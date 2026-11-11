@@ -4,13 +4,14 @@
 
 Every push to `main` that changes the app or the tests runs the **test** job first:
 
-1. Four local Nutshell test mints start with fake Lightning: a normal one (with input fees), a no-fee one, one where every payment fails, and one where every payment stays pending. `tests/mock_nostr.py` starts a stand-in Nostr relay and npub.cash server, so the tests never touch public services.
+1. Four local Nutshell test mints start with fake Lightning: a normal one (with input fees), a no-fee one, one where every payment fails, and one where every payment stays pending. `tests/mock_nostr.py` starts a stand-in Nostr relay and npub.cash server, so the tests never touch public services. The two normal mints accept multi-path payments through a small test-only patch (`tests/stub/sitecustomize.py`).
 2. The browser suites run against them:
    - `tests/wallet_qa.py`: wallet flows, failed and stuck payments, backup, restore after a wipe
    - `tests/crash_qa.py`: a deposit interrupted mid-way is recovered on the next open
    - `tests/pin_qa.py`: PIN lock, encryption at rest, lockout, change and removal, passkey unlock, auto-lock, forgot PIN
    - `tests/games_smoke.py`: every cabinet starts, pauses, resumes and exits
    - `tests/round2_qa.py`: trophies and share cards, instant updates (NUT-17), the Nostr mint-list backup (NUT-27) and the npub.cash Lightning address
+   - `tests/v16_qa.py`: multinut payments (NUT-15), payment requests (NUT-18) and NFC, with a stand-in NFC reader
 3. Only if every check passes does the **pages** job publish `public/` and write `SHA256SUMS.txt` next to the app.
 
 Logs and screenshots from each run are kept for a week under the job's artifacts (`qa-out/`).

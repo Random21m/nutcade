@@ -206,4 +206,5 @@ async def main():
     fails = [r for r in results if not r[1]]
     print(f"SUMMARY {len(results) - len(fails)}/{len(results)} passed")
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

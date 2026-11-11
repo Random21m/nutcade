@@ -25,6 +25,7 @@ users = {}         # pubkey -> {mintUrl, name}
 quotes = {}        # pubkey -> [quote]
 sockets = {}       # pubkey -> set(WebSocket)
 log = []
+subs = {}        # WebSocket -> {sub_id: [filters]}  (live subscriptions, like a real relay)
 
 
 def event_id(e):
@@ -44,6 +45,7 @@ def matches(e, f):
     if 'ids' in f and e['id'] not in f['ids']: return False
     if 'kinds' in f and e['kind'] not in f['kinds']: return False
     if 'authors' in f and e['pubkey'] not in f['authors']: return False
+    if 'since' in f and e['created_at'] < f['since']: return False
     for k, v in f.items():
         if k.startswith('#') and not any(t[0] == k[1:] and t[1] in v for t in e['tags'] if len(t) > 1): return False
     return True
@@ -52,6 +54,7 @@ def matches(e, f):
 @app.websocket('/relay')
 async def relay(ws: WebSocket):
     await ws.accept()
+    subs[ws] = {}
     try:
         while True:
             m = json.loads(await ws.receive_text())
@@ -67,14 +70,25 @@ async def relay(ws: WebSocket):
                 if ok: events[e['id']] = e
                 log.append(('event', e['kind'], ok))
                 await ws.send_text(json.dumps(['OK', e.get('id'), ok, '' if ok else 'invalid: bad signature or older']))
+                if ok:
+                    for other, ss in list(subs.items()):
+                        for sid, fs in list(ss.items()):
+                            if any(matches(e, f) for f in fs):
+                                try: await other.send_text(json.dumps(['EVENT', sid, e]))
+                                except Exception: pass
             elif m[0] == 'REQ':
                 sub, fs = m[1], m[2:]
                 hits = [e for e in events.values() if any(matches(e, f) for f in fs)]
                 for e in sorted(hits, key=lambda x: -x['created_at']):
                     await ws.send_text(json.dumps(['EVENT', sub, e]))
                 await ws.send_text(json.dumps(['EOSE', sub]))
+                subs[ws][sub] = fs
+            elif m[0] == 'CLOSE':
+                subs[ws].pop(m[1], None)
     except (WebSocketDisconnect, RuntimeError):
         pass
+    finally:
+        subs.pop(ws, None)
 
 
 def nip98(auth, url, method):
@@ -171,9 +185,19 @@ async def pay(pubkey: str, amount: int, lock: int = 1):
     return {'ok': True, 'quote': q['quote'], 'sockets': len(sockets.get(pubkey, []))}
 
 
+posted = []
+
+
+@app.post('/test/post')
+async def post_payment(request: Request):
+    """Stand-in for a NUT-18 HTTP POST payment request endpoint."""
+    posted.append(await request.json())
+    return {'ok': True}
+
+
 @app.get('/test/state')
 async def state():
-    return {'events': list(events.values()), 'users': users, 'quotes': quotes, 'sockets': {k: len(v) for k, v in sockets.items()}, 'log': log[-50:]}
+    return {'events': list(events.values()), 'posted': posted, 'users': users, 'quotes': quotes, 'sockets': {k: len(v) for k, v in sockets.items()}, 'log': log[-50:]}
 
 
 if __name__ == '__main__':

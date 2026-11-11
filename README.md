@@ -15,6 +15,9 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 - **Scan QR codes** with the camera or from a photo: ecash tokens, Lightning invoices, Lightning addresses, LNURL, Bitcoin addresses (BIP21) and mint addresses
 - Pay any **Lightning address** (like name@wallet.com) by typing or scanning it
 - **Your own Lightning address** (npub…@npub.cash) that anyone can pay from any Lightning wallet. It comes from your 12 words, so it's the same address cashu.me gives them
+- **Multinut payments** (NUT-15): pay one Lightning invoice from several mints at once when no single mint holds enough. Every part settles together, or all the sats come back
+- **Payment requests** (NUT-18): make a request (amount and note optional) that any Cashu wallet, like cashu.me, can pay. The ecash arrives privately over Nostr, even while the request screen is closed. You can also pay requests other people send you, over Nostr or HTTP
+- **NFC** (Chrome on Android): write ecash or a payment request onto an NFC card or sticker, and tap a card to receive. Small cards get a compact format that cashu.me also reads
 - **Instant updates**: deposits, payments and claimed tokens show up the moment the mint confirms them (NUT-17), with a regular check as backup
 - **Mint list backup on Nostr** (NUT-27): your mint list is saved encrypted, so restoring from 12 words finds your mints for you, here or in cashu.me
 - **PIN lock** with your wallet encrypted on the device, plus optional **Face ID / fingerprint** unlock
@@ -64,6 +67,20 @@ Plays with keyboard, mouse, or the on-screen joystick and buttons on a phone.
 
 Already have a Cashu wallet, like cashu.me or an earlier NUTCADE? On the welcome screen tap **Restore from recovery phrase**, or later go to **Settings → Backup → Restore wallet from 12 words**. Enter your 12 words, tap **Find my mints on Nostr** to tick the mints from your backup, and add any others you used. NUTCADE uses the same standard as cashu.me (NUT-13), so the same words work in both. If NUTCADE already holds sats, they move into the restored wallet.
 
+### Requesting and paying with payment requests
+
+To ask for sats, tap **Receive → Ecash → Request a payment**, add an amount and what it's for if you like, and share the code or QR. With **Only from my mints** on (the default), the payer has to use one of your mints, so you never receive ecash from a mint you don't trust. Payments land in your wallet whenever NUTCADE is open, and ones sent while it was closed arrive the next time you open it, for 30 days.
+
+To pay someone's request, scan it or paste it (it starts with creqA). NUTCADE shows what it's for and which of your mints can pay, then sends the ecash straight to them. If it can't be delivered, the ecash stays in your notes so you can send it another way or take it back.
+
+### Paying from several mints
+
+If the mint you're using doesn't hold enough to pay a Lightning invoice, the quote screen offers **Pay from several mints**. NUTCADE asks each mint that supports multi-path payments for a share, shows you the split and the fees, then pays all the parts together. This needs at least two of your mints to support NUT-15.
+
+### NFC cards
+
+On an Android phone with Chrome, the scanner has a **Tap NFC** button, and token and request screens have **Write to NFC**. Hold a card to the back of the phone. iPhones don't allow websites to use NFC, so these buttons don't appear there.
+
 ### Getting your own Lightning address
 
 Go to **Settings → Lightning address → Set it up**, pick the mint that should receive payments, and tap **Turn on**. Share the address shown, or find it any time on the **Receive → Lightning** screen. Payments are turned into ecash at your mint by npub.cash, and NUTCADE claims them whenever it's open. If you used a Lightning address in cashu.me with the same 12 words, it's the same address here.
@@ -94,6 +111,7 @@ Every push runs the suites in `tests/` automatically in GitLab against real Cash
 - 27 settings checks: themes, ₿ display, backup download and import, restoring a phrase from another Cashu client, reset, and swapping received ecash into your own mint
 - Crash recovery: a deposit interrupted mid-way comes back on the next open
 - 28 PIN-lock checks: encryption at rest, wrong PINs and lockout, change and removal, Face ID / fingerprint unlock, auto-lock, and forgot PIN followed by restore
+- 41 checks for multinut payments, payment requests (over Nostr and HTTP, including ecash sent by another wallet) and NFC reading and writing
 - 39 checks for trophies, share cards, instant updates, the Nostr mint-list backup and the Lightning address, against a stand-in Nostr relay and npub.cash server that check every signature
 - 24 scanner checks, run before release: camera scans of real tokens and invoices, photo scans, and recognising every kind of code
 - All seven games played through to game over, with high scores, pause, exit, touch controls and sound
@@ -105,7 +123,7 @@ NUTCADE has no account, no tracking and no analytics. Your recovery phrase and n
 
 - **Mints**: yours for every payment, and the ones listed in the mint picker to show whether they're online
 - **Coinbase**, for the price and chart, only while **Show Bitcoin price** is on
-- **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to save your encrypted mint list when it changes and to look for it when you restore. Turn this off in Settings → Backup. They're also used when you tap "Find mints people recommend"
+- **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to save your encrypted mint list when it changes and to look for it when you restore (turn this off in Settings → Backup), to receive payments for requests you made in the last 30 days, to deliver payments to requests you pay, and when you tap "Find mints people recommend". Payments you send over Nostr are signed with a one-time key, so they aren't linked to you
 - **npub.cash**, only while your Lightning address is turned on. It sees the amounts and times of payments to your address, not the rest of your wallet
 - **The donation address** (breez.tips), only when you tip from inside the app
 
@@ -129,6 +147,7 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Changelog
 
+- **v1.6.0:** multinut payments across several mints (NUT-15), payment requests to create and pay (NUT-18 over Nostr and HTTP), NFC cards for ecash and requests, opening tokens from links
 - **v1.5.0:** your own Lightning address (npub.cash, same as cashu.me), instant updates over mint websockets (NUT-17), encrypted mint-list backup on Nostr with "Find my mints" when restoring (NUT-27), 21 trophies, share cards for high scores and trophies
 
 - **v1.4.0:** QR scanner (camera and photo), paying Lightning addresses, PIN lock with encrypted storage and Face ID / fingerprint unlock, auto-lock, coin-drop and 1UP effects, fonts built in (no more Google Fonts), automatic tests in GitLab before every release, published SHA-256 checksums
