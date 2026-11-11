@@ -672,7 +672,7 @@ ${stars}
 <g fill="url(#chrome)"><rect x="${pad * s}" y="${(pad + mascotH) * s}" width="${cols * s}" height="${7 * s}" fill="url(#chrome)" mask="url(#letters)"/></g>
 <mask id="letters" maskUnits="userSpaceOnUse">${layer(0, 0, '#fff')}</mask>
 </g>
-${withTag ? `<text x="${W * s / 2}" y="${tagY}" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="${s * 2.3}" fill="#2de2ff" letter-spacing="3">INSERT ECASH · PRESS START</text>` : ''}
+${withTag ? `<text x="${W * s / 2}" y="${tagY}" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="${s * 2.3}" fill="#2de2ff" textLength="${Math.round(W * s * 0.84)}" lengthAdjust="spacingAndGlyphs">INSERT ECASH · PRESS START</text>` : ''}
 </svg>`;
 }
 window.NutLogo = logoSVG;
