@@ -15,6 +15,7 @@ test:
       changes:
         - public/index.html
         - public/zxing_reader.wasm
+        - public/sw.js
         - tests/**/*
         - .gitlab-ci.yml
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -42,7 +43,7 @@ pages:
     - job: test
       optional: true
   script:
-    - cd public && sha256sum index.html zxing_reader.wasm > SHA256SUMS.txt && cat SHA256SUMS.txt
+    - cd public && sha256sum index.html sw.js zxing_reader.wasm > SHA256SUMS.txt && cat SHA256SUMS.txt
   artifacts:
     paths:
       - public

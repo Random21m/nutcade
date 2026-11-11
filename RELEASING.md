@@ -12,6 +12,7 @@ Every push to `main` that changes the app or the tests runs the **test** job fir
    - `tests/games_smoke.py`: every cabinet starts, pauses, resumes and exits
    - `tests/round2_qa.py`: trophies and share cards, instant updates (NUT-17), the Nostr mint-list backup (NUT-27) and the npub.cash Lightning address
    - `tests/v16_qa.py`: multinut payments (NUT-15), payment requests (NUT-18) and NFC, with a stand-in NFC reader
+   - `tests/r3_qa.py`: amounts in your currency, #tags and CSV export, contacts, offline use and languages
 3. Only if every check passes does the **pages** job publish `public/` and write `SHA256SUMS.txt` next to the app.
 
 Logs and screenshots from each run are kept for a week under the job's artifacts (`qa-out/`).
@@ -47,6 +48,6 @@ Attach `SHA256SUMS.txt` and `SHA256SUMS.txt.asc` to the release, and commit your
 
 ```bash
 curl -O https://nutcade-2c150c.gitlab.io/index.html
-sha256sum index.html                       # compare with SHA256SUMS.txt
+sha256sum index.html                       # compare with SHA256SUMS.txt (sw.js and zxing_reader.wasm are listed too)
 gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
 ```

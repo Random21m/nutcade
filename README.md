@@ -24,7 +24,11 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 - Use several mints at once and switch between them
 - Pick mints from a curated list, by address, or from recommendations on Nostr (NIP-87)
 - Claim ecash from a mint you don't use yet, or swap it into your own mint over Lightning
-- Private **notes on every transaction**, searchable and filterable
+- Private **notes on every transaction**, searchable and filterable. Add **#tags** like #food or #rent to group them, and **export everything to CSV** for a spreadsheet or your taxes
+- **Contacts**: save people with their Lightning address, their Nostr address for ecash, or both, and pay them by name. Friends can send you ecash over Nostr to your own **ecash address**, from NUTCADE or cashu.me
+- **Amounts in your currency**: every amount field has a SAT / currency switch, and each transaction remembers the Bitcoin price at the time
+- **Works offline**: NUTCADE opens without a connection once you've visited. Offline you can still send amounts that match the coins you hold, and save ecash people give you; it's claimed automatically when you're back online
+- **Languages**: English, Español, Português (Brasil), Deutsch and Français, picked from your browser or chosen in Settings. Game titles stay in English, like arcade cabinets. Spotted a clumsy translation? Open an issue on GitLab
 - **Live Bitcoin price chart** in arcade style: 1H, 1D, 1W, 1M and 1Y ranges, high and low markers, touch or hover to read any point, and your balance's value updating live
 - Take back a sent token if nobody claimed it, and see when one was claimed
 - Coin-drop and 1UP effects when sats arrive, and a launch effect when you send
@@ -49,8 +53,9 @@ Plays with keyboard, mouse, or the on-screen joystick and buttons on a phone.
 - **Security:** set, change or remove your PIN, turn on Face ID / fingerprint, lock now, and choose when the wallet locks itself
 - **Backup:** show your phrase, find lost ecash, back up your mint list to Nostr, download or import a backup file, restore a wallet from 12 words, reset the wallet
 - **Lightning address:** turn on your own address, choose which mint receives the payments, check for payments, turn it off
-- **Look & sound:** three cabinet themes (Neon, Amber CRT, Green phosphor), sound effects, music, CRT scanlines, amounts shown as ₿
-- **Privacy:** turn the live price and price chart on or off (prices come from Coinbase, in your currency), and choose whether to check if sent tokens were claimed
+- **Contacts:** add, edit and pay contacts, and show your ecash address
+- **Look & sound:** language, three cabinet themes (Neon, Amber CRT, Green phosphor), sound effects, music, CRT scanlines, amounts shown as ₿
+- **Privacy:** turn the live price and price chart on or off (prices come from Coinbase, in your currency), choose whether to check if sent tokens were claimed, and whether to receive ecash sent over Nostr
 - **Wallet tools:** remove spent ecash and check stuck payments
 - **About:** version, links and donations
 
@@ -72,6 +77,16 @@ Already have a Cashu wallet, like cashu.me or an earlier NUTCADE? On the welcome
 To ask for sats, tap **Receive → Ecash → Request a payment**, add an amount and what it's for if you like, and share the code or QR. With **Only from my mints** on (the default), the payer has to use one of your mints, so you never receive ecash from a mint you don't trust. Payments land in your wallet whenever NUTCADE is open, and ones sent while it was closed arrive the next time you open it, for 30 days.
 
 To pay someone's request, scan it or paste it (it starts with creqA). NUTCADE shows what it's for and which of your mints can pay, then sends the ecash straight to them. If it can't be delivered, the ecash stays in your notes so you can send it another way or take it back.
+
+### Contacts and your ecash address
+
+**Settings → Contacts** (or **Manage** on the Send screen) holds the people you pay. Give each a name and a Lightning address, a Nostr address (npub or nprofile), or both. Tap a contact on the Send screen to pay them: Lightning addresses are paid over Lightning, and Nostr addresses get ecash sent privately over Nostr. After paying a new Lightning address, NUTCADE offers to save it as a contact.
+
+Your own **ecash address** is under Receive → Ecash. Friends can send ecash to it from NUTCADE or cashu.me, and it arrives whenever NUTCADE is open.
+
+### Offline
+
+Open NUTCADE once while online and it keeps a copy, so it opens without a connection after that. While offline, a banner says so. You can still send ecash for amounts made of the exact coins you hold (NUTCADE suggests the nearest amounts if yours doesn't fit), and ecash someone gives you is saved and claimed automatically when you're back online. Until it's claimed it isn't yours yet, because the sender could still spend it.
 
 ### Paying from several mints
 
@@ -111,11 +126,12 @@ Every push runs the suites in `tests/` automatically in GitLab against real Cash
 - 27 settings checks: themes, ₿ display, backup download and import, restoring a phrase from another Cashu client, reset, and swapping received ecash into your own mint
 - Crash recovery: a deposit interrupted mid-way comes back on the next open
 - 28 PIN-lock checks: encryption at rest, wrong PINs and lockout, change and removal, Face ID / fingerprint unlock, auto-lock, and forgot PIN followed by restore
+- 37 checks for amounts in your currency, #tags and CSV export, contacts (Lightning address and ecash over Nostr), offline use, and languages
 - 41 checks for multinut payments, payment requests (over Nostr and HTTP, including ecash sent by another wallet) and NFC reading and writing
 - 39 checks for trophies, share cards, instant updates, the Nostr mint-list backup and the Lightning address, against a stand-in Nostr relay and npub.cash server that check every signature
 - 24 scanner checks, run before release: camera scans of real tokens and invoices, photo scans, and recognising every kind of code
 - All seven games played through to game over, with high scores, pause, exit, touch controls and sound
-- Every screen at 320, 390, 768 and 1280 pixels wide, checked for overflow and clipped text
+- Every screen at 320, 390, 768 and 1280 pixels wide, checked for overflow and clipped text, and again in each language
 
 ## Privacy
 
@@ -123,7 +139,7 @@ NUTCADE has no account, no tracking and no analytics. Your recovery phrase and n
 
 - **Mints**: yours for every payment, and the ones listed in the mint picker to show whether they're online
 - **Coinbase**, for the price and chart, only while **Show Bitcoin price** is on
-- **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to save your encrypted mint list when it changes and to look for it when you restore (turn this off in Settings → Backup), to receive payments for requests you made in the last 30 days, to deliver payments to requests you pay, and when you tap "Find mints people recommend". Payments you send over Nostr are signed with a one-time key, so they aren't linked to you
+- **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to save your encrypted mint list when it changes and to look for it when you restore (turn this off in Settings → Backup), to receive payments for requests you made in the last 30 days, to deliver payments to requests you pay, to receive ecash friends send to your ecash address (turn this off in Settings → Privacy), and when you tap "Find mints people recommend". Payments you send over Nostr are signed with a one-time key, so they aren't linked to you
 - **npub.cash**, only while your Lightning address is turned on. It sees the amounts and times of payments to your address, not the rest of your wallet
 - **The donation address** (breez.tips), only when you tip from inside the app
 
@@ -133,7 +149,7 @@ Posting the link on X and most social sites shows a large preview card automatic
 
 ## For maintainers
 
-The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm`. On every push to `main`, `.gitlab-ci.yml` runs the test suites and then publishes `public/` to GitLab Pages with fresh checksums. To ship an update, replace `public/index.html` and push. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
+The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm` and the offline helper `public/sw.js`. On every push to `main`, `.gitlab-ci.yml` runs the test suites and then publishes `public/` to GitLab Pages with fresh checksums. To ship an update, replace `public/index.html` and push. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
 
 ## Support the project
 
@@ -147,6 +163,7 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Changelog
 
+- **v1.7.0:** contacts with Lightning and Nostr addresses, your own ecash address, amounts in your currency, #tags and CSV export, offline use (the app opens offline, exact-amount sends, tokens saved to claim later), Spanish, Portuguese, German and French
 - **v1.6.0:** multinut payments across several mints (NUT-15), payment requests to create and pay (NUT-18 over Nostr and HTTP), NFC cards for ecash and requests, opening tokens from links
 - **v1.5.0:** your own Lightning address (npub.cash, same as cashu.me), instant updates over mint websockets (NUT-17), encrypted mint-list backup on Nostr with "Find my mints" when restoring (NUT-27), 21 trophies, share cards for high scores and trophies
 
