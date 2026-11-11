@@ -13,9 +13,14 @@ Every push to `main` that changes the app or the tests runs the **test** job fir
    - `tests/round2_qa.py`: trophies and share cards, instant updates (NUT-17), the Nostr mint-list backup (NUT-27) and the npub.cash Lightning address
    - `tests/v16_qa.py`: multinut payments (NUT-15), payment requests (NUT-18) and NFC, with a stand-in NFC reader
    - `tests/r3_qa.py`: amounts in your currency, #tags and CSV export, contacts, offline use and languages
+   - `tests/r4_qa.py`: sending by sound (through a simulated microphone), refundable gifts, bill split, mint health and moving sats, cashier mode, challenges, piggy bank, and the new screens in every language
 3. Only if every check passes does the **pages** job publish `public/` and write `SHA256SUMS.txt` next to the app.
 
 Logs and screenshots from each run are kept for a week under the job's artifacts (`qa-out/`).
+
+## On GitHub
+
+The repository is mirrored at https://github.com/Random21m/nutcade. Its workflow, `.github/workflows/test-and-deploy.yml`, runs the same suites and then publishes to https://random21m.github.io/nutcade/ with `SHA256SUMS.txt`. Push the same commit to both remotes so the two sites serve identical files.
 
 ## Running the tests on your own computer
 

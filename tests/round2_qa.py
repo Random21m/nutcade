@@ -166,7 +166,7 @@ async def main():
         await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(300)
         n = await w.ev("document.querySelectorAll('#trophyRoom .trophy').length")
         on = await w.ev("document.querySelectorAll('#trophyRoom .trophy.on').length")
-        check('trophy room lists every trophy', n == 21, n)
+        check('trophy room lists every trophy', n == 26, n)
         check('trophy room marks earned ones', on >= 5, on)
         await w.ev("Trophies.progress('swarm',{wave:3},12000)"); await w.wait(100)
         got = await w.ev("Trophies.got()")
