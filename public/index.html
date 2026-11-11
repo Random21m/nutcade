@@ -3871,7 +3871,8 @@ function npcSocketStart() {
 function npcSocketStop() { clearTimeout(npcWsTimer); const w = npcWs; npcWs = null; if (w) try { w.close(1000); } catch (e) {} }
 
 /* ---------- instant updates from mints (NUT-17 websockets); the 30-second check stays as the fallback ---------- */
-const live = new Map();   // key -> canceller | 'none' | null (connecting)
+const live = new Map();
+const reclaiming = new Set();   // our own tokens we're taking back, so a live SPENT isn't reported as claimed   // key -> canceller | 'none' | null (connecting)
 async function liveWatch(key, url, cmd, subscribe) {
   if (live.has(key)) return;
   live.set(key, null);
@@ -3897,7 +3898,15 @@ function liveSync() {
   }
   if (S.prefs.checkSent) for (const t of S.txs.filter(t => t.status === 'pending' && t.method === 'ecash' && t.sent).slice(0, 10)) {
     const k = 'tok:' + t.id; want.add(k);
-    liveWatch(k, t.mint, 'proof_state', w => w.on.proofStateUpdates(t.sent, ps => { if (ps.state === 'SPENT') checkClaim(t).then(c => { if (c) { refresh(); toast(`Your ${money(t.amount)} token was claimed`, 'lime'); } }).catch(() => {}); }, () => liveDrop(k)));
+    const spent = new Set();
+    liveWatch(k, t.mint, 'proof_state', w => w.on.proofStateUpdates(t.sent, ps => {
+      if (ps.state !== 'SPENT') return;
+      spent.add(ps.proof.secret);
+      if (spent.size < t.sent.length) return;
+      // The mint pushed SPENT for every proof in the token: it has been claimed (or reclaimed by us, which wins).
+      const cur = txById(t.id);
+      if (cur && cur.status === 'pending' && !reclaiming.has(t.id)) { updTx(t.id, { status: 'claimed' }); refresh(); toast(`Your ${money(t.amount)} token was claimed`, 'lime'); }
+    }, () => liveDrop(k)));
   }
   for (const k of [...live.keys()]) if (!want.has(k)) liveDrop(k);
 }
@@ -4309,7 +4318,7 @@ const A = {
   }),
   saveNote: b => { updTx(b.dataset.id, { note: val('noteEdit').trim() }); sfx('coin'); toast('Note saved', 'gold'); closeSheet(); refresh(); },
   checkClaim: b => run(b, '…', async () => { const t = txById(b.dataset.id); const c = await checkClaim(t); toast(c ? 'Claimed by the receiver' : 'Not claimed yet', c ? 'lime' : 'gold'); if (c) { closeSheet(); refresh(); } }),
-  reclaim: b => run(b, 'RECLAIMING', async () => { const t = txById(b.dataset.id); await receiveToken(t.token, 'Reclaimed: ' + (t.note || 'ecash token')); updTx(t.id, { status: 'reclaimed' }); sfx('coin'); toast('Token reclaimed', 'lime'); closeSheet(); refresh(); }),
+  reclaim: b => run(b, 'RECLAIMING', async () => { const t = txById(b.dataset.id); reclaiming.add(t.id); try { await receiveToken(t.token, 'Reclaimed: ' + (t.note || 'ecash token')); } finally { setTimeout(() => reclaiming.delete(t.id), 5000); } updTx(t.id, { status: 'reclaimed' }); sfx('coin'); toast('Token reclaimed', 'lime'); closeSheet(); refresh(); }),
   resumeInvoice: b => { const t = txById(b.dataset.id); showInvoice(t); },
   resumeAddr: b => { const t = txById(b.dataset.id); showAddress(t); },
   stopWatch: b => { const t = txById(b.dataset.id); S.quotes = S.quotes.filter(q => q.quote !== t.quote); updTx(t.id, { status: 'expired' }); closeSheet(); refresh(); },
@@ -4607,7 +4616,7 @@ function livePrice(v, cur) {
   const f = $('.credits .fiat'); if (f) f.textContent = '≈ ' + fiatOf(+f.dataset.sats);
   else if (!had && tab === 'wallet' && !$('#layer .sheet')) refresh();
 }
-window.Nutcade = { render, refresh, S, toast, logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault };
+window.Nutcade = { render, refresh, S, toast, logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live };
 render();
 if (S.mints.length && !(vault.on && !vault.open)) setTimeout(() => backgroundTick(true).then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 1200);
 })();
