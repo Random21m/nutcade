@@ -33,7 +33,14 @@ async def main():
     async with async_playwright() as p:
         opts = {'executable_path': os.environ['CHROME']} if os.environ.get('CHROME') else {}
         b = await p.chromium.launch(**opts)
-        w = await newwallet(b, 'r4'); await w.create(); await w.add_mint(A); await w.add_mint(B)
+        w = await newwallet(b, 'r4')
+        # pin the Bitcoin price so results don't depend on the live market (CI can reach Coinbase)
+        async def fixed_rate(route):
+            if 'exchange-rates' in route.request.url: await route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': '*'}, body=json.dumps({'data': {'currency': 'BTC', 'rates': {'USD': '50000'}}}))
+            else: await route.abort()
+        await w.pg.context.route(re.compile(r'https://api(\.exchange)?\.coinbase\.com/.*'), fixed_rate)
+        await w.pg.context.route_web_socket(re.compile('coinbase'), lambda ws: None)
+        await w.create(); await w.add_mint(A); await w.add_mint(B)
         await w.use(A); await w.receive_ln(20000); await w.use(B); await w.receive_ln(3000); await w.use(A)
         fr = await newwallet(b, 'friend4'); await fr.create(); await fr.add_mint(A); await fr.add_mint(B); await fr.use(A); await fr.receive_ln(6000)
         faddr = await friend_addr(fr); waddr = await friend_addr(w)
@@ -307,7 +314,7 @@ async def main():
         vals, titles = set(known['v']), set(known['names'])
         def real(x):
             if re.sub(r'\d[\d,.]*', '{#}', x) in vals or x.upper() in titles or any(t.startswith(x.upper() + ' ') for t in titles): return False
-            if x.startswith('#') or x in ('Robin', 'Host', 'Mint A', 'Mint B', 'NUTCADE', 'LN', 'BTC /') or '/' in x or '₿' in x: return False
+            if x[:1] in '▲▼' or x.startswith('#') or x in ('Robin', 'Host', 'Mint A', 'Mint B', 'NUTCADE', 'LN', 'BTC /') or '/' in x or '₿' in x: return False
             if re.fullmatch(r'[A-Z]{3}|[\d,]+ (SAT|Sat|sat)|\d+[DHMWY]|\d+M AGO|HI -+', x): return False
             return True
         allmiss = sorted(set(x for x in sum(miss.values(), []) if real(x)))
