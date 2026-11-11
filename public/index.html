@@ -143,8 +143,8 @@ textarea.inp{min-height:84px;resize:vertical;font-size:21px;line-height:1.1}
 /* Tab bar */
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:50;background:rgba(10,7,23,.96);border-top:3px solid var(--violet);
   padding:8px max(10px,env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px))}
-.tabbar .in{max-width:480px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-.tab{display:grid;justify-items:center;gap:6px;padding:6px 2px;border:2px solid transparent;border-radius:var(--r);background:none;color:var(--dim);font-family:var(--f-display);font-size:8px;letter-spacing:1px}
+.tabbar .in{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+.tab{display:grid;justify-items:center;gap:6px;padding:6px 0;border:2px solid transparent;border-radius:var(--r);background:none;color:var(--dim);font-family:var(--f-display);font-size:clamp(6px,1.9vw,8px);letter-spacing:0;min-width:0;white-space:nowrap}
 .tab svg{width:26px;height:26px;image-rendering:pixelated}
 .tab[aria-current="page"]{color:var(--gold);border-color:var(--grid);background:var(--panel)}
 
@@ -196,6 +196,36 @@ textarea.inp{min-height:84px;resize:vertical;font-size:21px;line-height:1.1}
 .words{list-style:none;margin:0;padding:10px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;border:2px solid var(--gold);border-radius:var(--r);background:#0b0820}
 .words li{display:flex;gap:6px;align-items:baseline;padding:6px 8px;border:1px solid var(--grid);border-radius:3px;font-size:clamp(16px,5vw,22px);min-width:0;white-space:nowrap}
 .words li span{font-family:var(--f-display);font-size:8px;color:var(--dim);flex:none;min-width:1.9em;text-align:right}
+.gate{gap:16px;padding:18px}
+.gate-h{margin:0;font-family:var(--f-display);font-size:clamp(13px,4.2vw,16px);line-height:1.5;color:var(--gold);letter-spacing:1px;text-wrap:balance}
+.gate-list{margin:0;padding:0;list-style:none;display:grid;gap:10px}
+.gate-list li{padding-left:22px;position:relative}
+.gate-list li::before{content:"";position:absolute;left:4px;top:.45em;width:8px;height:8px;background:var(--pink);box-shadow:0 0 6px var(--pink)}
+.gate-list b{color:var(--cyan);font-weight:normal}
+.ack{display:flex;gap:12px;align-items:flex-start;padding:12px;border:2px dashed var(--grid);border-radius:var(--r);font-size:19px;cursor:pointer}
+.ack input{width:22px;height:22px;flex:none;margin-top:2px;accent-color:var(--pink)}
+.steps{display:flex;align-items:center;gap:6px}
+.steps i{width:22px;height:6px;background:var(--grid)}
+.steps i.on{background:var(--pink);box-shadow:0 0 6px var(--pink)}
+.steps span{margin-left:auto;font-family:var(--f-display);font-size:8px;color:var(--dim);letter-spacing:2px}
+.settings .panel{scroll-margin-top:12px}
+.set-index{display:flex;flex-wrap:wrap;gap:6px}
+.set-index .chip{background:none;cursor:pointer;font:inherit;font-size:16px;line-height:24px;padding:0 8px}
+.sub{font-family:var(--f-display);font-size:9px;letter-spacing:2px;color:var(--gold);margin-top:6px;text-transform:uppercase}
+.th{display:block;font-size:17px;line-height:1.15;color:var(--dim)}
+.tl{display:block}
+.toggle.set{align-items:flex-start;padding:8px 0;border-top:1px dashed var(--grid)}
+.toggle.set > span{min-width:0}
+.toggle.set input{margin-top:3px;flex:none}
+.row.wrap{flex-wrap:wrap}
+.keyrow{display:grid;gap:6px}
+.mono{font-family:ui-monospace,monospace;font-size:14px}
+details.adv summary{cursor:pointer;color:var(--cyan);font-size:19px}
+select.inp{font-size:20px}
+a.btn{text-decoration:none}
+body.theme-amber{--void:#0d0905;--panel:#1b1309;--panel-2:#24190c;--grid:#4a3414;--ink:#ffe9c2;--dim:#c39a5c;--faint:#7a5f35;--pink:#ff8a1f;--cyan:#ffcf3a;--gold:#ffd77a;--lime:#ffe08a;--violet:#c9771a}
+body.theme-phosphor{--void:#020a04;--panel:#071a0c;--panel-2:#0b2412;--grid:#14451f;--ink:#c9ffd4;--dim:#6fbf82;--faint:#3c7a4b;--pink:#33ff66;--cyan:#7dffa0;--gold:#b6ff5c;--lime:#33ff66;--violet:#2bbf55}
+body.theme-amber,body.theme-phosphor{background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:28px 28px}
 .toggle{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:21px}
 .toggle input{width:22px;height:22px;accent-color:var(--pink)}
 
@@ -2401,6 +2431,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const num = a => a == null ? 0 : (typeof a === 'object' && typeof a.toNumber === 'function') ? a.toNumber() : Number(a) || 0;
 const sum = ps => (ps || []).reduce((t, p) => t + num(p.amount), 0);
 const fmt = n => Math.round(num(n)).toLocaleString('en-US');
+const unitTag = () => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '' : 'SAT';
+const money = n => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '₿' + fmt(n) : fmt(n) + ' SAT';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const normUrl = u => { u = String(u || '').trim(); if (!/^https?:\/\//i.test(u)) u = 'https://' + u; return u.replace(/\/+$/, ''); };
 const host = u => { try { const x = new URL(u); return x.host + (x.pathname === '/' ? '' : x.pathname); } catch (e) { return u; } };
@@ -2467,7 +2499,7 @@ if (S.seed) requestPersist();
 async function secureMint(url) {
   const ps = S.proofs[url] || []; if (!ps.length) return 0;
   const w = await getWallet(url);
-  const fresh = await w.receive(ps);
+  const fresh = await withRepair(url, () => w.receive(ps));
   S.proofs[url] = plain(fresh); save();
   return sum(ps) - sum(fresh);
 }
@@ -2495,6 +2527,18 @@ async function restoreFromMint(url, onStep) {
   const fresh = found.filter(p => !have.has(p.secret));
   if (fresh.length) { addProofs(url, fresh); addTx({ type: 'in', method: 'ecash', amount: sum(fresh), mint: url, note: 'Recovered with recovery phrase' }); }
   return sum(fresh);
+}
+
+/* Same phrase used on another device can leave our counters behind: the mint answers 11003.
+   Catch up by rescanning that mint (which also recovers anything new), then retry once. */
+const isDupOutputs = e => e && (e.code === 11003 || /already signed/i.test(String(e.message || '')));
+async function withRepair(url, fn) {
+  try { return await fn(); }
+  catch (e) {
+    if (!isDupOutputs(e)) throw e;
+    await restoreFromMint(url);
+    return await fn();
+  }
 }
 
 /* ---------- one tab at a time ---------- */
@@ -2618,27 +2662,33 @@ async function checkQuote(q) {
     if (q.kind === 'bolt11') {
       const r = await w.checkMintQuoteBolt11(q.quote);
       if (r.state === 'PAID') {
-        const proofs = await w.mintProofsBolt11(q.amount, r);
+        const proofs = await withRepair(q.mint, () => w.mintProofsBolt11(q.amount, r));
         addProofs(q.mint, proofs);
         updTx(q.txId, { status: 'done', ts: Date.now() });
         dropQuote(q); sfx('coin'); refresh();
-        toast(`+${fmt(q.amount)} SAT received`, 'lime');
+        toast(`+${money(q.amount)} received`, 'lime');
         return 'paid';
       }
-      if (r.state === 'ISSUED') { dropQuote(q); updTx(q.txId, { status: 'done' }); refresh(); return 'paid'; }
+      if (r.state === 'ISSUED') {
+        // The mint issued this deposit but we never stored the ecash (app closed mid-request). Recover it from the phrase.
+        const got = await restoreFromMint(q.mint).catch(() => 0);
+        dropQuote(q); updTx(q.txId, { status: 'done' }); refresh();
+        if (got) { sfx('coin'); toast(`Recovered ${money(got)} from an interrupted deposit`, 'lime'); }
+        return 'paid';
+      }
       if (q.expiry && Date.now() / 1000 > q.expiry) { dropQuote(q); updTx(q.txId, { status: 'expired' }); refresh(); return 'expired'; }
       return 'waiting';
     } else {
       const r = await w.checkMintQuoteOnchain(q.quote);
       const avail = num(r.amount_paid) - num(r.amount_issued);
       if (avail > 0) {
-        const proofs = await w.mintProofsOnchain(avail, r, q.privkey);
+        const proofs = await withRepair(q.mint, () => w.mintProofsOnchain(avail, r, q.privkey));
         const got = sum(proofs);
         addProofs(q.mint, proofs);
         const t = txById(q.txId);
         if (t && t.status === 'pending') updTx(q.txId, { status: 'done', amount: got, ts: Date.now() });
         else addTx({ type: 'in', method: 'onchain', amount: got, mint: q.mint, note: t ? t.note : '', request: q.request, quote: q.quote });
-        sfx('coin'); refresh(); toast(`+${fmt(got)} SAT deposited on-chain`, 'lime');
+        sfx('coin'); refresh(); toast(`+${money(got)} deposited on-chain`, 'lime');
         return 'paid';
       }
       if (q.expiry && Date.now() / 1000 > q.expiry) { dropQuote(q); const t = txById(q.txId); if (t && t.status === 'pending') updTx(q.txId, { status: 'expired' }); refresh(); return 'expired'; }
@@ -2659,7 +2709,9 @@ async function receiveToken(token, note) {
   if (meta.unit !== 'sat') throw new Error(`This token is in ${meta.unit}. NUTCADE handles sats only.`);
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint);
   const w = await getWallet(meta.mint);
-  const proofs = await w.receive(token);
+  let proofs;
+  try { proofs = await withRepair(meta.mint, () => w.receive(token, S.p2pk.length ? { privkey: p2pkPrivs() } : undefined)); }
+  catch (e) { if (/witness|signature|p2pk|locked/i.test(e.message || '')) throw new Error("This ecash is locked to someone else's key, so this wallet can't claim it."); throw e; }
   addProofs(meta.mint, proofs);
   const got = sum(proofs);
   // mark own sent token as reclaimed if it matches
@@ -2669,15 +2721,16 @@ async function receiveToken(token, note) {
 }
 
 /* ---------- SEND ---------- */
-async function sendEcash(amount, note) {
+async function sendEcash(amount, note, lockTo) {
   const url = S.active; const w = await getWallet(url);
   const have = S.proofs[url] || [];
-  if (sum(have) < amount) throw new Error(`Not enough credits. This mint holds ${fmt(sum(have))} SAT.`);
-  const { keep, send } = await w.send(amount, have, { includeFees: true });
+  if (sum(have) < amount) throw new Error(`Not enough credits. This mint holds ${money(sum(have))}.`);
+  const outCfg = lockTo ? { send: { type: 'p2pk', options: { pubkey: lockTo } }, keep: w.defaultOutputType() } : undefined;
+  const { keep, send } = await withRepair(url, () => w.send(amount, have, { includeFees: true }, outCfg));
   S.proofs[url] = plain(keep);
   const token = L.getEncodedToken({ mint: url, proofs: send, unit: 'sat' });
   save();
-  return addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(send) - amount), mint: url, note, status: 'pending', token, sent: plain(send) });
+  return addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(send) - amount), mint: url, note, status: 'pending', token, sent: plain(send), locked: lockTo || null });
 }
 async function meltQuote(kind, dest, amount) {
   const w = await getWallet(S.active);
@@ -2690,13 +2743,13 @@ async function payMelt(kind, mq, feeIndex, note, dest) {
   const reserve = kind === 'ln' ? num(mq.fee_reserve) : num((mq.fee_options || []).find(f => f.fee_index === feeIndex)?.fee_reserve);
   const need = amount + reserve;
   const have = S.proofs[url] || [];
-  if (sum(have) < need) throw new Error(`Not enough credits. Need ${fmt(need)} SAT including fees, this mint holds ${fmt(sum(have))}.`);
-  const { keep, send } = await w.send(need, have, { includeFees: true });
+  if (sum(have) < need) throw new Error(`Not enough credits. Need ${money(need)} including fees, this mint holds ${fmt(sum(have))}.`);
+  const { keep, send } = await withRepair(url, () => w.send(need, have, { includeFees: true }));
   const tx = addTx({ type: 'out', method: kind, amount, mint: url, note, status: 'pending', request: dest, quote: mq.quote });
   const pend = { id: uid(), mint: url, proofs: plain(send), quote: mq.quote, kind, txId: tx.id };
   S.proofs[url] = plain(keep); S.pending.push(pend); save();
   try {
-    const res = kind === 'ln' ? await w.meltProofsBolt11(mq, send) : await w.meltProofsOnchain(mq, send, feeIndex);
+    const res = await withRepair(url, () => kind === 'ln' ? w.meltProofsBolt11(mq, send) : w.meltProofsOnchain(mq, send, feeIndex));
     const change = plain(res.change || []);
     if (change.length) addProofs(url, change);
     const st = res.quote && res.quote.state;
@@ -2756,7 +2809,10 @@ async function cleanWallet() {
 }
 
 /* ---------- sound ---------- */
-if (S.prefs.music === undefined) S.prefs.music = true;
+const PREF_DEFAULTS = { sound: true, music: true, crt: true, theme: 'neon', btcSymbol: false, fiat: true, currency: 'USD',
+  checkSent: true };
+for (const k in PREF_DEFAULTS) if (S.prefs[k] === undefined) S.prefs[k] = PREF_DEFAULTS[k];
+S.p2pk = store.get('p2pk', []);   // [{pub, priv, created, used}]
 const sfx = n => window.NutAudio && window.NutAudio.sfx(n);
 
 /* ---------- logo ---------- */
@@ -2785,7 +2841,7 @@ const ACORN = [
 function logoSVG(word = 'NUTCADE', withTag = true) {
   const s = 6, gap = 1, cols = word.length * 6 + (word.length - 1) * gap;
   const pad = 4, mascotH = ACORN.length + 2;
-  const W = cols + pad * 2, H = mascotH + 7 + pad * 2 + (withTag ? 5 : 0);
+  const W = cols + pad * 2, H = mascotH + 7 + pad * 2 + (withTag ? 6 : 0);
   const cells = [];
   [...word].forEach((ch, i) => { const g = GLYPHS[ch]; if (!g) return; g.forEach((row, y) => [...row].forEach((b, x) => { if (b === '1') cells.push([pad + i * 7 + x, pad + mascotH + y]); })); });
   const rect = (x, y, c, o = 0) => `<rect x="${(x - o) * s}" y="${(y - o) * s}" width="${s + o * 2 * s}" height="${s + o * 2 * s}" fill="${c}"/>`;
@@ -2797,7 +2853,7 @@ function logoSVG(word = 'NUTCADE', withTag = true) {
   let acornOutline = '';
   ACORN.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') acornOutline += rect(ax + x + 0.5, ay + y, '#0a0717', 0.5); }));
   const stars = [[2, 3], [W - 4, 2], [W - 8, 9], [6, 10], [W - 3, 14]].map(([x, y]) => `<g fill="#2de2ff"><rect x="${x * s}" y="${(y - .5) * s}" width="${s}" height="${s * 2}"/><rect x="${(x - .5) * s}" y="${y * s}" width="${s * 2}" height="${s}"/></g>`).join('');
-  const tagY = (pad + mascotH + 7 + 3.6) * s;
+  const tagTop = (pad + mascotH + 7 + 1.6) * s, tagH = 4 * s, tagY = tagTop + tagH / 2;
   return `<svg viewBox="0 0 ${W * s} ${H * s}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NUTCADE logo" shape-rendering="crispEdges">
 <defs><linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
 <stop offset="0" stop-color="#fff6c9"/><stop offset=".28" stop-color="#ffd23a"/><stop offset=".28" stop-color="#ff9a1f"/><stop offset=".55" stop-color="#ff3d8b"/>
@@ -2813,7 +2869,7 @@ ${stars}
 <g fill="url(#chrome)"><rect x="${pad * s}" y="${(pad + mascotH) * s}" width="${cols * s}" height="${7 * s}" fill="url(#chrome)" mask="url(#letters)"/></g>
 <mask id="letters" maskUnits="userSpaceOnUse">${layer(0, 0, '#fff')}</mask>
 </g>
-${withTag ? `<text x="${W * s / 2}" y="${tagY}" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="${s * 2.3}" fill="#2de2ff" textLength="${Math.round(W * s * 0.84)}" lengthAdjust="spacingAndGlyphs">INSERT ECASH · PRESS START</text>` : ''}
+${withTag ? `<g class="tagline"><text x="${W * s / 2}" y="${tagY}" dominant-baseline="central" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="${s * 2.6}" fill="#ffcf3a" stroke="#0a0717" stroke-width="${s * 0.6}" stroke-linejoin="round" paint-order="stroke" textLength="${Math.round((W - 8) * s)}" lengthAdjust="spacingAndGlyphs">INSERT ECASH · PRESS START</text></g>` : ''}
 </svg>`;
 }
 window.NutLogo = logoSVG;
@@ -2875,13 +2931,16 @@ const ICONS = {
   wallet: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 4h12v2h2v7H1z" opacity=".35"/><path d="M1 3h11v1H2v8h12V7h-3v3h4V6h-1V4h1v9H1z"/><rect x="11" y="8" width="2" height="1"/></svg>',
   arcade: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 1h8v2h1v5h-1v7H4V8H3V3h1z" opacity=".35"/><path d="M4 1h8v1H4zM3 2h1v6H3zm9 0h1v6h-1zM5 3h6v4H5zm-1 5h8v1H4zm0 1h1v6H4zm7 0h1v6h-1zM6 11h1v1H6zm3 0h2v2H9z"/></svg>',
   history: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 1h10v14H3z" opacity=".35"/><path d="M3 1h10v14H3V1zm1 1v12h8V2zm1 2h6v1H5zm0 3h6v1H5zm0 3h4v1H5z"/></svg>',
-  mints: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 6h12v8H2z" opacity=".35"/><path d="M8 1l7 4v1H1V5zm0 1.2L3.5 5h9zM2 7h2v6H2zm5 0h2v6H7zm5 0h2v6h-2zM1 14h14v1H1z"/></svg>'
+  mints: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 6h12v8H2z" opacity=".35"/><path d="M8 1l7 4v1H1V5zm0 1.2L3.5 5h9zM2 7h2v6H2zm5 0h2v6H7zm5 0h2v6h-2zM1 14h14v1H1z"/></svg>',
+  settings: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 4h6v8H5z" opacity=".35"/><path d="M7 1h2v2h2v1h1v1h1v2h2v2h-2v2h-1v1h-1v1H9v2H7v-2H5v-1H4v-1H3V9H1V7h2V5h1V4h1V3h2zm0 4v1H6v4h1v1h2v-1h1V6H9V5z"/></svg>'
 };
-const TABS = [['wallet', 'WALLET'], ['arcade', 'ARCADE'], ['history', 'NOTES'], ['mints', 'MINTS']];
+const TABS = [['wallet', 'WALLET'], ['arcade', 'ARCADE'], ['history', 'NOTES'], ['mints', 'MINTS'], ['settings', 'SETTINGS']];
 
 function render() {
   const app = $('#app');
   app.className = S.prefs.crt ? 'crt' : '';
+  document.body.className = 'theme-' + (S.prefs.theme || 'neon');
+  if (S.prefs.fiat && S.seed) fetchPrice();
   let body = '';
   if (tabLocked) {
     app.innerHTML = `<div class="wrap"><header class="marquee"><div class="bulbs top">${'<i></i>'.repeat(14)}</div><h1 class="sr">NUTCADE</h1><div class="logo">${logoSVG()}</div><div class="bulbs bot">${'<i></i>'.repeat(14)}</div></header>
@@ -2890,10 +2949,19 @@ function render() {
       <button class="btn solid gold block" data-act="takeover">Use NUTCADE here instead</button></div></section></div>`;
     return;
   }
-  if (tab === 'wallet') body = S.seed ? viewWallet() : viewOnboard();
+  if (needsGate()) {
+    app.innerHTML = `<div class="wrap" style="padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))">
+      <header class="marquee"><div class="bulbs top">${'<i></i>'.repeat(14)}</div><h1 class="sr">NUTCADE</h1><div class="logo">${logoSVG()}</div><div class="bulbs bot">${'<i></i>'.repeat(14)}</div></header>
+      ${storageOk ? '' : '<div class="notice red" style="margin-top:14px">This browser is blocking storage, so your wallet would vanish on reload. Open NUTCADE in a normal browser tab.</div>'}
+      ${viewGate()}</div>`;
+    if (window.NutAudio) window.NutAudio.stopMusic();
+    return;
+  }
+  if (tab === 'wallet') body = viewWallet();
   else if (tab === 'arcade') body = `<section class="screen" id="arcadeScreen"></section>`;
   else if (tab === 'history') body = viewHistory();
-  else body = viewMints();
+  else if (tab === 'mints') body = viewMints();
+  else body = viewSettings();
   app.innerHTML = `<div class="wrap">
     <header class="marquee"><div class="bulbs top">${'<i></i>'.repeat(14)}</div><h1 class="sr">NUTCADE</h1><div class="logo">${logoSVG()}</div><div class="bulbs bot">${'<i></i>'.repeat(14)}</div></header>
     ${storageOk ? '' : '<div class="notice red" style="margin-top:14px">This browser is blocking storage, so ecash you receive here would vanish on reload. Open NUTCADE in a normal browser tab before adding funds.</div>'}
@@ -2923,19 +2991,58 @@ function timeAgo(ts) {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function viewOnboard() {
+/* ---------- first-run gate: create + back up before entering ---------- */
+let gate = { step: 'welcome', picks: null };
+const needsGate = () => !S.seed || !S.seed.backedUp || gate.step === 'done';
+function pickWords() { const p = []; while (p.length < 3) { const i = Math.floor(Math.random() * 12); if (!p.includes(i)) p.push(i); } return p.sort((a, b) => a - b); }
+const stepDots = n => `<div class="steps" aria-label="Step ${n} of 3">${[1, 2, 3].map(i => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}<span>STEP ${n}/3</span></div>`;
+function viewGate() {
+  if (S.seed && !S.seed.backedUp && gate.step === 'welcome') gate.step = 'show';
   const legacy = totalBalance() > 0;
+  if (gate.step === 'welcome') return `<section class="screen">
+    <div class="panel hot gate">
+      ${stepDots(1)}
+      <h2 class="gate-h">WELCOME, PLAYER 1</h2>
+      <ul class="gate-list">
+        <li><b>A Bitcoin wallet.</b> NUTCADE holds sats as Cashu ecash: fast, private, and sent like a text.</li>
+        <li><b>Your keys, your sats.</b> A 12-word recovery phrase is the only way to get your sats back if this device is lost.</li>
+        <li><b>An arcade.</b> Seven cabinets of free play once you're in.</li>
+      </ul>
+      ${legacy ? `<div class="notice">You already hold ${money(totalBalance())} here from before recovery phrases. Creating your phrase moves that ecash under it so it's protected too.</div>` : ''}
+      <label class="ack" for="ack"><input id="ack" type="checkbox" data-gatecheck="ack"><span>I understand NUTCADE is new, experimental software, that mints hold the Bitcoin behind my ecash, and that my 12 words are the only way to recover my sats.</span></label>
+      <button class="btn solid gold block" data-act="gateCreate" data-needs="ack" disabled>Create a new wallet</button>
+      <button class="btn block" data-act="gateRestore" data-needs="ack" disabled>Restore from recovery phrase</button>
+    </div></section>`;
+  const words = S.seed.mnemonic.split(' ');
+  if (gate.step === 'show') return `<section class="screen">
+    <div class="panel hot gate">
+      ${stepDots(2)}
+      <h2 class="gate-h">WRITE DOWN YOUR 12 WORDS</h2>
+      <div class="notice red">Anyone with these words can take your sats. Write them on paper, in order, and keep them offline. Never type them into a website, take a screenshot, or send them to anyone, including NUTCADE support.</div>
+      ${phraseGrid(words)}
+      <div class="tiny muted">Later, also note the mints you use next to your words. Restoring scans those mints.</div>
+      <label class="ack" for="wrote"><input id="wrote" type="checkbox" data-gatecheck="wrote"><span>I wrote down all 12 words, in order, on paper.</span></label>
+      <button class="btn solid gold block" data-act="gateToConfirm" data-needs="wrote" disabled>Continue</button>
+    </div></section>`;
+  if (gate.step === 'confirm') {
+    if (!gate.picks) gate.picks = pickWords();
+    return `<section class="screen">
+    <div class="panel hot gate">
+      ${stepDots(3)}
+      <h2 class="gate-h">CHECK YOUR BACKUP</h2>
+      <p style="margin:0">Type these words from your paper, not from memory.</p>
+      ${gate.picks.map(i => `<div class="field"><label for="cw${i}">Word #${i + 1}</label><input id="cw${i}" class="inp" data-cw="${i}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`).join('')}
+      <div id="gateErr"></div>
+      <button class="btn solid gold block" data-act="gateConfirm">Confirm backup</button>
+      <button class="linkbtn" data-act="gateBack" style="justify-self:center">Back to my words</button>
+    </div></section>`;
+  }
   return `<section class="screen">
-    <div class="panel hot">
-      <span class="h2" style="color:var(--gold)">Player 1, set up your wallet</span>
-      <p style="margin:0">NUTCADE protects your ecash with a 12-word recovery phrase. Write it down once and you can bring your sats back on any device, even if this one is lost.</p>
-      ${legacy ? `<div class="notice">You already hold ${fmt(totalBalance())} SAT here from before recovery phrases. After you create your phrase, NUTCADE moves that ecash under it so it's protected too.</div>` : ''}
-      <button class="btn solid gold block" data-act="seedCreate">Create a new wallet</button>
-      <button class="btn block" data-act="seedRestore">Restore from recovery phrase</button>
-    </div>
-    <div class="panel"><div class="row between"><span class="h2">Just here to play?</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Arcade</button></div>
-      <div class="tiny muted">The arcade works without a wallet.</div></div>
-  </section>`;
+    <div class="panel hot gate" style="text-align:center;justify-items:center">
+      <h2 class="gate-h" style="color:var(--lime)">PLAYER 1 READY!</h2>
+      <p style="margin:0">Your wallet is created and backed up. ${gate.msg ? esc(gate.msg) : ''}</p>
+      ${gate.busy ? `<span class="spinner">${esc(gate.busy)}</span>` : `<button class="btn solid gold block" data-act="gateStart">Press start</button>`}
+    </div></section>`;
 }
 function phraseGrid(words) {
   return `<ol class="words" aria-label="Recovery phrase">${words.map((w, i) => `<li><span>${i + 1}</span>${esc(w)}</li>`).join('')}</ol>`;
@@ -2946,8 +3053,7 @@ function openShowPhrase(fresh) {
     <div class="notice red">Anyone with these 12 words can take your sats. Write them on paper in this order and keep them offline. Never type them into a website or send them to anyone, including NUTCADE support.</div>
     ${phraseGrid(words)}
     ${S.mints.length ? `<div class="field"><label>Also write down your mints</label><div class="code" style="color:var(--ink);font-size:14px">${S.mints.map(m => esc(m.url)).join('<br>')}</div><div class="tiny muted">Restoring scans the mints you list, so keep this list with your words.</div></div>` : '<div class="tiny muted">When you add mints, note their addresses next to your words. Restoring scans the mints you list.</div>'}
-    <button class="btn solid gold block" data-act="seedConfirmStart">I wrote it down</button>
-    ${fresh ? '<button class="linkbtn" data-act="seedLater" style="justify-self:center">Remind me later</button>' : ''}`);
+    <button class="btn block" data-act="close">Done</button>`);
 }
 function openConfirmPhrase() {
   const words = S.seed.mnemonic.split(' ');
@@ -2962,8 +3068,8 @@ function openConfirmPhrase() {
 function openRestore() {
   const curated = CURATED.filter(c => !c.test);
   const urls = [...new Set(S.mints.map(m => m.url).concat(curated.map(c => c.url)))];
-  openSheet('Restore from phrase', `
-    ${S.seed && totalBalance() > 0 ? `<div class="notice">This device already holds ${fmt(totalBalance())} SAT. Restoring a different phrase keeps those sats and moves them under the restored phrase. Make sure you have your current phrase written down first.</div>` : ''}
+  openSheet('Restore wallet', `
+    ${S.seed ? `<div class="notice">This replaces your current wallet with the one from these 12 words.${totalBalance() ? ` The ${money(totalBalance())} here moves into the restored wallet, so nothing is lost.` : ''} Write down your current words first if you might want this wallet back.</div>` : '<div class="th">Use the 12 words from a previous NUTCADE or another Cashu wallet like cashu.me.</div>'}
     <div class="field"><label for="phraseIn">Your 12 words</label><textarea id="phraseIn" class="inp" placeholder="word1 word2 word3 …" autocomplete="off" autocapitalize="off" spellcheck="false" data-input="phrase"></textarea><div id="phraseOk" class="tiny muted">Separate words with spaces.</div></div>
     <div class="field"><label>Mints to scan</label><div class="txs">${urls.map((u, i) => `<label class="toggle" for="rm${i}" style="font-size:19px"><span style="overflow-wrap:anywhere;min-width:0">${esc(host(u))}</span><input id="rm${i}" type="checkbox" data-rmint="${esc(u)}" ${S.mints.find(m => m.url === u) ? 'checked' : ''}></label>`).join('')}</div></div>
     <div class="field"><label for="rmExtra">Other mint addresses (one per line)</label><textarea id="rmExtra" class="inp" placeholder="https://mint.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea></div>
@@ -2974,12 +3080,13 @@ function openRestore() {
 function viewWallet() {
   const m = activeMint();
   const nag = S.seed && !S.seed.backedUp ? `<div class="notice red row between" style="flex-wrap:wrap"><span>Your recovery phrase isn't backed up yet.</span><button class="btn sm red" data-act="seedShow">Back up now</button></div>` : '';
-  const legacy = S.seed && !S.seed.secured && totalBalance() > 0 && S.seed.backedUp ? `<div class="notice row between" style="flex-wrap:wrap"><span>${fmt(totalBalance())} SAT here isn't covered by your phrase yet.</span><button class="btn sm gold" data-act="secureAll">Protect it</button></div>` : '';
+  const legacy = S.seed && !S.seed.secured && totalBalance() > 0 && S.seed.backedUp ? `<div class="notice row between" style="flex-wrap:wrap"><span>${money(totalBalance())} here isn't covered by your phrase yet.</span><button class="btn sm gold" data-act="secureAll">Protect it</button></div>` : '';
   if (!m) return `<section class="screen">${nag}${legacy}
-    <div class="credits" style="text-align:center;justify-items:center"><div class="label">Credits</div><div class="credit-num">0<small>SAT</small></div>
+    <div class="credits" style="text-align:center;justify-items:center"><div class="label">Credits</div><div class="credit-num">0<small>${unitTag()}</small></div>
     <div class="spinner" style="font-size:11px">INSERT MINT TO START</div></div>
     <div class="panel"><p style="margin:0">NUTCADE holds Bitcoin as Cashu ecash. A mint issues the ecash, so pick one first. Try a test mint if you want to play with fake sats.</p>
-    <button class="btn solid gold block" data-act="pickMint">Choose a mint</button></div>
+    <button class="btn solid gold block" data-act="pickMint">Choose a mint</button>
+    <button class="btn block lime" data-act="recvMethod" data-m="ecash">Someone sent me ecash</button></div>
     <div class="panel"><div class="row between"><span class="h2">Arcade</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Play</button></div><div id="topScore" class="tiny muted"></div></div>
     <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">♥ Support NUTCADE</button>
   </section>`;
@@ -2988,9 +3095,10 @@ function viewWallet() {
   return `<section class="screen">${nag}${legacy}
     <div class="credits">
       <div class="row between"><span class="label">Credits</span>${tot !== bal ? `<span class="tiny muted">All mints ${fmt(tot)}</span>` : ''}</div>
-      <div class="credit-num" aria-live="polite">${fmt(bal)}<small>SAT</small></div>
+      <div class="credit-num" aria-live="polite">${S.prefs.btcSymbol ? '₿' : ''}${fmt(bal)}<small>${unitTag()}</small></div>
+      ${fiatOf(bal) ? `<div class="tiny muted">≈ ${fiatOf(bal)}</div>` : ''}
       <button class="mint-pill" data-act="pickMint" aria-label="Change mint"><span class="dot"></span><span>${esc(m.name)}</span><span class="muted">▾</span></button>
-      ${po ? `<div class="tiny" style="color:var(--violet)">${fmt(po)} SAT in flight. <button class="linkbtn" data-act="reconcileAll">Check now</button></div>` : ''}
+      ${po ? `<div class="tiny" style="color:var(--violet)">${money(po)} in flight. <button class="linkbtn" data-act="reconcileAll">Check now</button></div>` : ''}
     </div>
     <div class="pushes">
       <button class="push recv" data-act="receive"><span class="cap" aria-hidden="true">↓</span><span class="t">RECEIVE</span></button>
@@ -3028,26 +3136,151 @@ function viewMints() {
       <button class="btn sm" data-act="refreshMint" data-url="${esc(m.url)}">Refresh</button>
       <button class="btn sm red" data-act="removeMint" data-url="${esc(m.url)}">Remove</button></div></div>`).join('')}</div>`
       : `<div class="empty-state"><b>NO MINTS</b>Add a mint to start holding ecash.</div>`}
-    <div class="panel"><span class="h2">Settings</span>
-      <label class="toggle" for="pSound">Sound effects<input id="pSound" type="checkbox" data-act="pref" data-k="sound" ${S.prefs.sound ? 'checked' : ''}></label>
-      <label class="toggle" for="pMusic">Arcade music<input id="pMusic" type="checkbox" data-act="pref" data-k="music" ${S.prefs.music ? 'checked' : ''}></label>
-      <label class="toggle" for="pCrt">CRT scanlines<input id="pCrt" type="checkbox" data-act="pref" data-k="crt" ${S.prefs.crt ? 'checked' : ''}></label>
-    </div>
-    ${S.seed ? `<div class="panel"><span class="h2">Recovery phrase</span>
-      <div class="row between tiny"><span>Phrase backed up</span><span style="color:${S.seed.backedUp ? 'var(--lime)' : 'var(--red)'}">${S.seed.backedUp ? 'YES' : 'NOT YET'}</span></div>
-      <div class="row between tiny"><span>Protected from browser clean-up</span><span style="color:${persisted ? 'var(--lime)' : 'var(--gold)'}">${persisted ? 'YES' : persisted === false ? 'NOT GRANTED' : 'CHECKING'}</span></div>
-      ${persisted ? '' : '<div class="tiny muted">On iPhone, add NUTCADE to your home screen so Safari keeps its data.</div>'}
-      <div class="row" style="flex-wrap:wrap"><button class="btn sm gold" data-act="seedShow">Show phrase</button><button class="btn sm violet" data-act="findLost">Find lost ecash</button><button class="btn sm" data-act="seedRestore">Restore a phrase</button></div>
-    </div>` : ''}
-    <div class="panel"><span class="h2">Backup</span>
-      <p class="tiny muted" style="margin:0">Your recovery phrase brings back your sats. This extra backup also keeps your notes and history. Anyone with it can spend the sats.</p>
-      <div class="row" style="flex-wrap:wrap"><button class="btn sm gold" data-act="backup">Copy backup</button><button class="btn sm" data-act="restore">Restore</button><button class="btn sm violet" data-act="clean">Check proofs</button></div>
-    </div>
-    <div class="panel hot"><div class="row between"><span class="h2" style="color:var(--pink)">Support NUTCADE</span><button class="btn sm pink" data-act="support">Donate</button></div>
-      <p class="tiny muted" style="margin:0">Free and open source. Tips over Lightning are optional and keep the cabinets lit.</p></div>
-    <p class="tiny muted" style="text-align:center;margin:0">NUTCADE · Cashu ecash · Built with cashu-ts</p>
+    <div class="tiny muted" style="text-align:center">Mint settings, backup and privacy live in the Settings tab.</div>
   </section>`;
 }
+/* ---------- settings ---------- */
+const APP_VERSION = '1.2.0';
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
+const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
+const SECTIONS = [['set-backup', 'Backup'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-tools', 'Wallet tools'], ['set-about', 'About']];
+const toggle = (k, label, help) => `<label class="toggle set" for="p_${k}"><span><span class="tl">${label}</span>${help ? `<span class="th">${help}</span>` : ''}</span><input id="p_${k}" type="checkbox" data-act="pref" data-k="${k}" ${S.prefs[k] ? 'checked' : ''}></label>`;
+function viewSettings() {
+  const inflight = S.pending.length;
+  return `<section class="screen settings">
+    <h2 class="h2">Settings</h2>
+    <nav class="set-index" aria-label="Settings sections">${SECTIONS.map(([id, l]) => `<button class="chip ecash" data-act="jump" data-id="${id}">${l}</button>`).join('')}</nav>
+
+    <div class="panel" id="set-backup"><span class="h2">Backup</span>
+      <div class="row between tiny"><span>Recovery phrase backed up</span><span style="color:${S.seed && S.seed.backedUp ? 'var(--lime)' : 'var(--red)'}">${S.seed && S.seed.backedUp ? 'YES' : 'NOT YET'}</span></div>
+      <div class="row between tiny"><span>Protected from browser clean-up</span><span style="color:${persisted ? 'var(--lime)' : 'var(--gold)'}">${persisted ? 'YES' : persisted === false ? 'NOT GRANTED' : 'CHECKING'}</span></div>
+      ${persisted ? '' : '<div class="th">On iPhone, add NUTCADE to your home screen so Safari keeps its data.</div>'}
+      <div class="row wrap"><button class="btn sm gold" data-act="seedShow">Show recovery phrase</button><button class="btn sm violet" data-act="findLost">Find lost ecash</button></div>
+      <div class="sub">Backup file</div>
+      <p class="th" style="margin:0">Your phrase, ecash, notes and history in one file. Anyone with it can spend your sats.</p>
+      <div class="row wrap"><button class="btn sm gold" data-act="backupDownload">Download backup</button><button class="btn sm" data-act="restore">Import backup</button></div>
+      <div class="sub">Restore a wallet</div>
+      <p class="th" style="margin:0">Moving from another wallet? Use the 12 words from a previous NUTCADE or another Cashu wallet like cashu.me. Any sats in this wallet move into the restored one.</p>
+      <button class="btn sm gold" data-act="seedRestore">Restore wallet from 12 words</button>
+      <div class="sub">Reset wallet</div>
+      <p class="th" style="margin:0">Start over: deletes this wallet from this browser, then takes you back to the start screen to create a new wallet or restore one.</p>
+      <button class="btn sm red" data-act="resetAsk">Reset wallet</button>
+    </div>
+
+    <div class="panel" id="set-look"><span class="h2">Look &amp; sound</span>
+      <div class="field"><label>Cabinet theme</label><div class="seg three" role="group" aria-label="Theme">${THEMES.map(([k, l]) => `<button data-act="setTheme" data-t="${k}" aria-pressed="${S.prefs.theme === k}">${l.split(' ')[0].toUpperCase()}</button>`).join('')}</div></div>
+      ${toggle('sound', 'Sound effects', '')}
+      ${toggle('music', 'Arcade music', '')}
+      ${toggle('crt', 'CRT scanlines', '')}
+      ${toggle('btcSymbol', 'Show amounts as ₿', '₿1,000 instead of 1,000 SAT.')}
+    </div>
+
+    <div class="panel" id="set-privacy"><span class="h2">Privacy</span>
+      ${toggle('fiat', 'Show Bitcoin price', 'Fetches the exchange rate from coinbase.com to show your balance in money.')}
+      <div class="field"><label for="p_currency">Currency</label><select id="p_currency" class="inp" data-act="prefSelect" data-k="currency" ${S.prefs.fiat ? '' : 'disabled'}>${CURRENCIES.map(c => `<option ${c === S.prefs.currency ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+      ${toggle('checkSent', 'Check if sent ecash was claimed', 'Asks your mints in the background. Turn off to contact them less.')}
+    </div>
+
+    <div class="panel" id="set-tools"><span class="h2">Wallet tools</span>
+      <p class="th" style="margin:0">Use these if your balance looks wrong or a payment seems stuck.</p>
+      <div class="row wrap"><button class="btn sm violet" data-act="clean">Remove spent ecash</button><button class="btn sm" data-act="reconcileAll">Check stuck payments${inflight ? ` (${inflight})` : ''}</button></div>
+    </div>
+
+    <div class="panel" id="set-about"><span class="h2">About</span>
+      <dl class="kv"><dt>Version</dt><dd>${APP_VERSION}</dd><dt>Works with</dt><dd>Any Cashu wallet</dd></dl>
+      <div class="row wrap"><a class="btn sm" href="https://gitlab.com/random21m/nutcade" target="_blank" rel="noopener">Source on GitLab</a><a class="btn sm" href="https://cashu.space" target="_blank" rel="noopener">What is Cashu?</a></div>
+      <div class="sub" style="color:var(--pink)">Support NUTCADE</div>
+      <p class="th" style="margin:0">Free and open source. Tips over Lightning are optional and keep the cabinets lit.</p>
+      <button class="btn sm pink" data-act="support">Donate</button>
+    </div>
+  </section>`;
+}
+
+/* fiat price (cashu.me uses the same Coinbase endpoint) */
+let price = { rate: null, at: 0, cur: null };
+async function fetchPrice(force) {
+  if (!S.prefs.fiat) return;
+  if (!force && price.cur === S.prefs.currency && Date.now() - price.at < 5 * 60e3) return;
+  try {
+    const j = await fetch('https://api.coinbase.com/v2/exchange-rates?currency=BTC').then(r => r.json());
+    const rate = parseFloat(j.data.rates[S.prefs.currency]);
+    if (rate > 0) { price = { rate, at: Date.now(), cur: S.prefs.currency }; if (!$('#layer .sheet') && tab === 'wallet') refresh(); }
+  } catch (e) {}
+}
+const fiatOf = sats => (S.prefs.fiat && price.rate && price.cur === S.prefs.currency) ? (sats / 1e8 * price.rate).toLocaleString(undefined, { style: 'currency', currency: S.prefs.currency }) : null;
+
+/* P2PK keys */
+function newP2PK() {
+  const k = new Uint8Array(32); crypto.getRandomValues(k);
+  const pub = hex(L.getPubKeyFromPrivKey(k));
+  S.p2pk.push({ pub, priv: hex(k), created: Date.now() });
+  if (!store.set('p2pk', S.p2pk)) throw new Error("This browser won't save data.");
+  return pub;
+}
+const p2pkPrivs = () => S.p2pk.map(k => k.priv);
+const validPub = s => /^0[23][0-9a-f]{64}$/i.test(String(s || '').trim());
+
+/* Sweep ecash found under a different phrase into this wallet. */
+async function sweepPhrase(phrase, urls, onStep) {
+  const otherSeed = L.mnemonicToSeedSync(phrase);
+  let total = 0; const fails = [];
+  for (const url of urls) {
+    try {
+      if (!S.mints.find(m => m.url === url)) await addMint(url);
+      const other = new L.Wallet(url, { unit: 'sat', bip39seed: otherSeed });
+      await other.loadMint();
+      let found = [];
+      for (const k of other.keyChain.getKeysets().filter(k => k.unit === 'sat')) {
+        onStep && onStep(`Scanning ${host(url)} · keyset ${k.id.slice(0, 8)}…`);
+        const r = await other.batchRestore(300, undefined, 0, k.id);
+        if (r.proofs && r.proofs.length) {
+          const st = await other.checkProofsStates(r.proofs);
+          found = found.concat(r.proofs.filter((p, i) => st[i] && st[i].state === 'UNSPENT'));
+        }
+      }
+      if (found.length) {
+        const w = await getWallet(url);
+        const mine = await withRepair(url, () => w.receive(found));
+        addProofs(url, mine); total += sum(mine);
+        addTx({ type: 'in', method: 'ecash', amount: sum(mine), fee: Math.max(0, sum(found) - sum(mine)), mint: url, note: 'Restored from another phrase' });
+      }
+    } catch (e) { fails.push(host(url)); }
+  }
+  return { total, fails };
+}
+
+/* Receive swap: claim at the foreign mint, then pay ourselves over Lightning into the active mint. */
+async function swapIn(token, note) {
+  token = cleanToken(token);
+  const meta = peekToken(token);
+  const dest = activeMint();
+  if (!dest || !supports(dest, 'mint', 'bolt11')) throw new Error('Your active mint must accept Lightning deposits to swap into it.');
+  if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint);
+  const fw = await getWallet(meta.mint), dw = await getWallet(dest.url);
+  const got = await withRepair(meta.mint, () => fw.receive(token, S.p2pk.length ? { privkey: p2pkPrivs() } : undefined));
+  addProofs(meta.mint, got);
+  const total = sum(S.proofs[meta.mint]);
+  let amt = total - Math.max(2, Math.ceil(total * 0.02)), mq, melt, need;
+  for (let i = 0; i < 4; i++) {
+    if (amt < 1) throw new Error('This token is too small to cover Lightning fees for a swap. Claim it at its own mint instead.');
+    mq = await dw.createMintQuoteBolt11(amt);
+    melt = await fw.createMeltQuoteBolt11(mq.request);
+    const inFee = num(fw.getFeesForProofs(S.proofs[meta.mint]));
+    need = num(melt.amount) + num(melt.fee_reserve) + inFee;
+    if (need <= total) break;
+    amt -= (need - total); mq = null;
+  }
+  if (!mq) throw new Error("Couldn't fit the swap fees into this token. Claim it at its own mint instead.");
+  const tx = addTx({ type: 'in', method: 'ln', amount: amt, mint: dest.url, note: note || `Swapped from ${host(meta.mint)}`, status: 'pending', request: mq.request, quote: mq.quote });
+  S.quotes.push({ kind: 'bolt11', quote: mq.quote, request: mq.request, amount: amt, mint: dest.url, txId: tx.id }); save();
+  const prevActive = S.active; S.active = meta.mint;
+  try { await payMelt('ln', melt, 0, `Swap to ${dest.name}`, mq.request); }
+  finally { S.active = prevActive; save(); }
+  const q = S.quotes.find(x => x.quote === mq.quote);
+  for (let i = 0; i < 20 && q; i++) { const r = await checkQuote(q).catch(() => 'waiting'); if (r === 'paid') break; await sleep(1000); }
+  return { amt, from: meta.mint, to: dest.url };
+}
+
 function methodChips(m) {
   const has = (d, k) => supports(m, d, k);
   const c = [];
@@ -3140,6 +3373,7 @@ function renderDiscovered(recs, final) {
 }
 
 /* ---------- receive / send sheets ---------- */
+function needSeed() { if (!S.seed) { closeSheet(); tab = 'wallet'; render(); toast('Set up your recovery phrase first', 'gold'); return true; } return false; }
 function needMint() { if (!S.seed) { closeSheet(); tab = 'wallet'; render(); toast('Set up your recovery phrase first', 'gold'); return true; } if (!activeMint()) { openMintPicker(); return true; } return false; }
 function methodSeg(dir, cur) {
   const m = activeMint();
@@ -3147,8 +3381,9 @@ function methodSeg(dir, cur) {
   return `<div class="seg three" role="group" aria-label="Method">${opts.map(([k, l]) => `<button data-act="${dir}Method" data-m="${k}" aria-pressed="${cur === k}">${l}</button>`).join('')}</div>`;
 }
 function openReceive(method = 'ln') {
-  if (needMint()) return;
+  if (method === 'ecash' ? needSeed() : needMint()) return;
   const m = activeMint();
+  if (!m && method !== 'ecash') return openMintPicker();
   let inner = '';
   if (method === 'ecash') inner = `
     <div class="field"><label for="tokIn">Paste ecash token</label><textarea id="tokIn" class="inp" placeholder="cashuB…" autocomplete="off" spellcheck="false" data-input="tokPeek"></textarea></div>
@@ -3163,7 +3398,7 @@ function openReceive(method = 'ln') {
     <div class="notice">On-chain deposits need ${esc(methodInfo(m, 'mint', 'onchain')?.confirmations || 'a few')} confirmation(s). NUTCADE watches the address while it's open.${minMax(methodInfo(m, 'mint', 'onchain'))}</div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Savings top-up"></div>
     <button class="btn solid lime block" data-act="doOnchainAddr">Get Bitcoin address</button>` : notSupported('On-chain deposits');
-  openSheet('Receive', `${methodSeg('recv', method)}<div class="tiny muted">Into <b style="color:var(--ink)">${esc(m.name)}</b></div>${inner}<div id="sheetErr"></div>`);
+  openSheet('Receive', `${methodSeg('recv', method)}${m && method !== 'ecash' ? `<div class="tiny muted">Into <b style="color:var(--ink)">${esc(m.name)}</b></div>` : ''}${inner}<div id="sheetErr"></div>`);
 }
 function minMax(mi) { if (!mi) return ''; const a = []; if (mi.min) a.push(`min ${fmt(mi.min)}`); if (mi.max) a.push(`max ${fmt(mi.max)}`); return a.length ? ` Limits: ${a.join(', ')} sat.` : ''; }
 function notSupported(what) { return `<div class="notice red">${what} aren't offered by ${esc(activeMint().name)}. Pick a mint that lists them in the mint picker.</div><button class="btn block gold" data-act="pickMint">Open mint picker</button>`; }
@@ -3184,7 +3419,7 @@ function openSend(method = 'ecash') {
     <div class="field"><label for="amtIn">Amount (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="50000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Move to cold storage"></div>
     <button class="btn solid pink block" data-act="doMeltQuote" data-k="onchain">Get fee options</button>${minMax(methodInfo(m, 'melt', 'onchain')) ? `<div class="tiny muted">${minMax(methodInfo(m, 'melt', 'onchain'))}</div>` : ''}` : notSupported('On-chain withdrawals');
-  openSheet('Send', `${methodSeg('send', method)}<div class="tiny muted">From <b style="color:var(--ink)">${esc(m.name)}</b> · ${fmt(balanceOf(m.url))} SAT available</div>${inner}<div id="sheetErr"></div>`);
+  openSheet('Send', `${methodSeg('send', method)}<div class="tiny muted">From <b style="color:var(--ink)">${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>${inner}<div id="sheetErr"></div>`);
 }
 const val = id => ($('#' + id) || {}).value || '';
 const amt = () => { const n = parseInt(val('amtIn').replace(/[^0-9]/g, ''), 10); if (!n || n <= 0) throw new Error('Enter an amount in sats, like 1000.'); return n; };
@@ -3198,7 +3433,7 @@ async function run(btn, label, fn) {
 function showInvoice(tx) {
   const q = S.quotes.find(x => x.quote === tx.quote);
   setBody(`<div class="label" style="text-align:center">Pay this invoice</div>
-    <div class="credit-num" style="text-align:center;font-size:26px">${fmt(tx.amount)}<small>SAT</small></div>
+    <div class="credit-num" style="text-align:center;font-size:26px">${fmt(tx.amount)}<small>${unitTag()}</small></div>
     ${qrBlock('lightning:' + tx.request.toUpperCase(), 'Lightning invoice QR')}
     <div class="code">${esc(tx.request)}</div>
     <div class="row"><button class="btn block" data-act="copy" data-text="${esc(tx.request)}">Copy invoice</button></div>
@@ -3224,7 +3459,7 @@ function showAddress(tx) {
 }
 function showToken(tx) {
   setBody(`<div class="label" style="text-align:center">Ecash token</div>
-    <div class="credit-num" style="text-align:center;font-size:26px">${fmt(tx.amount)}<small>SAT</small></div>
+    <div class="credit-num" style="text-align:center;font-size:26px">${fmt(tx.amount)}<small>${unitTag()}</small></div>
     ${qrBlock(tx.token, 'Ecash token QR')}
     <div class="code">${esc(tx.token)}</div>
     <button class="btn solid pink block" data-act="copy" data-text="${esc(tx.token)}">Copy token</button>
@@ -3234,7 +3469,7 @@ function showDone(dir, amount, how) {
   sfx('start');
   setBody(`<div style="text-align:center;display:grid;gap:14px;padding:10px 0">
     <div style="font-family:var(--f-display);font-size:18px;color:${dir === 'in' ? 'var(--lime)' : 'var(--pink)'}">${dir === 'in' ? '1UP!' : 'SENT!'}</div>
-    <div class="credit-num" style="font-size:30px">${dir === 'in' ? '+' : '−'}${fmt(amount)}<small>SAT</small></div>
+    <div class="credit-num" style="font-size:30px">${dir === 'in' ? '+' : '−'}${fmt(amount)}<small>${unitTag()}</small></div>
     <div class="muted">${esc(how)}</div>
     <button class="btn solid gold block" data-act="close">Continue</button></div>`);
   refresh();
@@ -3242,11 +3477,11 @@ function showDone(dir, amount, how) {
 function showMeltQuote(kind, mq, dest, note) {
   const amount = num(mq.amount);
   const opts = kind === 'onchain' ? (mq.fee_options || []) : [];
-  const feeRow = kind === 'ln' ? `<dt>Fee reserve</dt><dd>${fmt(mq.fee_reserve)} SAT</dd>` : '';
-  setBody(`<dl class="kv"><dt>Pay</dt><dd>${fmt(amount)} SAT</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd>${esc(note)}</dd>` : ''}</dl>
+  const feeRow = kind === 'ln' ? `<dt>Fee reserve</dt><dd>${money(mq.fee_reserve)}</dd>` : '';
+  setBody(`<dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd>${esc(note)}</dd>` : ''}</dl>
     ${opts.length ? `<div class="field"><label>Fee speed</label><div class="txs">${opts.map((o, i) => `<label class="tx out" style="cursor:pointer"><span class="ico"><input type="radio" name="fee" value="${o.fee_index}" ${i === 0 ? 'checked' : ''} style="accent-color:var(--pink)"></span><span class="mid"><div class="note">~${o.estimated_blocks} block${o.estimated_blocks === 1 ? '' : 's'}</div><div class="meta">≈ ${Math.round(o.estimated_blocks * 10)} min</div></span><span class="amt">${fmt(o.fee_reserve)}</span></label>`).join('')}</div></div>` : ''}
     ${kind === 'ln' ? '<div class="tiny muted">Unused fee reserve comes back as change.</div>' : ''}
-    <button class="btn solid pink block" id="payBtn">Pay ${fmt(amount)} SAT</button><div id="sheetErr"></div>`, body => {
+    <button class="btn solid pink block" id="payBtn">Pay ${money(amount)}</button><div id="sheetErr"></div>`, body => {
     body.querySelector('#payBtn').onclick = e => run(e.currentTarget, 'PAYING', async () => {
       const fi = kind === 'onchain' ? parseInt((body.querySelector('input[name=fee]:checked') || {}).value || '0', 10) : 0;
       const tx = await payMelt(kind, mq, fi, note, dest);
@@ -3268,10 +3503,10 @@ function openTx(id) {
   else if (t.status === 'pending' && t.type === 'in' && t.method === 'onchain') extra = `<div class="row" style="flex-wrap:wrap"><button class="btn sm lime" data-act="resumeAddr" data-id="${t.id}">Show address</button><button class="btn sm red" data-act="stopWatch" data-id="${t.id}">Stop watching</button></div>`;
   else if (t.status === 'pending' && t.type === 'out') extra = `<button class="btn block violet" data-act="reconcileTx" data-id="${t.id}">Check payment</button>`;
   openSheet(t.type === 'in' ? 'Received' : 'Sent', `
-    <div class="credit-num" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${t.type === 'in' ? '+' : '−'}${t.amount ? fmt(t.amount) : '…'}<small>SAT</small></div>
+    <div class="credit-num" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${t.type === 'in' ? '+' : '−'}${t.amount ? fmt(t.amount) : '…'}<small>${unitTag()}</small></div>
     <div class="field"><label for="noteEdit">Note</label><textarea id="noteEdit" class="inp" maxlength="500" placeholder="What was this for?">${esc(t.note)}</textarea></div>
     <button class="btn solid gold block" data-act="saveNote" data-id="${t.id}">Save note</button>
-    <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(t.status)}</dd>${t.fee ? `<dt>Fee</dt><dd>${fmt(t.fee)} SAT</dd>` : ''}
+    <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(t.status)}</dd>${t.fee ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
     <dt>Mint</dt><dd>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd>${new Date(t.ts).toLocaleString()}</dd>
     ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
     ${extra}<div id="sheetErr"></div>`);
@@ -3289,7 +3524,7 @@ function openSupport() {
       ${canTip ? `<div class="seg three" role="group" aria-label="Tip amount">${[21, 210, 2100].map(a => `<button data-act="tipPreset" data-a="${a}" aria-pressed="${a === 210}">${fmt(a)}</button>`).join('')}</div>
       <div class="field"><label for="tipAmt">Amount (sat)</label><input id="tipAmt" class="inp amount" inputmode="numeric" value="210" autocomplete="off"></div>
       <button class="btn solid pink block" data-act="tipQuote">Tip ${'♥'} from ${esc(m.name)}</button>
-      <div class="tiny muted">You'll see the fee and confirm before anything is sent. ${fmt(balanceOf(m.url))} SAT available.</div>`
+      <div class="tiny muted">You'll see the fee and confirm before anything is sent. ${money(balanceOf(m.url))} available.</div>`
       : `<div class="tiny muted">${m ? `${esc(m.name)} can't pay Lightning, so use the address below from another wallet.` : 'Add a mint and some sats to tip from NUTCADE, or use the address below from any Lightning wallet.'}</div>`}
     </div>
     <div class="field"><label>Lightning address</label><div class="row"><div class="code" style="flex:1;font-size:16px">${DONATE.address}</div><button class="btn sm" data-act="copy" data-text="${DONATE.address}">Copy</button></div></div>
@@ -3304,7 +3539,7 @@ async function lnAddressInvoice(address, sats, comment) {
   if (base.status === 'ERROR') throw new Error(base.reason || 'The Lightning address returned an error.');
   if (base.tag !== 'payRequest' || !base.callback) throw new Error("That Lightning address isn't set up for payments.");
   const msat = sats * 1000;
-  if (msat < base.minSendable || msat > base.maxSendable) throw new Error(`Tips must be between ${fmt(Math.ceil(base.minSendable / 1000))} and ${fmt(Math.floor(base.maxSendable / 1000))} SAT.`);
+  if (msat < base.minSendable || msat > base.maxSendable) throw new Error(`Tips must be between ${fmt(Math.ceil(base.minSendable / 1000))} and ${money(Math.floor(base.maxSendable / 1000))}.`);
   const u = new URL(base.callback); u.searchParams.set('amount', String(msat));
   if (comment && base.commentAllowed) u.searchParams.set('comment', comment.slice(0, base.commentAllowed));
   const inv = await fetch(u.toString()).then(r => r.json());
@@ -3330,7 +3565,7 @@ const A = {
   refreshMint: b => run(b, '…', async () => { delete wallets[b.dataset.url]; await addMint(b.dataset.url); render(); toast('Mint info refreshed', 'cyan'); }),
   removeMint: b => {
     const u = b.dataset.url, bal = balanceOf(u);
-    if (bal > 0) { toast(`Send or move the ${fmt(bal)} SAT out of this mint before removing it.`, 'red'); sfx('err'); return; }
+    if (bal > 0) { toast(`Send or move the ${money(bal)} out of this mint before removing it.`, 'red'); sfx('err'); return; }
     openSheet('Remove mint', `<p style="margin:0">Remove ${esc(host(u))} from NUTCADE? Its transaction notes stay.</p><button class="btn solid red block" data-act="confirmRemove" data-url="${esc(u)}">Remove</button>`);
   },
   confirmRemove: b => { const u = b.dataset.url; S.mints = S.mints.filter(m => m.url !== u); delete S.proofs[u]; if (S.active === u) S.active = S.mints[0] ? S.mints[0].url : null; save(); closeSheet(); render(); },
@@ -3349,11 +3584,11 @@ const A = {
     }
     const tx = await receiveToken(tok, val('noteIn').trim()); sfx('coin'); showDone('in', tx.amount, 'Ecash');
   }),
-  doSendEcash: b => run(b, 'MINTING TOKEN', async () => { const tx = await sendEcash(amt(), val('noteIn').trim()); sfx('coin'); refresh(); showToken(tx); }),
+  doSendEcash: b => run(b, 'MINTING TOKEN', async () => { const lock = '';const tx = await sendEcash(amt(), val('noteIn').trim(), lock || null); sfx('coin'); refresh(); showToken(tx); }),
   doMeltQuote: b => run(b, 'QUOTING', async () => {
     const k = b.dataset.k; let dest = val('destIn').trim().replace(/^(lightning|bitcoin):/i, '').split('?')[0];
     const note = val('noteIn').trim();
-    if (k === 'ln') { if (!/^ln(bc|tb|bcrt|tbs)[0-9a-z]+$/i.test(dest)) throw new Error('Paste a Lightning invoice. It starts with lnbc.'); dest = dest.toLowerCase(); const mq = await meltQuote('ln', dest); showMeltQuote('ln', mq, dest, note); }
+    if (k === 'ln') { if (!/^ln(bc|tb|bcrt|tbs)[0-9a-z]{50,}$/i.test(dest)) throw new Error("That isn't a complete Lightning invoice. Copy the whole invoice (it starts with lnbc) and paste again."); dest = dest.toLowerCase(); let mq; try { mq = await meltQuote('ln', dest); } catch (e) { if (/bech32|checksum|decode|invalid invoice|parse/i.test(e.message)) throw new Error("That Lightning invoice isn't valid. Check you copied all of it."); throw e; } showMeltQuote('ln', mq, dest, note); }
     else { if (!/^(bc1|tb1|bcrt1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,90}$/.test(dest)) throw new Error('That Bitcoin address looks wrong. Check it and paste again.'); const a = amt(); const mq = await meltQuote('onchain', dest, a); showMeltQuote('onchain', mq, dest, note); }
   }),
   saveNote: b => { updTx(b.dataset.id, { note: val('noteEdit').trim() }); sfx('coin'); toast('Note saved', 'gold'); closeSheet(); refresh(); },
@@ -3364,17 +3599,18 @@ const A = {
   stopWatch: b => { const t = txById(b.dataset.id); S.quotes = S.quotes.filter(q => q.quote !== t.quote); updTx(t.id, { status: 'expired' }); closeSheet(); refresh(); },
   reconcileTx: b => run(b, 'CHECKING', async () => { const t = txById(b.dataset.id); const p = S.pending.find(x => x.txId === t.id); if (!p) { toast('Nothing pending for this one', 'cyan'); return; } const r = await reconcile(p); toast({ paid: 'Payment confirmed', returned: 'Payment failed. Sats returned.', pending: 'Still in flight' }[r], r === 'pending' ? 'gold' : 'lime'); closeSheet(); refresh(); }),
   reconcileAll: b => run(b, '…', async () => { for (const p of [...S.pending]) await reconcile(p).catch(() => {}); refresh(); }),
-  pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); render(); sfx('blip'); },
+  pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); refresh(); sfx('blip'); },
   backup: () => {
     const data = JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs });
     openSheet('Backup', `<div class="notice red">This contains your recovery phrase and spendable ecash. Keep it private.</div><div class="code" style="max-height:200px">${esc(data)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(data)}">Copy backup</button>`);
   },
-  restore: () => openSheet('Restore', `<div class="field"><label for="restoreIn">Paste a NUTCADE backup</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`),
+  restore: () => openSheet('Import backup', `<div class="field"><label for="restoreFile">Backup file</label><input id="restoreFile" class="inp" type="file" accept=".json,application/json" style="font-size:16px"></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`),
   doRestore: () => {
     try {
       const d = JSON.parse(val('restoreIn')); if (d.app !== 'nutcade') throw new Error('Not a NUTCADE backup.');
       if (d.seed && (!S.seed || (S.seed.mnemonic !== d.seed && totalBalance() === 0))) setSeed(d.seed, true);
       for (const k in d.counters || {}) counterSource.advanceToAtLeast(k, d.counters[k]);
+      for (const k of d.p2pk || []) if (!S.p2pk.find(x => x.pub === k.pub)) S.p2pk.push(k); store.set('p2pk', S.p2pk);
       for (const m of d.mints || []) if (!S.mints.find(x => x.url === m.url)) S.mints.push(m);
       for (const u in d.proofs || {}) addProofs(u, d.proofs[u]);
       const ids = new Set(S.txs.map(t => t.id)); for (const t of d.txs || []) if (!ids.has(t.id)) S.txs.push(t);
@@ -3387,7 +3623,25 @@ const A = {
   takeover: () => { try { chan && chan.postMessage({ t: 'takeover', id: TAB_ID }); } catch (e) {} location.reload(); },
   seedCreate: b => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (totalBalance() === 0) { S.seed.secured = true; store.set('seed', S.seed); } sfx('start'); render(); openShowPhrase(true); }),
   seedShow: () => { if (!S.seed) return; openShowPhrase(!S.seed.backedUp); },
-  seedLater: () => { closeSheet(); render(); toast("Your phrase isn't backed up yet. Do it before adding real sats.", 'gold'); },
+  gateCreate: b => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (totalBalance() === 0) { S.seed.secured = true; store.set('seed', S.seed); } gate = { step: 'show' }; sfx('start'); render(); window.scrollTo(0, 0); }),
+  gateRestore: () => openRestore(),
+  gateToConfirm: () => { gate = { step: 'confirm', picks: pickWords() }; sfx('select'); render(); window.scrollTo(0, 0); const f = document.querySelector('[data-cw]'); if (f && !matchMedia('(pointer:coarse)').matches) f.focus(); },
+  gateBack: () => { gate = { step: 'show' }; render(); window.scrollTo(0, 0); },
+  gateConfirm: async b => {
+    const words = S.seed.mnemonic.split(' ');
+    const bad = [...document.querySelectorAll('[data-cw]')].filter(i => cleanPhrase(i.value) !== words[+i.dataset.cw]);
+    if (bad.length) { sfx('err'); $('#gateErr').innerHTML = errHTML(`Word #${+bad[0].dataset.cw + 1} doesn't match. Check your paper, or go back to your words.`); bad[0].focus(); return; }
+    S.seed.backedUp = true; store.set('seed', S.seed); sfx('levelup');
+    gate = { step: 'done' };
+    if (!S.seed.secured && totalBalance() > 0) {
+      gate.busy = 'PROTECTING YOUR ECASH'; render();
+      try { const fee = await secureAll(); gate.msg = `Your existing ecash is now protected by your phrase${fee ? ` (mint fee ${money(fee)})` : ''}.`; }
+      catch (e) { gate.msg = 'Some older ecash could not be moved yet. Use "Protect it" on the wallet screen to try again.'; }
+      gate.busy = null;
+    }
+    render(); window.scrollTo(0, 0);
+  },
+  gateStart: () => { gate = { step: 'welcome' }; tab = 'wallet'; sfx('start'); render(); window.scrollTo(0, 0); if (!S.mints.length) openMintPicker(); },
   seedConfirmStart: () => openConfirmPhrase(),
   seedConfirm: b => run(b, 'CHECKING', async () => {
     const words = S.seed.mnemonic.split(' ');
@@ -3396,12 +3650,12 @@ const A = {
     S.seed.backedUp = true; store.set('seed', S.seed); sfx('levelup');
     if (!S.seed.secured && totalBalance() > 0) {
       setBody(busyHTML('PROTECTING YOUR ECASH'));
-      try { const fee = await secureAll(); setBody(`<div class="notice cyan">Backed up. Your existing ecash now sits under your phrase too${fee ? ` (mint fee ${fmt(fee)} SAT)` : ''}.</div><button class="btn solid gold block" data-act="close">Continue</button>`); }
+      try { const fee = await secureAll(); setBody(`<div class="notice cyan">Backed up. Your existing ecash now sits under your phrase too${fee ? ` (mint fee ${money(fee)})` : ''}.</div><button class="btn solid gold block" data-act="close">Continue</button>`); }
       catch (e) { setBody(`<div class="notice cyan">Backed up.</div>${errHTML(friendly(e, S.active))}<div class="tiny muted">Your older ecash is still in the wallet. Use "Protect it" on the wallet screen to try again.</div><button class="btn solid gold block" data-act="close">Continue</button>`); }
     } else { setBody(`<div style="text-align:center;display:grid;gap:12px"><div style="font-family:var(--f-display);font-size:16px;color:var(--lime)">PHRASE SAVED!</div><p style="margin:0">Your sats can now be recovered from these 12 words.</p><button class="btn solid gold block" data-act="close">Continue</button></div>`); }
     render();
   }),
-  secureAll: b => run(b, 'PROTECTING', async () => { const fee = await secureAll(); render(); toast(`Your ecash is now covered by your phrase${fee ? ` (fee ${fmt(fee)} SAT)` : ''}`, 'lime'); }),
+  secureAll: b => run(b, 'PROTECTING', async () => { const fee = await secureAll(); render(); toast(`Your ecash is now covered by your phrase${fee ? ` (fee ${money(fee)})` : ''}`, 'lime'); }),
   seedRestore: () => openRestore(),
   doRestorePhrase: b => run(b, 'RESTORING', async () => {
     const phrase = cleanPhrase(val('phraseIn'));
@@ -3424,7 +3678,7 @@ const A = {
     sfx(total ? 'levelup' : 'blip'); render();
     setBody(`<div style="text-align:center;display:grid;gap:12px">
       <div style="font-family:var(--f-display);font-size:16px;color:${total ? 'var(--lime)' : 'var(--gold)'}">${total ? 'CONTINUE!' : 'SCAN COMPLETE'}</div>
-      <div class="credit-num" style="font-size:28px">${fmt(total)}<small>SAT</small></div>
+      <div class="credit-num" style="font-size:28px">${fmt(total)}<small>${unitTag()}</small></div>
       <p style="margin:0">${total ? 'Recovered and back in your wallet.' : 'No unspent ecash was found on those mints for this phrase.'}</p>
       ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}. Try those again later from Mints → Find lost ecash.</div>` : ''}
       <button class="btn solid gold block" data-act="close">Continue</button></div>`);
@@ -3433,27 +3687,93 @@ const A = {
     if (!S.mints.length) throw new Error('Add the mints you used first, then scan.');
     let total = 0, fails = 0;
     for (const m of S.mints) { try { total += await restoreFromMint(m.url, t => { b.innerHTML = '<span class="spinner">SCANNING</span>'; }); } catch (e) { fails++; } }
-    render(); toast(total ? `Found ${fmt(total)} SAT` : fails ? `Nothing found; ${fails} mint(s) didn't answer` : 'No lost ecash found', total ? 'lime' : 'cyan'); if (total) sfx('coin');
+    render(); toast(total ? `Found ${money(total)}` : fails ? `Nothing found; ${fails} mint(s) didn't answer` : 'No lost ecash found', total ? 'lime' : 'cyan'); if (total) sfx('coin');
   }),
   support: () => { sfx('select'); openSupport(); },
+  jump: b => { const el = document.getElementById(b.dataset.id); if (el) el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); },
+  setTheme: b => { S.prefs.theme = b.dataset.t; save(); refresh(); sfx('select'); },
+  backupDownload: () => {
+    const data = JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk }, null, 1);
+    try {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+      a.download = `nutcade-backup-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast('Backup file downloaded. Keep it private.', 'lime');
+    } catch (e) { A.backup(); }
+  },
+  sweepOpen: () => {
+    const urls = [...new Set(S.mints.map(m => m.url).concat(CURATED.filter(c => !c.test).map(c => c.url)))];
+    openSheet('Restore ecash', `<p style="margin:0">Enter the other phrase. NUTCADE scans the mints you pick and moves any ecash it finds into this wallet, under your current phrase.</p>
+      <div class="field"><label for="phraseIn">Other 12 words</label><textarea id="phraseIn" class="inp" autocomplete="off" autocapitalize="off" spellcheck="false" data-input="phrase"></textarea><div id="phraseOk" class="tiny muted">Separate words with spaces.</div></div>
+      <div class="field"><label>Mints to scan</label><div class="txs">${urls.map((u, i) => `<label class="toggle" for="sm${i}" style="font-size:19px"><span style="overflow-wrap:anywhere;min-width:0">${esc(host(u))}</span><input id="sm${i}" type="checkbox" data-rmint="${esc(u)}" ${S.mints.find(m => m.url === u) ? 'checked' : ''}></label>`).join('')}</div></div>
+      <div class="field"><label for="rmExtra">Other mint addresses (one per line)</label><textarea id="rmExtra" class="inp" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea></div>
+      <button class="btn solid gold block" data-act="doSweep">Scan and restore</button><div id="restoreLog" class="tiny muted"></div><div id="sheetErr"></div>`);
+  },
+  doSweep: b => run(b, 'SCANNING', async () => {
+    const phrase = cleanPhrase(val('phraseIn'));
+    if (!validPhrase(phrase)) throw new Error("That phrase isn't valid. Check each word's spelling and that you have all 12, in order.");
+    if (S.seed && phrase === S.seed.mnemonic) throw new Error('That is your current phrase. Use Find lost ecash instead.');
+    const urls = [...new Set([...document.querySelectorAll('[data-rmint]')].filter(i => i.checked).map(i => i.dataset.rmint).concat(val('rmExtra').split(/\s+/).filter(Boolean).map(normUrl)))];
+    if (!urls.length) throw new Error('Pick at least one mint to scan.');
+    const log = $('#restoreLog');
+    const { total, fails } = await sweepPhrase(phrase, urls, t => { if (log) log.textContent = t; });
+    sfx(total ? 'levelup' : 'blip'); refresh();
+    setBody(`<div style="text-align:center;display:grid;gap:12px"><div style="font-family:var(--f-display);font-size:16px;color:${total ? 'var(--lime)' : 'var(--gold)'}">${total ? 'BONUS ROUND!' : 'SCAN COMPLETE'}</div>
+      <div class="credit-num" style="font-size:28px">${fmt(total)}<small>${unitTag()}</small></div><p style="margin:0">${total ? 'Moved into this wallet.' : 'No unspent ecash was found for that phrase.'}</p>
+      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}.</div>` : ''}<button class="btn solid gold block" data-act="close">Continue</button></div>`);
+  }),
+  p2pkNew: b => run(b, '…', async () => { newP2PK(); sfx('coin'); refresh(); toast('New P2PK key created', 'lime'); }),
+  p2pkShow: b => { const k = S.p2pk[+b.dataset.i]; openSheet('Your P2PK key', `<p style="margin:0">Share this public key. Ecash locked to it can only be claimed by this wallet.</p>${qrBlock(k.pub, 'P2PK public key QR')}<div class="code">${esc(k.pub)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(k.pub)}">Copy key</button>`); },
+  exportToken: () => {
+    const m = activeMint(); const ps = S.proofs[m.url] || [];
+    if (!ps.length) { toast('Nothing to export on this mint', 'gold'); return; }
+    const tok = L.getEncodedToken({ mint: m.url, proofs: ps, unit: 'sat' });
+    openSheet('Export ecash', `<div class="notice red">This token holds your entire ${esc(m.name)} balance (${money(sum(ps))}). Anyone who has it can spend it. After you claim it in another wallet, use Remove spent ecash here.</div>
+      <div class="code" style="max-height:160px">${esc(tok)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(tok)}">Copy token</button>`);
+  },
+  ctrBump: b => { counterSource.advanceToAtLeast(b.dataset.id, (S.counters[b.dataset.id] || 0) + 10); refresh(); },
+  newSeedAsk: () => openSheet('New recovery phrase', `<p style="margin:0">NUTCADE will create a new 12-word phrase, show it for you to write down, then move your ${money(totalBalance())} under it. The mint may charge a small fee for the move.</p>
+    <div class="field"><label for="confirmWord">Type NEW to continue</label><input id="confirmWord" class="inp" autocomplete="off" autocapitalize="characters"></div>
+    <button class="btn solid red block" data-act="doNewSeed">Create new phrase</button><div id="sheetErr"></div>`),
+  doNewSeed: () => {
+    if (val('confirmWord').trim().toUpperCase() !== 'NEW') { showErr(new Error('Type NEW to confirm.')); return; }
+    setSeed(newMnemonic(), false); S.seed.secured = totalBalance() === 0; store.set('seed', S.seed);
+    closeSheet(); gate = { step: 'show' }; render(); window.scrollTo(0, 0);
+  },
+  resetAsk: () => openSheet('Reset wallet', `<div class="notice red">This deletes your recovery phrase, ecash, notes and history from this browser, then returns you to the start screen to create a new wallet or restore one. ${totalBalance() ? `If you don't have your 12 words and mint list, your ${money(totalBalance())} is lost forever.` : 'Your wallet is empty.'}</div>
+    ${S.mints.length ? `<div class="th">Your mints, to write down with your words:</div><div class="code" style="color:var(--ink)">${S.mints.map(m => esc(m.url)).join('<br>')}</div>` : ''}
+    <div class="field"><label for="confirmWord">Type RESET to confirm</label><input id="confirmWord" class="inp" autocomplete="off" autocapitalize="characters"></div>
+    <button class="btn solid red block" data-act="doReset">Reset wallet</button><div id="sheetErr"></div>`),
+  doReset: () => {
+    if (val('confirmWord').trim().toUpperCase() !== 'RESET') { showErr(new Error('Type RESET to confirm.')); return; }
+    try { for (const k of Object.keys(localStorage)) if (/^nutcade:(seed|counters|mints|active|proofs|pending|txs|quotes|p2pk)$/.test(k)) localStorage.removeItem(k); } catch (e) {}
+    location.reload();
+  },
+  swapToken: b => run(b, 'SWAPPING', async () => {
+    const r = await swapIn(val('tokIn'), val('noteIn').trim());
+    sfx('coin'); refresh();
+    setBody(`<div style="text-align:center;display:grid;gap:12px"><div style="font-family:var(--f-display);font-size:16px;color:var(--lime)">SWAPPED!</div><div class="credit-num" style="font-size:28px">+${fmt(r.amt)}<small>${unitTag()}</small></div>
+      <p style="margin:0">Claimed at ${esc(host(r.from))} and moved into ${esc((S.mints.find(m => m.url === r.to) || {}).name || host(r.to))} over Lightning.</p><button class="btn solid gold block" data-act="close">Continue</button></div>`);
+  }),
   tipPreset: b => { const i = $('#tipAmt'); if (i) i.value = b.dataset.a; b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); sfx('blip'); },
   tipQuote: b => run(b, 'ASKING', async () => {
     const sats = parseInt((val('tipAmt') || '').replace(/[^0-9]/g, ''), 10);
     if (!sats || sats < 1) throw new Error('Enter a tip amount in sats, like 210.');
-    if (balanceOf(S.active) < sats) throw new Error(`Not enough credits. This mint holds ${fmt(balanceOf(S.active))} SAT.`);
+    if (balanceOf(S.active) < sats) throw new Error(`Not enough credits. This mint holds ${money(balanceOf(S.active))}.`);
     let pr;
     try { pr = await lnAddressInvoice(DONATE.address, sats, 'Tip from NUTCADE'); }
     catch (e) { throw new Error(/fetch|network|load failed/i.test(e.message) ? "Couldn't reach the Lightning address from here. Copy the address into another wallet instead." : e.message); }
     const mq = await meltQuote('ln', pr);
-    if (num(mq.amount) !== sats) throw new Error(`The invoice asked for ${fmt(num(mq.amount))} SAT instead of ${fmt(sats)}. Nothing was sent.`);
+    if (num(mq.amount) !== sats) throw new Error(`The invoice asked for ${money(num(mq.amount))} instead of ${fmt(sats)}. Nothing was sent.`);
     showMeltQuote('ln', mq, DONATE.address, 'Tip to NUTCADE ♥');
   }),
   clean: b => run(b, 'CHECKING', async () => { const n = await cleanWallet(); render(); toast(n ? `Removed ${n} spent proof${n === 1 ? '' : 's'}` : 'All proofs are good', 'lime'); })
 };
 function setTrust(meta) {
-  const el = $('#tokPeek');
-  el.innerHTML = `<div class="notice">This token is from <b>${esc(host(meta.mint))}</b>, a mint you haven't added. Claiming adds it and trusts it with ${fmt(meta.amount)} SAT.</div>`;
+  const el = $('#tokPeek'); const dest = activeMint();
+  const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;
+  el.innerHTML = `<div class="notice">This token is from <b>${esc(host(meta.mint))}</b>, a mint you haven't added. Claiming adds it and trusts it with ${money(meta.amount)}.${canSwap ? ` Or swap it into ${esc(dest.name)} over Lightning (small fee).` : ''}</div>`;
   const btn = $('[data-act="doReceiveToken"]'); btn.dataset.trust = '1'; btn.textContent = 'Trust mint & claim';
+  if (canSwap && !$('[data-act="swapToken"]')) btn.insertAdjacentHTML('afterend', `<button class="btn block violet" data-act="swapToken">Swap into ${esc(dest.name)}</button>`);
 }
 
 document.addEventListener('click', e => {
@@ -3462,7 +3782,13 @@ document.addEventListener('click', e => {
   if (b.type === 'checkbox') return;
   const f = A[b.dataset.act]; if (f) { e.preventDefault(); f(b, e); }
 });
-document.addEventListener('change', e => { const b = e.target.closest('[data-act="pref"]'); if (b) A.pref(b); });
+document.addEventListener('change', e => {
+  const b = e.target.closest('[data-act="pref"]'); if (b) A.pref(b);
+  if (e.target.id === 'restoreFile' && e.target.files[0]) { e.target.files[0].text().then(t => { const box = $('#restoreIn'); if (box) box.value = t; }).catch(() => {}); }
+  const sel = e.target.closest('[data-act="prefSelect"]'); if (sel) { S.prefs[sel.dataset.k] = sel.value; save(); price = { rate: null, at: 0, cur: null }; fetchPrice(true); }
+  const g = e.target.dataset && e.target.dataset.gatecheck;
+  if (g) document.querySelectorAll(`[data-needs="${g}"]`).forEach(x => { x.disabled = !e.target.checked; });
+});
 document.addEventListener('input', e => {
   const k = e.target.dataset && e.target.dataset.input;
   if (k === 'hq') { histQuery = e.target.value; const list = $('#txList'); const pos = e.target.selectionStart; render(); const i = $('#hq'); if (i) { i.focus(); try { i.setSelectionRange(pos, pos); } catch (x) {} } }
@@ -3472,25 +3798,29 @@ document.addEventListener('input', e => {
   }
   if (k === 'tokPeek') {
     const el = $('#tokPeek'); const v = e.target.value.trim(); if (!v) { el.innerHTML = ''; return; }
-    try { const m = peekToken(v); el.innerHTML = `<dl class="kv"><dt>Amount</dt><dd style="color:var(--gold)">${fmt(m.amount)} SAT</dd><dt>Mint</dt><dd>${esc(host(m.mint))}</dd>${m.memo ? `<dt>Memo</dt><dd>${esc(m.memo)}</dd>` : ''}</dl>`; }
+    try { const m = peekToken(v); el.innerHTML = `<dl class="kv"><dt>Amount</dt><dd style="color:var(--gold)">${money(m.amount)}</dd><dt>Mint</dt><dd>${esc(host(m.mint))}</dd>${m.memo ? `<dt>Memo</dt><dd>${esc(m.memo)}</dd>` : ''}</dl>`; }
     catch (x) { el.innerHTML = '<div class="tiny muted">Waiting for a valid cashu token…</div>'; }
   }
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#layer .sheet')) closeSheet(); if (e.key === 'Enter' && e.target.id === 'mintUrl') A.addMintUrl($('[data-act="addMintUrl"]')); });
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.cw !== undefined && $('[data-act=gateConfirm]')) { e.preventDefault(); A.gateConfirm($('[data-act=gateConfirm]')); } if (e.key === 'Escape' && $('#layer .sheet')) closeSheet(); if (e.key === 'Enter' && e.target.id === 'mintUrl') A.addMintUrl($('[data-act="addMintUrl"]')); });
 
 /* ---------- background checks ---------- */
-async function backgroundTick() {
+async function backgroundTick(startup) {
   if (!S.seed || tabLocked) return;
-  for (const q of [...S.quotes]) { if (q.kind === 'onchain' || (Date.now() - (txById(q.txId)?.ts || 0)) < 86400000) await checkQuote(q).catch(() => {}); }
+  {
+    const now = Date.now(), maxAge = 14 * 86400000;
+    const qs = S.quotes.filter(q => q.kind === 'onchain' || now - (txById(q.txId)?.ts || 0) < maxAge);
+    for (const q of qs) await checkQuote(q).catch(() => {});
+  }
   for (const p of [...S.pending]) await reconcile(p).catch(() => {});
-  for (const t of S.txs.filter(t => t.status === 'pending' && t.method === 'ecash' && t.sent).slice(0, 10)) await checkClaim(t).catch(() => {});
+  if (S.prefs.checkSent) for (const t of S.txs.filter(t => t.status === 'pending' && t.method === 'ecash' && t.sent).slice(0, 10)) await checkClaim(t).catch(() => {});
 }
 let tickCount = 0;
 setInterval(() => { if (document.hidden || tabLocked || $('#layer .sheet')) return; tickCount++; backgroundTick().then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }); }, 30000);
 
 window.Nutcade = { render, refresh, S, toast, logoSVG, sfx, openSheet, closeSheet, esc, fmt };
 render();
-if (S.mints.length) setTimeout(() => backgroundTick().then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 1200);
+if (S.mints.length) setTimeout(() => backgroundTick(true).then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 1200);
 })();
 </script>
 <script>/* NUTCADE arcade: engine + seven original 80s-style games */

@@ -12,15 +12,20 @@ A Cashu ecash wallet with a 1980s arcade built in.
 - Seven original arcade games with high scores, chiptune sound and music
 - Install it to your phone's home screen from the browser's share or menu button
 - 12-word recovery phrase with restore on any device
+- Settings: backup file, restore a wallet from 12 words (including from cashu.me), reset, themes, sound, Bitcoin price
 
 The whole app is one file: `public/index.html`. GitLab Pages serves it from the `public/` folder.
 
 ## Safety
 
-- **12-word recovery phrase.** NUTCADE uses Cashu's standard deterministic secrets (NUT-13). Write the phrase down when you create your wallet; with it, **Restore from recovery phrase** rebuilds your balance on any device by scanning your mints (NUT-09). Keep a list of the mints you use next to your words.
+- **12-word recovery phrase.** NUTCADE uses Cashu's standard deterministic secrets (NUT-13), the same as cashu.me. You must write the phrase down and confirm it before using the wallet. **Restore wallet from 12 words** rebuilds your balance on any device by scanning your mints (NUT-09). Keep a list of the mints you use next to your words.
+- **Moving from another wallet.** Settings → Backup → Restore wallet from 12 words accepts a phrase from a previous NUTCADE or another Cashu wallet like cashu.me. Sats already in NUTCADE move into the restored wallet.
+- **Interrupted payments.** Failed Lightning payments return your sats; stuck ones are tracked until the mint settles them; deposits interrupted mid-way are recovered automatically next time you open the app.
+- **Same phrase on two devices.** If a mint reports reused codes, NUTCADE catches up and retries on its own.
 - **Find lost ecash** (Mints tab) rescans your mints if a payment was interrupted.
 - **One tab at a time.** If NUTCADE is open in two tabs, the second one pauses so they can't overwrite each other.
 - **Storage protection.** NUTCADE asks the browser not to clear its data. On iPhone, add it to your home screen so Safari keeps it.
+- **Reset wallet** (Settings) deletes the wallet from the browser so you can start fresh.
 - Wallets from before v1.1 are upgraded when you create your phrase: existing ecash is swapped into phrase-backed ecash (the mint may charge a small fee).
 
 This is young software that hasn't been independently audited. Start with small amounts.
