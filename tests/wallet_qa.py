@@ -93,6 +93,8 @@ class W:
 
 async def newwallet(b, name):
     ctx=await b.new_context(viewport={'width':390,'height':844}, device_scale_factor=1, is_mobile=True, has_touch=True)
+    # Nostr relays and npub.cash point at the local stand-ins (mock_nostr.py), so tests never touch public services.
+    await ctx.add_init_script("if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs',JSON.stringify({sound:true,crt:true,relays:['ws://127.0.0.1:3350/relay'],npcHost:'http://127.0.0.1:3350'}))")
     pg=await ctx.new_page(); w=W(pg,name)
     pg.on('pageerror', lambda e: w.errs.append('PAGEERROR '+str(e)))
     pg.on('console', lambda m: w.errs.append('CONSOLE '+m.text) if m.type=='error' and 'ERR_TUNNEL' not in m.text and 'ERR_CONNECTION' not in m.text and 'Failed to load resource' not in m.text else None)
@@ -140,7 +142,8 @@ async def main():
         await al.ev(f"Nutcade.S.txs.find(t=>t.id==='{tid}')"); 
         await al.click('[data-act=tab][data-tab=history]'); await al.wait(200)
         await al.click(f'[data-act=tx][data-id="{tid}"]'); await al.wait(200)
-        await al.click(f'[data-act=checkClaim]'); await al.wait(1500)
+        # with instant updates (NUT-17) the claim may already be known; otherwise the manual check finds it
+        if await al.ev("!!document.querySelector('[data-act=checkClaim]')"): await al.click('[data-act=checkClaim]'); await al.wait(1500)
         check('sender sees token claimed', await al.ev(f"Nutcade.S.txs.find(t=>t.id==='{tid}').status")=='claimed')
         await al.close(); await al.click('[data-act=tab][data-tab=wallet]'); await al.wait(150)
         # reclaim

@@ -14,6 +14,9 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 - Send and receive **ecash**, **Lightning** and **on-chain** Bitcoin (on-chain needs a mint that supports NUT-30)
 - **Scan QR codes** with the camera or from a photo: ecash tokens, Lightning invoices, Lightning addresses, LNURL, Bitcoin addresses (BIP21) and mint addresses
 - Pay any **Lightning address** (like name@wallet.com) by typing or scanning it
+- **Your own Lightning address** (npub…@npub.cash) that anyone can pay from any Lightning wallet. It comes from your 12 words, so it's the same address cashu.me gives them
+- **Instant updates**: deposits, payments and claimed tokens show up the moment the mint confirms them (NUT-17), with a regular check as backup
+- **Mint list backup on Nostr** (NUT-27): your mint list is saved encrypted, so restoring from 12 words finds your mints for you, here or in cashu.me
 - **PIN lock** with your wallet encrypted on the device, plus optional **Face ID / fingerprint** unlock
 - Use several mints at once and switch between them
 - Pick mints from a curated list, by address, or from recommendations on Nostr (NIP-87)
@@ -37,9 +40,12 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 
 Plays with keyboard, mouse, or the on-screen joystick and buttons on a phone.
 
+**Trophies and score cards**: 21 trophies for wallet milestones and arcade feats (reach wave 3 in Star Swarm, grow Nibble to 30, play every cabinet…). Every high score and trophy can be turned into a share card for X or anywhere else. Cards show the game and score only, never anything about your wallet, and trophies stay on your device.
+
 **Settings**
 - **Security:** set, change or remove your PIN, turn on Face ID / fingerprint, lock now, and choose when the wallet locks itself
-- **Backup:** show your phrase, find lost ecash, download or import a backup file, restore a wallet from 12 words, reset the wallet
+- **Backup:** show your phrase, find lost ecash, back up your mint list to Nostr, download or import a backup file, restore a wallet from 12 words, reset the wallet
+- **Lightning address:** turn on your own address, choose which mint receives the payments, check for payments, turn it off
 - **Look & sound:** three cabinet themes (Neon, Amber CRT, Green phosphor), sound effects, music, CRT scanlines, amounts shown as ₿
 - **Privacy:** turn the live price and price chart on or off (prices come from Coinbase, in your currency), and choose whether to check if sent tokens were claimed
 - **Wallet tools:** remove spent ecash and check stuck payments
@@ -56,7 +62,11 @@ Plays with keyboard, mouse, or the on-screen joystick and buttons on a phone.
 
 ### Moving from another wallet
 
-Already have a Cashu wallet, like cashu.me or an earlier NUTCADE? On the welcome screen tap **Restore from recovery phrase**, or later go to **Settings → Backup → Restore wallet from 12 words**. Enter your 12 words and tick the mints you used. NUTCADE uses the same standard as cashu.me (NUT-13), so the same words work in both. If NUTCADE already holds sats, they move into the restored wallet.
+Already have a Cashu wallet, like cashu.me or an earlier NUTCADE? On the welcome screen tap **Restore from recovery phrase**, or later go to **Settings → Backup → Restore wallet from 12 words**. Enter your 12 words, tap **Find my mints on Nostr** to tick the mints from your backup, and add any others you used. NUTCADE uses the same standard as cashu.me (NUT-13), so the same words work in both. If NUTCADE already holds sats, they move into the restored wallet.
+
+### Getting your own Lightning address
+
+Go to **Settings → Lightning address → Set it up**, pick the mint that should receive payments, and tap **Turn on**. Share the address shown, or find it any time on the **Receive → Lightning** screen. Payments are turned into ecash at your mint by npub.cash, and NUTCADE claims them whenever it's open. If you used a Lightning address in cashu.me with the same 12 words, it's the same address here.
 
 ### Starting over
 
@@ -67,6 +77,7 @@ Already have a Cashu wallet, like cashu.me or an earlier NUTCADE? On the welcome
 - **PIN lock and encryption.** With a PIN set, your phrase, ecash, history and notes are stored encrypted (AES-256-GCM). The key is unlocked by your PIN (PBKDF2, 600,000 rounds) or by a Face ID / fingerprint passkey (WebAuthn PRF). Five wrong PINs trigger a growing wait, and the wallet locks itself after the time you choose. A PIN stops someone who picks up your phone; it can't stop malware on a compromised device. If you forget it, reset and restore with your 12 words.
 - **Recovery phrase first.** You can't use the wallet until you've written down your 12 words and confirmed them. Every piece of ecash is derived from them (NUT-13), and restoring scans your mints to rebuild your balance (NUT-09).
 - **Interrupted payments are handled.** A failed Lightning payment returns your sats. A stuck one is tracked until the mint settles it. A deposit interrupted mid-way is recovered automatically the next time you open the app.
+- **Mint list backup.** Your list of mints is saved to Nostr relays encrypted with a key from your 12 words (NUT-27, the same format cashu.me uses), so a restore can find them even if you lose your note. Only the list is saved, never ecash or amounts. You can turn this off in Settings → Backup.
 - **Same phrase on two devices.** If a mint reports reused codes, NUTCADE catches up and retries on its own.
 - **One tab at a time.** If NUTCADE is open in a second tab, that tab pauses so the two can't overwrite each other.
 - **Storage protection.** NUTCADE asks the browser not to clear its data, and Settings shows whether that was granted.
@@ -83,6 +94,7 @@ Every push runs the suites in `tests/` automatically in GitLab against real Cash
 - 27 settings checks: themes, ₿ display, backup download and import, restoring a phrase from another Cashu client, reset, and swapping received ecash into your own mint
 - Crash recovery: a deposit interrupted mid-way comes back on the next open
 - 28 PIN-lock checks: encryption at rest, wrong PINs and lockout, change and removal, Face ID / fingerprint unlock, auto-lock, and forgot PIN followed by restore
+- 39 checks for trophies, share cards, instant updates, the Nostr mint-list backup and the Lightning address, against a stand-in Nostr relay and npub.cash server that check every signature
 - 24 scanner checks, run before release: camera scans of real tokens and invoices, photo scans, and recognising every kind of code
 - All seven games played through to game over, with high scores, pause, exit, touch controls and sound
 - Every screen at 320, 390, 768 and 1280 pixels wide, checked for overflow and clipped text
@@ -93,7 +105,8 @@ NUTCADE has no account, no tracking and no analytics. Your recovery phrase and n
 
 - **Mints**: yours for every payment, and the ones listed in the mint picker to show whether they're online
 - **Coinbase**, for the price and chart, only while **Show Bitcoin price** is on
-- **Nostr relays**, only when you tap "Find mints people recommend"
+- **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to save your encrypted mint list when it changes and to look for it when you restore. Turn this off in Settings → Backup. They're also used when you tap "Find mints people recommend"
+- **npub.cash**, only while your Lightning address is turned on. It sees the amounts and times of payments to your address, not the rest of your wallet
 - **The donation address** (breez.tips), only when you tip from inside the app
 
 ## Sharing
@@ -116,6 +129,8 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Changelog
 
+- **v1.5.0:** your own Lightning address (npub.cash, same as cashu.me), instant updates over mint websockets (NUT-17), encrypted mint-list backup on Nostr with "Find my mints" when restoring (NUT-27), 21 trophies, share cards for high scores and trophies
+
 - **v1.4.0:** QR scanner (camera and photo), paying Lightning addresses, PIN lock with encrypted storage and Face ID / fingerprint unlock, auto-lock, coin-drop and 1UP effects, fonts built in (no more Google Fonts), automatic tests in GitLab before every release, published SHA-256 checksums
 - **v1.3.0:** live Bitcoin price chart on the wallet screen, live balance value, share image and link preview for X and other social sites
 - **v1.2.0:** wallet setup before entry, Settings tab, restore a wallet from 12 words (including from cashu.me), reset wallet, automatic recovery of interrupted deposits, automatic repair when one phrase is used on two devices, claiming ecash before choosing a mint, clearer error messages, brighter logo tagline
@@ -131,5 +146,6 @@ The page bundles these libraries (their license notices are at the end of the bu
 - [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator)
 - [zxing-wasm](https://github.com/Sec-ant/zxing-wasm) (MIT) with [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp) (Apache-2.0), the QR decoder
 - [jsQR](https://github.com/cozmo/jsQR) (Apache-2.0), the fallback QR decoder
+- [nostr-tools](https://github.com/nbd-wtf/nostr-tools) (Unlicense) and [noble-ciphers](https://github.com/paulmillr/noble-ciphers) (MIT), for signing Nostr events and NIP-44 encryption
 
 Fonts: [Press Start 2P](https://fonts.google.com/specimen/Press+Start+2P) and [VT323](https://fonts.google.com/specimen/VT323), both under the SIL Open Font License.
