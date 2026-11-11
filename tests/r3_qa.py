@@ -1,7 +1,7 @@
 """Round 3: amounts in your currency, #tags and CSV export, contacts (Lightning address and ecash over Nostr),
 and offline use (service worker, offline send of exact amounts, tokens saved offline and claimed later).
 Uses the local mints and mock_nostr.py; a Lightning address is stood in by routing https://pay.test."""
-import asyncio, csv, io, json, os, urllib.request, urllib.parse
+import asyncio, csv, io, json, os, re, urllib.request, urllib.parse
 from playwright.async_api import async_playwright
 from wallet_qa import W, newwallet, check, results, A, B, URL
 
@@ -24,6 +24,12 @@ async def main():
         b = await p.chromium.launch(**({'executable_path': os.environ['CHROME']} if os.environ.get('CHROME') else {}))
         w = await newwallet(b, 'r3')
         await w.pg.context.route('https://pay.test/**', lnurl_route)
+        # pin the Bitcoin price so the currency checks don't depend on the live market (CI can reach Coinbase)
+        async def fixed_rate(route):
+            if 'exchange-rates' in route.request.url: await route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': '*'}, body=json.dumps({'data': {'currency': 'BTC', 'rates': {'USD': '50000'}}}))
+            else: await route.abort()
+        await w.pg.context.route(re.compile(r'https://api(\.exchange)?\.coinbase\.com/.*'), fixed_rate)
+        await w.pg.context.route_web_socket(re.compile('coinbase'), lambda ws: None)
         await w.create(); await w.add_mint(B); await w.use(B)
 
         # ---------- amounts in your currency ----------
