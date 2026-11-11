@@ -12,12 +12,16 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 
 **Wallet**
 - Send and receive **ecash**, **Lightning** and **on-chain** Bitcoin (on-chain needs a mint that supports NUT-30)
+- **Scan QR codes** with the camera or from a photo: ecash tokens, Lightning invoices, Lightning addresses, LNURL, Bitcoin addresses (BIP21) and mint addresses
+- Pay any **Lightning address** (like name@wallet.com) by typing or scanning it
+- **PIN lock** with your wallet encrypted on the device, plus optional **Face ID / fingerprint** unlock
 - Use several mints at once and switch between them
 - Pick mints from a curated list, by address, or from recommendations on Nostr (NIP-87)
 - Claim ecash from a mint you don't use yet, or swap it into your own mint over Lightning
 - Private **notes on every transaction**, searchable and filterable
 - **Live Bitcoin price chart** in arcade style: 1H, 1D, 1W, 1M and 1Y ranges, high and low markers, touch or hover to read any point, and your balance's value updating live
 - Take back a sent token if nobody claimed it, and see when one was claimed
+- Coin-drop and 1UP effects when sats arrive, and a launch effect when you send
 
 **Arcade**: seven original cabinets with high-score tables, chiptune sound and music
 
@@ -34,6 +38,7 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 Plays with keyboard, mouse, or the on-screen joystick and buttons on a phone.
 
 **Settings**
+- **Security:** set, change or remove your PIN, turn on Face ID / fingerprint, lock now, and choose when the wallet locks itself
 - **Backup:** show your phrase, find lost ecash, download or import a backup file, restore a wallet from 12 words, reset the wallet
 - **Look & sound:** three cabinet themes (Neon, Amber CRT, Green phosphor), sound effects, music, CRT scanlines, amounts shown as ₿
 - **Privacy:** turn the live price and price chart on or off (prices come from Coinbase, in your currency), and choose whether to check if sent tokens were claimed
@@ -45,8 +50,9 @@ Plays with keyboard, mouse, or the on-screen joystick and buttons on a phone.
 1. Open https://nutcade-2c150c.gitlab.io. On iPhone, tap Share → **Add to Home Screen** first and open NUTCADE from that icon, so Safari keeps your wallet.
 2. Tick the box to say you understand, then tap **Create a new wallet**.
 3. Write your **12 words** on paper, in order. Then type back the three words NUTCADE asks for.
-4. Choose a mint. Try **Testnut** first if you want to play with fake sats.
-5. Tap **Receive** to add sats, and write the mints you use next to your 12 words.
+4. Set a PIN when NUTCADE offers it (recommended).
+5. Choose a mint. Try **Testnut** first if you want to play with fake sats.
+6. Tap **Receive** to add sats, and write the mints you use next to your 12 words.
 
 ### Moving from another wallet
 
@@ -58,22 +64,26 @@ Already have a Cashu wallet, like cashu.me or an earlier NUTCADE? On the welcome
 
 ## Safety
 
+- **PIN lock and encryption.** With a PIN set, your phrase, ecash, history and notes are stored encrypted (AES-256-GCM). The key is unlocked by your PIN (PBKDF2, 600,000 rounds) or by a Face ID / fingerprint passkey (WebAuthn PRF). Five wrong PINs trigger a growing wait, and the wallet locks itself after the time you choose. A PIN stops someone who picks up your phone; it can't stop malware on a compromised device. If you forget it, reset and restore with your 12 words.
 - **Recovery phrase first.** You can't use the wallet until you've written down your 12 words and confirmed them. Every piece of ecash is derived from them (NUT-13), and restoring scans your mints to rebuild your balance (NUT-09).
 - **Interrupted payments are handled.** A failed Lightning payment returns your sats. A stuck one is tracked until the mint settles it. A deposit interrupted mid-way is recovered automatically the next time you open the app.
 - **Same phrase on two devices.** If a mint reports reused codes, NUTCADE catches up and retries on its own.
 - **One tab at a time.** If NUTCADE is open in a second tab, that tab pauses so the two can't overwrite each other.
 - **Storage protection.** NUTCADE asks the browser not to clear its data, and Settings shows whether that was granted.
-- **No outside code.** The app is one self-contained file. Apart from its fonts, it loads nothing from other servers.
+- **No outside code.** The app is one self-contained file with its fonts built in. The QR decoder loads from this same site, only when you open the scanner. Nothing is loaded from other servers.
+- **Checked releases.** Every update runs the test suites automatically before it goes live, and the site publishes SHA-256 checksums at https://nutcade-2c150c.gitlab.io/SHA256SUMS.txt. See [RELEASING.md](RELEASING.md).
 
 **Important:** your wallet lives in your browser. Keep your 12 words and your mint list somewhere safe and offline. Never type your words into a website or send them to anyone, including anyone claiming to be NUTCADE support. Mints hold the Bitcoin behind your ecash, so only use mints you trust. NUTCADE is young software that hasn't been independently audited, so start with small amounts.
 
 ## Testing
 
-Each release is tested against real Cashu mints (Nutshell), including mints set up to fail or stall payments:
+Every push runs the suites in `tests/` automatically in GitLab against real Cashu mints (Nutshell), including mints set up to fail or stall payments. The site only updates if every check passes:
 
 - 51 wallet checks: Lightning in and out, ecash between wallets, double-claim protection, failed and stuck payments, notes, multiple mints, backup files, and restoring from the phrase after a full wipe
 - 27 settings checks: themes, ₿ display, backup download and import, restoring a phrase from another Cashu client, reset, and swapping received ecash into your own mint
 - Crash recovery: a deposit interrupted mid-way comes back on the next open
+- 28 PIN-lock checks: encryption at rest, wrong PINs and lockout, change and removal, Face ID / fingerprint unlock, auto-lock, and forgot PIN followed by restore
+- 24 scanner checks, run before release: camera scans of real tokens and invoices, photo scans, and recognising every kind of code
 - All seven games played through to game over, with high scores, pause, exit, touch controls and sound
 - Every screen at 320, 390, 768 and 1280 pixels wide, checked for overflow and clipped text
 
@@ -85,7 +95,6 @@ NUTCADE has no account, no tracking and no analytics. Your recovery phrase and n
 - **Coinbase**, for the price and chart, only while **Show Bitcoin price** is on
 - **Nostr relays**, only when you tap "Find mints people recommend"
 - **The donation address** (breez.tips), only when you tip from inside the app
-- **Google Fonts**, to load the arcade fonts
 
 ## Sharing
 
@@ -93,7 +102,7 @@ Posting the link on X and most social sites shows a large preview card automatic
 
 ## For maintainers
 
-The whole app is one file, `public/index.html`. GitLab Pages publishes the `public/` folder on every push to `main` (see `.gitlab-ci.yml`). To ship an update, replace `public/index.html` and push. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
+The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm`. On every push to `main`, `.gitlab-ci.yml` runs the test suites and then publishes `public/` to GitLab Pages with fresh checksums. To ship an update, replace `public/index.html` and push. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
 
 ## Support the project
 
@@ -107,6 +116,7 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Changelog
 
+- **v1.4.0:** QR scanner (camera and photo), paying Lightning addresses, PIN lock with encrypted storage and Face ID / fingerprint unlock, auto-lock, coin-drop and 1UP effects, fonts built in (no more Google Fonts), automatic tests in GitLab before every release, published SHA-256 checksums
 - **v1.3.0:** live Bitcoin price chart on the wallet screen, live balance value, share image and link preview for X and other social sites
 - **v1.2.0:** wallet setup before entry, Settings tab, restore a wallet from 12 words (including from cashu.me), reset wallet, automatic recovery of interrupted deposits, automatic repair when one phrase is used on two devices, claiming ecash before choosing a mint, clearer error messages, brighter logo tagline
 - **v1.1.0:** 12-word recovery phrase, restore, find lost ecash, one-tab lock, storage protection, donation section, logo and app icons
@@ -114,8 +124,12 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Open-source components
 
-The page bundles these MIT-licensed libraries (their license notices are at the end of the bundled script):
+The page bundles these libraries (their license notices are at the end of the bundled script):
 
 - [cashu-ts](https://github.com/cashubtc/cashu-ts)
 - [noble-curves, noble-hashes, scure-base, scure-bip32, scure-bip39](https://paulmillr.com/noble/)
 - [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator)
+- [zxing-wasm](https://github.com/Sec-ant/zxing-wasm) (MIT) with [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp) (Apache-2.0), the QR decoder
+- [jsQR](https://github.com/cozmo/jsQR) (Apache-2.0), the fallback QR decoder
+
+Fonts: [Press Start 2P](https://fonts.google.com/specimen/Press+Start+2P) and [VT323](https://fonts.google.com/specimen/VT323), both under the SIL Open Font License.
