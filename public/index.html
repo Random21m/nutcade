@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png"><link rel="apple-touch-icon" href="apple-touch-icon.png"><link rel="manifest" href="manifest.webmanifest"><meta name="apple-mobile-web-app-title" content="NUTCADE"><meta property="og:title" content="NUTCADE"><meta property="og:description" content="A Cashu ecash wallet with a 1980s arcade built in."><meta property="og:image" content="icon-512.png"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
 <title>NUTCADE</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="NUTCADE: a Cashu ecash wallet with a built-in 1980s arcade.">
@@ -34,7 +34,7 @@ body{
 }
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:60;background:var(--void)}
 .crt::after{
-  content:""; position:fixed; inset:0; pointer-events:none; z-index:200;
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:90;
   background:repeating-linear-gradient(rgba(0,0,0,0) 0 2px, rgba(0,0,0,.22) 2px 3px);
   box-shadow:inset 0 0 140px rgba(0,0,0,.75);
 }
@@ -783,6 +783,7 @@ function viewWallet() {
     <div class="panel"><p style="margin:0">NUTCADE holds Bitcoin as Cashu ecash. A mint issues the ecash, so pick one first. Try a test mint if you want to play with fake sats.</p>
     <button class="btn solid gold block" data-act="pickMint">Choose a mint</button></div>
     <div class="panel"><div class="row between"><span class="h2">Arcade</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Play</button></div><div id="topScore" class="tiny muted"></div></div>
+    <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">♥ Support NUTCADE</button>
   </section>`;
   const bal = balanceOf(m.url), tot = totalBalance(), po = pendingOut();
   const recent = S.txs.slice(0, 4);
@@ -802,6 +803,7 @@ function viewWallet() {
       ${recent.length ? `<div class="txs">${recent.map(txRow).join('')}</div>` : `<div class="empty-state"><b>NO PLAYS YET</b>Receive some sats and every transaction shows up here with room for a note.</div>`}
     </div>
     <div class="panel"><div class="row between"><span class="h2">Arcade</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Play</button></div><div id="topScore" class="tiny muted"></div></div>
+    <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">♥ Support NUTCADE</button>
   </section>`;
 }
 
@@ -837,6 +839,8 @@ function viewMints() {
       <p class="tiny muted" style="margin:0">Your ecash lives only in this browser. Copy a backup and keep it somewhere safe. Anyone with the backup can spend the sats.</p>
       <div class="row" style="flex-wrap:wrap"><button class="btn sm gold" data-act="backup">Copy backup</button><button class="btn sm" data-act="restore">Restore</button><button class="btn sm violet" data-act="clean">Check proofs</button></div>
     </div>
+    <div class="panel hot"><div class="row between"><span class="h2" style="color:var(--pink)">Support NUTCADE</span><button class="btn sm pink" data-act="support">Donate</button></div>
+      <p class="tiny muted" style="margin:0">Free and open source. Tips over Lightning are optional and keep the cabinets lit.</p></div>
     <p class="tiny muted" style="text-align:center;margin:0">NUTCADE · Cashu ecash · Built with cashu-ts</p>
   </section>`;
 }
@@ -1069,6 +1073,41 @@ function openTx(id) {
     ${extra}<div id="sheetErr"></div>`);
 }
 
+/* ---------- support / donations ---------- */
+const DONATE = { address: 'dev@breez.tips', lnurl: 'LNURL1DP68GURN8GHJ7CNJV4JH5TN5D9C8XTMVDE6HYMRS9AJX2ASZ5RD0C' };
+function openSupport() {
+  const m = activeMint();
+  const canTip = m && supports(m, 'melt', 'bolt11');
+  openSheet('Support NUTCADE', `
+    <p style="margin:0">NUTCADE is free and open source, and it stays that way. If you enjoy it and want to support its development, you can send a few sats over Lightning. It's entirely optional and changes nothing about how the wallet or the arcade work.</p>
+    <div class="panel" style="background:var(--panel-2)">
+      <span class="h2" style="color:var(--pink)">Tip from this wallet</span>
+      ${canTip ? `<div class="seg three" role="group" aria-label="Tip amount">${[21, 210, 2100].map(a => `<button data-act="tipPreset" data-a="${a}" aria-pressed="${a === 210}">${fmt(a)}</button>`).join('')}</div>
+      <div class="field"><label for="tipAmt">Amount (sat)</label><input id="tipAmt" class="inp amount" inputmode="numeric" value="210" autocomplete="off"></div>
+      <button class="btn solid pink block" data-act="tipQuote">Tip ${'♥'} from ${esc(m.name)}</button>
+      <div class="tiny muted">You'll see the fee and confirm before anything is sent. ${fmt(balanceOf(m.url))} SAT available.</div>`
+      : `<div class="tiny muted">${m ? `${esc(m.name)} can't pay Lightning, so use the address below from another wallet.` : 'Add a mint and some sats to tip from NUTCADE, or use the address below from any Lightning wallet.'}</div>`}
+    </div>
+    <div class="field"><label>Lightning address</label><div class="row"><div class="code" style="flex:1;font-size:16px">${DONATE.address}</div><button class="btn sm" data-act="copy" data-text="${DONATE.address}">Copy</button></div></div>
+    ${qrBlock('lightning:' + DONATE.lnurl, 'QR code for the Lightning address ' + DONATE.address)}
+    <div class="field"><label>Same thing as a payment code (LNURL)</label><div class="code">${DONATE.lnurl}</div><button class="btn sm" data-act="copy" data-text="${DONATE.lnurl}">Copy LNURL</button></div>
+    <div class="notice">Be wary of any other "NUTCADE donation" address. The same address and code are in the project README on GitLab. Never send your backup or seed words to anyone, for any reason.</div>
+    <div id="sheetErr"></div>`);
+}
+async function lnAddressInvoice(address, sats, comment) {
+  const [user, domain] = address.split('@');
+  const base = await fetch(`https://${domain}/.well-known/lnurlp/${encodeURIComponent(user)}`).then(r => { if (!r.ok) throw new Error(`The Lightning address didn't answer (${r.status}).`); return r.json(); });
+  if (base.status === 'ERROR') throw new Error(base.reason || 'The Lightning address returned an error.');
+  if (base.tag !== 'payRequest' || !base.callback) throw new Error("That Lightning address isn't set up for payments.");
+  const msat = sats * 1000;
+  if (msat < base.minSendable || msat > base.maxSendable) throw new Error(`Tips must be between ${fmt(Math.ceil(base.minSendable / 1000))} and ${fmt(Math.floor(base.maxSendable / 1000))} SAT.`);
+  const u = new URL(base.callback); u.searchParams.set('amount', String(msat));
+  if (comment && base.commentAllowed) u.searchParams.set('comment', comment.slice(0, base.commentAllowed));
+  const inv = await fetch(u.toString()).then(r => r.json());
+  if (inv.status === 'ERROR' || !inv.pr) throw new Error(inv.reason || "Couldn't get an invoice from the Lightning address.");
+  return inv.pr;
+}
+
 /* ---------- actions ---------- */
 const A = {
   close: () => closeSheet(),
@@ -1139,6 +1178,19 @@ const A = {
       save(); closeSheet(); render(); toast('Backup restored. Run Check proofs to drop spent ecash.', 'lime');
     } catch (e) { showErr(new Error(e.message.includes('JSON') ? "That isn't valid backup text." : e.message)); }
   },
+  support: () => { sfx('select'); openSupport(); },
+  tipPreset: b => { const i = $('#tipAmt'); if (i) i.value = b.dataset.a; b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); sfx('blip'); },
+  tipQuote: b => run(b, 'ASKING', async () => {
+    const sats = parseInt((val('tipAmt') || '').replace(/[^0-9]/g, ''), 10);
+    if (!sats || sats < 1) throw new Error('Enter a tip amount in sats, like 210.');
+    if (balanceOf(S.active) < sats) throw new Error(`Not enough credits. This mint holds ${fmt(balanceOf(S.active))} SAT.`);
+    let pr;
+    try { pr = await lnAddressInvoice(DONATE.address, sats, 'Tip from NUTCADE'); }
+    catch (e) { throw new Error(/fetch|network|load failed/i.test(e.message) ? "Couldn't reach the Lightning address from here. Copy the address into another wallet instead." : e.message); }
+    const mq = await meltQuote('ln', pr);
+    if (num(mq.amount) !== sats) throw new Error(`The invoice asked for ${fmt(num(mq.amount))} SAT instead of ${fmt(sats)}. Nothing was sent.`);
+    showMeltQuote('ln', mq, DONATE.address, 'Tip to NUTCADE ♥');
+  }),
   clean: b => run(b, 'CHECKING', async () => { const n = await cleanWallet(); render(); toast(n ? `Removed ${n} spent proof${n === 1 ? '' : 's'}` : 'All proofs are good', 'lime'); })
 };
 function setTrust(meta) {
