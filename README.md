@@ -11,13 +11,19 @@ A Cashu ecash wallet with a 1980s arcade built in.
 - Private notes on every transaction, searchable
 - Seven original arcade games with high scores, chiptune sound and music
 - Install it to your phone's home screen from the browser's share or menu button
+- 12-word recovery phrase with restore on any device
 
 The whole app is one file: `public/index.html`. GitLab Pages serves it from the `public/` folder.
 
-## Important
+## Safety
 
-Ecash is stored only in the browser that received it. There is no seed-phrase recovery yet.
-Use **Mints → Copy backup** regularly and start with small amounts or a test mint.
+- **12-word recovery phrase.** NUTCADE uses Cashu's standard deterministic secrets (NUT-13). Write the phrase down when you create your wallet; with it, **Restore from recovery phrase** rebuilds your balance on any device by scanning your mints (NUT-09). Keep a list of the mints you use next to your words.
+- **Find lost ecash** (Mints tab) rescans your mints if a payment was interrupted.
+- **One tab at a time.** If NUTCADE is open in two tabs, the second one pauses so they can't overwrite each other.
+- **Storage protection.** NUTCADE asks the browser not to clear its data. On iPhone, add it to your home screen so Safari keeps it.
+- Wallets from before v1.1 are upgraded when you create your phrase: existing ecash is swapped into phrase-backed ecash (the mint may charge a small fee).
+
+This is young software that hasn't been independently audited. Start with small amounts.
 
 ## Support the project
 
