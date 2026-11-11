@@ -36,7 +36,6 @@ websockets>=12.0,<13.0
 wheel>=0.41.1,<0.42.0
 zstandard>=0.23.0,<0.24.0
 coincurve==21.0.0
-bip32==4.0
 base58
 marshmallow<4
 limits<4
