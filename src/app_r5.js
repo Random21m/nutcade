@@ -186,8 +186,10 @@ async function onExtraLife(p, from) {
   }
   const who = nameFor(from);
   const h = { from, name: who || 'A friend', token: cleanToken(String(p.token)), amount: sum(d.proofs), mint: normUrl(d.mint), until, state: 'waiting', at: Date.now() };
+  // a renewal always replaces the copy we hold: the old one is dead at the mint once our friend continued,
+  // even when two renewals land in the same second and carry the same date
   const old = S.heirlooms.find(x => x.from === from && x.state === 'waiting');
-  if (old && old.until >= until) return;
+  if (old && (old.token === h.token || old.until > until)) return;
   S.heirlooms = S.heirlooms.filter(x => !(x.from === from && x.state === 'waiting')); S.heirlooms.unshift(h); saveHeir();
   if (!old) { sfx('select'); toast(`${h.name} made you the heir of their Extra Life`, 'gold'); }
   if (tab === 'wallet' && !$('#layer .sheet')) refresh();

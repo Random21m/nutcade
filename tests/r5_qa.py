@@ -197,7 +197,7 @@ async def main():
         await w.ev("Nutcade.S.extra.until -= 86400e3*10; Nutcade.S.extra.days=182"); await w.click('[data-act=extraContinue]')
         ok = await w.until("Nutcade.S.extra.renewed > Date.now()-8000 && Nutcade.S.extra.until > Date.now()+181*86400e3", 15000)
         check('extra life: CONTINUE pushes the date back to six months from now', ok, await w.ev("Nutcade.S.extra.until"))
-        ok = await fr.until(f"Nutcade.S.heirlooms[0].until > {old_until} && Nutcade.S.heirlooms[0].token !== {json.dumps(old)}", 40000)
+        ok = await fr.until(f"Nutcade.S.heirlooms[0].until >= {old_until} && Nutcade.S.heirlooms[0].token !== {json.dumps(old)}", 40000)
         check("extra life: Robin's copy is replaced by the new one", ok)
         st = await fr.ev(f"(async()=>{{const w=new CashuLib.Wallet({json.dumps(A)},{{unit:'sat'}}); await w.loadMint(); const d=CashuLib.getDecodedToken({json.dumps(old)}, Object.keys(Nutcade.S.counters)); return (await w.checkProofsStates(d.proofs)).map(s=>s.state)}})()")
         check("extra life: and the old copy is dead at the mint", st and all(s == 'SPENT' for s in st), st)
