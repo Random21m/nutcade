@@ -6,6 +6,8 @@ A Cashu ecash wallet with a 1980s arcade built in.
 
 **Open it:** https://random21m.github.io/nutcade/
 
+**Watch the demo:** [76-second video on X](https://x.com/Random21m/status/2120702493701329382)
+
 > **Moved from GitLab.** NUTCADE now lives on GitHub. The old address (nutcade-2c150c.gitlab.io) is no longer updated. Each address keeps its own wallet in your browser, so to move: write down your 12 words (Settings → Backup → Show recovery phrase), open the new address, and tap **Restore from recovery phrase**.
 
 NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a text message. It works in any modern browser on phone or desktop, with nothing to install, and keeps your wallet protected by a standard 12-word recovery phrase.
