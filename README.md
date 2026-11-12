@@ -214,6 +214,10 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 - **v1.1.0:** 12-word recovery phrase, restore, find lost ecash, one-tab lock, storage protection, donation section, logo and app icons
 - **v1.0.0:** first release: ecash, Lightning and on-chain wallet, transaction notes, seven arcade games, sound
 
+## License
+
+NUTCADE is open source under the [MIT License](LICENSE).
+
 ## Open-source components
 
 The page bundles these libraries (their license notices are at the end of the bundled script):
