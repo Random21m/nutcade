@@ -48,7 +48,9 @@ Object.assign(A, {
   chalSendOpen: b => openChallengeSend(b.dataset.id),
   chalPlay: b => {
     const c = S.challenges.find(x => x.id === b.dataset.id && x.dir === 'in'); if (!c || !window.Arcade) return;
-    closeSheet(); window.Arcade.open(c.game, { challenge: { id: c.id, seed: c.seed, target: c.score, by: c.by, name: nameFor(c.pubkey) } });
+    // a verified replay becomes a ghost to race; an unchecked one is never raced
+    const go = runs => { closeSheet(); window.Arcade.open(c.game, { challenge: { id: c.id, seed: c.seed, target: c.score, by: c.by, name: nameFor(c.pubkey), replay: runs } }); };
+    if (c.replay && c.verified && window.Arcade.replay) window.Arcade.replay.unpack(c.replay).then(go, () => go(null)); else go(null);
   },
   chalSend: b => run(b, 'SENDING', async () => {
     const c = S.challenges.find(x => x.id === b.dataset.id && x.dir === 'out'); const k = contactById(b.dataset.c);
@@ -57,15 +59,15 @@ Object.assign(A, {
     let bounty = null, bo = null;
     if (bAmt > 0) { bo = await createBounty(c, k, bAmt); bounty = { token: bo.tx.token, amount: bAmt, until: bo.b.until }; }
     // with a bounty the message is sealed with our own key, so Robin's NUTCADE can tell the sats really come from the challenger
-    const wrap = L.nip17.wrapEvent(bounty ? nostrKey() : rnd(32), { publicKey: k.pubkey }, JSON.stringify(Object.assign({ t: 'nutcade-challenge', ev: c.ev }, bounty ? { bounty } : {})));
+    const wrap = L.nip17.wrapEvent(bounty ? nostrKey() : rnd(32), { publicKey: k.pubkey }, JSON.stringify(Object.assign({ t: 'nutcade-challenge', ev: c.ev }, bounty ? { bounty } : {}, c.replay ? { replay: c.replay } : {})));
     const ok = await relayPublish(wrap, 8000, [...new Set((k.relays || []).concat(relays()))].slice(0, 8));
     if (!ok) throw new Error(bounty ? `No Nostr relay took the challenge. Your ${money(bAmt)} stay locked until ${fmtDay(bo.b.until)}, then come back to you.` : 'No Nostr relay accepted the challenge. Share the link instead.');
     c.sentTo = [...new Set((c.sentTo || []).concat(k.id))]; saveChallenges();
     sfx('coin'); toast(bounty ? `Challenge and ${money(bAmt)} bounty sent to ${k.name}` : `Challenge sent to ${k.name}`, 'lime');
     if (bounty) { refresh(); openChallengeSend(c.id); }
   }),
-  chalShare: b => { const c = S.challenges.find(x => x.id === b.dataset.id); if (!c) return; const g = gameById(c.game); navigator.share({ text: `Beat my ${pad6(c.score)} on ${g ? g.name : c.game} in NUTCADE`, url: challengeLink(c.ev) }).catch(() => {}); },
-  chalQR: b => { const c = S.challenges.find(x => x.id === b.dataset.id); if (!c) return; openSheet('Challenge QR', `${qrBlock(challengeLink(c.ev), 'Challenge link QR')}<button class="btn block" data-act="chalSendOpen" data-id="${esc(c.id)}">Back</button>`); },
+  chalShare: b => { const c = S.challenges.find(x => x.id === b.dataset.id); if (!c) return; const g = gameById(c.game); navigator.share({ text: `Beat my ${pad6(c.score)} on ${g ? g.name : c.game} in NUTCADE`, url: challengeLink(c.ev, c.replay) }).catch(() => {}); },
+  chalQR: b => { const c = S.challenges.find(x => x.id === b.dataset.id); if (!c) return; openSheet('Challenge QR', `${qrBlock(challengeLink(c.ev, c.replay), 'Challenge link QR')}<button class="btn block" data-act="chalSendOpen" data-id="${esc(c.id)}">Back</button>`); },
   piggyEmpty: () => openSheet('Empty the piggy bank', `<p style="margin:0">This stops setting aside the ${money(piggySaved())} in your piggy bank. The sats were never moved, so your balance stays the same.</p><button class="btn solid pink block" data-act="piggyEmptyGo">Empty it</button><button class="btn block" data-act="close">Keep saving</button>`),
   piggyEmptyGo: () => { S.piggy.saved = 0; store.set('piggy', S.piggy); sfx('boom'); closeSheet(); refresh(); toast('Piggy bank emptied', 'gold'); }
 });

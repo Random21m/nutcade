@@ -166,7 +166,7 @@ async function takeBackGift(t) {
 async function refundExpiredGifts() {
   let back = 0;
   for (const t of S.txs.filter(t => t.status === 'pending' && t.method === 'ecash' && t.lockUntil && Date.now() > t.lockUntil + 30e3)) {
-    try { const r = await takeBackGift(t); if (r === 'back') { back++; toast(`${t.giftTo || 'They'} didn't claim your gift, so ${money(t.amount)} came back`, 'gold'); } } catch (e) {}
+    try { const r = await takeBackGift(t); if (r === 'back') { back++; toast(t.hunt ? `Nobody opened your treasure in time, so ${money(t.amount)} came back` : t.bounty ? `Nobody won your bounty, so ${money(t.amount)} came back` : `${t.giftTo || 'They'} didn't claim your gift, so ${money(t.amount)} came back`, 'gold'); } } catch (e) {}
   }
   if (back) { sfx('coin'); refresh(); }
   return back;
@@ -499,22 +499,29 @@ function readSigned(ev) {
   const c = JSON.parse(ev.content);
   return Object.assign(c, { pubkey: ev.pubkey });
 }
-const challengeLink = ev => location.origin + location.pathname + '#challenge=' + b64url(new TextEncoder().encode(JSON.stringify(ev)));
+// a short replay rides along in the link; a long one only travels over Nostr (the link still works, without the ghost)
+const challengeLink = (ev, replay) => location.origin + location.pathname + '#challenge=' + b64url(new TextEncoder().encode(JSON.stringify(ev))) + (replay && replay.length <= 6000 ? '&r=' + replay : '');
+const replayHash = r => hex(L.sha256(new TextEncoder().encode(String(r))));
+// replay a score on this phone; true when the replay reaches exactly the claimed score from the challenge's seed
+async function checkReplay(game, seed, replay, score) { if (!replay || !window.Arcade || !Arcade.replay) return false; try { return (await Arcade.replay.verify(game, seed, replay, score)).ok; } catch (e) { return false; } }
 function nameFor(pub) { const c = S.contacts.find(x => x.pubkey === pub); return c ? c.name : ''; }
 function startChallenge(o) {   // called by the arcade after a game with a score
   if (!S.seed) return;
-  const ev = signChallenge({ v: 1, id: hex(rnd(6)), game: o.game, seed: o.seed >>> 0, score: Math.floor(o.score), by: String(o.by || 'AAA').slice(0, 3) });
+  const body = { v: 1, id: hex(rnd(6)), game: o.game, seed: o.seed >>> 0, score: Math.floor(o.score), by: String(o.by || 'AAA').slice(0, 3) };
+  if (o.replay) body.rh = replayHash(o.replay);   // the signature covers the replay through its hash
+  const ev = signChallenge(body);
   const c = readSigned(ev);
-  S.challenges.unshift({ dir: 'out', id: c.id, game: c.game, seed: c.seed, score: c.score, by: c.by, at: Date.now(), ev, results: [] }); saveChallenges();
+  S.challenges.unshift(Object.assign({ dir: 'out', id: c.id, game: c.game, seed: c.seed, score: c.score, by: c.by, at: Date.now(), ev, results: [] }, o.replay ? { replay: o.replay } : {})); saveChallenges();
   openChallengeSend(c.id);
 }
 function openChallengeSend(id) {
   const c = S.challenges.find(x => x.id === id && x.dir === 'out'); if (!c) return;
-  const g = gameById(c.game); const link = challengeLink(c.ev);
+  const g = gameById(c.game); const link = challengeLink(c.ev, c.replay);
   const cs = S.contacts.filter(x => x.pubkey);
   openSheet('Challenge a friend', `
     <div class="chal-card"><span class="label">Beat my score</span><b>${pad6(c.score)}</b><span data-noi18n>${esc(g ? g.name : c.game)} · ${esc(c.by)}</span></div>
     <p style="margin:0">Your friend plays the same seed, so their game starts on the same layout as yours. The challenge is signed with your NUTCADE key.</p>
+    ${c.replay ? '<div class="tiny muted">Your replay goes with it: their NUTCADE checks your score is real, and they race your ghost.</div>' : ''}
     ${(c.bounties || []).map(b => `<div class="notice ${b.state === 'open' ? '' : 'cyan'}"><span data-noi18n>${esc(b.name)}</span>: ${money(b.amount)} bounty · ${b.state === 'open' ? (Date.now() < b.until ? `open until ${fmtDay(b.until)}` : 'expired, coming back to you') : `won with ${pad6(b.score || 0)}`}</div>`).join('')}
     ${cs.length ? bountyField() : ''}
     ${cs.length ? `<div class="field"><label>Send to a contact over Nostr</label><div class="tagrow">${cs.map(x => `<button class="tag" data-act="chalSend" data-id="${esc(c.id)}" data-c="${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div></div>` : '<div class="tiny muted">Add friends with a Nostr address in Contacts to send challenges straight to their NUTCADE.</div>'}
@@ -522,7 +529,7 @@ function openChallengeSend(id) {
     <div class="row wrap"><button class="btn sm gold" data-act="copy" data-text="${esc(link)}">Copy link</button>${navigator.share ? `<button class="btn sm" data-act="chalShare" data-id="${esc(c.id)}">Share</button>` : ''}<button class="btn sm violet" data-act="chalQR" data-id="${esc(c.id)}">Show QR</button></div>
     <div id="sheetErr"></div>`);
 }
-function onChallenge(ev, via, bounty, from) {
+function onChallenge(ev, via, bounty, from, replay) {
   let c; try { c = readSigned(ev); } catch (e) { return null; }
   if (!gameById(c.game) || !Number.isFinite(c.score) || !Number.isFinite(c.seed) || !c.id) return null;
   if (c.pubkey === L.nostrPub(nostrKey())) return S.challenges.find(x => x.id === c.id) || null;   // our own link
@@ -535,14 +542,22 @@ function onChallenge(ev, via, bounty, from) {
   }
   // a bounty only counts from the player who signed the challenge, and only if the sats are really locked to us
   if (bounty) attachBounty(rec, bounty, c.pubkey, from).catch(() => {});
+  // the replay must match the hash the challenger signed; then this phone plays it to check the score
+  if (replay && c.rh && !rec.replay && replayHash(replay) === c.rh) {
+    rec.replay = replay; saveChallenges();
+    checkReplay(rec.game, rec.seed, replay, rec.score).then(ok => { rec.verified = ok; saveChallenges(); const n = $('#layer [data-verify]'); if (n) n.outerHTML = verifyNote(rec); else if (tab === 'arcade' && !$('#layer .sheet')) refresh(); });
+  }
   return rec;
 }
-async function onResult(ev) {
+async function onResult(ev, replay) {
   let r; try { r = readSigned(ev); } catch (e) { return; }
   const c = S.challenges.find(x => x.id === r.re && x.dir === 'out'); if (!c || !Number.isFinite(r.score)) return;
-  await bountyOnResult(c, r).catch(() => {});
-  if (c.results.some(x => x.pubkey === r.pubkey && x.score >= r.score)) return;
-  c.results = c.results.filter(x => x.pubkey !== r.pubkey).concat([{ pubkey: r.pubkey, by: String(r.by || '???').slice(0, 3), score: Math.floor(r.score), at: Date.now() }]); saveChallenges();
+  // replay their game on this phone before believing the score (and before any bounty is paid)
+  r.verified = !!(replay && r.rh && replayHash(replay) === r.rh && await checkReplay(c.game, c.seed, replay, r.score));
+  if (r.verified) await bountyOnResult(c, r).catch(() => {});
+  else if ((c.bounties || []).some(b => b.to === r.pubkey && b.state === 'open') && r.score > c.score) toast(`${nameFor(r.pubkey) || r.by} says they scored ${pad6(r.score)}, but their replay didn't check out. The bounty stays locked.`, 'pink');
+  if (c.results.some(x => x.pubkey === r.pubkey && x.score >= r.score && (x.verified || !r.verified))) return;   // a verified score replaces an unverified higher one
+  c.results = c.results.filter(x => x.pubkey !== r.pubkey).concat([{ pubkey: r.pubkey, by: String(r.by || '???').slice(0, 3), score: Math.floor(r.score), at: Date.now(), verified: r.verified }]); saveChallenges();
   const who = nameFor(r.pubkey) || r.by; const won = r.score > c.score;
   sfx(won ? 'over' : 'levelup'); toast(won ? `${who} beat your challenge with ${pad6(r.score)}` : `${who} scored ${pad6(r.score)}. Your ${pad6(c.score)} still stands!`, won ? 'pink' : 'lime');
   if (tab === 'arcade' && !$('#layer .sheet')) refresh();
@@ -553,25 +568,32 @@ function openChallengeIn(id) {
   openSheet('Challenge!', `
     <div class="chal-card"><span class="label">${who ? esc(who) + ' challenges you' : 'A player challenges you'}</span><b>${pad6(c.score)}</b><span data-noi18n>${esc(g.name)} · ${esc(c.by)}</span></div>
     ${c.bounty ? `<div class="notice bounty-note ${c.bounty.state === 'won' ? 'cyan' : ''}"><b>${money(c.bounty.amount)} BOUNTY</b> ${c.bounty.state === 'won' ? 'You won it! The sats are in your wallet.' : c.bounty.state === 'gone' ? 'This bounty is gone.' : Date.now() < c.bounty.until ? `Beat ${pad6(c.score)} by ${fmtDay(c.bounty.until)} and it's yours. The mint holds it locked to you until then.` : 'Time ran out on this bounty.'}</div>` : ''}
+    ${verifyNote(c)}
     ${c.best != null ? `<div class="notice ${c.best > c.score ? 'cyan' : ''}">Your best on this challenge: ${pad6(c.best)} points. ${c.best > c.score ? 'You won!' : 'Not beaten yet.'}</div>` : ''}
     ${who ? '' : '<div class="tiny muted">This player isn\'t in your contacts. The challenge is signed, so you can save them if you know their key.</div>'}
     <button class="btn solid gold block" data-act="chalPlay" data-id="${esc(c.id)}">Accept: play ${esc(g.name)}</button>
     <button class="btn block" data-act="close">Later</button>`);
 }
-function challengeDone(id, score, by) {   // the arcade reports the score of a challenge game
+function verifyNote(c) {
+  if (!c.replay) return '<div class="tiny muted" data-verify>No replay came with this challenge, so its score can\'t be checked.</div>';
+  if (c.verified == null) return '<div class="tiny muted" data-verify>Checking their replay…</div>';
+  return c.verified ? `<div class="tiny verified" data-verify>✓ Verified: their replay reaches ${pad6(c.score)}. Race their ghost.</div>` : '<div class="tiny bad" data-verify>Their replay doesn\'t reach that score. It may have been faked.</div>';
+}
+function challengeDone(id, score, by, replay) {   // the arcade reports the score of a challenge game (and a promise of its packed replay)
   const c = S.challenges.find(x => x.id === id && x.dir === 'in'); if (!c) return null;
   c.best = Math.max(c.best || 0, score); saveChallenges();
   const contact = S.contacts.find(x => x.pubkey === c.pubkey);
   const won = score > c.score, b = c.bounty && c.bounty.state === 'open' && Date.now() < c.bounty.until ? c.bounty : null;
   // with sats on the line, a winning score goes back to the challenger straight away so their NUTCADE can release the bounty
-  if (won && b && contact) sendResult(id, score, by).catch(() => {});
+  if (won && b && contact) sendResult(id, score, by, replay).catch(() => {});
   return { won, target: c.score, canReply: !!contact, name: contact ? contact.name : '', bounty: b ? b.amount : 0, bountySent: !!(won && b && contact) };
 }
-async function sendResult(id, score, by) {
+async function sendResult(id, score, by, replay) {
   const c = S.challenges.find(x => x.id === id && x.dir === 'in'); if (!c) return false;
   const contact = S.contacts.find(x => x.pubkey === c.pubkey); if (!contact) return false;
-  const ev = signChallenge({ v: 1, re: c.id, score: Math.floor(score), by: String(by || 'AAA').slice(0, 3) });
-  const wrap = L.nip17.wrapEvent(rnd(32), { publicKey: contact.pubkey }, JSON.stringify({ t: 'nutcade-result', ev }));
+  const packed = replay ? await Promise.resolve(replay).catch(() => null) : null;
+  const ev = signChallenge(Object.assign({ v: 1, re: c.id, score: Math.floor(score), by: String(by || 'AAA').slice(0, 3) }, packed ? { rh: replayHash(packed) } : {}));
+  const wrap = L.nip17.wrapEvent(rnd(32), { publicKey: contact.pubkey }, JSON.stringify(Object.assign({ t: 'nutcade-result', ev }, packed ? { replay: packed } : {})));
   const ok = await relayPublish(wrap, 8000, [...new Set((contact.relays || []).concat(relays()))].slice(0, 8));
   if (ok) { c.replied = Math.max(c.replied || 0, score); saveChallenges(); }
   return !!ok;
@@ -583,7 +605,7 @@ function challengePanel() {
     if (c.dir === 'in') { const who = nameFor(c.pubkey) || c.by; const won = c.best != null && c.best > c.score;
       return `<button class="tx in" data-act="chalOpen" data-id="${esc(c.id)}"><span class="ico" aria-hidden="true">!</span><span class="mid"><div class="note" data-noi18n>${esc(who)}</div><div class="meta"><span data-noi18n>${esc(g.name)}</span>${c.bounty ? `<span class="chip ${c.bounty.state === 'won' ? 'ecash' : 'gift'}" data-noi18n>${fmt(c.bounty.amount)} SAT</span>` : ''}${won ? '<span class="chip ecash">WON</span>' : c.best != null ? `<span class="chip pending">BEST ${pad6(c.best)}</span>` : '<span class="chip ln">NEW</span>'}</div></span><span class="amt">${pad6(c.score)}</span></button>`; }
     const best = c.results.slice().sort((a, b) => b.score - a.score)[0];
-    return `<button class="tx out" data-act="chalSendOpen" data-id="${esc(c.id)}"><span class="ico" aria-hidden="true">↑</span><span class="mid"><div class="note">Your challenge</div><div class="meta"><span data-noi18n>${esc(g.name)}</span>${best ? `<span class="chip ${best.score > c.score ? 'failed' : 'claimed'}" data-noi18n>${esc(nameFor(best.pubkey) || best.by)} ${pad6(best.score)}</span>` : '<span class="chip pending">NO REPLIES YET</span>'}</div></span><span class="amt">${pad6(c.score)}</span></button>`;
+    return `<button class="tx out" data-act="chalSendOpen" data-id="${esc(c.id)}"><span class="ico" aria-hidden="true">↑</span><span class="mid"><div class="note">Your challenge</div><div class="meta"><span data-noi18n>${esc(g.name)}</span>${best ? `<span class="chip ${best.score > c.score ? 'failed' : 'claimed'}" data-noi18n>${esc(nameFor(best.pubkey) || best.by)} ${pad6(best.score)}</span>${best.verified ? '<span class="chip ecash">✓</span>' : ''}` : '<span class="chip pending">NO REPLIES YET</span>'}</div></span><span class="amt">${pad6(c.score)}</span></button>`;
   }).join('')}</div></div>`;
 }
 

@@ -707,6 +707,8 @@ function classify(raw) {
   if (/^https?:\/\/[^\s]+$/i.test(t)) return { kind: 'mint', value: normUrl(t) };
   return { kind: 'unknown' };
 }
+// a NUTCADE link: a challenge, or a treasure-hunt clue card
+function openLink(t) { if (/^hunt=/.test(t)) { onHuntCard(t.slice(5)); return; } if (/^challenge=/.test(t)) { let rec = null; try { const [evPart, rPart] = t.slice(10).split('&r='); rec = onChallenge(JSON.parse(new TextDecoder().decode(unb64url(evPart))), 'link', null, null, rPart || null); } catch (e) {} if (rec && rec.dir === 'in') openChallengeIn(rec.id); else if (rec) openChallengeSend(rec.id); else toast("That challenge link isn't valid.", 'gold'); } else handleScan(t); }
 // A ur: code that fits in one QR (or was pasted) decodes on its own. Returns the text, false for one frame of a longer code, null if it isn't ur:.
 async function urSingle(text) {
   if (!/^ur:/i.test(String(text).trim()) || !window.NutUR) return null;
@@ -714,6 +716,8 @@ async function urSingle(text) {
   return d.done() ? d.text() : false;
 }
 function handleScan(text) {
+  // a NUTCADE link (a challenge or a treasure-hunt clue) scanned with the camera opens like a tapped link
+  { const lk = /#((?:challenge|hunt)=[A-Za-z0-9_.&=-]+)/.exec(String(text || '')); if (lk && /^https?:\/\//i.test(String(text).trim())) { if (needSeed()) return; closeSheet(); openLink(lk[1]); return; } }
   if (/^ur:bytes\//i.test(String(text || '').trim())) { urSingle(text).then(t => t ? handleScan(t) : toast("That's one frame of an animated QR code. Scan it live with the camera instead.", 'gold')); return; }
   const c = classify(text);
   if (c.kind === 'token') { closeSheet(); openReceive('ecash'); const box = $('#tokIn'); if (box) { box.value = c.value; box.dispatchEvent(new Event('input', { bubbles: true })); } return; }
@@ -974,7 +978,7 @@ function render() {
   setTimeout(liveSync, 0);
   setTimeout(dmListen, 0);
   netBanner();
-  if (pendingLink && S.seed && S.seed.backedUp) { const t = pendingLink; pendingLink = null; setTimeout(() => { if (/^challenge=/.test(t)) { let rec = null; try { rec = onChallenge(JSON.parse(new TextDecoder().decode(unb64url(t.slice(10)))), 'link'); } catch (e) {} if (rec && rec.dir === 'in') openChallengeIn(rec.id); else if (rec) openChallengeSend(rec.id); else toast("That challenge link isn't valid.", 'gold'); } else handleScan(t); }, 300); }
+  if (pendingLink && S.seed && S.seed.backedUp) { const t = pendingLink; pendingLink = null; setTimeout(() => openLink(t), 300); }
   if (S.prefs.npc) npcSocketStart();
   if (window.NutAudio && !(window.Arcade && window.Arcade.playing())) { if (tab === 'arcade') window.NutAudio.music('title'); else window.NutAudio.stopMusic(); }
   if (tab === 'wallet' && window.Arcade) { const el = $('#topScore'); if (el) el.innerHTML = window.Arcade.topLine(); }
@@ -1115,8 +1119,8 @@ function viewWallet() {
       <button class="push send" data-act="send"><span class="cap" aria-hidden="true">↑</span><span class="t">SEND</span></button>
     </div>
     <div class="scanrow"><button class="btn violet scan-btn" data-act="scan"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h5v1H2v4H1zm9 0h5v5h-1V2h-4zM1 10h1v4h4v1H1zm13 0h1v5h-5v-1h4zM4 4h3v3H4zm5 0h3v3H9zM4 9h3v3H4zm5 0h1v1H9zm2 0h1v1h-1zm-2 2h1v1H9zm2 1h1v1h-1z"/></svg>Scan QR code</button>${window.Chiptune && window.Chiptune.canListen() ? '<button class="btn violet" data-act="ctListen" aria-label="Listen for a code sent as sound"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 1h4v8H6zM4 6h1v3a3 3 0 0 0 6 0V6h1v3a4 4 0 0 1-3.5 4V15h-1v-2A4 4 0 0 1 4 9z"/></svg>Listen</button>' : ''}</div>
-    <div class="toolrow"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm pink" data-act="splitOpen">Split a bill</button>${S.extra ? '' : '<button class="btn sm lime" data-act="extraOpen">Extra Life</button>'}</div>
-    ${splitPanels()}${piggyPanel()}${extraPanel()}
+    <div class="toolrow"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm pink" data-act="splitOpen">Split a bill</button>${S.extra ? '' : '<button class="btn sm lime" data-act="extraOpen">Extra Life</button>'}<button class="btn sm violet" data-act="huntNew">Treasure hunt</button></div>
+    ${splitPanels()}${piggyPanel()}${extraPanel()}${huntsPanel()}
     <div id="priceMount"></div>
     <div class="panel">
       <div class="row between"><span class="h2">Recent</span>${S.txs.length ? '<button class="linkbtn" data-act="tab" data-tab="history">All notes</button>' : ''}</div>
@@ -1279,7 +1283,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
 const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
 const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-about', 'About']];
@@ -1714,8 +1718,8 @@ function onGiftWrap(ev) {
   wrapChain = wrapChain.then(async () => {
     let rumor; try { if (!L.verifyEvent(ev)) return; rumor = L.nip59.unwrapEvent(ev, nostrKey()); } catch (e) { return; }
     let p; try { p = JSON.parse(rumor.content); } catch (e) { return; }
-    if (p && p.t === 'nutcade-challenge' && p.ev) { onChallenge(p.ev, 'nostr', p.bounty, rumor.pubkey); return; }
-    if (p && p.t === 'nutcade-result' && p.ev) { await onResult(p.ev); return; }
+    if (p && p.t === 'nutcade-challenge' && p.ev) { onChallenge(p.ev, 'nostr', p.bounty, rumor.pubkey, typeof p.replay === 'string' ? p.replay : null); return; }
+    if (p && p.t === 'nutcade-result' && p.ev) { await onResult(p.ev, typeof p.replay === 'string' ? p.replay : null); return; }
     if (p && p.t === 'nutcade-bounty' && p.re && typeof p.pre === 'string') { const rec = S.challenges.find(x => x.id === p.re && x.dir === 'in'); if (rec) await claimBounty(rec, p.pre, rumor.pubkey); return; }
     if (p && (p.t === 'nutcade-extralife' || p.t === 'nutcade-extralife-end')) { await onExtraLife(p, rumor.pubkey); return; }
     if (p && Array.isArray(p.proofs) && p.proofs.length && typeof p.mint === 'string') await receivePayload(p, rumor.pubkey);
@@ -2376,6 +2380,7 @@ async function lnAddressInvoice(address, sats, comment) {
 
 /*@@app_r4.js@@*/
 /*@@app_r5.js@@*/
+/*@@app_r6.js@@*/
 
 /* ---------- actions ---------- */
 const A = {
@@ -2469,6 +2474,8 @@ const A = {
       if (d.extra && !S.extra) { S.extra = d.extra; saveExtra(); }
       for (const h of d.heirlooms || []) if (!S.heirlooms.find(x => x.token === h.token)) S.heirlooms.push(h); saveHeir();
       for (const c of d.challenges || []) if (!S.challenges.find(x => x.id === c.id && x.dir === c.dir)) S.challenges.push(c); saveChallenges();
+      for (const h of d.hunts || []) if (!S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
+      for (const k in d.found || {}) if (!S.found[k]) S.found[k] = d.found[k]; saveFound();
       if (!S.active && S.mints[0]) S.active = S.mints[0].url;
       save(); closeSheet(); render(); toast('Backup restored. Run Check proofs to drop spent ecash.', 'lime');
     } catch (e) { showErr(new Error(e.message.includes('JSON') ? "That isn't valid backup text." : e.message)); }
@@ -2584,7 +2591,7 @@ const A = {
   jump: b => { const el = document.getElementById(b.dataset.id); if (el) el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); },
   setTheme: b => { S.prefs.theme = b.dataset.t; save(); refresh(); sfx('select'); },
   backupDownload: () => {
-    const data = JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges }, null, 1);
+    const data = JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found }, null, 1);
     try {
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
       a.download = `nutcade-backup-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(a); a.click(); a.remove();
@@ -2744,6 +2751,7 @@ const A = {
 };
 /*@@app_r4_actions.js@@*/
 /*@@app_r5_actions.js@@*/
+/*@@app_r6_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;
@@ -2814,10 +2822,10 @@ function livePrice(v, cur) {
 }
 /* A link like …/#token=cashuB… (from an NFC card or a shared link) opens the token once the wallet is unlocked. */
 let pendingLink = null;
-function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
+function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { render, refresh, S, toast, logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved };
+window.Nutcade = { loadCard, render, refresh, S, toast, logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}

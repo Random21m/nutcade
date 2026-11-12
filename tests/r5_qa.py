@@ -115,7 +115,10 @@ async def main():
 
         # ---------- high-score bounties ----------
         await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(200)
-        await w.ev("Nutcade.startChallenge({game:'flipper', seed:777, score:9000, by:'ACE'})"); await w.wait(200)
+        # since v1.10 a bounty only pays a win whose replay checks out, so Robin's win is a real replay on the challenge's seed
+        win = await w.pg.evaluate("""async (v)=>{ const packed=await Arcade.replay.pack({frames: v}); const r=await Arcade.replay.verify('flipper', 777, packed, 0); return {packed, score:r.score}; }""",
+                                  (['2,2,0,448,576,,,'] + ['2,0,0,448,576,,,'] * 43 + ['0,0,0,448,576,,,'] * 1500) * 8)
+        await w.ev("Nutcade.startChallenge({game:'flipper', seed:777, score:1000, by:'ACE'})"); await w.wait(200)
         check('bounty: Challenge a friend offers to put sats on it', await w.ev("!!document.querySelector('#bountyAmt')"))
         wbal = await w.bal(A); fbal = await fr.bal()
         await w.fill('#bountyAmt', '500'); await w.click('[data-act=chalSend]')
@@ -137,9 +140,9 @@ async def main():
         await fr.click('#challenges [data-act=chalOpen]'); await fr.wait(150)
         check('bounty: and when it closes', 'BOUNTY' in (await fr.sheet_text()).upper() and 'locked to you' in await fr.sheet_text(), (await fr.sheet_text())[:200])
         cid = await fr.ev("Nutcade.S.challenges.find(c=>c.bounty).id")
-        lose = await fr.ev(f"Nutcade.challengeDone({json.dumps(cid)}, 8000, 'ROB')")
+        lose = await fr.ev(f"Nutcade.challengeDone({json.dumps(cid)}, 800, 'ROB')")
         check('bounty: a losing score leaves it locked', not lose['won'] and lose['bounty'] == 500 and not lose['bountySent'], lose)
-        res = await fr.ev(f"Nutcade.challengeDone({json.dumps(cid)}, 9500, 'ROB')")
+        res = await fr.ev(f"Nutcade.challengeDone({json.dumps(cid)}, {win['score']}, 'ROB', Promise.resolve({json.dumps(win['packed'])}))")
         check('bounty: a winning score is sent back on its own', res['won'] and res['bountySent'], res)
         ok = await w.until("Nutcade.S.challenges[0].bounties[0].state==='paid'", 20000)
         check('bounty: your NUTCADE sees the signed win and sends Robin the key', ok, await w.ev("Nutcade.S.challenges[0].bounties[0]"))

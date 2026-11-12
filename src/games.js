@@ -1,6 +1,23 @@
 /* NUTCADE arcade: engine + eight original 80s-style games */
 (function(){
 'use strict';
+/* Deterministic maths for the games. Browsers may round Math.sin, Math.cos and Math.hypot differently in the last bit,
+   and in a game like pinball that tiny difference grows until two phones disagree. Replays are checked on other
+   phones, so the games use these versions, built only from + - * / and sqrt, which every engine rounds the same way. */
+const RealMath = globalThis.Math;
+const Math = (() => {
+  const PI = RealMath.PI, TAU = 2 * PI, HALF = PI / 2;
+  const sin = x => {
+    if (!isFinite(x)) return NaN;
+    let r = x - RealMath.round(x / TAU) * TAU;
+    if (r > HALF) r = PI - r; else if (r < -HALF) r = -PI - r;
+    const r2 = r * r;
+    return r * (1 + r2 * (-1 / 6 + r2 * (1 / 120 + r2 * (-1 / 5040 + r2 * (1 / 362880 + r2 * (-1 / 39916800 + r2 * (1 / 6227020800 + r2 * (-1 / 1307674368000))))))));
+  };
+  const cos = x => sin(x + HALF);
+  const hypot = (a, b) => RealMath.sqrt(a * a + b * b);
+  return Object.freeze(Object.assign(Object.create(RealMath), { sin, cos, hypot }));
+})();
 const W = 224, H = 288;
 const A = () => window.NutAudio || { sfx() {}, music() {}, stopMusic() {} };
 const store = window.NutStore || { get: (k, d) => d, set() {} };
@@ -672,13 +689,21 @@ const nutFlipper = {
 };
 
 const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper];
+// The challenger's ghost: their player drawn faintly over yours while you race their replay
+starSwarm.ghost = (s, ctx) => { if (!s.p.dead) spr(ctx, SHIP, s.p.x, s.p.y, { c: C.white, w: C.white, p: C.white }); };
+brickBlitz.ghost = (s, ctx) => { ctx.fillStyle = C.white; ctx.fillRect(s.pad.x, s.pad.y, s.pad.w, s.pad.h); ctx.fillRect(s.ball.x - 2, s.ball.y - 2, 4, 4); };
+nibble.ghost = (s, ctx) => { ctx.fillStyle = C.white; s.body.forEach(([x, y]) => ctx.fillRect(x * NT + 2, NOY + y * NT + 2, NT - 4, NT - 4)); };
+nutMaze.ghost = (s, ctx) => spr(ctx, NUTBOT, MOX + s.p.x, MOY + s.p.y, { g: C.white, w: C.white, k: C.white });
+hopLanes.ghost = (s, ctx) => spr(ctx, BUNNY, s.p.x + 4, HOY + s.p.row * HT + 4, { w: C.white, p: C.white, k: C.white });
+nutFlipper.ghost = (s, ctx) => { ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(s.b.x, s.b.y, PB.r, 0, 6.29); ctx.fill(); };
 
 /* =====================================================================
    ENGINE
 ===================================================================== */
 const keys = {}, pressed = new Set();
 let G = null, cur = null, st = null, mode = 'title', raf = 0, view = null, ctx = null, frame = 0;
-let chal = null, runSeed = 0;   // chal: a challenge being played { id, seed, target, by, name }
+let chal = null, runSeed = 0;   // chal: a challenge being played { id, seed, target, by, name, replay? }
+let rec = null, lastReplay = null, ghost = null;   // this game's inputs, frame by frame; the last finished game; a challenger's ghost
 const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', Space: 'a', KeyZ: 'a', KeyX: 'a', KeyJ: 'a', Enter: 'b', KeyP: 'b', Escape: 'esc' };
 function press(k) { if (!keys[k]) pressed.add(k); keys[k] = true; }
 function release(k) { keys[k] = false; }
@@ -689,6 +714,69 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && mod
 
 const ptr = { x: W / 2, y: H / 2, down: false, over: false, sx: 0, sy: 0, st: 0 };
 let tap = null, swipe = null;
+
+/* ---------- replays ----------
+   Every game starts from a seed and runs one update per frame, so the inputs of each frame are enough to play the
+   whole game again, anywhere. A replay is the run-length list of per-frame inputs, compressed. Replaying it on
+   another phone gives the same score, which is how challenges and bounties check a score is real, and how a
+   challenger's ghost races you. */
+const RK = ['up', 'down', 'left', 'right', 'a', 'b'], SWD = { u: 'up', d: 'down', l: 'left', r: 'right' };
+const MAX_FRAMES = 60 * 60 * 30;   // half an hour of play
+const b64u = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+async function zip(bytes, how) {
+  const S = how === 'in' ? window.CompressionStream : window.DecompressionStream; if (!S) return null;
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new S('deflate-raw'))).arrayBuffer());
+}
+function stepper(g, seed, runs) {
+  const P = { x: W / 2, y: H / 2, down: false, over: false }; let HELD = 0, HIT = 0, T = null, SW = null, done = false, frames = 0;
+  const bit = k => 1 << RK.indexOf(k);
+  const Gs = { W, H, score: 0, held: k => !!(HELD & bit(k)), hit: k => !!(HIT & bit(k)), ptr: P, get tap() { return T; }, get swipe() { return SW; }, sfx() {}, addScore(n) { this.score += n; }, over() { done = true; }, hud() {} };
+  const rng = seeded(seed); const withRNG = fn => { const keep = RNG; RNG = rng; try { return fn(); } finally { RNG = keep; } };
+  const s = withRNG(() => g.init(Gs));
+  const load = code => { const v = code.split(','); HELD = +v[0]; HIT = +v[1]; P.down = !!(v[2] & 1); P.over = !!(v[2] & 2); P.x = v[3] / 4; P.y = v[4] / 4; T = v[5] !== '' ? { x: v[5] / 4, y: v[6] / 4 } : null; SW = v[7] ? SWD[v[7]] : null; };
+  let ri = 0, left = runs.length ? runs[0][1] : 0; if (runs.length) load(runs[0][0]);
+  return {
+    g: Gs, state: s, get done() { return done; }, get frames() { return frames; }, get over() { return done || ri >= runs.length; },
+    step() {
+      if (done || ri >= runs.length) return false;
+      withRNG(() => g.update(s, Gs)); frames++;
+      if (--left <= 0) { ri++; if (ri < runs.length) { left = runs[ri][1]; load(runs[ri][0]); } }
+      return !done;
+    }
+  };
+}
+const Replay = {
+  code() {   // this frame's input, exactly as the game sees it
+    let h = 0, t = 0; RK.forEach((k, i) => { if (keys[k]) h |= 1 << i; if (pressed.has(k)) t |= 1 << i; });
+    return [h, t, (ptr.down ? 1 : 0) | (ptr.over ? 2 : 0), ptr.x * 4, ptr.y * 4, tap ? tap.x * 4 : '', tap ? tap.y * 4 : '', swipe ? swipe[0] : ''].join(',');
+  },
+  async pack(r) {
+    const runs = []; for (const f of r.frames) { const last = runs[runs.length - 1]; if (last && last[0] === f) last[1]++; else runs.push([f, 1]); }
+    const json = new TextEncoder().encode(JSON.stringify(runs));
+    const z = await zip(json, 'in').catch(() => null);
+    return z ? 'r1.' + b64u(z) : 'r0.' + b64u(json);
+  },
+  async unpack(str) {
+    const m = /^r([01])\.([A-Za-z0-9_-]+)$/.exec(String(str || '')); if (!m || m[2].length > 400000) throw new Error('bad replay');
+    let bytes = unb64u(m[2]); if (m[1] === '1') bytes = await zip(bytes, 'out');
+    if (!bytes || bytes.length > 4e6) throw new Error('bad replay');
+    const runs = JSON.parse(new TextDecoder().decode(bytes)); let n = 0;
+    if (!Array.isArray(runs)) throw new Error('bad replay');
+    for (const r of runs) { if (!Array.isArray(r) || typeof r[0] !== 'string' || !/^\d+,\d+,\d,-?[\d.]+,-?[\d.]+,-?[\d.]*,-?[\d.]*,[udlr]?$/.test(r[0]) || !(r[1] >= 1)) throw new Error('bad replay'); n += r[1]; }
+    if (n > MAX_FRAMES) throw new Error('replay too long');
+    return runs;
+  },
+  // play a replay to the end and report the score it reaches
+  async verify(id, seed, packed, score) {
+    const g = GAMES.find(x => x.id === id); if (!g) return { ok: false, why: 'game' };
+    let runs; try { runs = await Replay.unpack(packed); } catch (e) { return { ok: false, why: 'replay' }; }
+    const sim = stepper(g, seed >>> 0, runs); let n = 0;
+    while (sim.step()) { if (++n % 4000 === 0) await new Promise(r => setTimeout(r, 0)); }
+    return { ok: sim.done && sim.g.score === Math.floor(score), score: sim.g.score, frames: sim.frames, ended: sim.done };
+  },
+  ghost(id, seed, runs) { const g = GAMES.find(x => x.id === id); try { return g && runs ? stepper(g, seed >>> 0, runs) : null; } catch (e) { return null; } }
+};
 
 function makeG() {
   const g = {
@@ -701,7 +789,8 @@ function makeG() {
     hud(lives, label, bottomless) {
       ctx.fillStyle = '#05030c'; ctx.fillRect(0, 0, W, 22);
       text(ctx, '1UP', 8, 3, C.red); text(ctx, pad6(this.score), 8, 12, C.ink);
-      if (chal) { text(ctx, 'TARGET', W / 2, 3, C.pink, 8, 'center'); text(ctx, pad6(chal.target), W / 2, 12, this.score > chal.target ? C.lime : C.ink, 8, 'center'); }
+      if (chal && ghost) { text(ctx, ghost.over ? 'GHOST OUT' : 'GHOST', W / 2, 3, C.violet, 8, 'center'); text(ctx, pad6(ghost.g.score), W / 2, 12, this.score > ghost.g.score ? C.lime : C.pink, 8, 'center'); }
+      else if (chal) { text(ctx, 'TARGET', W / 2, 3, C.pink, 8, 'center'); text(ctx, pad6(chal.target), W / 2, 12, this.score > chal.target ? C.lime : C.ink, 8, 'center'); }
       else { text(ctx, 'HI-SCORE', W / 2, 3, C.red, 8, 'center'); text(ctx, pad6(Math.max(hiOf(cur.id), this.score)), W / 2, 12, C.ink, 8, 'center'); }
       if (label) text(ctx, label, W - 8, 12, C.gold, 8, 'right');
       if (lives != null) for (let i = 0; i < lives - 1 && i < 5; i++) spr(ctx, ['.c.', 'ccc', 'c.c'], 8 + i * 6, bottomless ? H - 14 : H - 8, { c: C.lime }, 1);
@@ -715,7 +804,9 @@ function fit() {
   const kk = k >= 2 ? Math.floor(k * 2) / 2 : k;
   c.style.width = Math.floor(W * kk) + 'px'; c.style.height = Math.floor(H * kk) + 'px';
 }
-function toLogical(e) { const c = view.querySelector('#gameCanvas'); const r = c.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
+// Pointer positions snap to quarter pixels, so a replay can store exactly what the game saw.
+const q4 = v => Math.round(v * 4) / 4;
+function toLogical(e) { const c = view.querySelector('#gameCanvas'); const r = c.getBoundingClientRect(); return { x: q4((e.clientX - r.left) / r.width * W), y: q4((e.clientY - r.top) / r.height * H) }; }
 
 /* Touch controls: a joystick by default (a D-pad if you prefer). The stick turns into the same up/down/left/right
    keys the games already read. Grid games (maze, lanes, snake) take one direction at a time; the rest allow diagonals. */
@@ -801,15 +892,20 @@ function openGame(id, opts) {
   loop();
 }
 function closeGame(silent) {
-  cancelAnimationFrame(raf); raf = 0; RNG = Math.random;
+  cancelAnimationFrame(raf); raf = 0; RNG = Math.random; ghost = null; rec = null;
   if (view) { view.remove(); view = null; window.removeEventListener('resize', fit); document.body.style.overflow = ''; }
   for (const k in keys) keys[k] = false;
   if (!silent) { mode = 'title'; A().music('title'); if (window.Nutcade) window.Nutcade.refresh(); }
 }
-function startGame() { runSeed = chal ? chal.seed >>> 0 : (Math.random() * 4294967296) >>> 0; RNG = seeded(runSeed); G = makeG(); st = cur.init(G); mode = 'play'; A().sfx('start'); A().music(cur.track); if (window.Trophies) window.Trophies.played(cur.id); }
+function startGame() {
+  runSeed = chal ? chal.seed >>> 0 : (Math.random() * 4294967296) >>> 0; RNG = seeded(runSeed); G = makeG(); st = cur.init(G); mode = 'play'; rec = []; lastReplay = null;
+  ghost = chal && chal.replay ? Replay.ghost(cur.id, runSeed, chal.replay) : null;
+  A().sfx('start'); A().music(cur.track); if (window.Trophies) window.Trophies.played(cur.id);
+}
 function endGame() {
   mode = 'over'; A().stopMusic(); A().sfx('over');
   const score = G.score;
+  if (rec) { lastReplay = { game: cur.id, seed: runSeed, score, frames: rec }; rec = null; }
   if (window.Trophies) try { window.Trophies.gameOver(cur.id, score, st, qualifies(cur.id, score)); } catch (e) {}
   const seed = runSeed;
   setTimeout(() => {
@@ -823,7 +919,12 @@ function endGame() {
 const N = () => window.Nutcade;
 const canChallenge = () => !!(N() && N().canChallenge && N().canChallenge());
 const box6 = inner => `<div class="scrim" style="align-items:center"><div class="sheet initials" style="border-radius:8px;border-bottom:3px solid var(--cyan);max-width:340px">${inner}</div></div>`;
-function challengeFromHere(g, seed, score, initials) { closeGame(); if (N()) N().startChallenge({ game: g.id, seed, score, by: initials || store.get('initials', 'AAA') }); }
+function challengeFromHere(g, seed, score, initials) {
+  const r = lastReplay && lastReplay.game === g.id && lastReplay.seed === seed && lastReplay.score === score ? lastReplay : null;
+  closeGame();
+  const go = packed => { if (N()) N().startChallenge({ game: g.id, seed, score, by: initials || store.get('initials', 'AAA'), replay: packed || null }); };
+  if (r) Replay.pack(r).then(go, () => go(null)); else go(null);
+}
 function showOver(score, seed) {
   mode = 'entry';
   const box = view.querySelector('#entry'); const g = cur;
@@ -838,7 +939,8 @@ function showChallengeResult(score) {
   const box = view.querySelector('#entry'); const c = chal, g = cur;
   const initials = store.get('initials', 'AAA');
   if (qualifies(cur.id, score)) addScore(cur.id, initials, score);
-  const res = N() ? N().challengeDone(c.id, score, initials) : null;
+  const r = lastReplay && lastReplay.score === score ? lastReplay : null;
+  const res = N() ? N().challengeDone(c.id, score, initials, r ? Replay.pack(r) : null) : null;
   const won = score > c.target;
   A().sfx(won ? 'levelup' : 'over');
   box.innerHTML = box6(`<div style="font-family:var(--f-display);font-size:14px;color:${won ? 'var(--lime)' : 'var(--pink)'}">${won ? 'YOU WIN!' : 'SO CLOSE!'}</div>
@@ -847,7 +949,7 @@ function showChallengeResult(score) {
     ${res && res.canReply && !res.bountySent ? `<button class="btn solid gold block" data-g="reply">Send my score to ${esc6(res.name)}</button>` : ''}
     <button class="btn block ${res && res.canReply && !res.bountySent ? '' : 'solid gold'}" data-g="rematch">Rematch</button><button class="btn block" data-g="exit2">Exit</button>`);
   const rb = box.querySelector('[data-g=reply]');
-  if (rb) rb.onclick = () => { rb.disabled = true; rb.textContent = 'SENDING…'; N().sendResult(c.id, score, initials).then(ok => { rb.textContent = ok ? 'SCORE SENT' : "COULDN'T SEND"; A().sfx(ok ? 'coin' : 'err'); }); };
+  if (rb) rb.onclick = () => { rb.disabled = true; rb.textContent = 'SENDING…'; N().sendResult(c.id, score, initials, r ? Replay.pack(r) : null).then(ok => { rb.textContent = ok ? 'SCORE SENT' : "COULDN'T SEND"; A().sfx(ok ? 'coin' : 'err'); }); };
   box.querySelector('[data-g=rematch]').onclick = () => { box.innerHTML = ''; mode = 'title'; A().music('title'); };
   box.querySelector('[data-g=exit2]').onclick = () => closeGame();
 }
@@ -890,6 +992,7 @@ function drawTitle() {
   if ((frame >> 5) & 1) text(ctx, 'PRESS A OR TAP', W / 2, 252, C.pink, 8, 'center');
   text(ctx, 'CREDIT 99', W / 2, 270, C.dim, 8, 'center');
 }
+function drawGhost() { if (!ghost || ghost.over || !cur.ghost) return; ctx.save(); ctx.globalAlpha = 0.38; try { cur.ghost(ghost.state, ctx); } catch (e) {} ctx.restore(); }
 function loop() {
   raf = requestAnimationFrame(loop);
   if (!view) return;
@@ -899,7 +1002,7 @@ function loop() {
     if (pressed.has('a') || pressed.has('b') || tap) startGame();
   } else if (mode === 'play') {
     if (pressed.has('b')) { mode = 'pause'; A().sfx('blip'); }
-    else { cur.update(st, G); if (frame % 30 === 0 && window.Trophies && st) try { window.Trophies.progress(cur.id, st, G.score); } catch (e) {} if (mode !== 'over' || st) { ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx); } }
+    else { if (rec) rec.push(Replay.code()); cur.update(st, G); if (ghost) ghost.step(); if (frame % 30 === 0 && window.Trophies && st) try { window.Trophies.progress(cur.id, st, G.score); } catch (e) {} if (mode !== 'over' || st) { ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx); drawGhost(); } }
   } else if (mode === 'pause') {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx);
     ctx.fillStyle = 'rgba(5,3,12,.7)'; ctx.fillRect(0, 22, W, H - 22);
@@ -935,6 +1038,6 @@ function topLine() {
 }
 // layout(id, seed): the starting state a seed gives, so tests can check that a challenge replays the same layout
 function layout(id, seed) { const g = GAMES.find(x => x.id === id); if (!g || view) return null; const keep = RNG; RNG = seeded(seed); const c0 = ctx; try { return JSON.stringify(g.init(makeG())); } finally { RNG = keep; ctx = c0; } }
-window.Arcade = { mountList, open: openGame, topLine, playing: () => !!view, games: GAMES, layout, challenge: () => chal, held: () => Object.keys(keys).filter(k => keys[k]) };
+window.Arcade = { mountList, open: openGame, topLine, playing: () => !!view, games: GAMES, layout, challenge: () => chal, held: () => Object.keys(keys).filter(k => keys[k]), replay: Replay, lastReplay: () => lastReplay, ghost: () => ghost };
 if (window.Nutcade) window.Nutcade.render();
 })();

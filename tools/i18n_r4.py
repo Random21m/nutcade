@@ -1,5 +1,5 @@
 # NUTCADE Round 4 and 5 translations (sound transfer, gifts, bill split, mint health, cashier, challenges, piggy bank;
-# pinball, animated QR codes, bounties, Extra Life, mint report card).
+# pinball, animated QR codes, bounties, Extra Life, mint report card; replays, treasure hunts, loaded cards).
 # Each row: English, Spanish, Portuguese (Brazil), German, French. {#} stands for a number (kept as written).
 # Run: python3 tools/i18n_r4.py  ->  writes src/i18n_r4.js, which adds these to the dictionaries in i18n.js.
 ROWS = [
@@ -300,6 +300,70 @@ ROWS = [
 ("Use joystick", "Usar joystick", "Usar joystick", "Joystick nutzen", "Utiliser le joystick"),
 ("Joystick", "Joystick", "Joystick", "Joystick", "Joystick"),
 
+# ===== Round 6: replays and ghosts, treasure hunts, loaded score cards =====
+("Your replay goes with it: their NUTCADE checks your score is real, and they race your ghost.", "Tu repetición va con él: su NUTCADE comprueba que tu puntuación es real y compite contra tu fantasma.", "Seu replay vai junto: o NUTCADE da pessoa confere que sua pontuação é real e ela corre contra o seu fantasma.", "Deine Wiederholung geht mit: Ihr NUTCADE prüft, dass deine Punkte echt sind, und sie spielen gegen deinen Geist.", "Votre replay part avec : son NUTCADE vérifie que votre score est réel et affronte votre fantôme."),
+("No replay came with this challenge, so its score can't be checked.", "Este desafío no trae repetición, así que su puntuación no se puede comprobar.", "Este desafio veio sem replay, então a pontuação não pode ser conferida.", "Diese Herausforderung kam ohne Wiederholung, also lässt sich die Punktzahl nicht prüfen.", "Ce défi est arrivé sans replay, son score ne peut donc pas être vérifié."),
+("Checking their replay…", "Comprobando su repetición…", "Conferindo o replay…", "Prüfe die Wiederholung …", "Vérification du replay…"),
+("✓ Verified: their replay reaches {#}. Race their ghost.", "✓ Verificado: su repetición llega a {#}. Compite contra su fantasma.", "✓ Verificado: o replay chega a {#}. Corra contra o fantasma.", "✓ Geprüft: Die Wiederholung erreicht {#}. Spiel gegen den Geist.", "✓ Vérifié : son replay atteint {#}. Affrontez son fantôme."),
+("Their replay doesn't reach that score. It may have been faked.", "Su repetición no llega a esa puntuación. Puede ser falsa.", "O replay não chega a essa pontuação. Pode ter sido falsificado.", "Die Wiederholung erreicht diese Punktzahl nicht. Sie könnte gefälscht sein.", "Son replay n'atteint pas ce score. Il a peut-être été truqué."),
+("Treasure hunt", "Búsqueda del tesoro", "Caça ao tesouro", "Schatzsuche", "Chasse au trésor"),
+("Treasure hunts", "Búsquedas del tesoro", "Caças ao tesouro", "Schatzsuchen", "Chasses au trésor"),
+("Hide sats behind clue cards. Whoever finds enough of them opens the chest.", "Esconde sats tras tarjetas de pistas. Quien encuentre suficientes abre el cofre.", "Esconda sats atrás de cartões de pista. Quem encontrar cartões suficientes abre o baú.", "Versteck Sats hinter Hinweiskarten. Wer genug davon findet, öffnet die Truhe.", "Cachez des sats derrière des cartes indices. Qui en trouve assez ouvre le coffre."),
+("Prize (sat)", "Premio (sat)", "Prêmio (sat)", "Preis (Sat)", "Prix (sat)"),
+("Clue cards", "Tarjetas de pistas", "Cartões de pista", "Hinweiskarten", "Cartes indices"),
+("Needed to open", "Necesarias para abrir", "Necessários para abrir", "Zum Öffnen nötig", "Nécessaires pour ouvrir"),
+("Message on every card (optional)", "Mensaje en cada tarjeta (opcional)", "Mensagem em cada cartão (opcional)", "Nachricht auf jeder Karte (optional)", "Message sur chaque carte (facultatif)"),
+("Happy hunting! Clues are hidden around the park.", "¡Buena caza! Las pistas están escondidas por el parque.", "Boa caça! As pistas estão escondidas pelo parque.", "Viel Glück! Die Hinweise sind im Park versteckt.", "Bonne chasse ! Les indices sont cachés dans le parc."),
+("The prize is locked to a key split across the cards, so no single card can open it, and you can't be cheated by a copied card. It waits on Nostr, encrypted, until someone has enough cards.", "El premio está bloqueado con una clave repartida entre las tarjetas, así que ninguna tarjeta sola puede abrirlo y una copia no sirve para hacer trampa. Espera en Nostr, cifrado, hasta que alguien tenga suficientes tarjetas.", "O prêmio fica bloqueado com uma chave dividida entre os cartões, então nenhum cartão sozinho abre o baú e uma cópia não serve para trapacear. Ele espera no Nostr, criptografado, até alguém ter cartões suficientes.", "Der Preis ist mit einem Schlüssel gesperrt, der auf die Karten verteilt ist. Keine Karte allein öffnet ihn, und eine kopierte Karte hilft niemandem beim Schummeln. Er wartet verschlüsselt auf Nostr, bis jemand genug Karten hat.", "Le prix est verrouillé par une clé répartie entre les cartes : aucune carte seule ne l'ouvre, et une carte copiée ne permet pas de tricher. Il attend sur Nostr, chiffré, que quelqu'un ait assez de cartes."),
+("Hide the treasure", "Esconder el tesoro", "Esconder o tesouro", "Schatz verstecken", "Cacher le trésor"),
+("HIDING", "ESCONDIENDO", "ESCONDENDO", "VERSTECKE", "ON CACHE"),
+("Print cards", "Imprimir tarjetas", "Imprimir cartões", "Karten drucken", "Imprimer les cartes"),
+("Someone opened the chest!", "¡Alguien abrió el cofre!", "Alguém abriu o baú!", "Jemand hat die Truhe geöffnet!", "Quelqu'un a ouvert le coffre !"),
+("Nobody opened it in time, so the prize came back to you.", "Nadie lo abrió a tiempo, así que el premio volvió a ti.", "Ninguém abriu a tempo, então o prêmio voltou para você.", "Niemand hat sie rechtzeitig geöffnet, also kam der Preis zu dir zurück.", "Personne ne l'a ouvert à temps, le prix vous est donc revenu."),
+("CLUE {#} OF {#}", "PISTA {#} DE {#}", "PISTA {#} DE {#}", "HINWEIS {#} VON {#}", "INDICE {#} SUR {#}"),
+("You need every card", "Necesitas todas las tarjetas", "Você precisa de todos os cartões", "Du brauchst jede Karte", "Il faut toutes les cartes"),
+("Any {#} open the chest", "{#} cualesquiera abren el cofre", "Quaisquer {#} abrem o baú", "Beliebige {#} öffnen die Truhe", "{#} au choix ouvrent le coffre"),
+("{#} SAT TREASURE", "TESORO DE {#} SAT", "TESOURO DE {#} SAT", "{#} SAT SCHATZ", "TRÉSOR DE {#} SAT"),
+("Scan with your phone camera · NUTCADE", "Escanéala con la cámara del teléfono · NUTCADE", "Escaneie com a câmera do celular · NUTCADE", "Mit der Handykamera scannen · NUTCADE", "À scanner avec l'appareil photo · NUTCADE"),
+("TREASURE!", "¡TESORO!", "TESOURO!", "SCHATZ!", "TRÉSOR !"),
+("{#} SAT landed in your wallet.", "{#} SAT llegaron a tu cartera.", "{#} SAT caíram na sua carteira.", "{#} SAT sind in deiner Wallet gelandet.", "{#} SAT sont arrivés dans votre portefeuille."),
+("TOO LATE", "DEMASIADO TARDE", "TARDE DEMAIS", "ZU SPÄT", "TROP TARD"),
+("Someone opened this chest first.", "Alguien abrió este cofre primero.", "Alguém abriu este baú primeiro.", "Jemand hat diese Truhe zuerst geöffnet.", "Quelqu'un a ouvert ce coffre en premier."),
+("WRONG CARDS", "TARJETAS EQUIVOCADAS", "CARTÕES ERRADOS", "FALSCHE KARTEN", "MAUVAISES CARTES"),
+("These cards don't rebuild the same key.", "Estas tarjetas no reconstruyen la misma clave.", "Estes cartões não reconstroem a mesma chave.", "Diese Karten ergeben nicht denselben Schlüssel.", "Ces cartes ne reconstituent pas la même clé."),
+("OPENING THE CHEST", "ABRIENDO EL COFRE", "ABRINDO O BAÚ", "ÖFFNE DIE TRUHE", "OUVERTURE DU COFFRE"),
+("CLUE {#}/{#}", "PISTA {#}/{#}", "PISTA {#}/{#}", "HINWEIS {#}/{#}", "INDICE {#}/{#}"),
+("All the clues you need!", "¡Tienes todas las pistas que necesitas!", "Você tem todas as pistas necessárias!", "Du hast alle Hinweise, die du brauchst!", "Vous avez tous les indices nécessaires !"),
+("Find {#} more clue card to open the chest.", "Encuentra {#} tarjeta de pista más para abrir el cofre.", "Encontre mais {#} cartão de pista para abrir o baú.", "Finde noch {#} Hinweiskarte, um die Truhe zu öffnen.", "Trouvez encore {#} carte indice pour ouvrir le coffre."),
+("Find {#} more clue cards to open the chest.", "Encuentra {#} tarjetas de pista más para abrir el cofre.", "Encontre mais {#} cartões de pista para abrir o baú.", "Finde noch {#} Hinweiskarten, um die Truhe zu öffnen.", "Trouvez encore {#} cartes indices pour ouvrir le coffre."),
+("{#} of {#} cards found", "{#} de {#} tarjetas encontradas", "{#} de {#} cartões encontrados", "{#} von {#} Karten gefunden", "{#} cartes trouvées sur {#}"),
+("Open the chest", "Abrir el cofre", "Abrir o baú", "Truhe öffnen", "Ouvrir le coffre"),
+("Scan the next clue", "Escanear la siguiente pista", "Escanear a próxima pista", "Nächsten Hinweis scannen", "Scanner l'indice suivant"),
+("Loaded card", "Tarjeta cargada", "Cartão carregado", "Geladene Karte", "Carte chargée"),
+("Loaded score card", "Tarjeta de puntuación cargada", "Cartão de pontuação carregado", "Geladene Punktekarte", "Carte de score chargée"),
+("Your hunt", "Tu búsqueda", "Sua caça", "Deine Schatzsuche", "Votre chasse"),
+("OPENED", "ABIERTO", "ABERTO", "GEÖFFNET", "OUVERT"),
+("CAME BACK", "VOLVIÓ", "VOLTOU", "ZURÜCK", "REVENU"),
+("{#} OF {#}", "{#} DE {#}", "{#} DE {#}", "{#} VON {#}", "{#} SUR {#}"),
+("Hunting", "Buscando", "Caçando", "Auf der Suche", "En chasse"),
+("Pick 1 to 12 cards, and how many of them open the chest.", "Elige de 1 a 12 tarjetas y cuántas abren el cofre.", "Escolha de 1 a 12 cartões e quantos abrem o baú.", "Wähle 1 bis 12 Karten und wie viele die Truhe öffnen.", "Choisissez de 1 à 12 cartes, et combien ouvrent le coffre."),
+("Use 2 to 12 clue cards.", "Usa de 2 a 12 tarjetas de pistas.", "Use de 2 a 12 cartões de pista.", "Nimm 2 bis 12 Hinweiskarten.", "Utilisez de 2 à 12 cartes indices."),
+("The number needed has to be between {#} and {#}.", "El número necesario tiene que estar entre {#} y {#}.", "O número necessário precisa estar entre {#} e {#}.", "Die nötige Anzahl muss zwischen {#} und {#} liegen.", "Le nombre nécessaire doit être entre {#} et {#}."),
+("That clue card isn't valid.", "Esa tarjeta de pista no es válida.", "Esse cartão de pista não é válido.", "Diese Hinweiskarte ist ungültig.", "Cette carte indice n'est pas valide."),
+("That's one of your own cards. Hide it well!", "Esa es una de tus propias tarjetas. ¡Escóndela bien!", "Esse é um dos seus próprios cartões. Esconda bem!", "Das ist eine deiner eigenen Karten. Versteck sie gut!", "C'est une de vos propres cartes. Cachez-la bien !"),
+("These clue cards don't fit together. One of them may be from another hunt.", "Estas tarjetas no encajan. Puede que una sea de otra búsqueda.", "Estes cartões não se encaixam. Um deles pode ser de outra caça.", "Diese Hinweiskarten passen nicht zusammen. Eine stammt vielleicht aus einer anderen Schatzsuche.", "Ces cartes indices ne vont pas ensemble. L'une vient peut-être d'une autre chasse."),
+("Couldn't find the chest on Nostr relays. Try again in a moment.", "No se encontró el cofre en los relays de Nostr. Inténtalo en un momento.", "Não foi possível achar o baú nos relays Nostr. Tente de novo daqui a pouco.", "Die Truhe war auf den Nostr-Relays nicht zu finden. Versuch es gleich noch mal.", "Coffre introuvable sur les relais Nostr. Réessayez dans un instant."),
+("Someone opened this chest first!", "¡Alguien abrió este cofre primero!", "Alguém abriu este baú primeiro!", "Jemand hat diese Truhe zuerst geöffnet!", "Quelqu'un a ouvert ce coffre en premier !"),
+("Treasure! {#} SAT is yours", "¡Tesoro! {#} SAT son tuyos", "Tesouro! {#} SAT são seus", "Schatz! {#} SAT gehören dir", "Trésor ! {#} SAT sont à vous"),
+("Treasure hunt: {#} of {#} clues", "Búsqueda del tesoro: {#} de {#} pistas", "Caça ao tesouro: {#} de {#} pistas", "Schatzsuche: {#} von {#} Hinweisen", "Chasse au trésor : {#} indices sur {#}"),
+("Nobody opened your treasure in time, so {#} SAT came back", "Nadie abrió tu tesoro a tiempo, así que volvieron {#} SAT", "Ninguém abriu seu tesouro a tempo, então {#} SAT voltaram", "Niemand hat deinen Schatz rechtzeitig geöffnet, also sind {#} SAT zurück", "Personne n'a ouvert votre trésor à temps, {#} SAT vous sont revenus"),
+("Nobody won your bounty, so {#} SAT came back", "Nadie ganó tu recompensa, así que volvieron {#} SAT", "Ninguém ganhou sua recompensa, então {#} SAT voltaram", "Niemand hat dein Kopfgeld gewonnen, also sind {#} SAT zurück", "Personne n'a gagné votre prime, {#} SAT vous sont revenus"),
+("Put sats in it (optional)", "Mete sats en ella (opcional)", "Coloque sats nele (opcional)", "Sats hineinlegen (optional)", "Y mettre des sats (facultatif)"),
+("Load card", "Cargar tarjeta", "Carregar cartão", "Karte laden", "Charger la carte"),
+("LOADING…", "CARGANDO…", "CARREGANDO…", "LÄDT …", "CHARGEMENT…"),
+("Adds a QR code to the card. The first person to scan it wins the sats; unclaimed after a week, they come back to you.", "Añade un código QR a la tarjeta. Quien lo escanee primero gana los sats; si nadie lo hace en una semana, vuelven a ti.", "Adiciona um QR code ao cartão. Quem escanear primeiro ganha os sats; se ninguém fizer isso em uma semana, eles voltam para você.", "Fügt der Karte einen QR-Code hinzu. Wer ihn zuerst scannt, gewinnt die Sats; holt sie niemand innerhalb einer Woche, kommen sie zu dir zurück.", "Ajoute un QR code à la carte. La première personne qui le scanne gagne les sats ; s'ils ne sont pas réclamés en une semaine, ils vous reviennent."),
+("Enter how many sats to put in the card.", "Indica cuántos sats meter en la tarjeta.", "Informe quantos sats colocar no cartão.", "Gib ein, wie viele Sats in die Karte sollen.", "Indiquez combien de sats mettre dans la carte."),
+
 ]
 
 # Patterns for sentences that carry names or dates. $1, $2… are filled in (and translated again if they're known words).
@@ -357,6 +421,13 @@ RE = [
 (r"^Extra Life cashed out \(was for (.+)\)$", "Vida extra retirada (era para $1)", "Vida extra resgatada (era para $1)", "Extraleben ausgezahlt (war für $1)", "Vie bonus récupérée (était pour $1)"),
 (r"^Extra Life passed to (.+)$", "Vida extra pasada a $1", "Vida extra passada para $1", "Extraleben an $1 übergegangen", "Vie bonus passée à $1"),
 (r"^Its identity key changed on (.+)\. That can mean a new operator, so be careful\.$", "Su clave de identidad cambió el $1. Eso puede significar un operador nuevo, así que ten cuidado.", "A chave de identidade dele mudou em $1. Isso pode indicar um novo operador, então tenha cuidado.", "Ihr Identitätsschlüssel hat sich am $1 geändert. Das kann einen neuen Betreiber bedeuten, also sei vorsichtig.", "Sa clé d'identité a changé le $1. Cela peut signifier un nouvel opérateur, soyez prudent."),
+
+(r"^(.+) says they scored (\d+), but their replay didn't check out\. The bounty stays locked\.$", "$1 dice que hizo $2, pero su repetición no cuadra. La recompensa sigue bloqueada.", "$1 diz que fez $2, mas o replay não confere. A recompensa continua bloqueada.", "$1 behauptet, $2 erreicht zu haben, aber die Wiederholung stimmt nicht. Das Kopfgeld bleibt gesperrt.", "$1 dit avoir fait $2, mais son replay ne colle pas. La prime reste verrouillée."),
+(r"^Print the cards and hide them, or show them on screen\. Unopened by (.+), the ([\d,]+) SAT comes back to you\.$", "Imprime las tarjetas y escóndelas, o muéstralas en pantalla. Si nadie abre el cofre antes del $1, los $2 SAT vuelven a ti.", "Imprima os cartões e esconda, ou mostre na tela. Se ninguém abrir até $1, os $2 SAT voltam para você.", "Druck die Karten aus und versteck sie, oder zeig sie auf dem Bildschirm. Ist die Truhe bis $1 nicht geöffnet, kommen die $2 SAT zu dir zurück.", "Imprimez les cartes et cachez-les, ou montrez-les à l'écran. Si personne n'ouvre le coffre avant le $1, les $2 SAT vous reviennent."),
+(r"^Prize: ([\d,]+) SAT · until (.+)$", "Premio: $1 SAT · hasta $2", "Prêmio: $1 SAT · até $2", "Preis: $1 SAT · bis $2", "Prix : $1 SAT · jusqu'au $2"),
+(r"^Prize: ([\d,]+) SAT$", "Premio: $1 SAT", "Prêmio: $1 SAT", "Preis: $1 SAT", "Prix : $1 SAT"),
+(r"^No Nostr relay took the prize\. Your ([\d,]+) SAT stay locked until (.+), then come back to you\.$", "Ningún relay de Nostr aceptó el premio. Tus $1 SAT siguen bloqueados hasta $2 y luego vuelven a ti.", "Nenhum relay Nostr aceitou o prêmio. Seus $1 SAT ficam bloqueados até $2 e depois voltam para você.", "Kein Nostr-Relay hat den Preis angenommen. Deine $1 SAT bleiben bis $2 gesperrt und kommen dann zurück.", "Aucun relais Nostr n'a accepté le prix. Vos $1 SAT restent verrouillés jusqu'au $2, puis vous reviennent."),
+(r"^Loaded with ([\d,]+) SAT\. Whoever scans it first wins them\. If nobody does by (.+), they come back to you\.$", "Cargada con $1 SAT. Quien la escanee primero los gana. Si nadie lo hace antes del $2, vuelven a ti.", "Carregado com $1 SAT. Quem escanear primeiro ganha. Se ninguém fizer isso até $2, eles voltam para você.", "Mit $1 SAT geladen. Wer sie zuerst scannt, gewinnt sie. Scannt sie bis $2 niemand, kommen sie zu dir zurück.", "Chargée de $1 SAT. La première personne qui la scanne les gagne. Si personne ne le fait avant le $2, ils vous reviennent."),
 
 ]
 

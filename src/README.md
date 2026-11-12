@@ -12,6 +12,8 @@
 | `app_r4_actions.js` | Round 4 button handlers, also inlined inside `app.js` |
 | `app_r5.js` | Round 5, inlined inside `app.js`: high-score bounties (NUT-14), Extra Life (NUT-11 inheritance), mint report card |
 | `app_r5_actions.js` | Round 5 button handlers, also inlined inside `app.js` |
+| `app_r6.js` | Round 6, inlined inside `app.js`: treasure hunts (Shamir-split keys, prize on Nostr) and loaded score cards |
+| `app_r6_actions.js` | Round 6 button handlers, also inlined inside `app.js` |
 | `ur.js` | Animated QR codes: a BC-UR encoder and decoder (`ur:bytes`, multipart fountain codes), compatible with cashu.me |
 | `chiptune.js` | The sound modem used by Send by sound (encoder, decoder, microphone and speaker) |
 | `games.js` | The arcade engine and eight cabinets |

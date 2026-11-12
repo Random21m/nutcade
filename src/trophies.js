@@ -237,12 +237,26 @@ async function renderCard(o) {
   }
   const when = new Date(o.at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase();
   txt(ctx, when, rx, 486, 16, '#9a8fc4');
+  if (o.loaded && o.loaded.url) {
+    // a loaded card: a QR over the game screen that pays out to whoever scans it first
+    const L = window.CashuLib; let qr = null; try { qr = L.qrcode(0, 'M'); qr.addData(o.loaded.url); qr.make(); } catch (e) { qr = null; }
+    if (qr) {
+      const m = qr.getModuleCount(), cell = Math.floor(260 / (m + 4)), size = cell * (m + 4), qx = bx + bw - size - 14, qy = by + bh - size - 14;
+      ctx.fillStyle = '#ffcf3a'; ctx.fillRect(qx - 8, qy - 8, size + 16, size + 16);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(qx, qy, size, size); ctx.fillStyle = '#0a0717';
+      for (let r = 0; r < m; r++) for (let k = 0; k < m; k++) if (qr.isDark(r, k)) ctx.fillRect(qx + (k + 2) * cell, qy + (r + 2) * cell, cell, cell);
+      ctx.fillStyle = 'rgba(5,3,12,.88)'; ctx.fillRect(bx, by, bw, 66);
+      txt(ctx, 'INSERT COIN: SCAN TO WIN', bx + bw / 2, by + 8, 18, '#ffcf3a', 'center');
+      txt(ctx, `${N().fmt(o.loaded.amount)} SAT · FIRST SCAN TAKES IT`, bx + bw / 2, by + 38, 16, '#9dff3a', 'center');
+    }
+  }
   txt(ctx, 'A BITCOIN WALLET WITH AN ARCADE INSIDE', CW / 2, 548, 18, '#ffffff', 'center');
   txt(ctx, SITE, CW / 2, 580, 16, '#9dff3a', 'center');
   return new Promise(res => c.toBlob(b => res({ blob: b, url: b ? URL.createObjectURL(b) : c.toDataURL('image/png') }), 'image/png'));
 }
 
 function shareText(o) {
+  if (o.loaded) return `${o.kind === 'score' ? `I scored ${N().fmt(o.score)} on ${o.game.name}` : `Trophy unlocked: ${o.d.name}`} in NUTCADE, and this card holds ${N().fmt(o.loaded.amount)} sats. First to scan it wins them.`;
   return o.kind === 'score'
     ? `I scored ${N().fmt(o.score)} on ${o.game.name} in NUTCADE, a Bitcoin wallet with an arcade inside.`
     : `Trophy unlocked in NUTCADE: ${o.d.name}.`;
@@ -256,12 +270,23 @@ async function openCard(o) {
   const file = r.blob ? new File([r.blob], name, { type: 'image/png' }) : null;
   const canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] }));
   box.innerHTML = `<img src="${r.url}" alt="${n.esc(shareText(o))}" class="share-card">
+    ${o.loaded ? `<div class="notice cyan">Loaded with ${n.esc(n.fmt(o.loaded.amount))} SAT. Whoever scans it first wins them. If nobody does by ${n.esc(new Date(o.loaded.until).toLocaleDateString())}, they come back to you.</div>`
+      : `<div class="load-card"><label class="label" for="loadAmt">Put sats in it (optional)</label><div class="row" style="gap:8px"><input id="loadAmt" class="inp" inputmode="numeric" placeholder="210" style="flex:1"><button class="btn sm gold" id="cardLoad">Load card</button></div><div class="tiny muted">Adds a QR code to the card. The first person to scan it wins the sats; unclaimed after a week, they come back to you.</div><div id="sheetErr"></div></div>`}
     <div class="tiny muted">The card shows the game and score only, nothing about your wallet.</div>
     ${canShare ? '<button class="btn solid gold block" id="cardShare">Share</button>' : ''}
     <button class="btn block ${canShare ? '' : 'solid gold'}" id="cardSave">Save image</button>
     <button class="btn block" data-act="copy" data-text="${n.esc(shareText(o) + ' https://' + SITE)}">Copy text and link</button>`;
   const s = document.getElementById('cardShare');
   if (s) s.onclick = async () => { try { await navigator.share({ files: [file], text: shareText(o) + ' https://' + SITE }); } catch (e) { if (e.name !== 'AbortError') n.toast("Couldn't open sharing. Save the image instead.", 'gold'); } };
+  const lb = document.getElementById('cardLoad');
+  if (lb) lb.onclick = async () => {
+    const amt = Math.floor(Number((document.getElementById('loadAmt').value || '').replace(/[^0-9]/g, '')));
+    const err = document.getElementById('sheetErr');
+    if (!(amt > 0)) { err.innerHTML = '<div class="notice red">Enter how many sats to put in the card.</div>'; return; }
+    lb.disabled = true; lb.textContent = 'LOADING…';
+    try { const ld = await n.loadCard(amt); n.sfx('coin'); openCard(Object.assign({}, o, { loaded: ld })); }
+    catch (e) { lb.disabled = false; lb.textContent = 'Load card'; err.innerHTML = `<div class="notice red">${n.esc(e.message || String(e))}</div>`; }
+  };
   document.getElementById('cardSave').onclick = () => {
     try { const a = document.createElement('a'); a.href = r.url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); n.toast('Card saved', 'lime'); }
     catch (e) { n.toast('Press and hold the image to save it.', 'gold'); }

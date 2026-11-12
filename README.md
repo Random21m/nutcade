@@ -44,6 +44,9 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 - **Mint health**: see how your sats are spread across mints, which mints are answering and how fast, and get a warning when one mint holds most of your sats or stops answering. **Move sats between mints** over Lightning in a couple of taps, or let NUTCADE suggest how to even them out
 - **Cashier mode**: a full-screen till for a market stall or a café. Type the price, the customer scans, and coins drop with a chime when it's paid. Takes Lightning or ecash, keeps today's total and exports the day's sales as CSV
 - **High-score bounties**: put sats on a challenge. The mint locks them to your friend and to a secret only your NUTCADE holds (NUT-14). Beat your score within a week and their NUTCADE gets the secret and claims the sats; otherwise they come back to you
+- **Replays that prove scores**: every game records its inputs, so any phone can replay it and get exactly the same score. Challenges carry the challenger's replay, checked on arrival, and you race their ghost; a bounty only pays out when the winner's replay checks out
+- **Treasure hunts**: hide sats behind printable clue cards. The prize is locked to a key split across the cards (Shamir's secret sharing), so any 3 of 5 (or whatever you choose) open the chest, and no single card can
+- **Loaded score cards**: put sats in a high-score or trophy card before you share it. The card carries a QR code, and the first person to scan it wins them
 - **Extra Life**: savings that pass to someone you trust if you stop playing. The sats stay yours and spendable, locked to your key with your heir as the refund key after a date (NUT-11). Each CONTINUE, or just opening NUTCADE, pushes the date back and sends your heir a fresh copy that makes their old one worthless
 - **Mint report card**: a grade for each mint from uptime, speed, age, key history, your own payments with it and recommendations on Nostr. A mint whose identity key changes is flagged
 - **Animated QR codes**: tokens too long for one QR code play as a looping animated QR in the BC-UR format cashu.me uses, and the scanner reads animated QR codes from NUTCADE and cashu.me
@@ -67,6 +70,8 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons (tap **Use D-pad** under the game if you'd rather have arrow buttons).
 
 **Challenges and bounties**: after a game, tap **Challenge a friend** to send your score to a contact over Nostr or share it as a link. Your friend's game starts from the same seed, so it's laid out the same way, and their score comes back to you. Challenges are signed with your NUTCADE key, so nobody can send one in your name. Sending to a contact, you can also **put sats on it**: they're locked so only that friend can win them, and only by beating your score within a week.
+
+**Replays**: every game is replayable. The games start from a seed and run one step per frame, and NUTCADE records each frame's input, so playing the inputs back gives exactly the same game and score on any phone. The games use their own sine, cosine and distance maths, so iPhones and Android phones agree to the last bit. A challenge carries your replay: your friend's NUTCADE plays it back to confirm your score is real before they accept, and then they race your ghost. Their result comes back with their replay too, which your NUTCADE checks before believing it.
 
 **Trophies and score cards**: 27 trophies for wallet milestones and arcade feats (reach wave 3 in Star Swarm, grow Nibble to 30, play every cabinet…). Every high score and trophy can be turned into a share card for X or anywhere else. Cards show the game and score only, never anything about your wallet, and trophies stay on your device.
 
@@ -120,7 +125,17 @@ Tap **Split a bill** on the wallet screen, enter the total and how many people a
 
 ### High-score bounties
 
-After a game, tap **Challenge a friend**, type an amount under **Put sats on it**, and tap the contact to send it to. The sats leave your balance as ecash locked two ways: to your friend's key, and to a secret that only your NUTCADE knows (NUT-14 hash lock). Your friend sees the bounty with the challenge. If they beat your score, their NUTCADE sends you the signed result, your NUTCADE replies with the secret, and theirs claims the sats. If nobody wins within a week, the lock's refund path opens and the sats come back to you on their own. Your NUTCADE has to see the result before the week is up, so open it now and then while a bounty is running. Bounties need a mint that supports NUT-14.
+After a game, tap **Challenge a friend**, type an amount under **Put sats on it**, and tap the contact to send it to. The sats leave your balance as ecash locked two ways: to your friend's key, and to a secret that only your NUTCADE knows (NUT-14 hash lock). Your friend sees the bounty with the challenge. If they beat your score, their NUTCADE sends you the signed result with its replay. Your NUTCADE plays the replay back, and only if it really reaches that score does it reply with the secret, so a made-up score can't win the bounty. Theirs then claims the sats. If nobody wins within a week, the lock's refund path opens and the sats come back to you on their own. Your NUTCADE has to see the result before the week is up, so open it now and then while a bounty is running. Bounties need a mint that supports NUT-14.
+
+### Treasure hunts
+
+Tap **Treasure hunt** on the wallet screen. Enter a prize, how many clue cards to make (2 to 12) and how many of them are needed to open the chest, add a message if you like, and choose when an unopened prize comes back to you. NUTCADE makes a fresh key, locks the prize to it (NUT-11, with your refund key after the date), splits the key across the cards with Shamir's secret sharing, and puts the prize on Nostr encrypted with that key. Print the cards (**Print cards**) or show them on screen, and hide them.
+
+Hunters scan the cards with their phone camera or the NUTCADE scanner. Each card shows the prize and how many clues are still missing; when someone has enough, their NUTCADE rebuilds the key, fetches and decrypts the prize, and claims it. A copied or altered card can't open the chest, and once someone has opened it, the others find it empty.
+
+### Loaded score cards
+
+When you share a high-score or trophy card, type an amount under **Put sats in it** and tap **Load card**. The card is redrawn with a QR code and "INSERT COIN: SCAN TO WIN". It works like a one-card treasure hunt: the first person to scan it wins the sats, and if nobody does within a week, they come back to you. Anyone who sees the card can scan it, so only load what you're happy to give away.
 
 ### Extra Life
 
@@ -204,6 +219,7 @@ Every push runs the suites in `tests/` automatically on GitHub (GitHub Actions) 
 - 27 settings checks: themes, ₿ display, backup download and import, restoring a phrase from another Cashu client, reset, and swapping received ecash into your own mint
 - Crash recovery: a deposit interrupted mid-way comes back on the next open
 - 28 PIN-lock checks: encryption at rest, wrong PINs and lockout, change and removal, Face ID / fingerprint unlock, auto-lock, and forgot PIN followed by restore
+- Round 6 checks: every game played live with random input and replayed to exactly the same score and length, a challenge's replay verified and raced as a ghost, a faked bounty win refused and a real one paid, a treasure hunt opened with three of five cards (as a link and in the scanner), a slower hunter and a tampered card refused, an unopened hunt refunded, and a loaded card's QR code read back from the image and claimed
 - Round 5 checks: Nut Flipper's physics (thousands of simulated games: the ball never leaves the table, and flipping keeps it in play), an animated QR scanned by a second browser through a (simulated) camera and claimed, a bounty won and released by a signed score, a bounty refunded after its date, an Extra Life continued, replaced, cashed out and finally claimed by the heir after the date, the mint report card, and translations
 - 74 Round 4 checks: sending a token by sound from one browser to another through a (simulated) microphone, gifts locked to a contact and refunded after their date, a bill split paid off by a friend, mint health warnings and moving sats, cashier sales in Lightning and ecash, challenges sent and answered over Nostr (and a tampered one refused), the piggy bank countdown, and every new screen in each language at 320 pixels wide
 - 37 checks for amounts in your currency, #tags and CSV export, contacts (Lightning address and ecash over Nostr), offline use, and languages
@@ -251,6 +267,7 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Changelog
 
+- **v1.10.0:** replays that prove scores (cross-phone deterministic games), ghosts to race, bounties that only pay on a verified replay; treasure hunts with Shamir-split clue cards; loaded score cards that pay the first person to scan them
 - **v1.9.0:** Nut Flipper, an eighth cabinet (pinball); high-score bounties locked with NUT-14 hash locks; Extra Life, ecash inheritance with NUT-11 time locks; a report card for every mint; animated QR codes (BC-UR, compatible with cashu.me) for long tokens, and scanning them; a joystick for the games on phones, with the D-pad still available
 - **v1.8.1:** moved to GitHub: new address https://random21m.github.io/nutcade/, share cards and preview images point there
 - **v1.8.0:** send codes by sound between phones, gifts locked to one person that come back after a date (NUT-11), split a bill as a boss fight, mint health with moving sats between mints, cashier mode for selling, high-score challenges with friends, round-up piggy bank, 5 new trophies
