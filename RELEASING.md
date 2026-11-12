@@ -36,19 +36,29 @@ MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh
 
 ## Signing a release (recommended)
 
-A signature proves the release came from you. Use the same GPG key you sign voidforge with:
+A signature proves the release came from the project. Releases are signed with the key in `nutcade-signing-key.asc`:
+
+```
+Random21m
+ed25519 key 4B729F056A529340
+fingerprint 2509 D115 03B7 2CBF BCB5  408F 4B72 9F05 6A52 9340
+```
 
 ```bash
 curl -O https://random21m.github.io/nutcade/SHA256SUMS.txt
-gpg --armor --detach-sign SHA256SUMS.txt        # creates SHA256SUMS.txt.asc
+gpg --armor --detach-sign --local-user 4B729F056A529340 SHA256SUMS.txt   # creates SHA256SUMS.txt.asc
+gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt                           # should say "Good signature"
 ```
 
-Attach `SHA256SUMS.txt` and `SHA256SUMS.txt.asc` to the release, and commit your public key as `nutcade-signing-key.asc` so others can check it.
+Then edit the release on GitHub and attach `SHA256SUMS.txt` and `SHA256SUMS.txt.asc`. The key expires on 5 November 2028; extend it before then with `gpg --quick-set-expire 2509D11503B72CBFBCB5408F4B729F056A529340 2y` and commit the re-exported public key.
 
 ## Checking a copy of NUTCADE
 
 ```bash
 curl -O https://random21m.github.io/nutcade/index.html
 sha256sum index.html                       # compare with SHA256SUMS.txt (sw.js and zxing_reader.wasm are listed too)
-gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
+gpg --import nutcade-signing-key.asc       # from this repository
+gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt   # SHA256SUMS.txt.asc is attached to each release
 ```
+
+The signature must say "Good signature from Random21m" and the key's fingerprint must be `2509 D115 03B7 2CBF BCB5  408F 4B72 9F05 6A52 9340`. GPG may warn that the key isn't certified by someone you trust; that's normal unless you've signed the key yourself.
