@@ -26,6 +26,8 @@ jobs:
       QA_OUT: ${{ github.workspace }}/qa-out
     steps:
       - uses: actions/checkout@v4
+      - name: The page matches its sources
+        run: python3 build.py --check
       - name: Test-mint environment (Nutshell, fake Lightning)
         run: |
           python3 -m venv /tmp/mint || (apt-get update -qq && apt-get install -y -qq python3-venv && python3 -m venv /tmp/mint)

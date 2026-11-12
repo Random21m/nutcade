@@ -18,6 +18,12 @@ Every push to `main` runs the GitHub Actions workflow `.github/workflows/test-an
 
 Logs and screenshots from each run are kept for a week as the run's `qa-out` artifact (Actions tab → the run → Artifacts).
 
+## Making a change
+
+1. Edit the files in `src/` (see [src/README.md](src/README.md)). For new on-screen text, add its translations to `tools/i18n_r4.py` and run `python3 tools/i18n_r4.py`.
+2. Run `python3 build.py` to rebuild `public/index.html`.
+3. Run the tests (below), then commit `src/` and `public/index.html` together. CI refuses a page that doesn't match `src/`.
+
 ## Running the tests on your own computer
 
 You need Python 3.12 and Chromium, which Playwright installs for you.

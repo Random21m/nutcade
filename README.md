@@ -188,7 +188,7 @@ Posting the link on X and most social sites shows a large preview card automatic
 
 ## For maintainers
 
-The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm` and the offline helper `public/sw.js`. On every push to `main`, `.github/workflows/test-and-deploy.yml` runs the test suites and then publishes `public/` to GitHub Pages with fresh checksums. To ship an update, replace `public/index.html` and push. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
+The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm` and the offline helper `public/sw.js`. `public/index.html` is built from the files in [`src/`](src/README.md): edit those, run `python3 build.py`, and commit both. On every push to `main`, `.github/workflows/test-and-deploy.yml` checks that the page matches `src/`, runs the test suites, and then publishes `public/` to GitHub Pages with fresh checksums. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
 
 ## Support the project
 
