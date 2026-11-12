@@ -151,7 +151,7 @@ Go to **Settings → Lightning address → Set it up**, pick the mint that shoul
 - **One tab at a time.** If NUTCADE is open in a second tab, that tab pauses so the two can't overwrite each other.
 - **Storage protection.** NUTCADE asks the browser not to clear its data, and Settings shows whether that was granted.
 - **No outside code.** The app is one self-contained file with its fonts built in. The QR decoder loads from this same site, only when you open the scanner. Nothing is loaded from other servers.
-- **Checked releases.** Every update runs the test suites automatically before it goes live, and the site publishes SHA-256 checksums at https://random21m.github.io/nutcade/SHA256SUMS.txt. Releases on GitHub include those checksums signed with the project's GPG key, [`nutcade-signing-key.asc`](nutcade-signing-key.asc) (fingerprint `2509 D115 03B7 2CBF BCB5  408F 4B72 9F05 6A52 9340`). See [RELEASING.md](RELEASING.md) to check a copy yourself.
+- **Checked releases.** Every update runs the test suites automatically before it goes live, and the site publishes SHA-256 checksums at https://random21m.github.io/nutcade/SHA256SUMS.txt. Releases on GitHub include those checksums signed with the project's GPG key, [`nutcade-signing-key.asc`](nutcade-signing-key.asc) (fingerprint `2509 D115 03B7 2CBF BCB5  408F 4B72 9F05 6A52 9340`), and timestamped in Bitcoin with [OpenTimestamps](https://opentimestamps.org): v1.8.1's checksums are anchored in block 975,501 (11 November 2026). See [RELEASING.md](RELEASING.md) to check a copy yourself.
 - **Shared GitHub domain.** GitHub serves every project site on an account from one domain (random21m.github.io), and browsers let pages on the same domain read each other's saved data. So only publish pages you trust under this account, and set a PIN: it keeps your phrase and ecash encrypted, so another page on the domain can't read them.
 
 **Found a security problem?** Please report it privately, as described in [SECURITY.md](SECURITY.md), not in a public issue.
@@ -193,6 +193,12 @@ Posting the link on X and most social sites shows a large preview card automatic
 ## For maintainers
 
 The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm` and the offline helper `public/sw.js`. `public/index.html` is built from the files in [`src/`](src/README.md): edit those, run `python3 build.py`, and commit both. On every push to `main`, `.github/workflows/test-and-deploy.yml` checks that the page matches `src/`, runs the test suites, and then publishes `public/` to GitHub Pages with fresh checksums. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
+
+## Made by
+
+<p><a href="https://github.com/Random21m"><img src="https://avatars.githubusercontent.com/u/344571732?v=4" alt="Random21m's GitHub profile picture" width="96"></a></p>
+
+NUTCADE is made by **[Random21m](https://github.com/Random21m)**. Bug reports and ideas are welcome in [Issues](https://github.com/Random21m/nutcade/issues); security problems go through [SECURITY.md](SECURITY.md).
 
 ## Support the project
 
