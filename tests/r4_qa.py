@@ -92,7 +92,7 @@ async def main():
         await w.click('[data-act=doSendEcash]')
         await w.until("document.querySelector('.sheet-body') && /Locked gift/i.test(document.querySelector('.sheet-body').innerText)", 15000)
         await w.wait(300)
-        check('gift: a gift too big for one QR code points to Copy and Play as sound', await w.ev("!!document.querySelector('.sheet .qr canvas') || (/Play as sound/.test(document.querySelector('.sheet-body').innerText) && !!document.querySelector('.sheet [data-act=ctPlay]'))"), await w.ev("(document.querySelector('.sheet .notice.cyan')||{}).innerText"))
+        check('gift: a gift too big for one QR code plays as an animated QR, with Play as sound too', await w.ev("!!document.querySelector('.sheet .qr canvas') && !!document.querySelector('.sheet [data-act=ctPlay]')"), await w.ev("(document.querySelector('.sheet .notice.cyan')||{}).innerText"))
         t = await w.ev("Nutcade.S.txs[0]")
         check('gift: locked to Robin with a refund date a week out', t.get('giftTo') == 'Robin' and 6.9 < (t['lockUntil'] / 1000 - __import__('time').time()) / 86400 < 7.1, {k: t.get(k) for k in ('giftTo', 'lockUntil', 'delivered')})
         locked_tok = t['token']

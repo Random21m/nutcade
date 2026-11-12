@@ -10,6 +10,8 @@ A Cashu ecash wallet with a 1980s arcade built in.
 
 **Timestamped in Bitcoin:** NUTCADE v1.8.1, including the send-by-sound chiptune modem, is anchored in [block 975,501](https://mempool.space/block/00000000000000000000c8328fa2baa44180bc59c74d739bfb317dd984ade480), mined 11 November 2026. The proof covers the release checksums, and the checksum for `index.html` covers the sound code inside it. The proof, `SHA256SUMS.txt.ots`, is attached to the [v1.8.1 release](https://github.com/Random21m/nutcade/releases/tag/v1.8.1); check it at [opentimestamps.org](https://opentimestamps.org).
 
+**Send by sound, timestamped on its own:** the sound modem's source, [`src/chiptune.js`](src/chiptune.js) (SHA-256 `77cb1714…c1c48f9`, unchanged since), is anchored in [block 975,513](https://mempool.space/block/00000000000000000000ffe72c5aff0f1b98e79bc4353e3345c48208cb23f1fb), mined 11 November 2026. The proof is [`docs/chiptune.js.ots`](docs/chiptune.js.ots); check it with `ots verify -f src/chiptune.js docs/chiptune.js.ots` or at [opentimestamps.org](https://opentimestamps.org).
+
 > **Moved from GitLab.** NUTCADE now lives on GitHub. The old address (nutcade-2c150c.gitlab.io) is no longer updated. Each address keeps its own wallet in your browser, so to move: write down your 12 words (Settings → Backup → Show recovery phrase), open the new address, and tap **Restore from recovery phrase**.
 
 NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a text message. It works in any modern browser on phone or desktop, with nothing to install, and keeps your wallet protected by a standard 12-word recovery phrase.
@@ -41,11 +43,15 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 - **Split a bill**: paid for the group? Turn the bill into a boss. Friends each pay their share from any Cashu wallet, and every payment knocks off some of its health until the boss is defeated
 - **Mint health**: see how your sats are spread across mints, which mints are answering and how fast, and get a warning when one mint holds most of your sats or stops answering. **Move sats between mints** over Lightning in a couple of taps, or let NUTCADE suggest how to even them out
 - **Cashier mode**: a full-screen till for a market stall or a café. Type the price, the customer scans, and coins drop with a chime when it's paid. Takes Lightning or ecash, keeps today's total and exports the day's sales as CSV
+- **High-score bounties**: put sats on a challenge. The mint locks them to your friend and to a secret only your NUTCADE holds (NUT-14). Beat your score within a week and their NUTCADE gets the secret and claims the sats; otherwise they come back to you
+- **Extra Life**: savings that pass to someone you trust if you stop playing. The sats stay yours and spendable, locked to your key with your heir as the refund key after a date (NUT-11). Each CONTINUE, or just opening NUTCADE, pushes the date back and sends your heir a fresh copy that makes their old one worthless
+- **Mint report card**: a grade for each mint from uptime, speed, age, key history, your own payments with it and recommendations on Nostr. A mint whose identity key changes is flagged
+- **Animated QR codes**: tokens too long for one QR code play as a looping animated QR in the BC-UR format cashu.me uses, and the scanner reads animated QR codes from NUTCADE and cashu.me
 - **Round-up piggy bank**: each payment rounds up to the nearest 10, 100 or 1,000 sats and the difference is set aside. The sats stay in your wallet, but spending them means waiting through a "Continue?" countdown first
 - Take back a sent token if nobody claimed it, and see when one was claimed
 - Coin-drop and 1UP effects when sats arrive, and a launch effect when you send
 
-**Arcade**: seven original cabinets with high-score tables, chiptune sound and music
+**Arcade**: eight original cabinets with high-score tables, chiptune sound and music
 
 | Cabinet | Style |
 |---|---|
@@ -56,12 +62,13 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 | Hop Lanes | Road and river crossing |
 | Sky Shield | Missile defense |
 | Nibble | Snake |
+| Nut Flipper | Pinball: light N-U-T for a multiplier, drop the S-A-T targets, hunt the gold sat |
 
-Plays with keyboard, mouse, or the on-screen joystick and buttons on a phone.
+Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons (tap **Use D-pad** under the game if you'd rather have arrow buttons).
 
-**Challenges**: after a game, tap **Challenge a friend** to send your score to a contact over Nostr or share it as a link. Your friend's game starts from the same seed, so it's laid out the same way, and their score comes back to you. Challenges are signed with your NUTCADE key, so nobody can send one in your name.
+**Challenges and bounties**: after a game, tap **Challenge a friend** to send your score to a contact over Nostr or share it as a link. Your friend's game starts from the same seed, so it's laid out the same way, and their score comes back to you. Challenges are signed with your NUTCADE key, so nobody can send one in your name. Sending to a contact, you can also **put sats on it**: they're locked so only that friend can win them, and only by beating your score within a week.
 
-**Trophies and score cards**: 26 trophies for wallet milestones and arcade feats (reach wave 3 in Star Swarm, grow Nibble to 30, play every cabinet…). Every high score and trophy can be turned into a share card for X or anywhere else. Cards show the game and score only, never anything about your wallet, and trophies stay on your device.
+**Trophies and score cards**: 27 trophies for wallet milestones and arcade feats (reach wave 3 in Star Swarm, grow Nibble to 30, play every cabinet…). Every high score and trophy can be turned into a share card for X or anywhere else. Cards show the game and score only, never anything about your wallet, and trophies stay on your device.
 
 **Settings**
 - **Security:** set, change or remove your PIN, turn on Face ID / fingerprint, lock now, and choose when the wallet locks itself
@@ -111,6 +118,31 @@ Under Send → Ecash, tick **Lock it to one person**, pick a contact (or paste a
 
 Tap **Split a bill** on the wallet screen, enter the total and how many people are sharing it (you included), and NUTCADE summons a bill boss with a QR code for everyone else. Each friend scans it with NUTCADE, cashu.me or another Cashu wallet and pays their share; the ecash comes straight to you over Nostr, and the boss loses health with every payment. Open bills stay on the wallet screen until the boss is defeated.
 
+### High-score bounties
+
+After a game, tap **Challenge a friend**, type an amount under **Put sats on it**, and tap the contact to send it to. The sats leave your balance as ecash locked two ways: to your friend's key, and to a secret that only your NUTCADE knows (NUT-14 hash lock). Your friend sees the bounty with the challenge. If they beat your score, their NUTCADE sends you the signed result, your NUTCADE replies with the secret, and theirs claims the sats. If nobody wins within a week, the lock's refund path opens and the sats come back to you on their own. Your NUTCADE has to see the result before the week is up, so open it now and then while a bounty is running. Bounties need a mint that supports NUT-14.
+
+### Extra Life
+
+Tap **Extra Life** on the wallet screen (or in Settings → Wallet tools), enter an amount, pick an heir from your contacts (or paste their npub) and choose when it opens for them: after 3 months, 6 months or a year. The sats are locked to your own key, so you can still spend them any time, with your heir's key as the refund key after the date (NUT-11). Your heir's NUTCADE receives a copy over Nostr that only opens after that date.
+
+Press **CONTINUE** to push the date back. With **Continue when I open NUTCADE** on (the default), opening NUTCADE after half the time has passed does it for you. Each CONTINUE swaps the ecash for fresh ecash with a later date and sends your heir the new copy, which also makes their old copy worthless. If you stop (you lost your phone and your words, or worse), your heir's NUTCADE claims the sats once the date passes. **Cash out** puts them back in your balance at any time. Extra Life depends on the mint still running when the date comes, so use one you trust for the long term. Restoring from your 12 words alone can't find Extra Life ecash (that's how it reaches your heir if you lose everything), but **Download backup** includes it, along with any copies you hold as someone's heir and the secrets for your open bounties.
+
+### Mint report card
+
+On the **Mints** tab, each mint shows a grade. Tap it for the report card:
+
+| Grade | From |
+|---|---|
+| Uptime | How many of NUTCADE's health checks it answered |
+| Speed | How fast it usually answers |
+| Age | How long it's been known: since you first used it, or since its first mention on Nostr if that's earlier |
+| Keys | Whether its identity key is the same as when you added it, and how often it rotates keysets. A changed identity key gets an F and caps the grade at D, because it can mean a new operator |
+| Track record | How many of your own payments and swaps with it went through, counting only failures on the mint's side |
+| Reviews | How many people recommend it on Nostr (NIP-87), and their average rating |
+
+Everything is worked out on your phone from what NUTCADE can check itself; no outside rating service is involved. A good grade isn't a guarantee, so only keep at each mint what you can afford to lose.
+
 ### Mint health and moving sats
 
 The **Mints** tab checks that each of your mints answers and how quickly, and shows how your sats are spread. If one mint holds most of them, NUTCADE suggests how much to move and where; **Move sats between mints** does it over Lightning. You see the Lightning fee before you confirm, and if NUTCADE closes halfway, the deposit at the receiving mint is still claimed the next time it opens.
@@ -126,6 +158,10 @@ Turn on **Settings → Piggy bank → Round up my payments**. Each payment round
 ### Offline
 
 Open NUTCADE once while online and it keeps a copy, so it opens without a connection after that. While offline, a banner says so. You can still send ecash for amounts made of the exact coins you hold (NUTCADE suggests the nearest amounts if yours doesn't fit), and ecash someone gives you is saved and claimed automatically when you're back online. Until it's claimed it isn't yours yet, because the sender could still spend it.
+
+### Animated QR codes
+
+Codes too long for a comfortable single QR code, like tokens with many coins or locked gifts, play as a looping animated QR. It uses BC-UR (`ur:bytes`), the format cashu.me uses, so cashu.me can scan NUTCADE's and NUTCADE can scan cashu.me's. Hold the scanner on it until the progress reaches 100%; missed frames don't matter, because later frames fill the gaps.
 
 ### Paying from several mints
 
@@ -168,12 +204,13 @@ Every push runs the suites in `tests/` automatically on GitHub (GitHub Actions) 
 - 27 settings checks: themes, ₿ display, backup download and import, restoring a phrase from another Cashu client, reset, and swapping received ecash into your own mint
 - Crash recovery: a deposit interrupted mid-way comes back on the next open
 - 28 PIN-lock checks: encryption at rest, wrong PINs and lockout, change and removal, Face ID / fingerprint unlock, auto-lock, and forgot PIN followed by restore
+- Round 5 checks: Nut Flipper's physics (thousands of simulated games: the ball never leaves the table, and flipping keeps it in play), an animated QR scanned by a second browser through a (simulated) camera and claimed, a bounty won and released by a signed score, a bounty refunded after its date, an Extra Life continued, replaced, cashed out and finally claimed by the heir after the date, the mint report card, and translations
 - 74 Round 4 checks: sending a token by sound from one browser to another through a (simulated) microphone, gifts locked to a contact and refunded after their date, a bill split paid off by a friend, mint health warnings and moving sats, cashier sales in Lightning and ecash, challenges sent and answered over Nostr (and a tampered one refused), the piggy bank countdown, and every new screen in each language at 320 pixels wide
 - 37 checks for amounts in your currency, #tags and CSV export, contacts (Lightning address and ecash over Nostr), offline use, and languages
 - 41 checks for multinut payments, payment requests (over Nostr and HTTP, including ecash sent by another wallet) and NFC reading and writing
 - 39 checks for trophies, share cards, instant updates, the Nostr mint-list backup and the Lightning address, against a stand-in Nostr relay and npub.cash server that check every signature
 - 24 scanner checks, run before release: camera scans of real tokens and invoices, photo scans, and recognising every kind of code
-- All seven games played through to game over, with high scores, pause, exit, touch controls and sound
+- All eight games played through to game over, with high scores, pause, exit, touch controls and sound
 - Every screen at 320, 390, 768 and 1280 pixels wide, checked for overflow and clipped text, and again in each language
 
 ## Privacy
@@ -214,6 +251,7 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Changelog
 
+- **v1.9.0:** Nut Flipper, an eighth cabinet (pinball); high-score bounties locked with NUT-14 hash locks; Extra Life, ecash inheritance with NUT-11 time locks; a report card for every mint; animated QR codes (BC-UR, compatible with cashu.me) for long tokens, and scanning them; a joystick for the games on phones, with the D-pad still available
 - **v1.8.1:** moved to GitHub: new address https://random21m.github.io/nutcade/, share cards and preview images point there
 - **v1.8.0:** send codes by sound between phones, gifts locked to one person that come back after a date (NUT-11), split a bill as a boss fight, mint health with moving sats between mints, cashier mode for selling, high-score challenges with friends, round-up piggy bank, 5 new trophies
 - **v1.7.0:** contacts with Lightning and Nostr addresses, your own ecash address, amounts in your currency, #tags and CSV export, offline use (the app opens offline, exact-amount sends, tokens saved to claim later), Spanish, Portuguese, German and French
@@ -240,5 +278,7 @@ The page bundles these libraries (their license notices are at the end of the bu
 - [zxing-wasm](https://github.com/Sec-ant/zxing-wasm) (MIT) with [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp) (Apache-2.0), the QR decoder
 - [jsQR](https://github.com/cozmo/jsQR) (Apache-2.0), the fallback QR decoder
 - [nostr-tools](https://github.com/nbd-wtf/nostr-tools) (Unlicense) and [noble-ciphers](https://github.com/paulmillr/noble-ciphers) (MIT), for signing Nostr events and NIP-44 encryption
+
+The animated QR codes (`src/ur.js`) are NUTCADE's own implementation of the Blockchain Commons BC-UR specs (BCR-2020-005, 006 and 012). Its frames were checked against [@gandlaf21/bc-ur](https://github.com/gandlaf21/bc-ur), the library cashu.me uses, and come out identical.
 
 Fonts: [Press Start 2P](https://fonts.google.com/specimen/Press+Start+2P) and [VT323](https://fonts.google.com/specimen/VT323), both under the SIL Open Font License.

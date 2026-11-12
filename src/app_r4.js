@@ -256,6 +256,7 @@ async function probeHealth(url) {
     const r = await fetch(url + '/v1/info', { cache: 'no-store', signal: ac.signal }); clearTimeout(tm);
     health[url] = { ok: r.ok, ms: Math.round(performance.now() - t0), at: Date.now() };
   } catch (e) { health[url] = { ok: false, ms: null, at: Date.now() }; }
+  logProbe(url, health[url]);
   return health[url];
 }
 async function checkHealth() {
@@ -514,12 +515,14 @@ function openChallengeSend(id) {
   openSheet('Challenge a friend', `
     <div class="chal-card"><span class="label">Beat my score</span><b>${pad6(c.score)}</b><span data-noi18n>${esc(g ? g.name : c.game)} · ${esc(c.by)}</span></div>
     <p style="margin:0">Your friend plays the same seed, so their game starts on the same layout as yours. The challenge is signed with your NUTCADE key.</p>
+    ${(c.bounties || []).map(b => `<div class="notice ${b.state === 'open' ? '' : 'cyan'}"><span data-noi18n>${esc(b.name)}</span>: ${money(b.amount)} bounty · ${b.state === 'open' ? (Date.now() < b.until ? `open until ${fmtDay(b.until)}` : 'expired, coming back to you') : `won with ${pad6(b.score || 0)}`}</div>`).join('')}
+    ${cs.length ? bountyField() : ''}
     ${cs.length ? `<div class="field"><label>Send to a contact over Nostr</label><div class="tagrow">${cs.map(x => `<button class="tag" data-act="chalSend" data-id="${esc(c.id)}" data-c="${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div></div>` : '<div class="tiny muted">Add friends with a Nostr address in Contacts to send challenges straight to their NUTCADE.</div>'}
     <div class="field"><label>Or share a link</label><div class="code">${esc(link)}</div></div>
     <div class="row wrap"><button class="btn sm gold" data-act="copy" data-text="${esc(link)}">Copy link</button>${navigator.share ? `<button class="btn sm" data-act="chalShare" data-id="${esc(c.id)}">Share</button>` : ''}<button class="btn sm violet" data-act="chalQR" data-id="${esc(c.id)}">Show QR</button></div>
     <div id="sheetErr"></div>`);
 }
-function onChallenge(ev, via) {
+function onChallenge(ev, via, bounty, from) {
   let c; try { c = readSigned(ev); } catch (e) { return null; }
   if (!gameById(c.game) || !Number.isFinite(c.score) || !Number.isFinite(c.seed) || !c.id) return null;
   if (c.pubkey === L.nostrPub(nostrKey())) return S.challenges.find(x => x.id === c.id) || null;   // our own link
@@ -528,13 +531,23 @@ function onChallenge(ev, via) {
     rec = { dir: 'in', id: String(c.id).slice(0, 24), game: c.game, seed: c.seed >>> 0, score: Math.max(0, Math.floor(c.score)), by: String(c.by || '???').slice(0, 3).toUpperCase(), pubkey: c.pubkey, via, at: Date.now(), best: null };
     S.challenges.unshift(rec); saveChallenges();
     const who = nameFor(c.pubkey) || rec.by;
-    if (via === 'nostr') { sfx('levelup'); toast(`Challenge from ${who}: beat ${pad6(rec.score)} on ${gameById(rec.game).name}`, 'gold'); if (tab === 'arcade' && !$('#layer .sheet')) refresh(); }
+    if (via === 'nostr' && !bounty) { sfx('levelup'); toast(`Challenge from ${who}: beat ${pad6(rec.score)} on ${gameById(rec.game).name}`, 'gold'); if (tab === 'arcade' && !$('#layer .sheet')) refresh(); }
+  }
+  // a bounty only counts from the player who signed the challenge, and only if the sats are really locked to us
+  if (bounty && from === c.pubkey && (!rec.bounty || rec.bounty.state !== 'won')) {
+    const bo = readBounty(bounty, rec);
+    if (bo && (!rec.bounty || rec.bounty.token !== bo.token)) {
+      rec.bounty = bo; saveChallenges();
+      sfx('levelup'); toast(`${nameFor(c.pubkey) || rec.by} put ${money(bo.amount)} on beating ${pad6(rec.score)} on ${gameById(rec.game).name}`, 'gold');
+      if (tab === 'arcade' && !$('#layer .sheet')) refresh();
+    }
   }
   return rec;
 }
-function onResult(ev) {
+async function onResult(ev) {
   let r; try { r = readSigned(ev); } catch (e) { return; }
   const c = S.challenges.find(x => x.id === r.re && x.dir === 'out'); if (!c || !Number.isFinite(r.score)) return;
+  await bountyOnResult(c, r).catch(() => {});
   if (c.results.some(x => x.pubkey === r.pubkey && x.score >= r.score)) return;
   c.results = c.results.filter(x => x.pubkey !== r.pubkey).concat([{ pubkey: r.pubkey, by: String(r.by || '???').slice(0, 3), score: Math.floor(r.score), at: Date.now() }]); saveChallenges();
   const who = nameFor(r.pubkey) || r.by; const won = r.score > c.score;
@@ -546,6 +559,7 @@ function openChallengeIn(id) {
   const g = gameById(c.game); const who = nameFor(c.pubkey);
   openSheet('Challenge!', `
     <div class="chal-card"><span class="label">${who ? esc(who) + ' challenges you' : 'A player challenges you'}</span><b>${pad6(c.score)}</b><span data-noi18n>${esc(g.name)} · ${esc(c.by)}</span></div>
+    ${c.bounty ? `<div class="notice bounty-note ${c.bounty.state === 'won' ? 'cyan' : ''}"><b>${money(c.bounty.amount)} BOUNTY</b> ${c.bounty.state === 'won' ? 'You won it! The sats are in your wallet.' : c.bounty.state === 'gone' ? 'This bounty is gone.' : Date.now() < c.bounty.until ? `Beat ${pad6(c.score)} by ${fmtDay(c.bounty.until)} and it's yours. The mint holds it locked to you until then.` : 'Time ran out on this bounty.'}</div>` : ''}
     ${c.best != null ? `<div class="notice ${c.best > c.score ? 'cyan' : ''}">Your best on this challenge: ${pad6(c.best)} points. ${c.best > c.score ? 'You won!' : 'Not beaten yet.'}</div>` : ''}
     ${who ? '' : '<div class="tiny muted">This player isn\'t in your contacts. The challenge is signed, so you can save them if you know their key.</div>'}
     <button class="btn solid gold block" data-act="chalPlay" data-id="${esc(c.id)}">Accept: play ${esc(g.name)}</button>
@@ -555,7 +569,10 @@ function challengeDone(id, score, by) {   // the arcade reports the score of a c
   const c = S.challenges.find(x => x.id === id && x.dir === 'in'); if (!c) return null;
   c.best = Math.max(c.best || 0, score); saveChallenges();
   const contact = S.contacts.find(x => x.pubkey === c.pubkey);
-  return { won: score > c.score, target: c.score, canReply: !!contact, name: contact ? contact.name : '' };
+  const won = score > c.score, b = c.bounty && c.bounty.state === 'open' && Date.now() < c.bounty.until ? c.bounty : null;
+  // with sats on the line, a winning score goes back to the challenger straight away so their NUTCADE can release the bounty
+  if (won && b && contact) sendResult(id, score, by).catch(() => {});
+  return { won, target: c.score, canReply: !!contact, name: contact ? contact.name : '', bounty: b ? b.amount : 0, bountySent: !!(won && b && contact) };
 }
 async function sendResult(id, score, by) {
   const c = S.challenges.find(x => x.id === id && x.dir === 'in'); if (!c) return false;
@@ -571,7 +588,7 @@ function challengePanel() {
   return `<div class="panel" id="challenges"><span class="h2">Challenges</span><div class="txs">${list.map(c => {
     const g = gameById(c.game); if (!g) return '';
     if (c.dir === 'in') { const who = nameFor(c.pubkey) || c.by; const won = c.best != null && c.best > c.score;
-      return `<button class="tx in" data-act="chalOpen" data-id="${esc(c.id)}"><span class="ico" aria-hidden="true">!</span><span class="mid"><div class="note" data-noi18n>${esc(who)}</div><div class="meta"><span data-noi18n>${esc(g.name)}</span>${won ? '<span class="chip ecash">WON</span>' : c.best != null ? `<span class="chip pending">BEST ${pad6(c.best)}</span>` : '<span class="chip ln">NEW</span>'}</div></span><span class="amt">${pad6(c.score)}</span></button>`; }
+      return `<button class="tx in" data-act="chalOpen" data-id="${esc(c.id)}"><span class="ico" aria-hidden="true">!</span><span class="mid"><div class="note" data-noi18n>${esc(who)}</div><div class="meta"><span data-noi18n>${esc(g.name)}</span>${c.bounty ? `<span class="chip ${c.bounty.state === 'won' ? 'ecash' : 'gift'}" data-noi18n>${fmt(c.bounty.amount)} SAT</span>` : ''}${won ? '<span class="chip ecash">WON</span>' : c.best != null ? `<span class="chip pending">BEST ${pad6(c.best)}</span>` : '<span class="chip ln">NEW</span>'}</div></span><span class="amt">${pad6(c.score)}</span></button>`; }
     const best = c.results.slice().sort((a, b) => b.score - a.score)[0];
     return `<button class="tx out" data-act="chalSendOpen" data-id="${esc(c.id)}"><span class="ico" aria-hidden="true">↑</span><span class="mid"><div class="note">Your challenge</div><div class="meta"><span data-noi18n>${esc(g.name)}</span>${best ? `<span class="chip ${best.score > c.score ? 'failed' : 'claimed'}" data-noi18n>${esc(nameFor(best.pubkey) || best.by)} ${pad6(best.score)}</span>` : '<span class="chip pending">NO REPLIES YET</span>'}</div></span><span class="amt">${pad6(c.score)}</span></button>`;
   }).join('')}</div></div>`;

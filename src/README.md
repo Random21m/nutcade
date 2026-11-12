@@ -10,8 +10,11 @@
 | `app.js` | The wallet: storage and PIN vault, recovery phrase, mints, sending and receiving, Nostr, contacts, settings, every screen |
 | `app_r4.js` | Round 4, inlined inside `app.js`: send by sound, refundable gifts, bill split, mint health, cashier mode, challenges, piggy bank |
 | `app_r4_actions.js` | Round 4 button handlers, also inlined inside `app.js` |
+| `app_r5.js` | Round 5, inlined inside `app.js`: high-score bounties (NUT-14), Extra Life (NUT-11 inheritance), mint report card |
+| `app_r5_actions.js` | Round 5 button handlers, also inlined inside `app.js` |
+| `ur.js` | Animated QR codes: a BC-UR encoder and decoder (`ur:bytes`, multipart fountain codes), compatible with cashu.me |
 | `chiptune.js` | The sound modem used by Send by sound (encoder, decoder, microphone and speaker) |
-| `games.js` | The arcade engine and seven cabinets |
+| `games.js` | The arcade engine and eight cabinets |
 | `trophies.js` | Trophies and share cards |
 | `price.js` | The live Bitcoin price chart |
 | `audio.js` | Sound effects and music |

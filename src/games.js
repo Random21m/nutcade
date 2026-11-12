@@ -1,4 +1,4 @@
-/* NUTCADE arcade: engine + seven original 80s-style games */
+/* NUTCADE arcade: engine + eight original 80s-style games */
 (function(){
 'use strict';
 const W = 224, H = 288;
@@ -532,7 +532,146 @@ const nibble = {
   thumb(ctx, t) { ctx.fillStyle = '#0e0a24'; ctx.fillRect(0, 0, 112, 84); const n = 14; for (let i = 0; i < n; i++) { const k = (t / 4 - i) ; const x = 56 + Math.cos(k / 5) * 34, y = 42 + Math.sin(k / 3.3) * 26; ctx.fillStyle = i ? '#2fb84d' : C.lime; ctx.fillRect(x | 0, y | 0, 6, 6); } spr(ctx, ['.oo.', 'oyyo', 'oyyo', '.oo.'], 80, 20, { o: C.orange, y: C.gold }, 2); }
 };
 
-const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble];
+/* =====================================================================
+   GAME 8: NUT FLIPPER (pinball)
+   Physics runs in small substeps against line segments, circles and two flipper capsules.
+   Units are pixels and frames (60 per second). Seeded RNG picks the lit lane and where the gold sat appears.
+===================================================================== */
+const PB = { r: 3, g: 0.075, steps: 6, max: 8.5, lane: 202, laneTop: 112 };
+const PIV = { l: { x: 68, y: 244 }, r: { x: 140, y: 244 } }, FLEN = 27, FREST = 0.52, FUP = -0.48;
+function pbSeg(x1, y1, x2, y2, o) { return Object.assign({ x1, y1, x2, y2 }, o || {}); }
+function pbTable() {
+  const segs = [];
+  // rounded top: half an ellipse from the left wall over to the right wall
+  const cx = 112, cy = 96, rx = 104, ry = 66; let px = cx - rx, py = cy;
+  for (let i = 1; i <= 24; i++) { const a = Math.PI - Math.PI * i / 24; const x = cx + Math.cos(a) * rx, y = cy - Math.sin(a) * ry; segs.push(pbSeg(px, py, x, y)); px = x; py = y; }
+  segs.push(pbSeg(8, 96, 8, 206), pbSeg(216, 96, 216, 286));                       // side walls
+  segs.push(pbSeg(PB.lane, PB.laneTop, PB.lane, 286));                              // launch lane, inner wall
+  segs.push(pbSeg(PB.lane, 274, 216, 274));                                         // plunger floor
+  segs.push(pbSeg(PB.lane, PB.laneTop, 216, PB.laneTop - 20, { oneway: true }));    // gate: out of the lane, never back in
+  segs.push(pbSeg(8, 206, 66, 241), pbSeg(PB.lane, 206, 142, 241));                 // guides down to the flippers
+  // slingshots: the face toward the middle kicks
+  segs.push(pbSeg(30, 172, 54, 214, { kick: 2.2, sling: 1 }), pbSeg(30, 172, 30, 206), pbSeg(30, 206, 54, 214));
+  segs.push(pbSeg(178, 172, 154, 214, { kick: 2.2, sling: 1 }), pbSeg(178, 172, 178, 206), pbSeg(178, 206, 154, 214));
+  // posts between the three top lanes
+  for (const x of [60, 84, 108, 132]) segs.push(pbSeg(x, 46, x, 60));
+  return segs;
+}
+const PB_SEGS = pbTable();
+const PB_BUMP = [{ x: 76, y: 104 }, { x: 132, y: 104 }, { x: 104, y: 132 }];
+const PB_LANES = [72, 96, 120], PB_WORD = 'NUT';
+function pbClosest(px, py, x1, y1, x2, y2) { const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy || 1; const t = clamp(((px - x1) * dx + (py - y1) * dy) / L, 0, 1); return [x1 + dx * t, y1 + dy * t]; }
+function pbFlip(side, a) { const p = PIV[side], d = side === 'l' ? 1 : -1; return [p.x, p.y, p.x + Math.cos(a) * FLEN * d, p.y + Math.sin(a) * FLEN]; }
+const nutFlipper = {
+  id: 'flipper', name: 'NUT FLIPPER', year: '1983', blurb: 'Silver-ball pinball. Light N-U-T and hunt the gold sat.', track: 'bounce',
+  help: '◀ ▶ flippers · hold A to launch', keys: '← → flippers · hold Space to launch',
+  init(G) {
+    const s = { t: 0, balls: 3, ball: 1, mult: 1, bonus: 0, lanes: [0, 0, 0], drops: [0, 0, 0], dropT: 0, bh: [0, 0, 0], fl: { l: FREST, r: FREST }, fw: { l: 0, r: 0 }, msg: '', msgT: 0, fx: [], coins: 0, still: 0, lit: ri(0, 2) };
+    this.serve(s); this.coin(s); return s;
+  },
+  serve(s, again) { s.b = { x: 209, y: 270, vx: 0, vy: 0 }; s.power = 0; s.ready = true; s.saveT = 0; if (!again) s.saved = false; },
+  coin(s) { let x, y, k = 0; do { x = rnd(40, 168); y = rnd(80, 165); } while (++k < 20 && PB_BUMP.some(m => Math.hypot(x - m.x, y - m.y) < 20)); s.gold = { x, y, t: 0 }; },
+  say(s, m) { s.msg = m; s.msgT = 90; },
+  update(s, G) {
+    s.t++; const b = s.b;
+    const L = G.held('left') || (G.ptr.down && G.ptr.x < W / 2), R = G.held('right') || (G.ptr.down && G.ptr.x >= W / 2) || (G.held('a') && !s.ready);
+    for (const [side, on] of [['l', L], ['r', R]]) {
+      const goal = on ? FUP : FREST, a = s.fl[side];
+      const w = on ? Math.max(goal - a, -0.32) : Math.min(goal - a, 0.14);
+      if (on && a > FUP + 0.3 && w < -0.2 && s.t > 1 && !s['was' + side]) G.sfx('wall');
+      s['was' + side] = on; s.fw[side] = w;
+    }
+    if (s.ready) {                                                                   // ball on the plunger
+      const pull = G.held('a') || G.held('down') || G.ptr.down;
+      if (pull) s.power = Math.min(1, s.power + 1 / 50);
+      else if (s.power > 0) { b.vy = -(6.2 + s.power * 2.6); s.ready = false; s.saveT = s.saved ? 0 : 360; s.power = 0; G.sfx('launch'); }
+    }
+    const n = PB.steps;
+    for (let k = 0; k < n; k++) {
+      for (const side of ['l', 'r']) s.fl[side] += s.fw[side] / n;
+      if (s.ready) break;
+      b.vy += PB.g / n; b.x += b.vx / n; b.y += b.vy / n;
+      for (const sg of PB_SEGS) this.hitSeg(s, G, sg, b);
+      for (let i = 0; i < 3; i++) if (!s.drops[i]) this.hitSeg(s, G, { x1: 12, y1: 104 + i * 15, x2: 12, y2: 114 + i * 15, drop: i }, b);
+      PB_BUMP.forEach((m, i) => { const dx = b.x - m.x, dy = b.y - m.y, d = Math.hypot(dx, dy); if (d < 9 + PB.r && d > 0) { const nx = dx / d, ny = dy / d; b.x = m.x + nx * (9 + PB.r); b.y = m.y + ny * (9 + PB.r); const vn = b.vx * nx + b.vy * ny; b.vx -= 2 * vn * nx; b.vy -= 2 * vn * ny; b.vx += nx * 2.6; b.vy += ny * 2.6; s.bh[i] = 8; G.addScore(100 * s.mult); s.bonus += 10; G.sfx('pop'); } });
+      for (const side of ['l', 'r']) this.hitFlipper(s, side, b);
+    }
+    const sp = Math.hypot(b.vx, b.vy); if (sp > PB.max) { b.vx *= PB.max / sp; b.vy *= PB.max / sp; }
+    if (!s.ready && b.x > PB.lane && b.y > 262 && sp < 0.4) { this.serve(s, true); }      // a weak launch rolls back onto the plunger
+    // top lanes
+    if (b.y > 46 && b.y < 60) PB_LANES.forEach((x, i) => { if (Math.abs(b.x - x) < 6 && !s.lanes[i]) { s.lanes[i] = 1; G.addScore((i === s.lit ? 1000 : 250) * s.mult); G.sfx('eat'); if (s.lanes.every(Boolean)) { s.mult = Math.min(5, s.mult + 1); s.lanes = [0, 0, 0]; s.lit = ri(0, 2); G.addScore(500); this.say(s, 'MULTIPLIER X' + s.mult); G.sfx('levelup'); } } });
+    // gold sat
+    if (s.gold) { s.gold.t++; if (Math.hypot(b.x - s.gold.x, b.y - s.gold.y) < 7) { G.addScore(1000 * s.mult); s.coins++; s.bonus += 100; boom(s.fx, s.gold.x, s.gold.y, C.gold, 18); G.sfx('coin'); this.say(s, 'GOLD SAT!'); s.gold = null; s.goldWait = 240; } }
+    else if (--s.goldWait <= 0) this.coin(s);
+    if (s.dropT && --s.dropT === 0) s.drops = [0, 0, 0];
+    s.bh = s.bh.map(v => Math.max(0, v - 1)); if (s.msgT) s.msgT--; if (s.saveT) s.saveT--;
+    // a ball resting somewhere it can't leave gets a nudge
+    if (!s.ready && sp < 0.05 && b.y < 225) { if (++s.still > 120) { b.vy = -2; b.vx = b.x < 104 ? 1 : -1; s.still = 0; } } else s.still = 0;
+    tickFx(s.fx);
+    if (b.y > H + 6) {                                                             // drain
+      if (s.saveT > 0) { this.serve(s, true); s.saved = true; this.say(s, 'BALL SAVED'); G.sfx('power'); return; }
+      const bonus = s.bonus * s.mult; G.addScore(bonus); if (bonus) this.say(s, 'BONUS ' + bonus);
+      G.sfx('die'); s.balls--; s.bonus = 0; s.mult = 1;
+      if (s.balls <= 0) return G.over();
+      s.ball++; this.serve(s);
+    }
+  },
+  hitSeg(s, G, sg, b) {
+    const [qx, qy] = pbClosest(b.x, b.y, sg.x1, sg.y1, sg.x2, sg.y2); let dx = b.x - qx, dy = b.y - qy; const d = Math.hypot(dx, dy);
+    if (d >= PB.r || d === 0) return;
+    const nx = dx / d, ny = dy / d;
+    if (sg.oneway) { const sx = sg.x2 - sg.x1, sy = sg.y2 - sg.y1; if (sx * (b.y - sg.y1) - sy * (b.x - sg.x1) > 0) return; }   // only blocks from the playfield side
+    b.x = qx + nx * PB.r; b.y = qy + ny * PB.r;
+    const vn = b.vx * nx + b.vy * ny; if (vn >= 0) return;
+    b.vx -= 1.55 * vn * nx; b.vy -= 1.55 * vn * ny;
+    if (sg.kick && -vn > 0.6) { b.vx += nx * sg.kick; b.vy += ny * sg.kick; G.addScore(10 * s.mult); G.sfx('hit'); }
+    else if (-vn > 1.2) G.sfx('tick');
+    if (sg.drop != null) { s.drops[sg.drop] = 1; G.addScore(250 * s.mult); s.bonus += 25; G.sfx('brick'); if (s.drops.every(Boolean)) { G.addScore(1500 * s.mult); this.say(s, 'S-A-T  1500'); G.sfx('levelup'); s.dropT = 90; } }
+  },
+  hitFlipper(s, side, b) {
+    const [x1, y1, x2, y2] = pbFlip(side, s.fl[side]); const [qx, qy] = pbClosest(b.x, b.y, x1, y1, x2, y2);
+    const rr = PB.r + 2.5; const dx = b.x - qx, dy = b.y - qy, d = Math.hypot(dx, dy);
+    if (d >= rr || d === 0) return;
+    const nx = dx / d, ny = dy / d; b.x = qx + nx * rr; b.y = qy + ny * rr;
+    const dir = side === 'l' ? 1 : -1, w = s.fw[side] * dir, px = qx - x1, py = qy - y1;
+    const fvx = -w * py, fvy = w * px;                                              // surface speed of the flipper at the contact
+    const rvx = b.vx - fvx, rvy = b.vy - fvy, vn = rvx * nx + rvy * ny;
+    if (vn >= 0) return;
+    b.vx = fvx + rvx - 1.35 * vn * nx; b.vy = fvy + rvy - 1.35 * vn * ny;
+  },
+  draw(s, G, ctx) {
+    const g = ctx.createLinearGradient(0, 22, 0, H); g.addColorStop(0, '#1a0b3a'); g.addColorStop(1, '#0a0618'); ctx.fillStyle = g; ctx.fillRect(0, 22, W, H);
+    ctx.fillStyle = '#26114d'; ctx.beginPath(); ctx.ellipse(104, 150, 70, 46, 0, 0, 6.29); ctx.fill();
+    text(ctx, 'NUT', 104, 182, '#3a1f6e', 16, 'center');
+    ctx.strokeStyle = C.violet; ctx.lineWidth = 2; ctx.beginPath(); for (const sg of PB_SEGS) { if (sg.sling) continue; ctx.moveTo(sg.x1, sg.y1); ctx.lineTo(sg.x2, sg.y2); } ctx.stroke();
+    ctx.strokeStyle = C.pink; ctx.lineWidth = 3; ctx.beginPath(); for (const sg of PB_SEGS) if (sg.sling) { ctx.moveTo(sg.x1, sg.y1); ctx.lineTo(sg.x2, sg.y2); } ctx.stroke(); ctx.lineWidth = 1;
+    PB_LANES.forEach((x, i) => { ctx.fillStyle = s.lanes[i] ? C.lime : i === s.lit && (s.t >> 4) & 1 ? C.gold : '#3a2a6b'; ctx.fillRect(x - 4, 64, 8, 8); text(ctx, PB_WORD[i], x, 65, s.lanes[i] ? '#000' : C.ink, 8, 'center'); });
+    for (let i = 0; i < 3; i++) { ctx.fillStyle = s.drops[i] ? '#2a1a4a' : [C.cyan, C.gold, C.pink][i]; ctx.fillRect(10, 104 + i * 15, 4, 10); text(ctx, 'SAT'[i], 18, 105 + i * 15, s.drops[i] ? C.dim : C.ink); }
+    PB_BUMP.forEach((m, i) => { ctx.fillStyle = s.bh[i] ? C.white : C.pink; ctx.beginPath(); ctx.arc(m.x, m.y, 9, 0, 6.29); ctx.fill(); ctx.fillStyle = s.bh[i] ? C.gold : '#7a1d4a'; ctx.beginPath(); ctx.arc(m.x, m.y, 5, 0, 6.29); ctx.fill(); });
+    if (s.gold && ((s.gold.t >> 3) & 1 || s.gold.t > 30)) spr(ctx, ['.33.', '2222', '1111', '.11.'], s.gold.x - 4, s.gold.y - 4, { 1: C.gold, 2: C.brown, 3: '#5a3110' }, 2);
+    ctx.lineCap = 'round';
+    for (const side of ['l', 'r']) { const [x1, y1, x2, y2] = pbFlip(side, s.fl[side]); ctx.strokeStyle = C.cyan; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.fillStyle = C.white; ctx.fillRect(x1 - 1, y1 - 1, 2, 2); }
+    ctx.lineCap = 'butt'; ctx.lineWidth = 1;
+    if (s.ready) { const py = 278 + s.power * 8; ctx.fillStyle = C.gold; ctx.fillRect(205, py, 8, 3); ctx.fillStyle = C.dim; ctx.fillRect(208, py + 3, 2, 8); }
+    ctx.fillStyle = '#d8d8f0'; ctx.beginPath(); ctx.arc(s.b.x, s.b.y, PB.r, 0, 6.29); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(s.b.x - 2, s.b.y - 2, 1, 1);
+    drawFx(ctx, s.fx);
+    G.hud(s.balls, 'BALL ' + s.ball);
+    if (s.mult > 1) text(ctx, 'X' + s.mult, 104, 28, C.gold, 8, 'center');
+    if (s.msgT) text(ctx, s.msg, 104, 150, C.gold, 8, 'center');
+    else if (s.ready && s.ball === 1 && s.t < 600) text(ctx, 'HOLD A TO LAUNCH', 104, 150, C.ink, 8, 'center');
+    if (s.saveT > 0 && (s.t >> 3) & 1) text(ctx, 'SAVE', 104, 262, C.lime, 8, 'center');
+  },
+  thumb(ctx, t) {
+    ctx.fillStyle = '#1a0b3a'; ctx.fillRect(0, 0, 112, 84);
+    [[34, 24], [78, 24], [56, 40]].forEach(([x, y], i) => { ctx.fillStyle = ((t >> 3) + i) % 3 ? C.pink : C.white; ctx.beginPath(); ctx.arc(x, y, 7, 0, 6.29); ctx.fill(); });
+    ctx.strokeStyle = C.cyan; ctx.lineWidth = 4; ctx.lineCap = 'round'; const up = (t % 60) < 8;
+    ctx.beginPath(); ctx.moveTo(30, 70); ctx.lineTo(50, up ? 64 : 76); ctx.moveTo(82, 70); ctx.lineTo(62, up ? 64 : 76); ctx.stroke(); ctx.lineCap = 'butt'; ctx.lineWidth = 1;
+    const k = (t % 60) / 60, bx = 56 + Math.sin(t / 9) * 30, by = 70 - Math.sin(k * Math.PI) * 58;
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(bx, by, 3, 0, 6.29); ctx.fill();
+  }
+};
+
+const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper];
 
 /* =====================================================================
    ENGINE
@@ -578,6 +717,42 @@ function fit() {
 }
 function toLogical(e) { const c = view.querySelector('#gameCanvas'); const r = c.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
 
+/* Touch controls: a joystick by default (a D-pad if you prefer). The stick turns into the same up/down/left/right
+   keys the games already read. Grid games (maze, lanes, snake) take one direction at a time; the rest allow diagonals. */
+const FOUR_WAY = new Set(['maze', 'hop', 'nibble']);
+function padHTML() {
+  if (store.get('pad', 'stick') === 'stick') return `<div class="stick" role="group" aria-label="Joystick"><div class="stick-ring" aria-hidden="true"></div><div class="stick-knob" aria-hidden="true"></div></div>`;
+  return `<div class="dpad">${['u', 'l', 'c', 'r', 'd'].map(k => `<button class="${k}" ${k === 'c' ? 'tabindex="-1" aria-hidden="true"' : `data-k="${{ u: 'up', l: 'left', r: 'right', d: 'down' }[k]}" aria-label="${{ u: 'Up', l: 'Left', r: 'Right', d: 'Down' }[k]}"`}>${{ u: '▲', l: '◀', r: '▶', d: '▼', c: '' }[k]}</button>`).join('')}</div>`;
+}
+function bindStick(root) {
+  const el = root.querySelector('.stick'); if (!el) return;
+  const knob = el.querySelector('.stick-knob'); const on = new Set(); let pid = null, cx = 0, cy = 0, R = 50;
+  const set = dirs => {
+    let changed = false;
+    for (const k of ['up', 'down', 'left', 'right']) { if (dirs.has(k) && !on.has(k)) { press(k); on.add(k); changed = true; } else if (!dirs.has(k) && on.has(k)) { release(k); on.delete(k); } }
+    if (changed && navigator.vibrate) try { navigator.vibrate(6); } catch (e) {}
+  };
+  const move = e => {
+    let dx = e.clientX - cx, dy = e.clientY - cy; const d = Math.hypot(dx, dy);
+    if (d > R) { dx *= R / d; dy *= R / d; }
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const t = R * 0.32, ax = Math.abs(dx), ay = Math.abs(dy), dirs = new Set();
+    if (Math.max(ax, ay) > t) {
+      if (cur && FOUR_WAY.has(cur.id)) dirs.add(ax > ay ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down'));
+      else { if (ax > t && ax > ay * 0.45) dirs.add(dx < 0 ? 'left' : 'right'); if (ay > t && ay > ax * 0.45) dirs.add(dy < 0 ? 'up' : 'down'); }
+    }
+    set(dirs);
+  };
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault(); pid = e.pointerId; try { el.setPointerCapture(pid); } catch (x) {}
+    const r = el.getBoundingClientRect(); cx = r.left + r.width / 2; cy = r.top + r.height / 2; R = r.width / 2 - knob.offsetWidth / 2 + 8;
+    el.classList.add('on'); move(e);
+  });
+  el.addEventListener('pointermove', e => { if (e.pointerId === pid) move(e); });
+  const up = e => { if (e.pointerId !== pid) return; pid = null; knob.style.transform = ''; el.classList.remove('on'); set(new Set()); };
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up); el.addEventListener('lostpointercapture', up);
+  el.addEventListener('contextmenu', e => e.preventDefault());
+}
 function openGame(id, opts) {
   cur = GAMES.find(g => g.id === id); if (!cur) return;
   closeGame(true);
@@ -585,19 +760,28 @@ function openGame(id, opts) {
   view = document.createElement('div'); view.className = 'game-view'; view.setAttribute('role', 'dialog'); view.setAttribute('aria-label', cur.name);
   view.innerHTML = `<div class="game-top"><button class="btn sm red" data-g="exit">Exit</button><div class="ttl">${cur.name}</div><button class="btn sm" data-g="mute" aria-label="Toggle sound">${(window.NutPrefs || {}).sound === false ? 'SND OFF' : 'SND ON'}</button></div>
     <div class="screen-frame"><canvas id="gameCanvas" width="${W}" height="${H}" aria-label="${cur.name} game screen"></canvas></div>
-    <div class="pad touch-only"><div class="dpad">${['u', 'l', 'c', 'r', 'd'].map(k => `<button class="${k}" ${k === 'c' ? 'tabindex="-1" aria-hidden="true"' : `data-k="${{ u: 'up', l: 'left', r: 'right', d: 'down' }[k]}" aria-label="${{ u: 'Up', l: 'Left', r: 'Right', d: 'Down' }[k]}"`}>${{ u: '▲', l: '◀', r: '▶', d: '▼', c: '' }[k]}</button>`).join('')}</div>
-    <div class="hint">${cur.help}</div><div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause">II</button><button class="abtn a" data-k="a" aria-label="A button">A</button></div></div>
+    <div class="pad touch-only">${padHTML()}
+    <div class="hint">${cur.help}<button class="padswap" data-g="pad">${store.get('pad', 'stick') === 'stick' ? 'Use D-pad' : 'Use joystick'}</button></div><div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause">II</button><button class="abtn a" data-k="a" aria-label="A button">A</button></div></div>
     <div class="pad-keys">${cur.keys} · Enter pause · Esc exit</div><div id="entry"></div>`;
   document.body.appendChild(view);
   document.body.style.overflow = 'hidden';
   ctx = view.querySelector('#gameCanvas').getContext('2d'); ctx.imageSmoothingEnabled = false;
-  view.querySelectorAll('[data-k]').forEach(b => {
+  bindStick(view);
+  view.querySelector('[data-g="pad"]').onclick = e => {   // switch between the joystick and the D-pad, remembered for next time
+    const next = store.get('pad', 'stick') === 'stick' ? 'dpad' : 'stick'; store.set('pad', next);
+    for (const k of ['up', 'down', 'left', 'right']) release(k);
+    const old = view.querySelector('.stick, .dpad'); old.insertAdjacentHTML('afterend', padHTML()); old.remove();
+    e.currentTarget.textContent = next === 'stick' ? 'Use D-pad' : 'Use joystick';
+    bindStick(view); bindKeys(view.querySelector('.dpad')); A().sfx('blip');
+  };
+  bindKeys(view);
+  function bindKeys(root) { if (!root) return; root.querySelectorAll('[data-k]').forEach(b => {
     const k = b.dataset.k;
     const down = e => { e.preventDefault(); b.setPointerCapture && b.setPointerCapture(e.pointerId); b.classList.add('on'); press(k); if (navigator.vibrate) try { navigator.vibrate(8); } catch (x) {} };
     const up = e => { b.classList.remove('on'); release(k); };
     b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
     b.addEventListener('contextmenu', e => e.preventDefault());
-  });
+  }); }
   view.querySelector('[data-g="exit"]').onclick = () => closeGame();
   view.querySelector('[data-g="mute"]').onclick = e => { const p = window.NutPrefs || {}; p.sound = p.sound === false; store.set('prefs', p); e.currentTarget.textContent = p.sound ? 'SND ON' : 'SND OFF'; if (p.sound) A().music(mode === 'play' ? cur.track : 'title'); else A().stopMusic(); };
   const cv = view.querySelector('#gameCanvas');
@@ -659,8 +843,9 @@ function showChallengeResult(score) {
   A().sfx(won ? 'levelup' : 'over');
   box.innerHTML = box6(`<div style="font-family:var(--f-display);font-size:14px;color:${won ? 'var(--lime)' : 'var(--pink)'}">${won ? 'YOU WIN!' : 'SO CLOSE!'}</div>
     <div class="scores" style="font-size:10px"><div><span>YOU</span><span data-noi18n>${esc6(initials)}</span><span>${pad6(score)}</span></div><div><span>THEM</span><span data-noi18n>${esc6(c.by)}</span><span>${pad6(c.target)}</span></div></div>
-    ${res && res.canReply ? `<button class="btn solid gold block" data-g="reply">Send my score to ${esc6(res.name)}</button>` : ''}
-    <button class="btn block ${res && res.canReply ? '' : 'solid gold'}" data-g="rematch">Rematch</button><button class="btn block" data-g="exit2">Exit</button>`);
+    ${res && res.bounty ? `<div class="notice ${won ? 'cyan' : ''}" style="font-size:11px">${won ? (res.bountySent ? `Score sent. ${esc6(res.name)}'s NUTCADE unlocks your ${res.bounty} sat bounty when it sees it.` : `You beat it! Add ${esc6(res.name || 'them')} to your contacts to claim the ${res.bounty} sat bounty.`) : `The ${res.bounty} sat bounty is still up. Rematch!`}</div>` : ''}
+    ${res && res.canReply && !res.bountySent ? `<button class="btn solid gold block" data-g="reply">Send my score to ${esc6(res.name)}</button>` : ''}
+    <button class="btn block ${res && res.canReply && !res.bountySent ? '' : 'solid gold'}" data-g="rematch">Rematch</button><button class="btn block" data-g="exit2">Exit</button>`);
   const rb = box.querySelector('[data-g=reply]');
   if (rb) rb.onclick = () => { rb.disabled = true; rb.textContent = 'SENDING…'; N().sendResult(c.id, score, initials).then(ok => { rb.textContent = ok ? 'SCORE SENT' : "COULDN'T SEND"; A().sfx(ok ? 'coin' : 'err'); }); };
   box.querySelector('[data-g=rematch]').onclick = () => { box.innerHTML = ''; mode = 'title'; A().music('title'); };
@@ -750,6 +935,6 @@ function topLine() {
 }
 // layout(id, seed): the starting state a seed gives, so tests can check that a challenge replays the same layout
 function layout(id, seed) { const g = GAMES.find(x => x.id === id); if (!g || view) return null; const keep = RNG; RNG = seeded(seed); const c0 = ctx; try { return JSON.stringify(g.init(makeG())); } finally { RNG = keep; ctx = c0; } }
-window.Arcade = { mountList, open: openGame, topLine, playing: () => !!view, games: GAMES, layout, challenge: () => chal };
+window.Arcade = { mountList, open: openGame, topLine, playing: () => !!view, games: GAMES, layout, challenge: () => chal, held: () => Object.keys(keys).filter(k => keys[k]) };
 if (window.Nutcade) window.Nutcade.render();
 })();

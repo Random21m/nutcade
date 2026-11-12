@@ -53,11 +53,16 @@ Object.assign(A, {
   chalSend: b => run(b, 'SENDING', async () => {
     const c = S.challenges.find(x => x.id === b.dataset.id && x.dir === 'out'); const k = contactById(b.dataset.c);
     if (!c || !k) return;
-    const wrap = L.nip17.wrapEvent(rnd(32), { publicKey: k.pubkey }, JSON.stringify({ t: 'nutcade-challenge', ev: c.ev }));
+    const bAmt = Math.floor(num(val('bountyAmt').replace(/[^0-9]/g, '')));
+    let bounty = null, bo = null;
+    if (bAmt > 0) { bo = await createBounty(c, k, bAmt); bounty = { token: bo.tx.token, amount: bAmt, until: bo.b.until }; }
+    // with a bounty the message is sealed with our own key, so Robin's NUTCADE can tell the sats really come from the challenger
+    const wrap = L.nip17.wrapEvent(bounty ? nostrKey() : rnd(32), { publicKey: k.pubkey }, JSON.stringify(Object.assign({ t: 'nutcade-challenge', ev: c.ev }, bounty ? { bounty } : {})));
     const ok = await relayPublish(wrap, 8000, [...new Set((k.relays || []).concat(relays()))].slice(0, 8));
-    if (!ok) throw new Error('No Nostr relay accepted the challenge. Share the link instead.');
+    if (!ok) throw new Error(bounty ? `No Nostr relay took the challenge. Your ${money(bAmt)} stay locked until ${fmtDay(bo.b.until)}, then come back to you.` : 'No Nostr relay accepted the challenge. Share the link instead.');
     c.sentTo = [...new Set((c.sentTo || []).concat(k.id))]; saveChallenges();
-    sfx('coin'); toast(`Challenge sent to ${k.name}`, 'lime');
+    sfx('coin'); toast(bounty ? `Challenge and ${money(bAmt)} bounty sent to ${k.name}` : `Challenge sent to ${k.name}`, 'lime');
+    if (bounty) { refresh(); openChallengeSend(c.id); }
   }),
   chalShare: b => { const c = S.challenges.find(x => x.id === b.dataset.id); if (!c) return; const g = gameById(c.game); navigator.share({ text: `Beat my ${pad6(c.score)} on ${g ? g.name : c.game} in NUTCADE`, url: challengeLink(c.ev) }).catch(() => {}); },
   chalQR: b => { const c = S.challenges.find(x => x.id === b.dataset.id); if (!c) return; openSheet('Challenge QR', `${qrBlock(challengeLink(c.ev), 'Challenge link QR')}<button class="btn block" data-act="chalSendOpen" data-id="${esc(c.id)}">Back</button>`); },

@@ -183,11 +183,11 @@ async function restoreFromMint(url, onStep) {
    Catch up by rescanning that mint (which also recovers anything new), then retry once. */
 const isDupOutputs = e => e && (e.code === 11003 || /already signed/i.test(String(e.message || '')));
 async function withRepair(url, fn) {
-  try { return await fn(); }
+  try { const r = await fn(); opMark(url, true); return r; }
   catch (e) {
-    if (!isDupOutputs(e)) throw e;
+    if (!isDupOutputs(e)) { opMark(url, false, e); throw e; }
     await restoreFromMint(url);
-    return await fn();
+    const r = await fn(); opMark(url, true); return r;
   }
 }
 
@@ -391,7 +391,7 @@ async function sendEcash(amount, note, lockTo, url = S.active, opts = {}) {
   const w = await getWallet(url);
   const have = S.proofs[url] || [];
   if (sum(have) < amount) throw new Error(`Not enough credits. This mint holds ${money(sum(have))}.`);
-  const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}) }, keep: w.defaultOutputType() } : undefined;
+  const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}) }, keep: w.defaultOutputType() } : undefined;
   const { keep, send } = await withRepair(url, () => w.send(amount, have, { includeFees: true }, outCfg));
   S.proofs[url] = plain(keep);
   const token = L.getEncodedToken({ mint: url, proofs: send, unit: 'sat' });
@@ -652,15 +652,23 @@ async function startCamera() {
     if (!v || !v.isConnected) { stopScan(); return; }
     v.srcObject = scanStream; await v.play(); if (msg) msg.hidden = true;
     const detector = ('BarcodeDetector' in window) ? await BarcodeDetector.getSupportedFormats().then(f => f.includes('qr_code') ? new BarcodeDetector({ formats: ['qr_code'] }) : null).catch(() => null) : null;
-    let busy = false, last = 0;
+    let busy = false, last = 0, ur = null;
     const tick = async t => {
       if (!scanStream) return;
       scanRaf = requestAnimationFrame(tick);
-      if (busy || t - last < 150 || v.readyState < 2) return; busy = true; last = t;
+      if (busy || t - last < (ur ? 90 : 150) || v.readyState < 2) return; busy = true; last = t;
       try {
         let text = null;
         if (detector) { const r = await detector.detect(v); text = r[0] && r[0].rawValue; }
         if (!text) text = await decodeFrame(v);
+        if (text && /^ur:/i.test(text) && window.NutUR) {
+          // one frame of an animated QR: keep collecting until the whole code is in
+          if (!ur) ur = NutUR.decoder();
+          if (await ur.receive(text)) { if (navigator.vibrate) try { navigator.vibrate(5); } catch (e) {} }
+          if (msg) { msg.hidden = false; msg.textContent = ur.done() ? 'GOT IT' : 'ANIMATED QR · ' + Math.round(ur.progress() * 100) + '%'; }
+          if (ur.error()) { ur = null; if (msg) msg.textContent = 'THAT CODE DIDN\'T CHECK OUT. TRY AGAIN.'; }
+          text = ur && ur.done() ? ur.text() : null;
+        }
         if (text) { stopScan(); sfx('select'); if (navigator.vibrate) try { navigator.vibrate(30); } catch (e) {} handleScan(text); }
       } catch (e) {}
       busy = false;
@@ -675,7 +683,8 @@ async function scanPhoto(file) {
     const url = URL.createObjectURL(file); const img = new Image(); img.src = url; await img.decode();
     const text = await decodeFrame(img, true); URL.revokeObjectURL(url);
     if (!text) throw new Error("No QR code found in that picture. Try a sharper, closer photo.");
-    stopScan(); handleScan(text);
+    const one = await urSingle(text); if (one === false) throw new Error("That's one frame of an animated QR code. Scan it live with the camera instead.");
+    stopScan(); handleScan(one || text);
   } catch (e) { showErr(e); }
 }
 /* Figure out what a scanned or pasted string is and open the right screen for it. */
@@ -698,7 +707,14 @@ function classify(raw) {
   if (/^https?:\/\/[^\s]+$/i.test(t)) return { kind: 'mint', value: normUrl(t) };
   return { kind: 'unknown' };
 }
+// A ur: code that fits in one QR (or was pasted) decodes on its own. Returns the text, false for one frame of a longer code, null if it isn't ur:.
+async function urSingle(text) {
+  if (!/^ur:/i.test(String(text).trim()) || !window.NutUR) return null;
+  const d = NutUR.decoder(); try { await d.receive(String(text).trim()); } catch (e) { return null; }
+  return d.done() ? d.text() : false;
+}
 function handleScan(text) {
+  if (/^ur:bytes\//i.test(String(text || '').trim())) { urSingle(text).then(t => t ? handleScan(t) : toast("That's one frame of an animated QR code. Scan it live with the camera instead.", 'gold')); return; }
   const c = classify(text);
   if (c.kind === 'token') { closeSheet(); openReceive('ecash'); const box = $('#tokIn'); if (box) { box.value = c.value; box.dispatchEvent(new Event('input', { bubbles: true })); } return; }
   if (c.kind === 'unknown') { closeSheet(); sfx('err'); toast("That QR code isn't something NUTCADE can use.", 'gold'); return; }
@@ -770,10 +786,10 @@ function celebrate(dir, amount) {
 }
 
 /* ---------- QR ---------- */
-function qrCanvas(text) {
+function qrCanvas(text, mode) {
   try {
     const qr = L.qrcode(0, text.length > 600 ? 'L' : 'M');
-    qr.addData(text); qr.make();
+    qr.addData(text, mode); qr.make();
     const n = qr.getModuleCount(), sc = 4, q = 2;
     const c = document.createElement('canvas'); c.width = c.height = (n + q * 2) * sc;
     const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.fillStyle = '#0a0717';
@@ -785,17 +801,37 @@ function slimToken(t) {
   const d = L.getDecodedToken(t, Object.keys(S.counters));
   return L.getEncodedToken({ mint: d.mint, unit: d.unit || 'sat', memo: d.memo, proofs: d.proofs.map(p => { const o = Object.assign({}, p); delete o.dleq; return o; }) });
 }
+// Above this many characters a single QR code gets too dense for most phone cameras, so it plays as an animated QR instead.
+const QR_STATIC_MAX = 1000;
 function qrBlock(text, label) {
   const id = 'qr' + uid();
   setTimeout(() => {
     const el = document.getElementById(id); if (!el) return;
-    let c = qrCanvas(text);
-    // Tokens with many proofs (locked gifts especially) can be too long for one QR code. Without the DLEQ proofs, which
-    // the receiving wallet doesn't need to claim the ecash, they usually fit. The copied text stays the full token.
-    if (!c && /^cashuB/.test(text)) { try { c = qrCanvas(slimToken(text)); } catch (e) {} }
-    if (c) { c.setAttribute('aria-label', label || 'QR code'); el.appendChild(c); } else { el.outerHTML = '<div class="notice cyan">Too long for one QR code. Use Copy or Play as sound instead.</div>'; }
+    // Tokens with many proofs (locked gifts especially) get long. Without the DLEQ proofs, which the receiving wallet
+    // doesn't need to claim the ecash, they're about a quarter shorter. The copied text stays the full token.
+    let t = text;
+    if (/^cashuB/.test(text) && text.length > QR_STATIC_MAX) { try { t = slimToken(text); } catch (e) {} }
+    const c = t.length <= QR_STATIC_MAX ? qrCanvas(t) : null;
+    if (c) { c.setAttribute('aria-label', label || 'QR code'); el.appendChild(c); return; }
+    animatedQR(el, t, label);
   }, 0);
   return `<div class="qr" id="${id}"></div>`;
+}
+/* A long code plays as a loop of small QR codes (BC-UR, the format cashu.me uses), drawn in uppercase so each frame
+   is a compact alphanumeric QR. Any frame order works and missed frames are fine: the scanner keeps collecting. */
+function animatedQR(el, text, label) {
+  if (!window.NutUR) { el.outerHTML = '<div class="notice cyan">Too long for one QR code. Use Copy or Play as sound instead.</div>'; return; }
+  const enc = NutUR.encoder(text, 150); let n = 0;
+  el.classList.add('qr-anim'); el.setAttribute('role', 'img'); el.setAttribute('aria-label', (label || 'QR code') + ', animated');
+  el.insertAdjacentHTML('afterend', `<div class="tiny muted qr-anim-note" style="text-align:center">Animated QR · ${enc.count} parts · scan with NUTCADE or cashu.me</div>`);
+  const step = async () => {
+    if (!el.isConnected) return;
+    const part = (await enc.next()).toUpperCase();
+    const c = qrCanvas(part, 'Alphanumeric') || qrCanvas(part);
+    if (c && el.isConnected) { el.replaceChildren(c); el.dataset.part = String(++n); }
+    setTimeout(step, 200);
+  };
+  step();
 }
 
 /* ---------- toasts / copy ---------- */
@@ -978,7 +1014,7 @@ function viewGate() {
       <ul class="gate-list">
         <li><b>A Bitcoin wallet.</b> NUTCADE holds sats as Cashu ecash: fast, private, and sent like a text.</li>
         <li><b>Your keys, your sats.</b> A 12-word recovery phrase is the only way to get your sats back if this device is lost.</li>
-        <li><b>An arcade.</b> Seven cabinets of free play once you're in.</li>
+        <li><b>An arcade.</b> Eight cabinets of free play once you're in.</li>
       </ul>
       ${legacy ? `<div class="notice">You already hold ${money(totalBalance())} here from before recovery phrases. Creating your phrase moves that ecash under it so it's protected too.</div>` : ''}
       <label class="ack" for="ack"><input id="ack" type="checkbox" data-gatecheck="ack"><span>I understand NUTCADE is new, experimental software, that mints hold the Bitcoin behind my ecash, and that my 12 words are the only way to recover my sats.</span></label>
@@ -1079,8 +1115,8 @@ function viewWallet() {
       <button class="push send" data-act="send"><span class="cap" aria-hidden="true">↑</span><span class="t">SEND</span></button>
     </div>
     <div class="scanrow"><button class="btn violet scan-btn" data-act="scan"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h5v1H2v4H1zm9 0h5v5h-1V2h-4zM1 10h1v4h4v1H1zm13 0h1v5h-5v-1h4zM4 4h3v3H4zm5 0h3v3H9zM4 9h3v3H4zm5 0h1v1H9zm2 0h1v1h-1zm-2 2h1v1H9zm2 1h1v1h-1z"/></svg>Scan QR code</button>${window.Chiptune && window.Chiptune.canListen() ? '<button class="btn violet" data-act="ctListen" aria-label="Listen for a code sent as sound"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 1h4v8H6zM4 6h1v3a3 3 0 0 0 6 0V6h1v3a4 4 0 0 1-3.5 4V15h-1v-2A4 4 0 0 1 4 9z"/></svg>Listen</button>' : ''}</div>
-    <div class="toolrow"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm pink" data-act="splitOpen">Split a bill</button></div>
-    ${splitPanels()}${piggyPanel()}
+    <div class="toolrow"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm pink" data-act="splitOpen">Split a bill</button>${S.extra ? '' : '<button class="btn sm lime" data-act="extraOpen">Extra Life</button>'}</div>
+    ${splitPanels()}${piggyPanel()}${extraPanel()}
     <div id="priceMount"></div>
     <div class="panel">
       <div class="row between"><span class="h2">Recent</span>${S.txs.length ? '<button class="linkbtn" data-act="tab" data-tab="history">All notes</button>' : ''}</div>
@@ -1113,7 +1149,7 @@ function viewMints() {
     ${S.mints.length ? `<div class="txs">${S.mints.map(m => `<div class="panel ${m.url === S.active ? 'hot' : ''}" style="gap:8px">
       <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div style="font-family:var(--f-display);font-size:11px;color:var(--gold)">${esc(m.name)}</div><div class="tiny muted" style="overflow-wrap:anywhere">${esc(host(m.url))}</div></div>
       <div style="font-family:var(--f-display);font-size:12px;white-space:nowrap">${fmt(balanceOf(m.url))}</div></div>
-      ${mintHealthLine(m)}
+      <div class="row between" style="gap:8px">${mintHealthLine(m)}${reportChip(m.url)}</div>
       <div class="row" style="flex-wrap:wrap;gap:6px">${methodChips(m)}</div>
       <div class="row" style="flex-wrap:wrap">${m.url === S.active ? '<span class="chip ecash">ACTIVE</span>' : `<button class="btn sm lime" data-act="useMint" data-url="${esc(m.url)}">Use</button>`}
       <button class="btn sm" data-act="refreshMint" data-url="${esc(m.url)}">Refresh</button>
@@ -1243,7 +1279,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.9.0';
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
 const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
 const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-about', 'About']];
@@ -1319,7 +1355,7 @@ function viewSettings() {
 
     <div class="panel" id="set-tools"><span class="h2">Wallet tools</span>
       <p class="th" style="margin:0">Use these if your balance looks wrong or a payment seems stuck.</p>
-      <div class="row wrap"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm" data-act="tillOpen">Today's till</button><button class="btn sm" data-act="moveOpen">Move sats between mints</button></div>
+      <div class="row wrap"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm" data-act="tillOpen">Today's till</button><button class="btn sm" data-act="moveOpen">Move sats between mints</button><button class="btn sm lime" data-act="extraOpen">Extra Life</button></div>
       <div class="row wrap"><button class="btn sm violet" data-act="clean">Remove spent ecash</button><button class="btn sm" data-act="reconcileAll">Check stuck payments${inflight ? ` (${inflight})` : ''}</button></div>
     </div>
 
@@ -1678,8 +1714,10 @@ function onGiftWrap(ev) {
   wrapChain = wrapChain.then(async () => {
     let rumor; try { if (!L.verifyEvent(ev)) return; rumor = L.nip59.unwrapEvent(ev, nostrKey()); } catch (e) { return; }
     let p; try { p = JSON.parse(rumor.content); } catch (e) { return; }
-    if (p && p.t === 'nutcade-challenge' && p.ev) { onChallenge(p.ev, 'nostr'); return; }
-    if (p && p.t === 'nutcade-result' && p.ev) { onResult(p.ev); return; }
+    if (p && p.t === 'nutcade-challenge' && p.ev) { onChallenge(p.ev, 'nostr', p.bounty, rumor.pubkey); return; }
+    if (p && p.t === 'nutcade-result' && p.ev) { await onResult(p.ev); return; }
+    if (p && p.t === 'nutcade-bounty' && p.re && typeof p.pre === 'string') { const rec = S.challenges.find(x => x.id === p.re && x.dir === 'in'); if (rec) await claimBounty(rec, p.pre, rumor.pubkey); return; }
+    if (p && (p.t === 'nutcade-extralife' || p.t === 'nutcade-extralife-end')) { onExtraLife(p, rumor.pubkey); return; }
     if (p && Array.isArray(p.proofs) && p.proofs.length && typeof p.mint === 'string') await receivePayload(p, rumor.pubkey);
   }).catch(() => {});
 }
@@ -2337,6 +2375,7 @@ async function lnAddressInvoice(address, sats, comment) {
 }
 
 /*@@app_r4.js@@*/
+/*@@app_r5.js@@*/
 
 /* ---------- actions ---------- */
 const A = {
@@ -2426,6 +2465,10 @@ const A = {
       const ids = new Set(S.txs.map(t => t.id)); for (const t of d.txs || []) if (!ids.has(t.id)) S.txs.push(t);
       S.txs.sort((a, b) => b.ts - a.ts);
       for (const p of d.pending || []) if (!S.pending.find(x => x.id === p.id)) S.pending.push(p);
+      // Extra Life, the copies we hold as an heir, and challenges (bounty secrets live there)
+      if (d.extra && !S.extra) { S.extra = d.extra; saveExtra(); }
+      for (const h of d.heirlooms || []) if (!S.heirlooms.find(x => x.token === h.token)) S.heirlooms.push(h); saveHeir();
+      for (const c of d.challenges || []) if (!S.challenges.find(x => x.id === c.id && x.dir === c.dir)) S.challenges.push(c); saveChallenges();
       if (!S.active && S.mints[0]) S.active = S.mints[0].url;
       save(); closeSheet(); render(); toast('Backup restored. Run Check proofs to drop spent ecash.', 'lime');
     } catch (e) { showErr(new Error(e.message.includes('JSON') ? "That isn't valid backup text." : e.message)); }
@@ -2541,7 +2584,7 @@ const A = {
   jump: b => { const el = document.getElementById(b.dataset.id); if (el) el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); },
   setTheme: b => { S.prefs.theme = b.dataset.t; save(); refresh(); sfx('select'); },
   backupDownload: () => {
-    const data = JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk }, null, 1);
+    const data = JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges }, null, 1);
     try {
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
       a.download = `nutcade-backup-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(a); a.click(); a.remove();
@@ -2700,6 +2743,7 @@ const A = {
   clean: b => run(b, 'CHECKING', async () => { const n = await cleanWallet(); render(); toast(n ? `Removed ${n} spent proof${n === 1 ? '' : 's'}` : 'All proofs are good', 'lime'); })
 };
 /*@@app_r4_actions.js@@*/
+/*@@app_r5_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;
@@ -2755,6 +2799,7 @@ async function backgroundTick(startup) {
   if (S.prefs.npc) await npcSync().catch(() => {});
   await claimSaved().catch(() => {});
   await refundExpiredGifts().catch(() => {});
+  await extraTick().catch(() => {}); await claimHeirlooms().catch(() => {}); await retryBounties().catch(() => {});
   if (S.prefs.nostrBackup && S.mints.length && S.prefs.mintBackupList !== S.mints.map(m => m.url).join(' ') && Date.now() - mintBackupTry > 10 * 60e3) scheduleMintBackup(startup ? 4000 : 0);
   if (S.prefs.checkSent) for (const t of S.txs.filter(t => t.status === 'pending' && t.method === 'ecash' && t.sent).slice(0, 10)) await checkClaim(t).catch(() => {});
 }

@@ -22,6 +22,7 @@ const ICON = {
   rock: ['..###...', '.#...##.', '#......#', '#..#...#', '.#.....#', '#......#', '.#..##..', '..##....'],
   frog: ['.##..##.', '#.#..#.#', '.######.', '########', '#.####.#', '.######.', '.#....#.', '##....##'],
   shield: ['########', '#......#', '#.####.#', '#.####.#', '.#.##.#.', '.#....#.', '..#..#..', '...##...'],
+  ball: ['..####..', '.#..####', '#..#####', '#.######', '########', '########', '.######.', '..####..'],
   snake: ['......##', '.....#.#', '.....##.', '..####..', '.#......', '.#####..', '.....#..', '.####...'],
   stick: ['..###...', '..###...', '...#....', '...#....', '...#....', '.#####..', '#######.', '#######.'],
   star: ['...##...', '...##...', '########', '.######.', '..####..', '.##..##.', '##....##', '#......#'],
@@ -58,7 +59,8 @@ const DEFS = [
   { id: 'g-hop', game: 'hop', name: 'SAFE CROSSING', how: 'Reach level 2 in Hop Lanes.', icon: 'frog', col: '#9dff3a', g: s => s.level >= 2 },
   { id: 'g-shield', game: 'shield', name: 'CITY SAVER', how: 'Reach wave 3 in Sky Shield.', icon: 'shield', col: '#2de2ff', g: s => s.wave >= 3 },
   { id: 'g-nibble', game: 'nibble', name: 'LONG BOI', how: 'Grow to length 30 in Nibble.', icon: 'snake', col: '#9dff3a', g: s => s.body && s.body.length >= 30 },
-  { id: 'tour', name: 'GRAND TOUR', how: 'Play all 7 cabinets.', icon: 'stick', col: '#ff9a1f', p: p => Object.keys(p.by || {}).length >= 7 },
+  { id: 'g-flipper', game: 'flipper', name: 'SILVER BALL', how: 'Light all three N-U-T lanes in Nut Flipper.', icon: 'ball', col: '#ffcf3a', g: s => s.mult >= 2 },
+  { id: 'tour', name: 'GRAND TOUR', how: 'Play all 8 cabinets.', icon: 'stick', col: '#ff9a1f', p: p => Object.keys(p.by || {}).length >= 8 },
   { id: 'rat', name: 'ARCADE RAT', how: 'Play 50 games.', icon: 'stick', col: '#ff3d8b', p: p => (p.n || 0) >= 50 },
   { id: 'top5', name: 'TOP FIVE', how: 'Put your initials on a high-score table.', icon: 'star', col: '#ffcf3a', x: 'hiscore' },
   { id: 'big', name: 'FIVE DIGITS', how: 'Score 10,000 in any game.', icon: 'five', col: '#ff3d8b', x: 'big' }
@@ -141,7 +143,7 @@ function mount(el) {
   box.innerHTML = `<div class="row between"><span class="h2">Trophies</span><span class="tiny" style="color:var(--gold)">${have}/${DEFS.length}</span></div>
     <div class="meter" aria-hidden="true"><i style="width:${Math.round(have / DEFS.length * 100)}%"></i></div>
     <div class="trophies">${DEFS.map(d => `<button class="trophy ${got[d.id] ? 'on' : ''}" data-trophy="${d.id}" aria-label="${esc(d.name)}${got[d.id] ? ', earned' : ', locked'}">${iconSVG(d, !!got[d.id])}<span>${esc(d.name)}</span></button>`).join('')}</div>
-    <div class="tiny muted">${p.n ? `${n.fmt(p.n)} game${p.n === 1 ? '' : 's'} played on this device.` : 'Earn trophies by using your wallet and playing the cabinets.'} Trophies stay on this device and never leave it unless you share a card.</div>`;
+    <div class="tiny muted"><span>${p.n ? `${n.fmt(p.n)} game${p.n === 1 ? '' : 's'} played on this device.` : 'Earn trophies by using your wallet and playing the cabinets.'}</span> <span>Trophies stay on this device and never leave it unless you share a card.</span></div>`;
   el.appendChild(box);
   box.querySelectorAll('[data-trophy]').forEach(b => b.onclick = () => openTrophy(b.dataset.trophy));
 }
