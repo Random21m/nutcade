@@ -152,6 +152,8 @@ Go to **Settings → Lightning address → Set it up**, pick the mint that shoul
 - **Checked releases.** Every update runs the test suites automatically before it goes live, and the site publishes SHA-256 checksums at https://random21m.github.io/nutcade/SHA256SUMS.txt. Releases on GitHub include those checksums signed with the project's GPG key, [`nutcade-signing-key.asc`](nutcade-signing-key.asc) (fingerprint `2509 D115 03B7 2CBF BCB5  408F 4B72 9F05 6A52 9340`). See [RELEASING.md](RELEASING.md) to check a copy yourself.
 - **Shared GitHub domain.** GitHub serves every project site on an account from one domain (random21m.github.io), and browsers let pages on the same domain read each other's saved data. So only publish pages you trust under this account, and set a PIN: it keeps your phrase and ecash encrypted, so another page on the domain can't read them.
 
+**Found a security problem?** Please report it privately, as described in [SECURITY.md](SECURITY.md), not in a public issue.
+
 **Important:** your wallet lives in your browser. Keep your 12 words and your mint list somewhere safe and offline. Never type your words into a website or send them to anyone, including anyone claiming to be NUTCADE support. Mints hold the Bitcoin behind your ecash, so only use mints you trust. NUTCADE is young software that hasn't been independently audited, so start with small amounts.
 
 ## Testing
