@@ -58,6 +58,18 @@ gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt                           # shoul
 
 Then edit the release on GitHub and attach `SHA256SUMS.txt` and `SHA256SUMS.txt.asc`. The key expires on 5 November 2028; extend it before then with `gpg --quick-set-expire 2509D11503B72CBFBCB5408F4B729F056A529340 2y` and commit the re-exported public key.
 
+## Timestamping a release (optional)
+
+An OpenTimestamps proof shows the checksums existed by a certain Bitcoin block, so nobody can later claim a release was made earlier or later than it was. Install the client once with `pipx install opentimestamps-client`, then, in the release folder:
+
+```bash
+ots stamp SHA256SUMS.txt                 # creates SHA256SUMS.txt.ots, pending at first
+ots upgrade SHA256SUMS.txt.ots           # run again after a few hours, until it says "Timestamp complete"
+ots info SHA256SUMS.txt.ots              # shows which Bitcoin block it is anchored in
+```
+
+When it's complete, edit the release on GitHub and attach `SHA256SUMS.txt.ots` too. Anyone can check it with `ots verify SHA256SUMS.txt.ots` (this needs a Bitcoin node), or by dropping both files on https://opentimestamps.org.
+
 ## Checking a copy of NUTCADE
 
 ```bash
