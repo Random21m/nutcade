@@ -2344,7 +2344,7 @@ function openLnAddr() {
 }
 
 /* ---------- support / donations ---------- */
-const DONATE = { address: 'dev@breez.tips', lnurl: 'LNURL1DP68GURN8GHJ7CNJV4JH5TN5D9C8XTMVDE6HYMRS9AJX2ASZ5RD0C' };
+const DONATE = { address: 'keywest@strike.me', lnurl: 'LNURL1DP68GURN8GHJ7UM5WF5KKEFWD4JJ7TNHV4KXCTTTDEHHWM30D3H82UNVWQHKKETEWAJHXAQ6MZ0AF' };
 function openSupport() {
   const m = activeMint();
   const canTip = m && supports(m, 'melt', 'bolt11');

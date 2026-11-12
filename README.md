@@ -237,7 +237,7 @@ NUTCADE has no account, no tracking and no analytics. Your recovery phrase and n
 - **Coinbase**, for the price and chart, only while **Show Bitcoin price** is on
 - **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to send and receive game challenges with your contacts, to save your encrypted mint list when it changes and to look for it when you restore (turn this off in Settings → Backup), to receive payments for requests you made in the last 30 days, to deliver payments to requests you pay, to receive ecash friends send to your ecash address (turn this off in Settings → Privacy), and when you tap "Find mints people recommend". Payments you send over Nostr are signed with a one-time key, so they aren't linked to you. Challenges and their scores are signed with your NUTCADE Nostr key so friends know they're from you
 - **npub.cash**, only while your Lightning address is turned on. It sees the amounts and times of payments to your address, not the rest of your wallet
-- **The donation address** (breez.tips), only when you tip from inside the app
+- **The donation address** (strike.me), only when you tip from inside the app
 
 The **microphone** is used only while a Listen screen is open. The sound is decoded on your phone and nothing is recorded or sent anywhere.
 
@@ -259,9 +259,9 @@ NUTCADE is made by **[Random21m](https://github.com/Random21m)**. Bug reports an
 
 NUTCADE is free and open source, and it stays that way. Supporting it is optional and changes nothing about how it works. If you enjoy it, you can send a few sats over Lightning:
 
-<p><img src="docs/support-qr.png" alt="QR code for the Lightning address dev@breez.tips" width="200"></p>
+<p><img src="docs/support-qr.png" alt="QR code for the Lightning address keywest@strike.me" width="200"></p>
 
-**dev@breez.tips**
+**keywest@strike.me**
 
 You can also tip from inside NUTCADE: **Settings → About → Donate**. The same address and code are on that screen. Be wary of any other "NUTCADE donation" address.
 
