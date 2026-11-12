@@ -6,7 +6,7 @@ A Cashu ecash wallet with a 1980s arcade built in.
 
 **Open it:** https://random21m.github.io/nutcade/
 
-**Watch the demo:** [76-second video on X](https://x.com/Random21m/status/2120702493701329382)
+**Watch the demo:** [2-minute video of every feature on X](https://x.com/Random21m/status/2120760385179619678)
 
 **Timestamped in Bitcoin:** NUTCADE v1.8.1, including the send-by-sound chiptune modem, is anchored in [block 975,501](https://mempool.space/block/00000000000000000000c8328fa2baa44180bc59c74d739bfb317dd984ade480), mined 11 November 2026. The proof covers the release checksums, and the checksum for `index.html` covers the sound code inside it. The proof, `SHA256SUMS.txt.ots`, is attached to the [v1.8.1 release](https://github.com/Random21m/nutcade/releases/tag/v1.8.1); check it at [opentimestamps.org](https://opentimestamps.org).
 
