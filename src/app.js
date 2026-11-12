@@ -781,9 +781,20 @@ function qrCanvas(text) {
     return c;
   } catch (e) { return null; }
 }
+function slimToken(t) {
+  const d = L.getDecodedToken(t, Object.keys(S.counters));
+  return L.getEncodedToken({ mint: d.mint, unit: d.unit || 'sat', memo: d.memo, proofs: d.proofs.map(p => { const o = Object.assign({}, p); delete o.dleq; return o; }) });
+}
 function qrBlock(text, label) {
   const id = 'qr' + uid();
-  setTimeout(() => { const el = document.getElementById(id); if (!el) return; const c = qrCanvas(text); if (c) { c.setAttribute('aria-label', label || 'QR code'); el.appendChild(c); } else { el.outerHTML = '<div class="notice cyan">Too long for a QR code. Use Copy instead.</div>'; } }, 0);
+  setTimeout(() => {
+    const el = document.getElementById(id); if (!el) return;
+    let c = qrCanvas(text);
+    // Tokens with many proofs (locked gifts especially) can be too long for one QR code. Without the DLEQ proofs, which
+    // the receiving wallet doesn't need to claim the ecash, they usually fit. The copied text stays the full token.
+    if (!c && /^cashuB/.test(text)) { try { c = qrCanvas(slimToken(text)); } catch (e) {} }
+    if (c) { c.setAttribute('aria-label', label || 'QR code'); el.appendChild(c); } else { el.outerHTML = '<div class="notice cyan">Too long for one QR code. Use Copy or Play as sound instead.</div>'; }
+  }, 0);
   return `<div class="qr" id="${id}"></div>`;
 }
 

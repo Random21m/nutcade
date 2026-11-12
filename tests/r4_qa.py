@@ -91,6 +91,8 @@ async def main():
         await w.fill('#amtIn', '700'); await w.fill('#noteIn', 'Birthday #gift')
         await w.click('[data-act=doSendEcash]')
         await w.until("document.querySelector('.sheet-body') && /Locked gift/i.test(document.querySelector('.sheet-body').innerText)", 15000)
+        await w.wait(300)
+        check('gift: a gift too big for one QR code points to Copy and Play as sound', await w.ev("!!document.querySelector('.sheet .qr canvas') || (/Play as sound/.test(document.querySelector('.sheet-body').innerText) && !!document.querySelector('.sheet [data-act=ctPlay]'))"), await w.ev("(document.querySelector('.sheet .notice.cyan')||{}).innerText"))
         t = await w.ev("Nutcade.S.txs[0]")
         check('gift: locked to Robin with a refund date a week out', t.get('giftTo') == 'Robin' and 6.9 < (t['lockUntil'] / 1000 - __import__('time').time()) / 86400 < 7.1, {k: t.get(k) for k in ('giftTo', 'lockUntil', 'delivered')})
         locked_tok = t['token']
@@ -150,15 +152,16 @@ async def main():
         async def friend_pays():
             await fr.home(); await fr.ev(f"Nutcade.handleScan({json.dumps(enc)})"); await fr.wait(300)
             await fr.click('[data-act=payReq]'); await fr.until(SHEET_DONE, 15000); await fr.close()
-        await friend_pays()
-        ok = await w.until("/HIT FOR 1,000/.test(document.querySelector('.sheet-body').innerText)", 15000)
-        check('split: a friend paying knocks off health', ok and '1,000' in await w.ev("document.querySelector('.hp').innerText"), await w.sheet_text())
         await w.close(); await w.home()
         check('split: an open bill shows on the wallet screen', await w.ev("!!document.querySelector('.boss-mini')"))
         await w.click('.boss-mini'); await w.wait(200)
+        # both friends pay while the boss screen stays open: it must react to every payment, not just the first
+        await friend_pays()
+        ok = await w.until("/HIT FOR 1,000/.test(document.querySelector('.sheet-body').innerText)", 15000)
+        check('split: a friend paying knocks off health', ok and '1,000' in await w.ev("document.querySelector('.hp').innerText"), await w.sheet_text())
         await friend_pays()
         ok = await w.until("/BOSS DEFEATED/.test(document.querySelector('.sheet-body').innerText)", 15000)
-        check('split: the last share defeats the boss', ok, await w.sheet_text())
+        check('split: the last share defeats the boss, with the screen left open', ok, await w.sheet_text())
         await w.close(); await w.home()
         check('split: a defeated boss leaves the wallet screen', not await w.ev("!!document.querySelector('.boss-mini')"))
 

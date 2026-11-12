@@ -233,7 +233,8 @@ function showSplit(r) {
     const on = e => {
       if (!e.detail || e.detail.id !== r.id) return;
       const now = splitGot(r); const dead = splitLeft(r) === 0;
-      setBody(splitHTML(r, !dead));
+      // redraw in place: setBody would also drop this listener, and the boss would stop reacting to later payments
+      const body = document.querySelector('#layer .sheet-body'); if (body) body.innerHTML = splitHTML(r, !dead);
       if (dead) { sfx('levelup'); celebrate('in', now); } else { sfx('hit'); setTimeout(() => { const s = document.querySelector('.boss-sprite'); if (s && !dead) s.outerHTML = bossSVG(false, false); }, 260); }
       gotBefore = now;
     };
