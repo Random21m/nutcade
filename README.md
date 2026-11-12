@@ -4,12 +4,9 @@
 
 A Cashu ecash wallet with a 1980s arcade built in.
 
-**Open it:** https://nutcade-2c150c.gitlab.io
-(also at https://random21m.github.io/nutcade/)
+**Open it:** https://random21m.github.io/nutcade/
 
-Source: [GitLab](https://gitlab.com/random21m/nutcade) and [GitHub](https://github.com/Random21m/nutcade). Both publish the same file with the same checksums.
-
-**Use one address for your wallet.** Each address keeps its own wallet in your browser, so sats you add at the GitLab address don't appear at the GitHub one. To move, restore your 12 words at the other address. For real money, prefer the GitLab address: it's on a domain of its own, while every GitHub Pages site under an account shares one domain (random21m.github.io), so anything else ever published there could read data stored in the browser for it. Setting a PIN keeps your wallet encrypted either way.
+> **Moved from GitLab.** NUTCADE now lives on GitHub. The old address (nutcade-2c150c.gitlab.io) is no longer updated. Each address keeps its own wallet in your browser, so to move: write down your 12 words (Settings → Backup → Show recovery phrase), open the new address, and tap **Restore from recovery phrase**.
 
 NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a text message. It works in any modern browser on phone or desktop, with nothing to install, and keeps your wallet protected by a standard 12-word recovery phrase.
 
@@ -33,7 +30,7 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 - **Contacts**: save people with their Lightning address, their Nostr address for ecash, or both, and pay them by name. Friends can send you ecash over Nostr to your own **ecash address**, from NUTCADE or cashu.me
 - **Amounts in your currency**: every amount field has a SAT / currency switch, and each transaction remembers the Bitcoin price at the time
 - **Works offline**: NUTCADE opens without a connection once you've visited. Offline you can still send amounts that match the coins you hold, and save ecash people give you; it's claimed automatically when you're back online
-- **Languages**: English, Español, Português (Brasil), Deutsch and Français, picked from your browser or chosen in Settings. Game titles stay in English, like arcade cabinets. Spotted a clumsy translation? Open an issue on GitLab
+- **Languages**: English, Español, Português (Brasil), Deutsch and Français, picked from your browser or chosen in Settings. Game titles stay in English, like arcade cabinets. Spotted a clumsy translation? Open an issue on GitHub
 - **Live Bitcoin price chart** in arcade style: 1H, 1D, 1W, 1M and 1Y ranges, high and low markers, touch or hover to read any point, and your balance's value updating live
 - **Send by sound**: play ecash, a payment request or an invoice as an 8-bit chirp, like loading a game from tape, and another phone running NUTCADE picks it up through its microphone. Works on iPhones and with no internet between the phones
 - **Gifts that come back**: lock ecash to one person (NUT-11). Only they can claim it, and if they haven't by the date you pick (a day, a week or a month), it comes back to you on its own
@@ -75,7 +72,7 @@ Plays with keyboard, mouse, or the on-screen joystick and buttons on a phone.
 
 ## Getting started
 
-1. Open https://nutcade-2c150c.gitlab.io. On iPhone, tap Share → **Add to Home Screen** first and open NUTCADE from that icon, so Safari keeps your wallet.
+1. Open https://random21m.github.io/nutcade/. On iPhone, tap Share → **Add to Home Screen** first and open NUTCADE from that icon, so Safari keeps your wallet.
 2. Tick the box to say you understand, then tap **Create a new wallet**.
 3. Write your **12 words** on paper, in order. Then type back the three words NUTCADE asks for.
 4. Set a PIN when NUTCADE offers it (recommended).
@@ -152,13 +149,14 @@ Go to **Settings → Lightning address → Set it up**, pick the mint that shoul
 - **One tab at a time.** If NUTCADE is open in a second tab, that tab pauses so the two can't overwrite each other.
 - **Storage protection.** NUTCADE asks the browser not to clear its data, and Settings shows whether that was granted.
 - **No outside code.** The app is one self-contained file with its fonts built in. The QR decoder loads from this same site, only when you open the scanner. Nothing is loaded from other servers.
-- **Checked releases.** Every update runs the test suites automatically before it goes live, and the site publishes SHA-256 checksums at https://nutcade-2c150c.gitlab.io/SHA256SUMS.txt. See [RELEASING.md](RELEASING.md).
+- **Checked releases.** Every update runs the test suites automatically before it goes live, and the site publishes SHA-256 checksums at https://random21m.github.io/nutcade/SHA256SUMS.txt. See [RELEASING.md](RELEASING.md).
+- **Shared GitHub domain.** GitHub serves every project site on an account from one domain (random21m.github.io), and browsers let pages on the same domain read each other's saved data. So only publish pages you trust under this account, and set a PIN: it keeps your phrase and ecash encrypted, so another page on the domain can't read them.
 
 **Important:** your wallet lives in your browser. Keep your 12 words and your mint list somewhere safe and offline. Never type your words into a website or send them to anyone, including anyone claiming to be NUTCADE support. Mints hold the Bitcoin behind your ecash, so only use mints you trust. NUTCADE is young software that hasn't been independently audited, so start with small amounts.
 
 ## Testing
 
-Every push runs the suites in `tests/` automatically in GitLab against real Cashu mints (Nutshell), including mints set up to fail or stall payments. The site only updates if every check passes:
+Every push runs the suites in `tests/` automatically on GitHub (GitHub Actions) against real Cashu mints (Nutshell), including mints set up to fail or stall payments. The site only updates if every check passes:
 
 - 51 wallet checks: Lightning in and out, ecash between wallets, double-claim protection, failed and stuck payments, notes, multiple mints, backup files, and restoring from the phrase after a full wipe
 - 27 settings checks: themes, ₿ display, backup download and import, restoring a phrase from another Cashu client, reset, and swapping received ecash into your own mint
@@ -186,11 +184,11 @@ The **microphone** is used only while a Listen screen is open. The sound is deco
 
 ## Sharing
 
-Posting the link on X and most social sites shows a large preview card automatically. A bigger version of the picture for attaching to posts is at https://nutcade-2c150c.gitlab.io/nutcade-share.png.
+Posting the link on X and most social sites shows a large preview card automatically. A bigger version of the picture for attaching to posts is at https://random21m.github.io/nutcade/nutcade-share.png.
 
 ## For maintainers
 
-The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm` and the offline helper `public/sw.js`. On every push to `main`, `.gitlab-ci.yml` (GitLab) and `.github/workflows/test-and-deploy.yml` (GitHub) run the test suites and then publish `public/` to GitLab Pages and GitHub Pages with fresh checksums. To ship an update, replace `public/index.html` and push. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
+The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm` and the offline helper `public/sw.js`. On every push to `main`, `.github/workflows/test-and-deploy.yml` runs the test suites and then publishes `public/` to GitHub Pages with fresh checksums. To ship an update, replace `public/index.html` and push. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
 
 ## Support the project
 
@@ -204,6 +202,7 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Changelog
 
+- **v1.8.1:** moved to GitHub: new address https://random21m.github.io/nutcade/, share cards and preview images point there
 - **v1.8.0:** send codes by sound between phones, gifts locked to one person that come back after a date (NUT-11), split a bill as a boss fight, mint health with moving sats between mints, cashier mode for selling, high-score challenges with friends, round-up piggy bank, 5 new trophies
 - **v1.7.0:** contacts with Lightning and Nostr addresses, your own ecash address, amounts in your currency, #tags and CSV export, offline use (the app opens offline, exact-amount sends, tokens saved to claim later), Spanish, Portuguese, German and French
 - **v1.6.0:** multinut payments across several mints (NUT-15), payment requests to create and pay (NUT-18 over Nostr and HTTP), NFC cards for ecash and requests, opening tokens from links

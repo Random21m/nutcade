@@ -2,7 +2,7 @@
 
 ## What happens automatically
 
-Every push to `main` that changes the app or the tests runs the **test** job first:
+Every push to `main` runs the GitHub Actions workflow `.github/workflows/test-and-deploy.yml`. Its **test** job comes first:
 
 1. Four local Nutshell test mints start with fake Lightning: a normal one (with input fees), a no-fee one, one where every payment fails, and one where every payment stays pending. `tests/mock_nostr.py` starts a stand-in Nostr relay and npub.cash server, so the tests never touch public services. The two normal mints accept multi-path payments through a small test-only patch (`tests/stub/sitecustomize.py`).
 2. The browser suites run against them:
@@ -14,13 +14,9 @@ Every push to `main` that changes the app or the tests runs the **test** job fir
    - `tests/v16_qa.py`: multinut payments (NUT-15), payment requests (NUT-18) and NFC, with a stand-in NFC reader
    - `tests/r3_qa.py`: amounts in your currency, #tags and CSV export, contacts, offline use and languages
    - `tests/r4_qa.py`: sending by sound (through a simulated microphone), refundable gifts, bill split, mint health and moving sats, cashier mode, challenges, piggy bank, and the new screens in every language
-3. Only if every check passes does the **pages** job publish `public/` and write `SHA256SUMS.txt` next to the app.
+3. Only if every check passes does the **deploy** job publish `public/` to https://random21m.github.io/nutcade/ and write `SHA256SUMS.txt` next to the app.
 
-Logs and screenshots from each run are kept for a week under the job's artifacts (`qa-out/`).
-
-## On GitHub
-
-The repository is mirrored at https://github.com/Random21m/nutcade. Its workflow, `.github/workflows/test-and-deploy.yml`, runs the same suites and then publishes to https://random21m.github.io/nutcade/ with `SHA256SUMS.txt`. Push the same commit to both remotes so the two sites serve identical files.
+Logs and screenshots from each run are kept for a week as the run's `qa-out` artifact (Actions tab → the run → Artifacts).
 
 ## Running the tests on your own computer
 
@@ -34,16 +30,16 @@ MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh
 
 ## Cutting a release
 
-1. Push the change and wait for the pipeline to pass.
-2. Note the checksums at https://nutcade-2c150c.gitlab.io/SHA256SUMS.txt.
-3. In GitLab, go to **Deploy → Releases → New release**, create a tag like `v1.4.0`, and paste the checksums into the release notes.
+1. Push the change and wait for the workflow to pass (Actions tab).
+2. Note the checksums at https://random21m.github.io/nutcade/SHA256SUMS.txt.
+3. On GitHub, go to **Releases → Draft a new release**, create a tag like `v1.8.1`, and paste the checksums into the release notes.
 
 ## Signing a release (recommended)
 
 A signature proves the release came from you. Use the same GPG key you sign voidforge with:
 
 ```bash
-curl -O https://nutcade-2c150c.gitlab.io/SHA256SUMS.txt
+curl -O https://random21m.github.io/nutcade/SHA256SUMS.txt
 gpg --armor --detach-sign SHA256SUMS.txt        # creates SHA256SUMS.txt.asc
 ```
 
@@ -52,7 +48,7 @@ Attach `SHA256SUMS.txt` and `SHA256SUMS.txt.asc` to the release, and commit your
 ## Checking a copy of NUTCADE
 
 ```bash
-curl -O https://nutcade-2c150c.gitlab.io/index.html
+curl -O https://random21m.github.io/nutcade/index.html
 sha256sum index.html                       # compare with SHA256SUMS.txt (sw.js and zxing_reader.wasm are listed too)
 gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
 ```

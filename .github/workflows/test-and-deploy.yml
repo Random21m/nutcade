@@ -1,4 +1,4 @@
-# NUTCADE on GitHub: the same checks as the GitLab pipeline, then publish public/ to GitHub Pages.
+# NUTCADE: run every test suite, then publish public/ to GitHub Pages.
 #   test:    runs every test suite against four local Nutshell test mints (fake Lightning) and a stand-in Nostr relay
 #   deploy:  publishes public/ with SHA-256 checksums, only if every check passed
 name: Test and deploy
