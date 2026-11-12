@@ -1717,7 +1717,7 @@ function onGiftWrap(ev) {
     if (p && p.t === 'nutcade-challenge' && p.ev) { onChallenge(p.ev, 'nostr', p.bounty, rumor.pubkey); return; }
     if (p && p.t === 'nutcade-result' && p.ev) { await onResult(p.ev); return; }
     if (p && p.t === 'nutcade-bounty' && p.re && typeof p.pre === 'string') { const rec = S.challenges.find(x => x.id === p.re && x.dir === 'in'); if (rec) await claimBounty(rec, p.pre, rumor.pubkey); return; }
-    if (p && (p.t === 'nutcade-extralife' || p.t === 'nutcade-extralife-end')) { onExtraLife(p, rumor.pubkey); return; }
+    if (p && (p.t === 'nutcade-extralife' || p.t === 'nutcade-extralife-end')) { await onExtraLife(p, rumor.pubkey); return; }
     if (p && Array.isArray(p.proofs) && p.proofs.length && typeof p.mint === 'string') await receivePayload(p, rumor.pubkey);
   }).catch(() => {});
 }

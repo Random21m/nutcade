@@ -534,14 +534,7 @@ function onChallenge(ev, via, bounty, from) {
     if (via === 'nostr' && !bounty) { sfx('levelup'); toast(`Challenge from ${who}: beat ${pad6(rec.score)} on ${gameById(rec.game).name}`, 'gold'); if (tab === 'arcade' && !$('#layer .sheet')) refresh(); }
   }
   // a bounty only counts from the player who signed the challenge, and only if the sats are really locked to us
-  if (bounty && from === c.pubkey && (!rec.bounty || rec.bounty.state !== 'won')) {
-    const bo = readBounty(bounty, rec);
-    if (bo && (!rec.bounty || rec.bounty.token !== bo.token)) {
-      rec.bounty = bo; saveChallenges();
-      sfx('levelup'); toast(`${nameFor(c.pubkey) || rec.by} put ${money(bo.amount)} on beating ${pad6(rec.score)} on ${gameById(rec.game).name}`, 'gold');
-      if (tab === 'arcade' && !$('#layer .sheet')) refresh();
-    }
-  }
+  if (bounty) attachBounty(rec, bounty, c.pubkey, from).catch(() => {});
   return rec;
 }
 async function onResult(ev) {

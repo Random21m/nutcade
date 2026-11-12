@@ -12,7 +12,7 @@ async def friend_addr(w):
 async def add_contact(w, name, addr):
     await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(100)
     await w.click('#set-contacts [data-act=contactsOpen]'); await w.wait(150)
-    await w.click('[data-act=contactEdit]'); await w.wait(100)
+    await w.click('[data-act=contactEdit]:not([data-id])'); await w.wait(100)
     await w.fill('#cName', name); await w.fill('#cNostr', addr); await w.click('[data-act=contactSave]'); await w.wait(250)
     await w.ev("Nutcade.closeSheet()")
 
@@ -146,6 +146,15 @@ async def main():
         ok = await fr.until(f"{TOTAL} >= {fbal + 495}", 20000)
         check('bounty: Robin claims the sats', ok and await fr.ev("Nutcade.S.challenges.find(c=>c.bounty).bounty.state") == 'won', (await fr.bal()) - fbal)
         check("bounty: and it's in Robin's notes as a won bounty", await fr.ev("Nutcade.S.txs.some(t=>t.type==='in' && /^Bounty from Host/.test(t.note||''))"), await fr.ev("Nutcade.S.txs.slice(0,3).map(t=>t.note)"))
+        # a friend whose wallet never held sats at that mint still gets the bounty (the keyset ids come from the mint)
+        nw = await newwallet(b, 'fresh5'); await nw.create(); await add_contact(nw, 'Host', waddr); await add_contact(w, 'Sam', await friend_addr(nw))
+        await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(200)
+        await w.ev("Nutcade.startChallenge({game:'maze', seed:9, score:300, by:'ACE'})"); await w.wait(200)
+        await w.fill('#bountyAmt', '100')
+        await w.ev("[...document.querySelectorAll('[data-act=chalSend]')].find(b=>b.textContent==='Sam').click()")
+        ok = await nw.until("Nutcade.S.challenges.some(c=>c.dir==='in' && c.bounty && c.bounty.amount===100)", 20000)
+        check('bounty: a brand-new wallet with no sats at that mint still receives it', ok)
+        await nw.pg.context.close(); await w.ev("Nutcade.closeSheet()")
         # a bounty nobody wins comes back after the date
         await w.ev("window.__nutcadeTest={bountySecs:4}")
         await w.ev("Nutcade.startChallenge({game:'swarm', seed:5, score:100000, by:'ACE'})"); await w.wait(200)
@@ -160,8 +169,9 @@ async def main():
         # ---------- Extra Life ----------
         await w.ev("Nutcade.closeSheet()"); await w.home()
         check('extra life: the wallet offers Extra Life', await w.ev("!!document.querySelector('[data-act=extraOpen]')"))
-        await w.click('[data-act=extraOpen]'); await w.wait(150)
-        check('extra life: explains itself and asks for an heir', 'heir' in (await w.sheet_text()).lower() and await w.ev("document.querySelector('#xlTo').options[0].text==='Robin'"))
+        await w.click('[data-act=extraOpen]'); await w.until("!!document.querySelector('#xlTo')", 5000); await w.wait(150)
+        check('extra life: explains itself and asks for an heir', 'heir' in (await w.sheet_text()).lower() and await w.ev("[...document.querySelector('#xlTo').options].some(o=>o.text==='Robin')"), [(await w.sheet_text())[:300], await w.ev("[...document.querySelectorAll('#xlTo option')].map(o=>o.text)"), await w.ev("document.querySelector('#layer .sheet h2, #layer .sheet .ttl') && document.querySelector('#layer .sheet').innerText.slice(0,80)")])
+        await w.ev("const s=document.querySelector('#xlTo'); s.value=[...s.options].find(o=>o.text==='Robin').value; s.dispatchEvent(new Event('change',{bubbles:true}))")
         before = await w.bal(A)
         await w.fill('#amtIn', '2000'); await w.click('[data-act=extraStart]')
         ok = await w.until("!!Nutcade.S.extra", 15000)
@@ -197,6 +207,7 @@ async def main():
         # auto CONTINUE: opening NUTCADE after half the time counts as proof of life
         await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(150)
         await w.fill('#amtIn', '800')
+        await w.ev("const s=document.querySelector('#xlTo'); s.value=[...s.options].find(o=>o.text==='Robin').value; s.dispatchEvent(new Event('change',{bubbles:true}))")
         await w.ev("const b=document.querySelector('[data-act=giftDays][data-days=\"90\"]'); b.dataset.days=20/86400; b.click()")
         await w.click('[data-act=extraStart]'); await w.until("!!Nutcade.S.extra", 15000)
         u1 = await w.ev("Nutcade.S.extra.until")
@@ -266,7 +277,7 @@ async def main():
         def real(x):
             if any(o.match(x) for o in outs) or re.fullmatch(r'[A-Z][a-z]{2} \d{1,2}(, \d{4})?', x) or x.endswith('…'): return False
             if re.sub(r'\d[\d,.]*', '{#}', x) in vals or x.upper() in titles or any(t.startswith(x.upper() + ' ') for t in titles): return False
-            if x[:1] in '▲▼' or x.startswith('#') or x in ('Robin', 'Host', 'Mint A', 'Mint B', 'NUTCADE', 'LN', 'BTC /', 'A', 'B', 'C', 'D', 'F', '?') or '/' in x or '₿' in x or '127.0.0.1' in x: return False
+            if x[:1] in '▲▼' or x.startswith('#') or x in ('Robin', 'Host', 'Sam', 'Mint A', 'Mint B', 'NUTCADE', 'LN', 'BTC /', 'A', 'B', 'C', 'D', 'F', '?') or '/' in x or '₿' in x or '127.0.0.1' in x: return False
             if re.fullmatch(r'[A-Z]{3}|[\d,]+ (SAT|Sat|sat)|\d+[DHMWY]|\d+M AGO|HI -+|[\d,]+', x): return False
             return True
         allmiss = sorted(set(x for x in sum(miss.values(), []) if real(x)))

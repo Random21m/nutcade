@@ -41,10 +41,17 @@ async function bountyOnResult(c, r) {
 async function retryBounties() {
   for (const c of S.challenges.filter(x => x.dir === 'out')) for (const b of (c.bounties || []).filter(x => x.state === 'won' && Date.now() < x.until)) await releaseBounty(c, b).catch(() => {});
 }
+// Decoding a token needs its mint's keyset ids. A wallet that never held sats at that mint doesn't have them yet, so ask the mint.
+async function decodeTok(t) {
+  t = cleanToken(String(t || ''));
+  try { return L.getDecodedToken(t, Object.keys(S.counters)); } catch (e) {}
+  const w = await getWallet(normUrl(L.getTokenMetadata(t).mint));
+  return w.decodeToken(t);
+}
 // an incoming bounty: check the ecash really is locked to us and to the hash before showing it
-function readBounty(bo, rec) {
+async function readBounty(bo, rec) {
   try {
-    const tok = cleanToken(String(bo.token || '')); const d = L.getDecodedToken(tok, Object.keys(S.counters));
+    const tok = cleanToken(String(bo.token || '')); const d = await decodeTok(tok);
     let H = null;
     for (const p of d.proofs) {
       const sec = JSON.parse(p.secret); if (sec[0] !== 'HTLC') return null;
@@ -57,10 +64,18 @@ function readBounty(bo, rec) {
     return { token: tok, amount, mint: normUrl(d.mint), H, until: num(bo.until) || Date.now() + BOUNTY_DAYS * 86400e3, state: 'open', game: rec.game };
   } catch (e) { return null; }
 }
+async function attachBounty(rec, bounty, signer, from) {
+  if (!bounty || from !== signer || (rec.bounty && rec.bounty.state === 'won')) return;
+  const bo = await readBounty(bounty, rec);
+  if (!bo || (rec.bounty && rec.bounty.token === bo.token)) return;
+  rec.bounty = bo; saveChallenges();
+  sfx('levelup'); toast(`${nameFor(signer) || rec.by} put ${money(bo.amount)} on beating ${pad6(rec.score)} on ${gameById(rec.game).name}`, 'gold');
+  if (tab === 'arcade' && !$('#layer .sheet')) refresh();
+}
 async function claimBounty(rec, pre, from) {
   const b = rec.bounty; if (!b || b.state === 'won' || from !== rec.pubkey) return;
   if (await sha256hex(L.hexToBytes(pre)) !== b.H) return;
-  const d = L.getDecodedToken(b.token, Object.keys(S.counters));
+  const d = await decodeTok(b.token);
   const unlocked = L.getEncodedToken({ mint: d.mint, unit: 'sat', proofs: d.proofs.map(p => Object.assign({}, p, { witness: JSON.stringify({ preimage: pre }) })) });
   const who = nameFor(rec.pubkey) || rec.by, g = gameById(rec.game);
   try { await receiveToken(unlocked, `Bounty from ${who}: beat ${pad6(rec.score)} on ${g ? g.name : rec.game}`); }
@@ -158,9 +173,9 @@ async function extraTick() {
   else if (!x.delivered) await sendHeirCopy().catch(() => {});
 }
 // the heir's side
-function onExtraLife(p, from) {
+async function onExtraLife(p, from) {
   if (p.t === 'nutcade-extralife-end') { S.heirlooms.filter(h => h.from === from && h.state === 'waiting').forEach(h => { h.state = 'ended'; }); saveHeir(); if (tab === 'wallet' && !$('#layer .sheet')) refresh(); return; }
-  let d; try { d = L.getDecodedToken(cleanToken(String(p.token || '')), Object.keys(S.counters)); } catch (e) { return; }
+  let d; try { d = await decodeTok(p.token); } catch (e) { return; }
   let until = 0;
   for (const pr of d.proofs) {
     let sec; try { sec = JSON.parse(pr.secret); } catch (e) { return; }
