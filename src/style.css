@@ -125,8 +125,10 @@ textarea.inp{min-height:84px;resize:vertical;font-size:21px;line-height:1.1}
 .seg button{min-height:44px;padding:0 4px;border:0;background:transparent;color:var(--dim);font-family:var(--f-display);font-size:10px;letter-spacing:0;white-space:nowrap;min-width:0}
 .seg button[aria-pressed="true"]{background:var(--cyan);color:#0a0717}
 .seg.three{grid-template-columns:repeat(3,1fr)}
-.code{font-family:ui-monospace,monospace;font-size:13px;line-height:1.35;word-break:break-all;padding:10px;border:1px solid var(--grid);border-radius:var(--r);background:var(--well);color:var(--cyan);max-height:120px;overflow:auto}
-.qr{display:grid;place-items:center;padding:14px;background:#fff;border-radius:var(--r);width:min(100%,280px);margin:0 auto}
+.code{font-family:ui-monospace,monospace;font-size:14px;line-height:1.35;word-break:break-all;padding:10px;border:1px solid var(--grid);border-radius:var(--r);background:var(--well);color:var(--cyan);max-height:120px;overflow:auto}
+.qr{display:grid;place-items:center;padding:14px;background:#fff;border-radius:var(--r);width:min(100%,280px,max(160px,100vh - 420px));margin:0 auto}
+/* short phones: a smaller QR and code box keep the sheet's main button above the fold */
+@media (max-height:700px){.sheet .code{max-height:78px}}
 .qr canvas{width:100%;height:auto;image-rendering:pixelated}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:20px}
 .kv dt{color:var(--dim)} .kv dd{margin:0;text-align:right;overflow-wrap:anywhere}
@@ -145,8 +147,8 @@ textarea.inp{min-height:84px;resize:vertical;font-size:21px;line-height:1.1}
 
 /* Sheet */
 .scrim{position:fixed;inset:0;z-index:100;background:rgba(5,3,14,.78);display:flex;align-items:flex-end;justify-content:center}
-.sheet{width:100%;max-width:480px;max-height:calc(100% - 60px - env(safe-area-inset-top,0px));overflow:auto;background:var(--panel);border:3px solid var(--cyan);border-bottom:0;border-radius:8px 8px 0 0;
-  padding:16px max(16px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:grid;gap:14px;box-shadow:0 -10px 40px rgba(45,226,255,.25)}
+.sheet{width:100%;max-width:480px;max-height:calc(100% - 68px - env(safe-area-inset-top,0px));overflow:auto;background:var(--panel);border:3px solid var(--cyan);border-bottom:0;border-radius:8px 8px 0 0;
+  padding:16px max(16px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:grid;gap:14px;box-shadow:0 -10px 40px color-mix(in srgb,var(--cyan) 25%,transparent)}
 .sheet-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .sheet-head h3{margin:0;font-family:var(--f-display);font-size:13px;letter-spacing:2px;color:var(--gold);min-width:0;overflow-wrap:anywhere;hyphens:auto;line-height:1.5}
 .x{flex:none;width:44px;height:44px;border:2px solid var(--grid);border-radius:var(--r);background:none;color:var(--ink);font-family:var(--f-display);font-size:12px}
@@ -157,7 +159,8 @@ textarea.inp{min-height:84px;resize:vertical;font-size:21px;line-height:1.1}
 .toast{position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:300;width:max-content;max-width:min(calc(100vw - 24px),440px);padding:6px 12px;border:2px solid var(--c,var(--lime));border-radius:var(--r);background:var(--well);font-size:18px;line-height:1.1;text-align:center;box-shadow:3px 3px 0 #000;pointer-events:none;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 .toast[hidden]{display:none}
 body:not(:has(.tabbar)) .toast,body:has(.game-view) .toast{bottom:calc(14px + env(safe-area-inset-bottom,0px))}
-body:has(#layer .scrim) .toast{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px))}
+/* above a sheet the toast fits the 68 px strip of backdrop: up to three short lines */
+body:has(#layer .scrim) .toast{bottom:auto;top:calc(4px + env(safe-area-inset-top,0px));font-size:16px;line-height:1.05;padding:4px 10px;max-width:min(calc(100vw - 16px),460px)}
 
 /* Arcade */
 .cabinets{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -469,8 +472,8 @@ ol.steps{margin:0;padding-left:24px;display:grid;gap:8px;font-size:19px;line-hei
 /* wide screens: sheets open as centered dialogs instead of hugging the bottom edge */
 @media (min-width:700px) and (min-height:520px){
   .scrim{align-items:center;padding:32px 16px}
-  .sheet{max-height:calc(100vh - 96px);border-bottom:3px solid var(--cyan);border-radius:8px;padding-bottom:20px;box-shadow:0 0 0 3px #000,0 0 40px rgba(45,226,255,.25)}
-  body:has(#layer .scrim) .toast{top:12px}
+  .sheet{max-height:calc(100vh - 150px);border-bottom:3px solid var(--cyan);border-radius:8px;padding-bottom:20px;box-shadow:0 0 0 3px #000,0 0 40px color-mix(in srgb,var(--cyan) 25%,transparent)}
+  body:has(#layer .scrim) .toast{top:8px}
 }
 .flabel{font-family:var(--f-display);font-size:9px;line-height:1.7;letter-spacing:2px;color:var(--dim)}
 .filepick{flex-wrap:wrap}
@@ -533,3 +536,5 @@ body{overflow-wrap:anywhere}
 .toast{overflow-wrap:anywhere}
 .boss > *{max-width:100%;min-width:0}
 .mid,.tx .meta > span{min-width:0}
+/* in cashier mode an error sits over the top of the amount display, clear of the keys and buttons */
+body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:auto}

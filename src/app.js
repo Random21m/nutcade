@@ -862,15 +862,15 @@ function animatedQR(el, text, label) {
 
 /* ---------- toasts / copy ---------- */
 /* A new toast replaces the one on screen (the latest thing you did matters most), for a time that fits its
-   length. While a game is open, toasts other than errors wait until you leave it (the last three, one after
-   another), and the cashier screen only shows errors, so nothing lands on a sale or a high score. */
+   length. While a game is open every toast waits until you leave it (the last three, one after another), so
+   none lands on the controls, the key hints or a high score; the cashier screen only shows errors. */
 let toastT = 0; const toastQ = [];
 const toastHeld = () => !!(window.Arcade && window.Arcade.playing && window.Arcade.playing());
 const toastMs = (msg, c) => Math.min(c === 'red' ? 5000 : 4000, 1600 + msg.length * 32);
 function toast(msg, c = 'lime') {
   msg = tr(String(msg ?? ''));
   if (document.querySelector('.cashier') && c !== 'red') return;   // the till shows its own PAID! screen
-  if (toastHeld() && c !== 'red') {
+  if (toastHeld()) {
     if (!toastQ.some(t => t.msg === msg)) { toastQ.push({ msg, c }); if (toastQ.length > 3) toastQ.splice(0, toastQ.length - 3); }
     if (!toastT) toastT = setTimeout(nextToast, 1000); return;
   }
