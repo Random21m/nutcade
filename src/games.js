@@ -40,6 +40,7 @@ function text(ctx, s, x, y, col = C.ink, size = 8, align = 'left') {
   ctx.font = `${size}px "Press Start 2P", monospace`; ctx.textAlign = align; ctx.textBaseline = 'top'; ctx.fillStyle = col; ctx.fillText(s, Math.round(x), Math.round(y));
 }
 const pad6 = n => String(Math.max(0, Math.floor(n))).padStart(6, '0');
+const T = s => (window.Nutcade && window.Nutcade.tr ? window.Nutcade.tr(s) : s);   // translate text drawn on the canvas
 
 /* ---------- scores ---------- */
 const scoresOf = id => store.get('scores:' + id, []);
@@ -851,9 +852,9 @@ function openGame(id, opts) {
   view = document.createElement('div'); view.className = 'game-view'; view.setAttribute('role', 'dialog'); view.setAttribute('aria-label', cur.name);
   view.innerHTML = `<div class="game-top"><button class="btn sm red" data-g="exit">Exit</button><div class="ttl">${cur.name}</div><button class="btn sm" data-g="mute" aria-label="Toggle sound">${(window.NutPrefs || {}).sound === false ? 'SND OFF' : 'SND ON'}</button></div>
     <div class="screen-frame"><canvas id="gameCanvas" width="${W}" height="${H}" aria-label="${cur.name} game screen"></canvas></div>
-    <div class="pad touch-only">${padHTML()}
-    <div class="hint">${cur.help}<button class="padswap" data-g="pad">${store.get('pad', 'stick') === 'stick' ? 'Use D-pad' : 'Use joystick'}</button></div><div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause">II</button><button class="abtn a" data-k="a" aria-label="A button">A</button></div></div>
-    <div class="pad-keys">${cur.keys} · Enter pause · Esc exit</div><div id="entry"></div>`;
+    <div class="pad touch-only"><div class="hint"><span>${cur.help}</span><button class="padswap" data-g="pad">${store.get('pad', 'stick') === 'stick' ? 'Use D-pad' : 'Use joystick'}</button></div>
+    <div class="pad-row">${padHTML()}<div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause">II</button><button class="abtn a" data-k="a" aria-label="A button">A</button></div></div></div>
+    <div class="pad-keys"><span>${cur.keys}</span> · <span>Enter pause</span> · <span>Esc exit</span></div><div id="entry"></div>`;
   document.body.appendChild(view);
   document.body.style.overflow = 'hidden';
   ctx = view.querySelector('#gameCanvas').getContext('2d'); ctx.imageSmoothingEnabled = false;
@@ -989,7 +990,7 @@ function drawTitle() {
   text(ctx, 'HIGH SCORES', W / 2, 166, C.cyan, 8, 'center');
   const sc = scoresOf(cur.id);
   for (let i = 0; i < 5; i++) { const r = sc[i]; const y = 182 + i * 12; text(ctx, `${i + 1}.`, 52, y, C.dim); text(ctx, r ? r.n : '---', 76, y, i === 0 ? C.gold : C.ink); text(ctx, r ? pad6(r.s) : '000000', 172, y, i === 0 ? C.gold : C.ink, 8, 'right'); }
-  if ((frame >> 5) & 1) text(ctx, 'PRESS A OR TAP', W / 2, 252, C.pink, 8, 'center');
+  if ((frame >> 5) & 1) text(ctx, T(matchMedia('(pointer:fine)').matches ? 'PRESS SPACE TO START' : 'PRESS A OR TAP'), W / 2, 252, C.pink, 8, 'center');
   text(ctx, 'CREDIT 99', W / 2, 270, C.dim, 8, 'center');
 }
 function drawGhost() { if (!ghost || ghost.over || !cur.ghost) return; ctx.save(); ctx.globalAlpha = 0.38; try { cur.ghost(ghost.state, ctx); } catch (e) {} ctx.restore(); }

@@ -43,7 +43,7 @@ button{cursor:pointer}
 .marquee.mini .logo svg{width:auto;height:38px;max-width:100%}
 .marquee .logo svg{display:block;width:100%;height:auto;max-width:400px;margin:0 auto;filter:drop-shadow(0 0 10px rgba(255,61,139,.35))}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.pad-keys{display:none;font-size:18px;color:var(--faint);text-align:center}
+.pad-keys{display:none;font-size:18px;color:var(--dim);text-align:center}
 @media (pointer:fine){.pad.touch-only{display:none}.pad-keys{display:block}}
 .marquee h1{margin:0;font-family:var(--f-display);font-size:clamp(28px,9vw,40px);letter-spacing:2px;color:var(--gold);
   text-shadow:3px 3px 0 var(--pink),6px 6px 0 var(--violet),0 0 18px rgba(255,207,58,.6)}
@@ -169,19 +169,21 @@ textarea.inp{min-height:84px;resize:vertical;font-size:21px;line-height:1.1}
 .game-top .ttl{font-family:var(--f-display);font-size:10px;color:var(--gold);letter-spacing:1px;text-align:center;flex:1}
 .screen-frame{flex:1;min-height:0;width:100%;display:grid;place-items:center}
 #gameCanvas{display:block;image-rendering:pixelated;border:3px solid var(--violet);box-shadow:0 0 0 3px #000,0 0 30px rgba(141,107,255,.4);background:#000;touch-action:none}
-.pad{width:100%;max-width:480px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px}
-.dpad{display:grid;grid-template-columns:repeat(3,52px);grid-template-rows:repeat(3,52px)}
+.pad{width:100%;max-width:480px;display:grid;gap:6px}
+/* the control row always fits: the stick and D-pad shrink on narrow or short phones, the hint sits above them */
+.pad-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.dpad{--k:clamp(40px,min(13vw,7.5vh),52px);display:grid;grid-template-columns:repeat(3,var(--k));grid-template-rows:repeat(3,var(--k));flex:none}
 .dpad button,.abtn{border:0;touch-action:none}
 .dpad button{background:#2a2350;color:var(--dim);font-family:var(--f-display);font-size:12px;border:2px solid #000}
 .dpad .u{grid-column:2;grid-row:1;border-radius:6px 6px 0 0}.dpad .l{grid-column:1;grid-row:2;border-radius:6px 0 0 6px}
 .dpad .r{grid-column:3;grid-row:2;border-radius:0 6px 6px 0}.dpad .d{grid-column:2;grid-row:3;border-radius:0 0 6px 6px}
 .dpad .c{grid-column:2;grid-row:2;background:#2a2350;border:2px solid #000;border-left:0;border-right:0}
 .dpad button.on,.abtn.on{filter:brightness(1.6)}
-.pad .hint{text-align:center;font-size:16px;color:var(--faint)}
-.abtns{display:flex;gap:12px;align-items:center}
-.abtn{width:70px;height:70px;border-radius:50%;font-family:var(--f-display);font-size:16px;color:#120a22;
+.pad .hint{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:0 12px;text-align:center;font-size:17px;line-height:1.1;color:var(--dim)}
+.abtns{display:flex;gap:12px;align-items:center;flex:none}
+.abtn{width:clamp(56px,18vw,70px);height:clamp(56px,18vw,70px);border-radius:50%;font-family:var(--f-display);font-size:16px;color:#120a22;
   background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.55),transparent 35%),var(--c);box-shadow:0 5px 0 color-mix(in srgb,var(--c) 45%,#000)}
-.abtn.a{--c:var(--pink)}.abtn.b{--c:var(--cyan);width:52px;height:52px;font-size:11px}
+.abtn.a{--c:var(--pink)}.abtn.b{--c:var(--cyan);width:clamp(44px,14vw,52px);height:clamp(44px,14vw,52px);font-size:11px}
 
 .initials{display:grid;gap:12px;justify-items:center;text-align:center}
 .initials input{width:6.5ch;text-align:center;text-transform:uppercase;font-family:var(--f-display);font-size:26px;letter-spacing:6px;color:var(--gold)}
@@ -423,11 +425,11 @@ ol.steps{margin:0;padding-left:20px;display:grid;gap:6px;font-size:13px}
 .rrow.warn b{color:var(--red)}
 .rg{font-family:var(--f-display);font-size:16px;text-align:center;padding-top:2px}
 /* joystick */
-.stick{position:relative;width:150px;height:150px;border-radius:50%;background:radial-gradient(circle,#2a2350 0 55%,#1a1438 56% 100%);border:3px solid #000;box-shadow:inset 0 0 0 2px #3b3270;touch-action:none;user-select:none;-webkit-user-select:none}
+.stick{position:relative;flex:none;width:clamp(104px,min(36vw,21vh),150px);height:clamp(104px,min(36vw,21vh),150px);border-radius:50%;background:radial-gradient(circle,#2a2350 0 55%,#1a1438 56% 100%);border:3px solid #000;box-shadow:inset 0 0 0 2px #3b3270;touch-action:none;user-select:none;-webkit-user-select:none}
 .stick-ring{position:absolute;inset:26%;border-radius:50%;border:2px dashed #4a3f8a;pointer-events:none}
-.stick-knob{position:absolute;left:50%;top:50%;width:62px;height:62px;margin:-31px 0 0 -31px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff8fbd,var(--pink) 45%,#a3134f);border:3px solid #000;box-shadow:0 4px 0 #000;transition:transform .09s ease-out;pointer-events:none}
+.stick-knob{position:absolute;left:50%;top:50%;width:42%;height:42%;transform-origin:center;translate:-50% -50%;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff8fbd,var(--pink) 45%,#a3134f);border:3px solid #000;box-shadow:0 4px 0 #000;transition:transform .09s ease-out;pointer-events:none}
 .stick.on .stick-knob{transition:none;filter:brightness(1.15)}
-.padswap{display:block;margin:8px auto 0;background:none;border:1px solid var(--faint);border-radius:4px;color:var(--dim);font-family:var(--f-display);font-size:8px;padding:6px 8px;touch-action:manipulation}
+.padswap{min-height:40px;background:none;border:0;color:var(--cyan);font-family:var(--f-body);font-size:17px;padding:0 6px;text-decoration:underline;text-underline-offset:3px;touch-action:manipulation}
 @media (prefers-reduced-motion: reduce){.stick-knob{transition:none}}
 .tiny.verified{color:var(--lime)} .tiny.bad{color:var(--red)}
 /* Round 6: treasure hunts and loaded cards */
@@ -451,3 +453,7 @@ ol.steps{margin:0;padding-left:20px;display:grid;gap:6px;font-size:13px}
   body.print-hunt .hunt-card *{color:#000 !important}
 }
 .load-card{display:grid;gap:8px;padding:10px;border:2px dashed var(--gold);border-radius:8px}
+
+/* game-over and initials boxes keep a margin on the smallest phones */
+.game-view .scrim{padding:16px}
+.game-view .sheet.initials{max-height:calc(100% - 32px)}
