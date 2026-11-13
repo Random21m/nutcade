@@ -531,6 +531,14 @@ ol.steps{margin:0;padding-left:24px;display:grid;gap:8px;font-size:19px;line-hei
   .lockwrap.bio .screen{margin-top:10px}
   .lockwrap.bio .pin-k{height:50px}.lockwrap.bio .pin-keys{gap:10px}.lockwrap.bio .pinpad{gap:8px}
 }
+/* Anything people type (mint names and addresses, contact names, notes, memos) may be one long unbroken string.
+   Body text may break anywhere when it has to; buttons and pixel-font labels still only break between words. */
+body{overflow-wrap:anywhere}
+.btn,.seg button,.tab,.label,.h2,.sub,.tl,.chip,.field label,.flabel,.cab .nm,.pin-title,.gate-h,.cash-title,.unitbtn,.linkbtn,.pin-k,.ck{overflow-wrap:break-word}
+.uname{overflow-wrap:anywhere;min-width:0;max-width:100%}
+.toast{overflow-wrap:anywhere}
+.boss > *{max-width:100%;min-width:0}
+.mid,.tx .meta > span{min-width:0}
 </style>
 
 <div id="app" class="crt"></div>
@@ -4298,7 +4306,7 @@ function viewMints() {
     <div class="row between"><h2 class="h2">Your mints</h2><button class="btn sm gold" data-act="pickMint">Add mint</button></div>
     ${healthPanel()}
     ${S.mints.length ? `<div class="txs">${S.mints.map(m => `<div class="panel ${m.url === S.active ? 'hot' : ''}" style="gap:8px">
-      <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div style="font-family:var(--f-display);font-size:11px;color:var(--gold)">${esc(m.name)}</div><div class="tiny muted" style="overflow-wrap:anywhere">${esc(host(m.url))}</div></div>
+      <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="uname" style="font-family:var(--f-display);font-size:11px;line-height:1.5;color:var(--gold)">${esc(m.name)}</div><div class="tiny muted" style="overflow-wrap:anywhere">${esc(host(m.url))}</div></div>
       <div style="font-family:var(--f-display);font-size:12px;white-space:nowrap">${fmt(balanceOf(m.url))}</div></div>
       <div class="row between" style="gap:8px">${mintHealthLine(m)}${reportChip(m.url)}</div>
       <div class="row" style="flex-wrap:wrap;gap:6px">${methodChips(m)}</div>
@@ -5178,7 +5186,7 @@ function methodChips(m) {
 function openMintPicker() {
   const known = new Set(S.mints.map(m => m.url));
   const card = (u, name, blurb, extra = '') => `<div class="panel" style="gap:8px;background:var(--panel-2)" data-probe="${esc(u)}">
-    <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="row" style="gap:8px"><span class="dot off"></span><span style="font-family:var(--f-display);font-size:10px;color:var(--gold)" data-name>${esc(name)}</span></div>
+    <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="row" style="gap:8px"><span class="dot off"></span><span class="uname" style="font-family:var(--f-display);font-size:10px;line-height:1.5;color:var(--gold)" data-name>${esc(name)}</span></div>
     <div class="tiny muted" style="overflow-wrap:anywhere">${esc(host(u))}</div></div>
     ${known.has(u) ? '<span class="chip ecash">ADDED</span>' : `<button class="btn sm lime" data-act="addMint" data-url="${esc(u)}">Add</button>`}</div>
     <div class="tiny">${esc(blurb)}</div><div class="row" style="gap:6px;flex-wrap:wrap" data-chips>${extra}</div></div>`;
@@ -6558,7 +6566,7 @@ function openReport(url) {
   const m = S.mints.find(x => x.url === url) || { name: host(url), url };
   const draw = (busy) => {
     const r = reportCard(url), l = mlog(url);
-    return `<div class="report"><div class="grade-big ${gradeCls(r.overall)}">${r.overall}</div><div><div class="h2" data-noi18n>${esc(m.name)}</div><div class="tiny muted" data-noi18n>${esc(host(url))}</div>${l.info && l.info.version ? `<div class="tiny muted" data-noi18n>${esc(l.info.version)}</div>` : ''}</div></div>
+    return `<div class="report"><div class="grade-big ${gradeCls(r.overall)}">${r.overall}</div><div><div class="h2 uname" data-noi18n>${esc(m.name)}</div><div class="tiny muted" data-noi18n>${esc(host(url))}</div>${l.info && l.info.version ? `<div class="tiny muted" data-noi18n>${esc(l.info.version)}</div>` : ''}</div></div>
       <div class="report-rows">${r.rows.map(x => `<div class="rrow ${x.warn ? 'warn' : ''}"><span class="rg ${gradeCls(x.g)}${x.g.length > 1 ? ' word' : ''}">${x.g}</span><span><b>${x.k}</b><span class="tiny muted">${x.d.map(p => `<span>${p}</span>`).join(' · ')}</span></span></div>`).join('')}</div>
       ${l.info && l.info.motd ? `<div class="notice">Message from the mint: <span data-noi18n>${esc(l.info.motd)}</span></div>` : ''}
       <div class="tiny muted">Graded on this phone from health checks, your own payments with this mint, its keys and Nostr recommendations. A good grade isn't a guarantee: only keep what you can afford to lose at any one mint.</div>

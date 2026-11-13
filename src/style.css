@@ -525,3 +525,11 @@ ol.steps{margin:0;padding-left:24px;display:grid;gap:8px;font-size:19px;line-hei
   .lockwrap.bio .screen{margin-top:10px}
   .lockwrap.bio .pin-k{height:50px}.lockwrap.bio .pin-keys{gap:10px}.lockwrap.bio .pinpad{gap:8px}
 }
+/* Anything people type (mint names and addresses, contact names, notes, memos) may be one long unbroken string.
+   Body text may break anywhere when it has to; buttons and pixel-font labels still only break between words. */
+body{overflow-wrap:anywhere}
+.btn,.seg button,.tab,.label,.h2,.sub,.tl,.chip,.field label,.flabel,.cab .nm,.pin-title,.gate-h,.cash-title,.unitbtn,.linkbtn,.pin-k,.ck{overflow-wrap:break-word}
+.uname{overflow-wrap:anywhere;min-width:0;max-width:100%}
+.toast{overflow-wrap:anywhere}
+.boss > *{max-width:100%;min-width:0}
+.mid,.tx .meta > span{min-width:0}

@@ -1226,7 +1226,7 @@ function viewMints() {
     <div class="row between"><h2 class="h2">Your mints</h2><button class="btn sm gold" data-act="pickMint">Add mint</button></div>
     ${healthPanel()}
     ${S.mints.length ? `<div class="txs">${S.mints.map(m => `<div class="panel ${m.url === S.active ? 'hot' : ''}" style="gap:8px">
-      <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div style="font-family:var(--f-display);font-size:11px;color:var(--gold)">${esc(m.name)}</div><div class="tiny muted" style="overflow-wrap:anywhere">${esc(host(m.url))}</div></div>
+      <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="uname" style="font-family:var(--f-display);font-size:11px;line-height:1.5;color:var(--gold)">${esc(m.name)}</div><div class="tiny muted" style="overflow-wrap:anywhere">${esc(host(m.url))}</div></div>
       <div style="font-family:var(--f-display);font-size:12px;white-space:nowrap">${fmt(balanceOf(m.url))}</div></div>
       <div class="row between" style="gap:8px">${mintHealthLine(m)}${reportChip(m.url)}</div>
       <div class="row" style="flex-wrap:wrap;gap:6px">${methodChips(m)}</div>
@@ -2106,7 +2106,7 @@ function methodChips(m) {
 function openMintPicker() {
   const known = new Set(S.mints.map(m => m.url));
   const card = (u, name, blurb, extra = '') => `<div class="panel" style="gap:8px;background:var(--panel-2)" data-probe="${esc(u)}">
-    <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="row" style="gap:8px"><span class="dot off"></span><span style="font-family:var(--f-display);font-size:10px;color:var(--gold)" data-name>${esc(name)}</span></div>
+    <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="row" style="gap:8px"><span class="dot off"></span><span class="uname" style="font-family:var(--f-display);font-size:10px;line-height:1.5;color:var(--gold)" data-name>${esc(name)}</span></div>
     <div class="tiny muted" style="overflow-wrap:anywhere">${esc(host(u))}</div></div>
     ${known.has(u) ? '<span class="chip ecash">ADDED</span>' : `<button class="btn sm lime" data-act="addMint" data-url="${esc(u)}">Add</button>`}</div>
     <div class="tiny">${esc(blurb)}</div><div class="row" style="gap:6px;flex-wrap:wrap" data-chips>${extra}</div></div>`;
