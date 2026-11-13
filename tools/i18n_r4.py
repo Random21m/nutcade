@@ -173,7 +173,7 @@ ROWS = [
 ("COULDN'T SEND", "NO SE PUDO ENVIAR", "NÃO FOI POSSÍVEL ENVIAR", "SENDEN FEHLGESCHLAGEN", "ENVOI IMPOSSIBLE"),
 # --- piggy bank ---
 ("Piggy bank", "Hucha", "Cofrinho", "Sparschwein", "Tirelire"),
-("Rounds up to the nearest {#} sat. Next goal: {#} sat", "Redondea a los {#} sat más cercanos. Próxima meta: {#} sat", "Arredonda para os {#} sat mais próximos. Próxima meta: {#} sat", "Rundet auf volle {#} Sat auf. Nächstes Ziel: {#} Sat", "Arrondit aux {#} sat près. Prochain objectif : {#} sat"),
+("Rounds up to the nearest {#} SAT. Next goal: {#} SAT", "Redondea a los {#} SAT más cercanos. Próxima meta: {#} SAT", "Arredonda para os {#} SAT mais próximos. Próxima meta: {#} SAT", "Rundet auf volle {#} SAT auf. Nächstes Ziel: {#} SAT", "Arrondit aux {#} SAT près. Prochain objectif : {#} SAT"),
 ("{#} SAT in your piggy bank · {#} SAT to spend", "{#} SAT en tu hucha · {#} SAT para gastar", "{#} SAT no cofrinho · {#} SAT para gastar", "{#} SAT im Sparschwein · {#} SAT zum Ausgeben", "{#} SAT dans votre tirelire · {#} SAT à dépenser"),
 ("Break the piggy bank?", "¿Romper la hucha?", "Quebrar o cofrinho?", "Sparschwein schlachten?", "Casser la tirelire ?"),
 ("BREAK THE PIGGY BANK?", "¿ROMPER LA HUCHA?", "QUEBRAR O COFRINHO?", "SPARSCHWEIN SCHLACHTEN?", "CASSER LA TIRELIRE ?"),
@@ -198,7 +198,7 @@ ROWS = [
 ("Send or receive a code as sound.", "Envía o recibe un código como sonido.", "Envie ou receba um código como som.", "Sende oder empfange einen Code als Ton.", "Envoyez ou recevez un code en son."),
 ("Collect every share of a split bill.", "Cobra todas las partes de una cuenta dividida.", "Receba todas as partes de uma conta dividida.", "Sammle jeden Anteil einer geteilten Rechnung ein.", "Encaissez toutes les parts d'une addition partagée."),
 ("Make a sale in cashier mode.", "Haz una venta en modo caja.", "Faça uma venda no modo caixa.", "Mach einen Verkauf im Kassenmodus.", "Faites une vente en mode caisse."),
-("Save {#} sats in round-ups.", "Ahorra {#} sats en redondeos.", "Guarde {#} sats em arredondamentos.", "Spare {#} Sats durch Aufrunden.", "Épargnez {#} sats en arrondis."),
+("Save {#} SAT in round-ups.", "Ahorra {#} SAT en redondeos.", "Guarde {#} SAT em arredondamentos.", "Spare {#} SAT durch Aufrunden.", "Épargnez {#} SAT en arrondis."),
 ("Win a high-score challenge.", "Gana un desafío de puntuación.", "Vença um desafio de pontuação.", "Gewinne eine Highscore-Herausforderung.", "Gagnez un défi de score."),
 # --- moved to GitHub ---
 ("Source on GitHub", "Código en GitHub", "Código no GitHub", "Quellcode auf GitHub", "Code source sur GitHub"),
@@ -219,7 +219,7 @@ ROWS = [
 ("You won it! The sats are in your wallet.", "¡La ganaste! Los sats están en tu cartera.", "Você ganhou! Os sats estão na sua carteira.", "Gewonnen! Die Sats sind in deiner Wallet.", "Gagnée ! Les sats sont dans votre portefeuille."),
 ("This bounty is gone.", "Esta recompensa ya no está.", "Esta recompensa não existe mais.", "Dieses Kopfgeld ist weg.", "Cette prime n'existe plus."),
 ("Time ran out on this bounty.", "Se acabó el tiempo de esta recompensa.", "O tempo desta recompensa acabou.", "Die Zeit für dieses Kopfgeld ist abgelaufen.", "Le temps de cette prime est écoulé."),
-("The {#} sat bounty is still up. Rematch!", "La recompensa de {#} sat sigue en juego. ¡Revancha!", "A recompensa de {#} sat continua valendo. Revanche!", "Das Kopfgeld von {#} Sat ist noch zu haben. Revanche!", "La prime de {#} sat est toujours en jeu. Revanche !"),
+("The {#} SAT bounty is still up. Rematch!", "La recompensa de {#} SAT sigue en juego. ¡Revancha!", "A recompensa de {#} SAT continua valendo. Revanche!", "Das Kopfgeld von {#} SAT ist noch zu haben. Revanche!", "La prime de {#} SAT est toujours en jeu. Revanche !"),
 ("Extra Life", "Vida extra", "Vida extra", "Extraleben", "Vie bonus"),
 ("Extra Life from", "Vida extra de", "Vida extra de", "Extraleben von", "Vie bonus de"),
 ("EXTRA LIFE", "VIDA EXTRA", "VIDA EXTRA", "EXTRALEBEN", "VIE BONUS"),
@@ -480,8 +480,8 @@ RE = [
 (r"^(.+) put ([\d,]+) SAT on beating (\d+) on (.+)$", "$1 ofrece $2 SAT por superar $3 en $4", "$1 oferece $2 SAT para quem superar $3 em $4", "$1 setzt $2 SAT darauf, dass du $3 in $4 schlägst", "$1 met $2 SAT en jeu pour battre $3 à $4"),
 (r"^Beat (\d+) by (.+) and it's yours\. The mint holds it locked to you until then\.$", "Supera $1 antes del $2 y es tuya. El mint la guarda bloqueada para ti hasta entonces.", "Supere $1 até $2 e ela é sua. O mint a mantém bloqueada para você até lá.", "Schlag $1 bis $2 und es gehört dir. Die Mint hält es bis dahin für dich gesperrt.", "Battez $1 avant le $2 et elle est à vous. Le mint la garde verrouillée pour vous d'ici là."),
 (r"^You won (.+)'s ([\d,]+) SAT bounty!$", "¡Ganaste la recompensa de $2 SAT de $1!", "Você ganhou a recompensa de $2 SAT de $1!", "Du hast das Kopfgeld von $1 über $2 SAT gewonnen!", "Vous avez gagné la prime de $2 SAT de $1 !"),
-(r"^Score sent\. (.+)'s NUTCADE unlocks your (\d+) sat bounty when it sees it\.$", "Puntuación enviada. El NUTCADE de $1 desbloquea tu recompensa de $2 sat cuando la vea.", "Pontuação enviada. O NUTCADE de $1 libera sua recompensa de $2 sat quando a vir.", "Punkte gesendet. Der NUTCADE von $1 gibt dein Kopfgeld von $2 Sat frei, sobald er sie sieht.", "Score envoyé. Le NUTCADE de $1 débloque votre prime de $2 sat dès qu'il le voit."),
-(r"^You beat it! Add (.+) to your contacts to claim the (\d+) sat bounty\.$", "¡Lo superaste! Añade a $1 a tus contactos para reclamar la recompensa de $2 sat.", "Você superou! Adicione $1 aos seus contatos para resgatar a recompensa de $2 sat.", "Geschafft! Füge $1 zu deinen Kontakten hinzu, um das Kopfgeld von $2 Sat zu holen.", "Battu ! Ajoutez $1 à vos contacts pour réclamer la prime de $2 sat."),
+(r"^Score sent\. (.+)'s NUTCADE unlocks your (\d+) SAT bounty when it sees it\.$", "Puntuación enviada. El NUTCADE de $1 desbloquea tu recompensa de $2 SAT cuando la vea.", "Pontuação enviada. O NUTCADE de $1 libera sua recompensa de $2 SAT quando a vir.", "Punkte gesendet. Der NUTCADE von $1 gibt dein Kopfgeld von $2 SAT frei, sobald er sie sieht.", "Score envoyé. Le NUTCADE de $1 débloque votre prime de $2 SAT dès qu'il le voit."),
+(r"^You beat it! Add (.+) to your contacts to claim the (\d+) SAT bounty\.$", "¡Lo superaste! Añade a $1 a tus contactos para reclamar la recompensa de $2 SAT.", "Você superou! Adicione $1 aos seus contatos para resgatar a recompensa de $2 SAT.", "Geschafft! Füge $1 zu deinen Kontakten hinzu, um das Kopfgeld von $2 SAT zu holen.", "Battu ! Ajoutez $1 à vos contacts pour réclamer la prime de $2 SAT."),
 (r"^Bounty for (.+): beat (\d+) on (.+)$", "Recompensa para $1: superar $2 en $3", "Recompensa para $1: superar $2 em $3", "Kopfgeld für $1: $2 in $3 schlagen", "Prime pour $1 : battre $2 à $3"),
 (r"^Bounty from (.+): beat (\d+) on (.+)$", "Recompensa de $1: superar $2 en $3", "Recompensa de $1: superar $2 em $3", "Kopfgeld von $1: $2 in $3 schlagen", "Prime de $1 : battre $2 à $3"),
 (r"^Opens for them on (.+)$", "Se abre para esa persona el $1", "Abre para a pessoa em $1", "Öffnet sich für sie am $1", "S'ouvre pour cette personne le $1"),
@@ -510,6 +510,22 @@ RE = [
 (r"^No Nostr relay took the prize\. Your ([\d,]+) SAT stay locked until (.+), then come back to you\.$", "Ningún relay de Nostr aceptó el premio. Tus $1 SAT siguen bloqueados hasta $2 y luego vuelven a ti.", "Nenhum relay Nostr aceitou o prêmio. Seus $1 SAT ficam bloqueados até $2 e depois voltam para você.", "Kein Nostr-Relay hat den Preis angenommen. Deine $1 SAT bleiben bis $2 gesperrt und kommen dann zurück.", "Aucun relais Nostr n'a accepté le prix. Vos $1 SAT restent verrouillés jusqu'au $2, puis vous reviennent."),
 (r"^Loaded with ([\d,]+) SAT\. Whoever scans it first wins them\. If nobody does by (.+), they come back to you\.$", "Cargada con $1 SAT. Quien la escanee primero los gana. Si nadie lo hace antes del $2, vuelven a ti.", "Carregado com $1 SAT. Quem escanear primeiro ganha. Se ninguém fizer isso até $2, eles voltam para você.", "Mit $1 SAT geladen. Wer sie zuerst scannt, gewinnt sie. Scannt sie bis $2 niemand, kommen sie zu dir zurück.", "Chargée de $1 SAT. La première personne qui la scanne les gagne. Si personne ne le fait avant le $2, ils vous reviennent."),
 
+
+# ===== 1.11 polish =====
+(r"^TROPHY! ([^:]+)$", "¡TROFEO! $1", "TROFÉU! $1", "TROPHÄE! $1", "TROPHÉE ! $1"),
+(r"^Amount \(([A-Z]{3})\)$", "Cantidad ($1)", "Valor ($1)", "Betrag ($1)", "Montant ($1)"),
+(r"^Amount \(([A-Z]{3}), optional\)$", "Cantidad ($1, opcional)", "Valor ($1, opcional)", "Betrag ($1, optional)", "Montant ($1, facultatif)"),
+(r"^Bill total \(([A-Z]{3})\)$", "Total de la cuenta ($1)", "Total da conta ($1)", "Rechnungsbetrag ($1)", "Total de l'addition ($1)"),
+(r"^Prize \(([A-Z]{3})\)$", "Premio ($1)", "Prêmio ($1)", "Preis ($1)", "Prix ($1)"),
+(r"^Tip from (.+)$", "Propina desde $1", "Gorjeta de $1", "Trinkgeld von $1", "Pourboire depuis $1"),
+(r"^Offline, NUTCADE can only send amounts made of the exact coins you hold\.(?: Try (.+)\.)?$", "Sin conexión, NUTCADE solo puede enviar cantidades formadas por las monedas exactas que tienes. Prueba $1.", "Offline, o NUTCADE só pode enviar valores formados pelas moedas exatas que você tem. Tente $1.", "Offline kann NUTCADE nur Beträge senden, die genau aus deinen Münzen bestehen. Versuch $1.", "Hors ligne, NUTCADE ne peut envoyer que des montants formés des pièces exactes que vous détenez. Essayez $1."),
+(r"^([\d,]+ SAT) or ([\d,]+ SAT)$", "$1 o $2", "$1 ou $2", "$1 oder $2", "$1 ou $2"),
+(r"^Swap to (.+)$", "Cambio a $1", "Troca para $1", "Tausch zu $1", "Échange vers $1"),
+(r"^Reclaimed: (.+)$", "Recuperado: $1", "Recuperado: $1", "Zurückgeholt: $1", "Repris : $1"),
+(r"^Moved from (.+)$", "Movido desde $1", "Movido de $1", "Verschoben von $1", "Déplacé depuis $1"),
+(r"^Moved to (.+)$", "Movido a $1", "Movido para $1", "Verschoben zu $1", "Déplacé vers $1"),
+(r"^Sale: (.+) #cashier$", "Venta: $1 #cashier", "Venda: $1 #cashier", "Verkauf: $1 #cashier", "Vente : $1 #cashier"),
+(r"^Gift came back from (.+)$", "El regalo volvió de $1", "O presente voltou de $1", "Geschenk von $1 ist zurückgekommen", "Le cadeau est revenu de $1"),
 ]
 
 LANGS = ['es', 'pt', 'de', 'fr']
