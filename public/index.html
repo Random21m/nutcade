@@ -4038,14 +4038,17 @@ function toggleUnit(el) {
   const b = el.parentElement.querySelector('.unitbtn'); if (b) b.textContent = toFiat ? S.prefs.currency : 'SAT';
   unitLabel(el); S.prefs.amtFiat = toFiat; save(); amtConv(el);
 }
+let sheetOpener = null;   // the control that opened the sheet gets focus back when it closes
 function openSheet(title, html, onOpen) {
+  const was = document.activeElement;
   closeSheet();
+  sheetOpener = was && was !== document.body && !was.closest('#layer') ? was : sheetOpener && sheetOpener.isConnected ? sheetOpener : null;
   const layer = $('#layer');
   layer.innerHTML = `<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="sheet-head"><h3>${esc(title)}</h3><button class="x" data-act="close" aria-label="Close">X</button></div><div class="sheet-body" style="display:grid;gap:14px">${html}</div></div></div>`;
   const body = layer.querySelector('.sheet-body');
   enhanceAmounts(body);
   sheetCleanup = onOpen ? onOpen(body) : null; fitNums(body);
-  const f = layer.querySelector('input,textarea'); if (f && !matchMedia('(pointer:coarse)').matches) f.focus();
+  const f = layer.querySelector('input:not([type=file]),textarea'); if (!matchMedia('(pointer:coarse)').matches) { if (f) f.focus(); else { const sh = layer.querySelector('.sheet'); sh.tabIndex = -1; sh.focus({ preventScroll: true }); } }
   return body;
 }
 function fitNums(root) {
@@ -4055,7 +4058,16 @@ function fitNums(root) {
     while (el.scrollWidth > el.clientWidth + 1 && fs > 14 && i++ < 30) { fs -= 1.5; el.style.fontSize = fs + 'px'; }
   });
 }
-function closeSheet() { if (typeof sheetCleanup === 'function') sheetCleanup(); sheetCleanup = null; $('#layer').innerHTML = ''; }
+function closeSheet() {
+  if (typeof sheetCleanup === 'function') sheetCleanup(); sheetCleanup = null;
+  const had = !!$('#layer').firstChild, inLayer = document.activeElement && document.activeElement.closest('#layer');
+  $('#layer').innerHTML = '';
+  // the screen may have been redrawn while the sheet was open: then find the same button again
+  let back = sheetOpener;
+  if (back && !back.isConnected && back.dataset && back.dataset.act) back = [...document.querySelectorAll(`#app [data-act="${back.dataset.act}"]`)].find(x => !back.dataset.id || x.dataset.id === back.dataset.id) || null;
+  if (had && back && back.isConnected && (inLayer || document.activeElement === document.body)) { try { back.focus({ preventScroll: true }); } catch (e) {} }
+}
+const FOCUSABLE = 'button:not([disabled]),[href],input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 function setBody(html, onOpen) { const b = $('#layer .sheet-body'); if (!b) return; if (typeof sheetCleanup === 'function') sheetCleanup(); b.innerHTML = html; enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; fitNums(b); }
 const busyHTML = msg => `<div class="row" style="justify-content:center;padding:24px 0"><span class="spinner">${esc(msg)}</span></div>`;
 const errHTML = e => `<div class="notice red">${esc(e && e.message || e)}${e && e.raw ? `<div class="tiny muted raw" data-noi18n>${esc(e.raw)}</div>` : ''}</div>`;
@@ -7276,6 +7288,22 @@ document.addEventListener('input', e => {
   }
 });
 document.addEventListener('keydown', e => {
+  const sheet = $('#layer .sheet');
+  if (sheet && e.key === 'Tab') {   // keep keyboard focus inside the open sheet
+    const f = [...sheet.querySelectorAll(FOCUSABLE)].filter(x => x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden');
+    if (f.length) {
+      const i = f.indexOf(document.activeElement);
+      if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); return; }
+      if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); return; }
+    }
+  }
+  // Enter in a sheet's field presses the sheet's main button (the first solid one after the field)
+  if (sheet && e.key === 'Enter' && e.target.matches && e.target.matches('input:not([type=checkbox]):not([type=radio]):not([type=file])') && sheet.contains(e.target)
+      && e.target.id !== 'mintUrl' && e.target.dataset.cw === undefined && !e.target.closest('[data-pinpad]')) {
+    const btns = [...sheet.querySelectorAll('.btn.solid:not([disabled]), button.solid:not([disabled])')].filter(b => b.getClientRects().length);
+    const after = btns.find(b => e.target.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) || btns[0];
+    if (after) { e.preventDefault(); after.click(); return; }
+  }
   if (document.querySelector('[data-pinpad]') && !e.target.matches('input,textarea,select')) {
     const k = /^[0-9]$/.test(e.key) ? e.key : e.key === 'Backspace' ? 'del' : e.key === 'Enter' ? 'ok' : null;
     if (k) { e.preventDefault(); const b = document.querySelector(`[data-pinpad] [data-k="${k}"]`); if (b) A.pinKey(b); return; }
@@ -8632,7 +8660,8 @@ function makeG() {
 }
 function fit() {
   if (!view) return; const frameEl = view.querySelector('.screen-frame'); const c = view.querySelector('#gameCanvas');
-  const r = frameEl.getBoundingClientRect(); const k = Math.max(1, Math.min((r.width - 6) / W, (r.height - 6) / H));
+  // the canvas shrinks below 1:1 in a short window, so the key hints under it never overlap it
+  const r = frameEl.getBoundingClientRect(); const k = Math.max(0.4, Math.min((r.width - 6) / W, (r.height - 6) / H));
   const kk = k >= 2 ? Math.floor(k * 2) / 2 : k;
   c.style.width = Math.floor(W * kk) + 'px'; c.style.height = Math.floor(H * kk) + 'px';
 }

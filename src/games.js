@@ -801,7 +801,8 @@ function makeG() {
 }
 function fit() {
   if (!view) return; const frameEl = view.querySelector('.screen-frame'); const c = view.querySelector('#gameCanvas');
-  const r = frameEl.getBoundingClientRect(); const k = Math.max(1, Math.min((r.width - 6) / W, (r.height - 6) / H));
+  // the canvas shrinks below 1:1 in a short window, so the key hints under it never overlap it
+  const r = frameEl.getBoundingClientRect(); const k = Math.max(0.4, Math.min((r.width - 6) / W, (r.height - 6) / H));
   const kk = k >= 2 ? Math.floor(k * 2) / 2 : k;
   c.style.width = Math.floor(W * kk) + 'px'; c.style.height = Math.floor(H * kk) + 'px';
 }
