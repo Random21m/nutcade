@@ -99,7 +99,7 @@ const daysLeft = ms => Math.max(0, Math.ceil(ms / 86400e3));
 async function lockExtra(url, amount, heirPub, until, extraInputs) {
   const w = await getWallet(url);
   const inputs = (extraInputs || []).concat(S.proofs[url] || []);
-  if (sum(inputs) < amount) throw new Error(`Not enough credits. This mint holds ${money(sum(S.proofs[url] || []))}.`);
+  if (sum(inputs) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
   const cfg = { send: { type: 'p2pk', options: { pubkey: myLockPub(), locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() };
   const { keep, send } = await withRepair(url, () => w.send(amount, inputs, { includeFees: true }, cfg));
   S.proofs[url] = plain(keep); save();
@@ -235,7 +235,7 @@ function openExtra() {
   openSheet('Extra Life', `
     <div class="continue-box"><div class="cont-q">EXTRA LIFE</div><div class="tiny">Savings that pass to someone you trust if you stop playing</div></div>
     <ol class="steps"><li>Lock some sats. They stay yours: spend them any time.</li><li>Your heir gets a copy that only opens after the date.</li><li>Press CONTINUE now and then (or just open NUTCADE) to push the date back.</li><li>If you stop, your heir's NUTCADE claims the sats once the date passes.</li></ol>
-    <div class="field"><label for="amtIn">Amount (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="10000" autocomplete="off"></div>
+    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="10000" autocomplete="off"></div>
     <div class="field"><label for="xlTo">Heir</label><select id="xlTo" class="inp">${cs.map(c => `<option value="${esc(c.id)}" data-noi18n>${esc(c.name)}</option>`).join('')}<option value="">Someone else (paste their npub)</option></select></div>
     <div class="field" id="xlKeyF" ${cs.length ? 'hidden' : ''}><label for="xlKey">Their npub</label><input id="xlKey" class="inp" placeholder="npub1…" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
     <div class="field"><label>If I stop pressing CONTINUE, it opens for them after</label><div class="seg three" role="group" aria-label="Opens after">${EXTRA_PERIODS.map(([d, l]) => `<button type="button" data-act="giftDays" data-days="${d}" aria-pressed="${d === 182}">${l}</button>`).join('')}</div></div>
@@ -332,7 +332,8 @@ function reportCard(url) {
   const viaNostr = !!(l.nostr && l.nostr.since && l.nostr.since < l.first);
   const since = viaNostr ? l.nostr.since : l.first, days = Math.floor((now - since) / 86400e3);
   const ageTxt = days >= 365 ? `Known for ${pl(Math.floor(days / 365), 'year', 'years')}` : days >= 60 ? `Known for ${Math.floor(days / 30)} months` : `Known for ${pl(days, 'day', 'days')}`;
-  rows.push({ k: 'Age', g: band(days, [365, 180, 90, 30]), d: [ageTxt, viaNostr ? 'since its first mention on Nostr' : 'since you first used it'] });
+  // a mint you only just met isn't failing, it's new: NEW until it's 30 days old, and it doesn't pull the overall grade down
+  rows.push({ k: 'Age', g: days < 30 ? 'NEW' : band(days, [365, 180, 90, 30]), d: [ageTxt, viaNostr ? 'since its first mention on Nostr' : 'since you first used it'] });
   // keys
   const recent = (l.changes || []).filter(c => c.kind === 'new' && now - c.at < 90 * 86400e3).length;
   if (l.pubChanged) rows.push({ k: 'Keys', g: 'F', d: [`Its identity key changed on ${fmtDay(l.pubChanged.at)}. That can mean a new operator, so be careful.`], warn: true });
@@ -344,7 +345,7 @@ function reportCard(url) {
   const nr = l.nostr;
   const avg = nr && nr.stars.length ? nr.stars.reduce((a, b) => a + b, 0) / nr.stars.length : null;
   rows.push({ k: 'Reviews', g: !nr ? '?' : nr.recs === 0 ? 'D' : avg != null && avg < 3 ? 'D' : band(nr.recs, [10, 5, 2, 1]), d: !nr ? ['Not checked yet'] : nr.recs ? [`Recommended by ${pl(nr.recs, 'Nostr user', 'Nostr users')}`].concat(avg != null ? [`${avg.toFixed(1)}/5 from ${pl(nr.stars.length, 'rating', 'ratings')}`] : []) : ['Nobody recommends it on Nostr yet'] });
-  const known = rows.filter(r => r.g !== '?');
+  const known = rows.filter(r => r.g !== '?' && r.g !== 'NEW');
   let overall = known.length >= 2 ? GRADES[Math.round(known.reduce((t, r) => t + GRADES.indexOf(r.g), 0) / known.length)] : '?';
   if (l.pubChanged && overall !== '?' && GRADES.indexOf(overall) > 1) overall = 'D';
   return { overall, rows };
@@ -358,7 +359,7 @@ function openReport(url) {
   const draw = (busy) => {
     const r = reportCard(url), l = mlog(url);
     return `<div class="report"><div class="grade-big ${gradeCls(r.overall)}">${r.overall}</div><div><div class="h2" data-noi18n>${esc(m.name)}</div><div class="tiny muted" data-noi18n>${esc(host(url))}</div>${l.info && l.info.version ? `<div class="tiny muted" data-noi18n>${esc(l.info.version)}</div>` : ''}</div></div>
-      <div class="report-rows">${r.rows.map(x => `<div class="rrow ${x.warn ? 'warn' : ''}"><span class="rg ${gradeCls(x.g)}">${x.g}</span><span><b>${x.k}</b><span class="tiny muted">${x.d.map(p => `<span>${p}</span>`).join(' · ')}</span></span></div>`).join('')}</div>
+      <div class="report-rows">${r.rows.map(x => `<div class="rrow ${x.warn ? 'warn' : ''}"><span class="rg ${gradeCls(x.g)}${x.g.length > 1 ? ' word' : ''}">${x.g}</span><span><b>${x.k}</b><span class="tiny muted">${x.d.map(p => `<span>${p}</span>`).join(' · ')}</span></span></div>`).join('')}</div>
       ${l.info && l.info.motd ? `<div class="notice">Message from the mint: <span data-noi18n>${esc(l.info.motd)}</span></div>` : ''}
       <div class="tiny muted">Graded on this phone from health checks, your own payments with this mint, its keys and Nostr recommendations. A good grade isn't a guarantee: only keep what you can afford to lose at any one mint.</div>
       ${busy ? busyHTML('CHECKING THE MINT') : `<button class="btn sm" data-act="reportOpen" data-url="${esc(url)}" data-fresh="1">Check again</button>`}`;

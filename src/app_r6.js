@@ -137,7 +137,7 @@ function openHuntNew() {
   if (needSeed()) return;
   openSheet('Treasure hunt', `
     <div class="hunt">${chestSVG(false)}<div class="tiny">Hide sats behind clue cards. Whoever finds enough of them opens the chest.</div></div>
-    <div class="field"><label for="amtIn">Prize (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="2100" autocomplete="off"></div>
+    <div class="field"><label for="amtIn">Prize (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="2100" autocomplete="off"></div>
     <div class="row" style="gap:10px"><div class="field" style="flex:1"><label for="huntN">Clue cards</label><input id="huntN" class="inp" inputmode="numeric" value="5"></div>
     <div class="field" style="flex:1"><label for="huntK">Needed to open</label><input id="huntK" class="inp" inputmode="numeric" value="3"></div></div>
     <div class="field"><label for="noteIn">Message on every card (optional)</label><input id="noteIn" class="inp" maxlength="140" placeholder="Happy hunting! Clues are hidden around the park."></div>

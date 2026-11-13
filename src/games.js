@@ -946,7 +946,7 @@ function showChallengeResult(score) {
   A().sfx(won ? 'levelup' : 'over');
   box.innerHTML = box6(`<div style="font-family:var(--f-display);font-size:14px;color:${won ? 'var(--lime)' : 'var(--pink)'}">${won ? 'YOU WIN!' : 'SO CLOSE!'}</div>
     <div class="scores" style="font-size:10px"><div><span>YOU</span><span data-noi18n>${esc6(initials)}</span><span>${pad6(score)}</span></div><div><span>THEM</span><span data-noi18n>${esc6(c.by)}</span><span>${pad6(c.target)}</span></div></div>
-    ${res && res.bounty ? `<div class="notice ${won ? 'cyan' : ''}" style="font-size:11px">${won ? (res.bountySent ? `Score sent. ${esc6(res.name)}'s NUTCADE unlocks your ${res.bounty} sat bounty when it sees it.` : `You beat it! Add ${esc6(res.name || 'them')} to your contacts to claim the ${res.bounty} sat bounty.`) : `The ${res.bounty} sat bounty is still up. Rematch!`}</div>` : ''}
+    ${res && res.bounty ? `<div class="notice ${won ? 'cyan' : ''}" style="font-size:11px">${won ? (res.bountySent ? `Score sent. ${esc6(res.name)}'s NUTCADE unlocks your ${res.bounty} SAT bounty when it sees it.` : `You beat it! Add ${esc6(res.name || 'them')} to your contacts to claim the ${res.bounty} SAT bounty.`) : `The ${res.bounty} SAT bounty is still up. Rematch!`}</div>` : ''}
     ${res && res.canReply && !res.bountySent ? `<button class="btn solid gold block" data-g="reply">Send my score to ${esc6(res.name)}</button>` : ''}
     <button class="btn block ${res && res.canReply && !res.bountySent ? '' : 'solid gold'}" data-g="rematch">Rematch</button><button class="btn block" data-g="exit2">Exit</button>`);
   const rb = box.querySelector('[data-g=reply]');

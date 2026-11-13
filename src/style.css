@@ -428,10 +428,11 @@ ol.steps{margin:0;padding-left:24px;display:grid;gap:8px;font-size:19px;line-hei
 .report{display:flex;gap:14px;align-items:center}
 .grade-big{font-family:var(--f-display);font-size:44px;line-height:1;border:3px solid currentColor;border-radius:8px;padding:10px 12px;min-width:72px;text-align:center}
 .report-rows{display:grid;gap:10px}
-.rrow{display:grid;grid-template-columns:30px 1fr;gap:10px;align-items:start}
+.rrow{display:grid;grid-template-columns:minmax(30px,auto) 1fr;gap:10px;align-items:start}
 .rrow > span:last-child{display:grid;gap:2px}
 .rrow.warn b{color:var(--red)}
 .rg{font-family:var(--f-display);font-size:16px;text-align:center;padding-top:2px}
+.rg.word{font-size:9px;padding-top:5px}
 /* joystick */
 .stick{position:relative;flex:none;width:clamp(104px,min(36vw,21vh),150px);height:clamp(104px,min(36vw,21vh),150px);border-radius:50%;background:radial-gradient(circle,#2a2350 0 55%,#1a1438 56% 100%);border:3px solid #000;box-shadow:inset 0 0 0 2px #3b3270;touch-action:none;user-select:none;-webkit-user-select:none}
 .stick-ring{position:absolute;inset:26%;border-radius:50%;border:2px dashed #4a3f8a;pointer-events:none}
@@ -481,11 +482,16 @@ ol.steps{margin:0;padding-left:24px;display:grid;gap:8px;font-size:19px;line-hei
 .field .toggle span{min-width:0;overflow-wrap:anywhere}
 .btngrid{display:flex;flex-wrap:wrap;gap:10px}
 .btngrid > .btn{flex:1 1 40%}
+.ico-heart{width:14px;height:12px;flex:none;vertical-align:-1px;image-rendering:pixelated}
+.linkbtn .ico-heart{margin-right:6px}
+.btn .ico-heart{width:16px;height:14px}
 /* contacts: the name gets the whole row; Pay and Edit sit under it */
 .tx.contact{grid-template-columns:34px minmax(0,1fr)}
 .tx.contact .note{white-space:normal;overflow-wrap:break-word}
 .tx.contact .addr{overflow-wrap:break-word;min-width:0}
 .tx.contact .cbtns{grid-column:2;gap:8px;flex-wrap:wrap}
+.notice .raw{margin-top:6px;font-size:16px;overflow-wrap:anywhere}
+.inp.amount::placeholder{font-family:var(--f-body);font-size:20px;letter-spacing:0}
 .pin-err{line-height:1.2}
 .tabbar .tab span{line-height:1}
 .row.inrow{flex-wrap:wrap}

@@ -138,7 +138,7 @@ function giftFields() {
       <div class="tiny muted">They claim it with NUTCADE, or with cashu.me using the same 12 words. Locked ecash can't be sent offline.</div>
     </div>`;
 }
-const fmtDay = ms => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: new Date(ms).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+const fmtDay = ms => fmtDate(ms);
 async function sendGift(amount, note, opts) {
   const pub = opts.pubkey, secs = Math.floor(Date.now() / 1000 + opts.seconds);
   const tx = await sendEcash(amount, note, pub, S.active, { locktime: secs });
@@ -202,7 +202,7 @@ function openSplit() {
   if (needSeed()) return;
   openSheet('Split a bill', `
     <p style="margin:0">Paid for the group? Turn the bill into a boss. Each friend pays their share from any Cashu wallet, and every payment knocks off some of its health.</p>
-    <div class="field"><label for="amtIn">Bill total (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="40000" autocomplete="off"></div>
+    <div class="field"><label for="amtIn">Bill total (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="40000" autocomplete="off"></div>
     <div class="field"><label for="splitN">People, including you</label><input id="splitN" class="inp" type="number" inputmode="numeric" min="2" max="30" value="4"></div>
     <div class="field"><label for="memoIn">What it's for (friends see this)</label><input id="memoIn" class="inp" maxlength="80" placeholder="Pizza night"></div>
     ${S.mints.length ? `<label class="toggle" for="onlyMine"><span><span class="tl">Only from my mints</span><span class="th">Friends must pay with ecash from a mint you use.</span></span><input id="onlyMine" type="checkbox" checked></label>` : ''}
@@ -315,7 +315,7 @@ function openMove(from, to, amount) {
     <p style="margin:0">Moves sats from one of your mints to another over Lightning. The sending mint charges a small Lightning fee, shown before you confirm.</p>
     <div class="field"><label for="mvFrom">From</label><select id="mvFrom" class="inp">${src.map(m => `<option value="${esc(m.url)}" ${m.url === from ? 'selected' : ''} data-noi18n>${esc(m.name)} · ${fmt(balanceOf(m.url))}</option>`).join('')}</select></div>
     <div class="field"><label for="mvTo">To</label><select id="mvTo" class="inp">${dst.map(m => `<option value="${esc(m.url)}" ${m.url === to ? 'selected' : ''} data-noi18n>${esc(m.name)} · ${fmt(balanceOf(m.url))}</option>`).join('')}</select></div>
-    <div class="field"><label for="amtIn">Amount (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" value="${amount ? esc(amount) : ''}" placeholder="5000" autocomplete="off"></div>
+    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" value="${amount ? esc(amount) : ''}" placeholder="5000" autocomplete="off"></div>
     <button class="btn solid gold block" data-act="moveQuote">Get quote</button>
     <div id="sheetErr"></div>`);
 }
@@ -638,7 +638,7 @@ function piggyPanel() {
   const saved = piggySaved(), goal = Math.max(1000, Math.ceil((saved + 1) / 10000) * 10000);
   return `<div class="panel piggy-panel"><div class="row" style="gap:12px;align-items:center">${pigSVG()}<div style="min-width:0;flex:1"><div class="row between"><span class="h2" style="color:var(--pink)">Piggy bank</span><span class="tiny" style="color:var(--gold)">${money(saved)}</span></div>
     <div class="meter" aria-hidden="true"><i style="width:${Math.min(100, Math.round(saved / goal * 100))}%"></i></div>
-    <div class="tiny muted">Rounds up to the nearest ${fmt(+S.prefs.piggyStep || 100)} sat. Next goal: ${fmt(goal)} sat</div></div></div></div>`;
+    <div class="tiny muted">Rounds up to the nearest ${money(+S.prefs.piggyStep || 100)}. Next goal: ${money(goal)}</div></div></div></div>`;
 }
 function piggyBreak(info, retry) {
   document.getElementById('piggyLayer')?.remove();

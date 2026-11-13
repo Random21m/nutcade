@@ -241,6 +241,19 @@ function friendly(e, url) {
       ? `Can't reach ${host(url || '')}. This preview blocks connections to mints. Open the NUTCADE file in a normal browser tab to use real sats.`
       : `Can't reach ${host(url || '')}. Check the address and your connection, then try again.`);
   }
+  // A mint's own error text ("mint quote already paid") is shown small under a sentence in your language.
+  if (e && !e.raw && (typeof e.code === 'number' || typeof e.status === 'number' || /^[a-z]/.test(m))) {
+    const say = /quote.*(already|issued)|already (been )?(paid|issued)/i.test(m) ? 'That invoice was already paid.'
+      : /already spent|token.*spent|proofs? (are|is) spent/i.test(m) ? 'This ecash was already spent.'
+      : /not paid|unpaid/i.test(m) ? "That invoice hasn't been paid yet."
+      : /pending/i.test(m) ? 'The mint says this payment is still pending.'
+      : /expired/i.test(m) ? 'That request expired. Start again.'
+      : /keyset/i.test(m) ? 'The mint changed its keys. Refresh the mint and try again.'
+      : /rate.?limit|too many requests/i.test(m) ? 'The mint is busy. Wait a moment and try again.'
+      : /insufficient|not enough|balance/i.test(m) ? "There isn't enough to cover this."
+      : 'The mint turned this down.';
+    const f = new Error(say); f.raw = m; return f;
+  }
   return e instanceof Error ? e : new Error(m);
 }
 function methodsOf(w) {
@@ -390,7 +403,7 @@ async function sendEcash(amount, note, lockTo, url = S.active, opts = {}) {
   piggyGuard(amount);
   const w = await getWallet(url);
   const have = S.proofs[url] || [];
-  if (sum(have) < amount) throw new Error(`Not enough credits. This mint holds ${money(sum(have))}.`);
+  if (sum(have) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(have))}.`);
   const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}) }, keep: w.defaultOutputType() } : undefined;
   const { keep, send } = await withRepair(url, () => w.send(amount, have, { includeFees: true }, outCfg));
   S.proofs[url] = plain(keep);
@@ -409,7 +422,7 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active) {
   const reserve = kind === 'ln' ? num(mq.fee_reserve) : num((mq.fee_options || []).find(f => f.fee_index === feeIndex)?.fee_reserve);
   const need = amount + reserve;
   const have = S.proofs[url] || [];
-  if (sum(have) < need) throw new Error(`Not enough credits. Need ${money(need)} including fees, this mint holds ${fmt(sum(have))}.`);
+  if (sum(have) < need) throw new Error(`Not enough funds. Need ${money(need)} including fees; this mint holds ${money(sum(have))}.`);
   piggyGuard(need);
   const { keep, send } = await withRepair(url, () => w.send(need, have, { includeFees: true }));
   const tx = addTx({ type: 'out', method: kind, amount, mint: url, note, status: 'pending', request: dest, quote: mq.quote });
@@ -742,7 +755,7 @@ function lnurlToUrl(v) {
 }
 function openPayLnurl(target) {
   openSheet('Pay', `<div class="tiny muted">To</div><div class="code" style="color:var(--ink)">${esc(target.length > 48 ? target.slice(0, 24) + '…' + target.slice(-12) : target)}</div>
-    <div class="field"><label for="amtIn">Amount (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>
+    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200"></div>
     <button class="btn solid pink block" data-act="lnurlQuote" data-t="${esc(target)}">Get quote</button><div id="sheetErr"></div>`);
 }
@@ -751,7 +764,7 @@ async function lnurlInvoice(target, sats, comment) {
   if (base.status === 'ERROR') throw new Error(base.reason || 'That address returned an error.');
   if (base.tag !== 'payRequest' || !base.callback) throw new Error("That address isn't set up to receive payments.");
   const msat = sats * 1000;
-  if (msat < base.minSendable || msat > base.maxSendable) throw new Error(`This address accepts ${fmt(Math.ceil(base.minSendable / 1000))} to ${fmt(Math.floor(base.maxSendable / 1000))} sats.`);
+  if (msat < base.minSendable || msat > base.maxSendable) throw new Error(`This address accepts ${money(Math.ceil(base.minSendable / 1000))} to ${money(Math.floor(base.maxSendable / 1000))}.`);
   const u = new URL(base.callback); u.searchParams.set('amount', String(msat));
   if (comment && base.commentAllowed) u.searchParams.set('comment', comment.slice(0, base.commentAllowed));
   const inv = await fetch(u.toString()).then(r => r.json());
@@ -768,7 +781,7 @@ function celebrate(dir, amount) {
   const layer = document.createElement('div'); layer.id = 'fxLayer'; layer.setAttribute('aria-hidden', 'true');
   const label = document.createElement('div'); label.className = 'fx-label ' + (dir === 'in' ? 'in' : 'out');
   const big = document.createElement('b'); big.textContent = dir === 'in' ? '1UP!' : 'SENT!';
-  const amt = document.createElement('span'); amt.textContent = (dir === 'in' ? '+' : '−') + money(amount);
+  const amt = document.createElement('span'); amt.textContent = (dir === 'in' ? '+' : '-') + money(amount);
   label.append(big, amt); layer.appendChild(label);
   document.body.appendChild(layer);
   if (reduce) { setTimeout(() => layer.remove(), 1400); return; }
@@ -892,7 +905,13 @@ function satsOf(id) {
   }
   return parseInt(v.replace(/[^0-9]/g, ''), 10) || 0;
 }
-function setSats(el, n) { if (!el) return; el.dataset.cur = 'sat'; el.value = n; const w = el.closest('.amtwrap'); if (w) { const b = w.querySelector('.unitbtn'); if (b) b.textContent = 'SAT'; el.setAttribute('inputmode', 'numeric'); } amtConv(el); }
+function setSats(el, n) { if (!el) return; el.dataset.cur = 'sat'; el.value = n; const w = el.closest('.amtwrap'); if (w) { const b = w.querySelector('.unitbtn'); if (b) b.textContent = 'SAT'; el.setAttribute('inputmode', 'numeric'); } unitLabel(el); amtConv(el); }
+// "Amount (SAT)" becomes "Amount (USD)" when you type in your currency
+function unitLabel(el) {
+  const lab = el.id && document.querySelector(`label[for="${el.id}"]`); if (!lab) return;
+  if (lab.dataset.en === undefined) { if (!/\(SAT\b/.test(lab.textContent)) return; lab.dataset.en = lab.textContent; }
+  lab.textContent = tr(lab.dataset.en.replace('(SAT', '(' + (el.dataset.cur === 'fiat' ? S.prefs.currency : 'SAT')));
+}
 function amtConv(el) {
   const out = el.parentElement && el.parentElement.parentElement && el.parentElement.parentElement.querySelector('.amtconv'); if (!out) return;
   let t = '';
@@ -908,6 +927,7 @@ function enhanceAmounts(root) {
   if (!root || !S.prefs.fiat) return;
   root.querySelectorAll('input.amount:not([data-enh])').forEach(el => {
     el.dataset.enh = '1'; el.dataset.cur = 'sat';
+    const lab = el.id && root.querySelector(`label[for="${el.id}"]`); if (lab && /\(SAT\b/.test(lab.textContent)) lab.dataset.en = lab.textContent;
     const wrap = document.createElement('div'); wrap.className = 'amtwrap';
     el.parentElement.insertBefore(wrap, el); wrap.appendChild(el);
     wrap.insertAdjacentHTML('beforeend', `<button type="button" class="unitbtn" data-act="amtUnit" aria-label="Switch between sats and ${esc(S.prefs.currency)}">SAT</button>`);
@@ -925,7 +945,7 @@ function toggleUnit(el) {
   el.setAttribute('inputmode', toFiat ? 'decimal' : 'numeric');
   el.value = n ? (toFiat ? (n / 1e8 * price.rate).toFixed(2) : String(n)) : '';
   const b = el.parentElement.querySelector('.unitbtn'); if (b) b.textContent = toFiat ? S.prefs.currency : 'SAT';
-  S.prefs.amtFiat = toFiat; save(); amtConv(el);
+  unitLabel(el); S.prefs.amtFiat = toFiat; save(); amtConv(el);
 }
 function openSheet(title, html, onOpen) {
   closeSheet();
@@ -947,7 +967,7 @@ function fitNums(root) {
 function closeSheet() { if (typeof sheetCleanup === 'function') sheetCleanup(); sheetCleanup = null; $('#layer').innerHTML = ''; }
 function setBody(html, onOpen) { const b = $('#layer .sheet-body'); if (!b) return; if (typeof sheetCleanup === 'function') sheetCleanup(); b.innerHTML = html; enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; fitNums(b); }
 const busyHTML = msg => `<div class="row" style="justify-content:center;padding:24px 0"><span class="spinner">${esc(msg)}</span></div>`;
-const errHTML = e => `<div class="notice red">${esc(e && e.message || e)}</div>`;
+const errHTML = e => `<div class="notice red">${esc(e && e.message || e)}${e && e.raw ? `<div class="tiny muted raw" data-noi18n>${esc(e.raw)}</div>` : ''}</div>`;
 
 /* ---------- views ---------- */
 let tab = 'wallet';
@@ -1021,12 +1041,12 @@ window.addEventListener('resize', () => { clearTimeout(fitNums.t); fitNums.t = s
 function refresh() { if ($('#layer .sheet')) { /* keep sheet */ } const y = window.scrollY; render(); window.scrollTo(0, y); }
 
 function txRow(t) {
-  const sign = t.type === 'in' ? '+' : '−';
+  const sign = t.type === 'in' ? '+' : '-';   // the pixel font's hyphen sits mid-height; its − glyph falls back to the baseline
   const method = { ln: 'LN', ecash: 'ECASH', onchain: 'ON-CHAIN' }[t.method];
   const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '');
   const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : sign + fmt(t.amount);
   return `<button class="tx ${t.type}" data-act="tx" data-id="${t.id}"><span class="ico" aria-hidden="true">${t.type === 'in' ? '↓' : '↑'}</span>
-    <span class="mid"><div class="note ${t.note ? '' : 'empty'}">${esc(t.note || 'Add a note…')}</div>
+    <span class="mid"><div class="note ${t.note ? '' : 'empty'}">${esc(noteText(t.note) || 'Add a note…')}</div>
     <div class="meta"><span class="chip ${t.method === 'ecash' ? 'ecash' : 'ln'}">${method}</span>${stat}<span>${timeAgo(t.ts)}</span></div></span>
     <span class="amt">${amt}</span></button>`;
 }
@@ -1034,8 +1054,23 @@ function timeAgo(ts) {
   const d = (Date.now() - ts) / 1000;
   if (d < 60) return 'just now'; if (d < 3600) return Math.floor(d / 60) + 'm ago'; if (d < 86400) return Math.floor(d / 3600) + 'h ago';
   if (d < 604800) return Math.floor(d / 86400) + 'd ago';
-  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return fmtDate(ts);
 }
+// Every date in the app reads the same way, in the app's language: "Nov 20, 2026" (with the time where it matters).
+const dateLocale = () => ({ en: 'en-US', pt: 'pt-BR' })[LANG] || LANG;
+function fmtDate(ms, withTime) {
+  const d = new Date(ms); if (isNaN(d)) return '';
+  try { return d.toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric', year: 'numeric' }) + (withTime ? ', ' + d.toLocaleTimeString(dateLocale(), { hour: 'numeric', minute: '2-digit' }) : ''); }
+  catch (e) { return d.toDateString(); }
+}
+// Notes NUTCADE writes itself (not ones you typed) are shown in your language.
+const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt: |Loaded score card)|\((part \d+ of \d+|cancelled at the till)\)$/;
+function noteText(n) {
+  if (!n || !AUTO_NOTE.test(n)) return n;
+  const m = /^(.*) \((part \d+ of \d+|cancelled at the till)\)$/.exec(n);   // your own words before the suffix stay as you typed them
+  return m ? noteText(m[1]) + ' (' + tr(m[2]) + ')' : tr(n);
+}
+const TX_STATUS = { pending: 'Pending', done: 'Complete', failed: 'Failed', claimed: 'Claimed', reclaimed: 'Reclaimed', expired: 'Expired' };
 
 /* ---------- first-run gate: create + back up before entering ---------- */
 let gate = { step: 'welcome', picks: null };
@@ -1135,7 +1170,7 @@ function viewWallet() {
     <button class="btn block lime" data-act="recvMethod" data-m="ecash">Someone sent me ecash</button></div>
     <div id="priceMount"></div>
     <div class="panel"><div class="row between"><span class="h2">Arcade</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Play</button></div><div id="topScore" class="tiny muted"></div></div>
-    <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">♥ Support NUTCADE</button>
+    <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">${HEART}<span>Support NUTCADE</span></button>
   </section>`;
   const bal = balanceOf(m.url), tot = totalBalance(), po = pendingOut();
   const recent = S.txs.slice(0, 4);
@@ -1161,7 +1196,7 @@ function viewWallet() {
       ${recent.length ? `<div class="txs">${recent.map(txRow).join('')}</div>` : `<div class="empty-state"><b>NO PLAYS YET</b>Receive some sats and every transaction shows up here with room for a note.</div>`}
     </div>
     <div class="panel"><div class="row between"><span class="h2">Arcade</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Play</button></div><div id="topScore" class="tiny muted"></div></div>
-    <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">♥ Support NUTCADE</button>
+    <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">${HEART}<span>Support NUTCADE</span></button>
   </section>`;
 }
 
@@ -1172,7 +1207,7 @@ function viewHistory() {
   const counts = {}; S.txs.forEach(t => tagsOf(t.note).forEach(g => { counts[g] = (counts[g] || 0) + 1; }));
   const tags = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 14);
   return `<section class="screen">
-    <div class="row between"><h2 class="h2">Transaction notes</h2><span class="row" style="gap:10px"><span class="tiny muted">${noted}/${S.txs.length} noted</span>${S.txs.length ? '<button class="btn sm" data-act="csv">Export CSV</button>' : ''}</span></div>
+    <div class="row between"><div style="display:grid;gap:4px"><h2 class="h2">Notes</h2><span class="tiny muted">${noted}/${S.txs.length} noted</span></div>${S.txs.length ? '<button class="btn sm" data-act="csv">Export CSV</button>' : ''}</div>
     <div class="field"><label for="hq">Search notes</label><input id="hq" class="inp" type="search" placeholder="pizza, rent, Satoshi…" value="${esc(histQuery)}" data-input="hq" autocomplete="off"></div>
     <div class="seg three" role="group" aria-label="Filter">${[['all', 'ALL'], ['in', 'IN'], ['out', 'OUT']].map(([k, l]) => `<button data-act="hf" data-f="${k}" aria-pressed="${histFilter === k}">${l}</button>`).join('')}</div>
     ${tags.length ? `<div class="tagrow" role="group" aria-label="Tags">${tags.map(([g, n]) => `<button class="tag" data-act="htag" data-tag="${esc(g)}" aria-pressed="${histTag === g}">#${esc(g)} <span>${n}</span></button>`).join('')}</div>` : `<div class="tiny muted">Tip: add #tags to notes, like #food or #rent, to group them.</div>`}
@@ -1204,6 +1239,11 @@ function hydrateFromVault() {
   S.seed = d.seed || null; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || [];
   seedBytes = null; raw.del('pinfails'); requestPersist();
 }
+const HEART = '<svg class="ico-heart" viewBox="0 0 7 6" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges"><path d="M1 0h2v1h1V0h2v1h1v2H6v1H5v1H4v1H3V5H2V4H1V3H0V1h1z"/></svg>';
+// A drawn backspace key: the pixel font has no ⌫, and the fallback glyph is tiny.
+const DEL_ICON = '<svg class="ico-del" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges"><path fill-rule="evenodd" d="M5 3h10v10H5L1 8zm1 1L2.5 8 6 12h8V4z"/><path d="M7 5h1v1H7zm1 1h1v1H8zm1 1h1v1H9zm1 1h1v1h-1zm1 1h1v1h-1zm0-4h1v1h-1zm-1 1h1v1h-1zM8 8h1v1H8zM7 9h1v1H7z"/></svg>';
+// One box per digit typed plus a blinking cursor box, so the pad never suggests a fixed length (a PIN is 6 to 12 digits).
+const pinDots = n => Array.from({ length: n }, () => '<i class="on"></i>').join('') + (n < PIN_MAX ? '<i class="cur"></i>' : '');
 function padHTML(title, sub, opts = {}) {
   const n = pinUI.value.length;
   return `<div class="pinpad" data-pinpad="${pinUI.mode}">
@@ -1387,7 +1427,7 @@ function viewSettings() {
 
     <div class="panel" id="set-piggy"><span class="h2">Piggy bank</span>
       ${toggle('piggy', 'Round up my payments', 'Each payment rounds up and the difference is set aside in your piggy bank. The sats stay in your wallet; NUTCADE makes you wait through a countdown before you spend them.')}
-      ${S.prefs.piggy ? `<div class="field"><label for="p_piggyStep">Round up to the nearest</label><select id="p_piggyStep" class="inp" data-act="prefSelect" data-k="piggyStep">${[10, 100, 1000].map(v => `<option value="${v}" ${(+S.prefs.piggyStep || 100) === v ? 'selected' : ''}>${fmt(v)} sat</option>`).join('')}</select></div>
+      ${S.prefs.piggy ? `<div class="field"><label for="p_piggyStep">Round up to the nearest</label><select id="p_piggyStep" class="inp" data-act="prefSelect" data-k="piggyStep">${[10, 100, 1000].map(v => `<option value="${v}" ${(+S.prefs.piggyStep || 100) === v ? 'selected' : ''}>${fmt(v)} SAT</option>`).join('')}</select></div>
       <div class="row between tiny"><span>Saved so far</span><span style="color:var(--gold)">${money(piggySaved())}</span></div>${piggySaved() ? '<button class="btn sm" data-act="piggyEmpty">Empty piggy bank</button>' : ''}` : ''}
     </div>
 
@@ -1924,7 +1964,7 @@ function openPayContact(id) {
   const canLn = c.ln && supports(m, 'melt', 'bolt11');
   openSheet(`Pay ${c.name}`, `
     <div class="tiny muted">From <b style="color:var(--ink)">${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
-    <div class="field"><label for="amtIn">Amount (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>
+    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Lunch"></div>
     ${c.pubkey ? `<button class="btn solid pink block" data-act="contactEcash" data-id="${c.id}">Send ecash over Nostr</button>` : ''}
     ${canLn ? `<button class="btn ${c.pubkey ? '' : 'solid pink'} block" data-act="contactLn" data-id="${c.id}">Pay ${esc(c.ln)}</button>` : c.ln ? `<div class="tiny muted">${esc(m.name)} can't pay Lightning. Pick another mint to pay ${esc(c.ln)}.</div>` : ''}
@@ -1954,7 +1994,7 @@ function sendOffline(amount, note, url = S.active) {
   piggyGuard(amount);
   const have = S.proofs[url] || [];
   const pick = pickExact(have, amount);
-  if (!pick) { const near = offlineAmounts(have, amount); throw new Error(`Offline, NUTCADE can only send amounts made of the exact coins you hold.${near.length ? ` Try ${near.map(fmt).join(' or ')} sat.` : ''}`); }
+  if (!pick) { const near = offlineAmounts(have, amount); throw new Error(`Offline, NUTCADE can only send amounts made of the exact coins you hold.${near.length ? ` Try ${near.map(money).join(' or ')}.` : ''}`); }
   const ids = new Set(pick.map(p => p.secret));
   S.proofs[url] = have.filter(p => !ids.has(p.secret));
   const token = L.getEncodedToken({ mint: url, proofs: pick, unit: 'sat' });
@@ -2160,7 +2200,7 @@ function openReceive(method = 'ln') {
   else if (method === 'ln') inner = supports(m, 'mint', 'bolt11') ? `
     ${S.prefs.npc ? `<div class="panel lnaddr"><div class="row between"><span class="label">Your Lightning address</span><button class="linkbtn tiny" data-act="lnAddr">Manage</button></div><div class="code addr">${esc(npcAddress())}</div><div class="row"><button class="btn sm" data-act="copy" data-text="${esc(npcAddress())}">Copy</button><button class="btn sm violet" data-act="lnAddrQR">Show QR</button></div><div class="tiny muted">Payments to it land here whenever NUTCADE is open. Or make a one-time invoice below.</div></div>`
       : `<button class="linkbtn tiny" data-act="lnAddr" style="justify-self:start">＠ Get your own Lightning address</button>`}
-    <div class="field"><label for="amtIn">Amount (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="2100" autocomplete="off"></div>
+    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="2100" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Arcade fund"></div>
     <button class="btn solid lime block" data-act="doLnInvoice">Create invoice</button>` : notSupported('Lightning deposits');
   else inner = supports(m, 'mint', 'onchain') ? `
@@ -2169,14 +2209,14 @@ function openReceive(method = 'ln') {
     <button class="btn solid lime block" data-act="doOnchainAddr">Get Bitcoin address</button>` : notSupported('On-chain deposits');
   openSheet('Receive', `${methodSeg('recv', method)}${m && method !== 'ecash' ? `<div class="tiny muted">Into <b style="color:var(--ink)">${esc(m.name)}</b></div>` : ''}${inner}<div id="sheetErr"></div>`);
 }
-function minMax(mi) { if (!mi) return ''; const a = []; if (mi.min) a.push(`min ${fmt(mi.min)}`); if (mi.max) a.push(`max ${fmt(mi.max)}`); return a.length ? ` Limits: ${a.join(', ')} sat.` : ''; }
+function minMax(mi) { if (!mi) return ''; const a = []; if (mi.min) a.push(`min ${fmt(mi.min)}`); if (mi.max) a.push(`max ${fmt(mi.max)}`); return a.length ? ` Limits: ${a.join(', ')} SAT.` : ''; }
 function notSupported(what) { return `<div class="notice red">${what} aren't offered by ${esc(activeMint().name)}. Pick a mint that lists them in the mint picker.</div><button class="btn block gold" data-act="pickMint">Open mint picker</button>`; }
 
 function openSend(method = 'ecash') {
   if (needMint()) return;
   const m = activeMint(); let inner = '';
   if (method === 'ecash') inner = `
-    <div class="field"><label for="amtIn">Amount (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="500" autocomplete="off"></div>
+    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="500" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="High score bet with Alex"></div>
     ${giftFields()}
     <button class="btn solid pink block" data-act="doSendEcash">Create token</button>
@@ -2187,7 +2227,7 @@ function openSend(method = 'ecash') {
     <button class="btn solid pink block" data-act="doMeltQuote" data-k="ln">Get quote</button>` : notSupported('Lightning payments');
   else inner = supports(m, 'melt', 'onchain') ? `
     <div class="field"><div class="row between"><label for="destIn">Bitcoin address</label><button class="btn sm violet" data-act="scan" data-hint="Point at a Bitcoin address."><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h5v1H2v4H1zm9 0h5v5h-1V2h-4zM1 10h1v4h4v1H1zm13 0h1v5h-5v-1h4zM4 4h3v3H4zm5 0h3v3H9zM4 9h3v3H4zm5 0h1v1H9zm2 0h1v1h-1zm-2 2h1v1H9zm2 1h1v1h-1z"/></svg>Scan</button></div><input id="destIn" class="inp" placeholder="bc1q…" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-    <div class="field"><label for="amtIn">Amount (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="50000" autocomplete="off"></div>
+    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="50000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Move to cold storage"></div>
     <button class="btn solid pink block" data-act="doMeltQuote" data-k="onchain">Get fee options</button>${minMax(methodInfo(m, 'melt', 'onchain')) ? `<div class="tiny muted">${minMax(methodInfo(m, 'melt', 'onchain'))}</div>` : ''}` : notSupported('On-chain withdrawals');
   openSheet('Send', `${contactChips()}${methodSeg('send', method)}<div class="tiny muted">From <b style="color:var(--ink)">${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>${inner}<div id="sheetErr"></div>`);
@@ -2247,13 +2287,14 @@ function showDone(dir, amount, how, extra = '') {
   sfx('start'); celebrate(dir, amount);
   setBody(`<div style="text-align:center;display:grid;gap:14px;padding:10px 0">
     <div style="font-family:var(--f-display);font-size:18px;color:${dir === 'in' ? 'var(--lime)' : 'var(--pink)'}">${dir === 'in' ? '1UP!' : 'SENT!'}</div>
-    <div class="credit-num" style="font-size:30px">${dir === 'in' ? '+' : '−'}${fmt(amount)}<small>${unitTag()}</small></div>
+    <div class="credit-num" style="font-size:30px">${dir === 'in' ? '+' : '-'}${fmt(amount)}<small>${unitTag()}</small></div>
     <div class="muted">${esc(how)}</div>
     ${extra}<button class="btn solid gold block" data-act="close">Continue</button></div>`);
   refresh();
 }
 function showMeltQuote(kind, mq, dest, note) {
   const amount = num(mq.amount);
+  const head = $('#layer .sheet-head h3'); if (head) { head.textContent = tr('Pay'); head.closest('.sheet').setAttribute('aria-label', tr('Pay')); }
   const opts = kind === 'onchain' ? (mq.fee_options || []) : [];
   const feeRow = kind === 'ln' ? `<dt>Fee reserve</dt><dd>${money(mq.fee_reserve)}</dd>` : '';
   setBody(`<dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd>${esc(note)}</dd>` : ''}</dl>
@@ -2291,11 +2332,11 @@ function openTx(id) {
   else if (t.status === 'pending' && t.type === 'in' && t.method === 'onchain') extra = `<div class="row" style="flex-wrap:wrap"><button class="btn sm lime" data-act="resumeAddr" data-id="${t.id}">Show address</button><button class="btn sm red" data-act="stopWatch" data-id="${t.id}">Stop watching</button></div>`;
   else if (t.status === 'pending' && t.type === 'out') extra = `<button class="btn block violet" data-act="reconcileTx" data-id="${t.id}">Check payment</button>`;
   openSheet(t.type === 'in' ? 'Received' : 'Sent', `
-    <div class="credit-num" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${t.type === 'in' ? '+' : '−'}${t.amount ? fmt(t.amount) : '…'}<small>${unitTag()}</small></div>
+    <div class="credit-num" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${t.type === 'in' ? '+' : '-'}${t.amount ? fmt(t.amount) : '…'}<small>${unitTag()}</small></div>
     <div class="field"><label for="noteEdit">Note</label><textarea id="noteEdit" class="inp" maxlength="500" placeholder="What was this for?">${esc(t.note)}</textarea></div>
     <button class="btn solid gold block" data-act="saveNote" data-id="${t.id}">Save note</button>
-    <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(t.status)}</dd>${t.fee ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
-    <dt>Mint</dt><dd>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd>${new Date(t.ts).toLocaleString()}</dd>
+    <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(TX_STATUS[t.status] || t.status)}</dd>${t.fee ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
+    <dt>Mint</dt><dd>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd>${fmtDate(t.ts, true)}</dd>
     ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
     ${extra}<div id="sheetErr"></div>`);
 }
@@ -2307,7 +2348,7 @@ function openRequest() {
   const recent = S.requests.slice(0, 5);
   openSheet('Request a payment', `
     <p style="margin:0">Make a payment request that any Cashu wallet (like cashu.me) can pay. The ecash comes straight to this wallet over Nostr, even if you're not looking at this screen.</p>
-    <div class="field"><label for="amtIn">Amount (sat, optional)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="Any amount" autocomplete="off"></div>
+    <div class="field"><label for="amtIn">Amount (SAT, optional)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="Any amount" autocomplete="off"></div>
     <div class="field"><label for="memoIn">What it's for (the payer sees this)</label><input id="memoIn" class="inp" maxlength="120" placeholder="Pizza night"></div>
     ${S.mints.length ? `<label class="toggle" for="onlyMine"><span><span class="tl">Only from my mints</span><span class="th">The payer must use one of the mints you use, so you never get ecash from a mint you don't trust.</span></span><input id="onlyMine" type="checkbox" checked></label>` : ''}
     <button class="btn solid lime block" data-act="reqCreate">Create request</button>
@@ -2339,7 +2380,7 @@ function openPayRequest(enc) {
   const tr = (pr.transport || []).find(t => t.type === 'nostr' || t.type === 'post');
   const pick = usable.find(m => m.url === S.active) || usable.slice().sort((a, b) => balanceOf(b.url) - balanceOf(a.url))[0];
   let body = `<div class="label">${pr.description ? esc(pr.description) : 'Payment request'}</div>
-    ${amount ? `<div class="credit-num" style="font-size:26px">${fmt(amount)}<small>${unitTag()}</small></div>` : `<div class="field"><label for="amtIn">Amount (sat)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>`}`;
+    ${amount ? `<div class="credit-num" style="font-size:26px">${fmt(amount)}<small>${unitTag()}</small></div>` : `<div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>`}`;
   if (pr.unit && pr.unit !== 'sat') body += `<div class="notice red">This request asks for ${esc(pr.unit)}. NUTCADE pays in sats only.</div>`;
   else if (!usable.length) body += `<div class="notice red">${allowed ? `This request only accepts ecash from ${allowed.map(u => esc(host(u))).join(', ')}, and you don't hold any there.` : "You don't have any sats to pay with yet."}</div>${allowed ? `<button class="btn block gold" data-act="addMint" data-url="${esc(allowed[0])}">Add ${esc(host(allowed[0]))}</button>` : ''}`;
   else body += `<div class="field"><label for="reqMint">Pay from</label><select id="reqMint" class="inp">${usable.map(m => `<option value="${esc(m.url)}" ${m === pick ? 'selected' : ''}>${esc(m.name)} · ${fmt(balanceOf(m.url))}</option>`).join('')}</select></div>
@@ -2371,9 +2412,9 @@ function openLnAddr() {
     ${qrBlock('lightning:' + npcAddress(), 'Lightning address QR')}
     <div class="code addr">${esc(npcAddress())}</div>
     <button class="btn solid gold block" data-act="copy" data-text="${esc(npcAddress())}">Copy address</button>
-    <dl class="kv"><dt>Payments go to</dt><dd>${esc(name)}</dd><dt>Checked</dt><dd>${npcWs && npcWs.readyState === 1 ? 'Live' : 'Every 30 seconds while open'}</dd>${waiting ? `<dt>Claiming</dt><dd>${waiting} payment${waiting === 1 ? '' : 's'}</dd>` : ''}</dl>
-    ${pick}${lnMints.length > 1 ? '<button class="btn sm" data-act="lnAddrMint">Use this mint</button>' : ''}
-    <div class="row wrap"><button class="btn sm violet" data-act="lnAddrSync">Check for payments</button><button class="btn sm red" data-act="lnAddrOff">Turn off</button></div>
+    <dl class="kv"><dt>Mint</dt><dd data-noi18n>${esc(name)}</dd><dt>Checked</dt><dd>${npcWs && npcWs.readyState === 1 ? 'Live' : 'Every 30 s'}</dd>${waiting ? `<dt>Claiming</dt><dd>${waiting} payment${waiting === 1 ? '' : 's'}</dd>` : ''}</dl>
+    ${pick}${lnMints.length > 1 ? '<button class="btn block" data-act="lnAddrMint">Use this mint</button>' : ''}
+    <div class="btngrid"><button class="btn violet" data-act="lnAddrSync">Check for payments</button><button class="btn red" data-act="lnAddrOff">Turn off</button></div>
     <div class="tiny muted">Turning it off only stops this device checking. Payments sent meanwhile wait at npub.cash and arrive when you turn it back on.</div><div id="sheetErr"></div>`);
 }
 
@@ -2387,8 +2428,8 @@ function openSupport() {
     <div class="panel" style="background:var(--panel-2)">
       <span class="h2" style="color:var(--pink)">Tip from this wallet</span>
       ${canTip ? `<div class="seg three" role="group" aria-label="Tip amount">${[21, 210, 2100].map(a => `<button data-act="tipPreset" data-a="${a}" aria-pressed="${a === 210}">${fmt(a)}</button>`).join('')}</div>
-      <div class="field"><label for="tipAmt">Amount (sat)</label><input id="tipAmt" class="inp amount" inputmode="numeric" value="210" autocomplete="off"></div>
-      <button class="btn solid pink block" data-act="tipQuote">Tip ${'♥'} from ${esc(m.name)}</button>
+      <div class="field"><label for="tipAmt">Amount (SAT)</label><input id="tipAmt" class="inp amount" inputmode="numeric" value="210" autocomplete="off"></div>
+      <button class="btn solid pink block" data-act="tipQuote">${HEART}<span>Tip from ${esc(m.name)}</span></button>
       <div class="tiny muted">You'll see the fee and confirm before anything is sent. ${money(balanceOf(m.url))} available.</div>`
       : `<div class="tiny muted">${m ? `${esc(m.name)} can't pay Lightning, so use the address below from another wallet.` : 'Add a mint and some sats to tip from NUTCADE, or use the address below from any Lightning wallet.'}</div>`}
     </div>
@@ -2419,7 +2460,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /* ---------- actions ---------- */
 const A = {
   close: () => closeSheet(),
-  tab: b => { tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); sfx('blip'); },
+  tab: b => { if (tab === 'history' && b.dataset.tab !== 'history') { histFilter = 'all'; histQuery = ''; histTag = ''; } tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); sfx('blip'); },
   pickMint: () => openMintPicker(),
   receive: () => { sfx('blip'); openReceive(supports(activeMint(), 'mint', 'bolt11') ? 'ln' : 'ecash'); },
   send: () => { sfx('select'); openSend('ecash'); },
@@ -2691,7 +2732,7 @@ const A = {
   tipQuote: b => run(b, 'ASKING', async () => {
     const sats = satsOf('tipAmt');
     if (!sats || sats < 1) throw new Error('Enter a tip amount in sats, like 210.');
-    if (balanceOf(S.active) < sats) throw new Error(`Not enough credits. This mint holds ${money(balanceOf(S.active))}.`);
+    if (balanceOf(S.active) < sats) throw new Error(`Not enough funds. This mint holds ${money(balanceOf(S.active))}.`);
     let pr;
     try { pr = await lnAddressInvoice(DONATE.address, sats, 'Tip from NUTCADE'); }
     catch (e) { throw new Error(/fetch|network|load failed/i.test(e.message) ? "Couldn't reach the Lightning address from here. Copy the address into another wallet instead." : e.message); }
@@ -2746,7 +2787,7 @@ const A = {
     const pr = decodeRequest(b.dataset.req);
     const a = pr.amount ? num(pr.amount) : amt();
     const url = val('reqMint'); if (!url) throw new Error('Pick a mint to pay from.');
-    if (balanceOf(url) < a) throw new Error(`Not enough credits. That mint holds ${money(balanceOf(url))}.`);
+    if (balanceOf(url) < a) throw new Error(`Not enough funds. That mint holds ${money(balanceOf(url))}.`);
     const { tx, sent, why } = await payRequest(pr, a, url, val('noteIn').trim() || pr.description || 'Payment request');
     sfx('coin'); refresh();
     if (sent) return showDone('out', a, 'Payment request');
@@ -2859,7 +2900,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved };
+window.Nutcade = { loadCard, render, refresh, S, toast, tr, fmtDate, logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}

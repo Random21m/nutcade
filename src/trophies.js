@@ -50,7 +50,7 @@ const DEFS = [
   { id: 'tape', name: 'TAPE LOADER', how: 'Send or receive a code as sound.', icon: 'tape', col: '#2de2ff', w: s => !!s.prefs.ctUsed },
   { id: 'boss', name: 'BOSS SLAYER', how: 'Collect every share of a split bill.', icon: 'boss', col: '#ff3d8b', w: s => (s.requests || []).some(r => r.split && r.paid.length >= r.split.people - 1) },
   { id: 'till', name: 'SHOPKEEPER', how: 'Make a sale in cashier mode.', icon: 'till', col: '#ffcf3a', w: s => s.txs.some(t => t.cashier && t.status === 'done') },
-  { id: 'piggy', name: 'PIGGY SAVER', how: 'Save 1,000 sats in round-ups.', icon: 'pig', col: '#ff3d8b', w: s => !!(s.piggy && s.piggy.saved >= 1000) },
+  { id: 'piggy', name: 'PIGGY SAVER', how: 'Save 1,000 SAT in round-ups.', icon: 'pig', col: '#ff3d8b', w: s => !!(s.piggy && s.piggy.saved >= 1000) },
   { id: 'rival', name: 'RIVAL', how: 'Win a high-score challenge.', icon: 'vs', col: '#9dff3a', w: s => (s.challenges || []).some(c => c.dir === 'in' && c.best != null && c.best > c.score) },
   { id: 'g-swarm', game: 'swarm', name: 'ACE PILOT', how: 'Reach wave 3 in Star Swarm.', icon: 'ship', col: '#2de2ff', g: s => s.wave >= 3 },
   { id: 'g-maze', game: 'maze', name: 'NUT CRACKER', how: 'Reach level 2 in Nut Maze.', icon: 'nut', col: '#ffcf3a', g: s => s.level >= 2 },
@@ -155,7 +155,7 @@ function openTrophy(id) {
     ${iconSVG(d, on, 96)}
     <div style="font-family:var(--f-display);font-size:14px;color:${on ? d.col : 'var(--dim)'}">${n.esc(d.name)}</div>
     <p style="margin:0">${n.esc(d.how)}</p>
-    ${on ? `<div class="tiny muted">Earned ${new Date(got[id]).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</div>` : '<div class="tiny muted">Not earned yet.</div>'}</div>
+    ${on ? `<div class="tiny muted">Earned ${N().fmtDate(got[id])}</div>` : '<div class="tiny muted">Not earned yet.</div>'}</div>
     ${on ? `<button class="btn solid gold block" id="trophyShare">Share trophy card</button>` : ''}<button class="btn block" data-act="close">Close</button>`, body => {
     const b = body.querySelector('#trophyShare');
     if (b) b.onclick = () => openCard({ kind: 'trophy', d, at: got[id] });
@@ -256,7 +256,7 @@ async function renderCard(o) {
 }
 
 function shareText(o) {
-  if (o.loaded) return `${o.kind === 'score' ? `I scored ${N().fmt(o.score)} on ${o.game.name}` : `Trophy unlocked: ${o.d.name}`} in NUTCADE, and this card holds ${N().fmt(o.loaded.amount)} sats. First to scan it wins them.`;
+  if (o.loaded) return `${o.kind === 'score' ? `I scored ${N().fmt(o.score)} on ${o.game.name}` : `Trophy unlocked: ${o.d.name}`} in NUTCADE, and this card holds ${N().fmt(o.loaded.amount)} SAT. First to scan it wins them.`;
   return o.kind === 'score'
     ? `I scored ${N().fmt(o.score)} on ${o.game.name} in NUTCADE, a Bitcoin wallet with an arcade inside.`
     : `Trophy unlocked in NUTCADE: ${o.d.name}.`;
@@ -270,7 +270,7 @@ async function openCard(o) {
   const file = r.blob ? new File([r.blob], name, { type: 'image/png' }) : null;
   const canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] }));
   box.innerHTML = `<img src="${r.url}" alt="${n.esc(shareText(o))}" class="share-card">
-    ${o.loaded ? `<div class="notice cyan">Loaded with ${n.esc(n.fmt(o.loaded.amount))} SAT. Whoever scans it first wins them. If nobody does by ${n.esc(new Date(o.loaded.until).toLocaleDateString())}, they come back to you.</div>`
+    ${o.loaded ? `<div class="notice cyan">Loaded with ${n.esc(n.fmt(o.loaded.amount))} SAT. Whoever scans it first wins them. If nobody does by ${n.esc(n.fmtDate(o.loaded.until))}, they come back to you.</div>`
       : `<div class="load-card"><label class="label" for="loadAmt">Put sats in it (optional)</label><div class="row" style="gap:8px"><input id="loadAmt" class="inp" inputmode="numeric" placeholder="210" style="flex:1"><button class="btn sm gold" id="cardLoad">Load card</button></div><div class="tiny muted">Adds a QR code to the card. The first person to scan it wins the sats; unclaimed after a week, they come back to you.</div><div id="sheetErr"></div></div>`}
     <div class="tiny muted">The card shows the game and score only, nothing about your wallet.</div>
     ${canShare ? '<button class="btn solid gold block" id="cardShare">Share</button>' : ''}
