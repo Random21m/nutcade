@@ -417,6 +417,7 @@ function cashierRender() {
   ex.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') closeCashier(); });
   const lab = cash.el.querySelector('#cashLabel'); if (lab) lab.addEventListener('input', () => { cash.label = lab.value; });
   if (window.Nutcade && LANG !== 'en') trNode(cash.el);
+  fitNums(cash.el);
 }
 function cashierClick(e) {
   const b = e.target.closest('[data-ck]'); if (!b || b.disabled) return;

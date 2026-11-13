@@ -647,7 +647,7 @@ function openScanner(hint) {
   openSheet('Scan QR code', `
     <div class="scan-box"><video id="scanVideo" playsinline muted></video><div class="scan-frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="scan-msg" id="scanMsg">STARTING CAMERA…</div></div>
     <div class="tiny muted" style="text-align:center">${esc(hint || 'Point at an ecash token, Lightning invoice, Lightning address, Bitcoin address or mint.')}</div>
-    <div class="row wrap"><label class="btn sm" for="scanFile" style="cursor:pointer">Scan a photo</label><input id="scanFile" type="file" accept="image/*" hidden><button class="btn sm" data-act="scanPaste">Paste instead</button>${nfcBtn('nfcScan', 'Tap NFC')}${window.Chiptune && window.Chiptune.canListen() ? '<button class="btn sm violet" data-act="ctListen">Listen</button>' : ''}</div>
+    <div class="btngrid"><label class="btn violet" for="scanFile" style="cursor:pointer">Scan a photo</label><input id="scanFile" type="file" accept="image/*" hidden><button class="btn violet" data-act="scanPaste">Paste instead</button>${nfcBtn('nfcScan', 'Tap NFC')}${window.Chiptune && window.Chiptune.canListen() ? '<button class="btn violet" data-act="ctListen">Listen</button>' : ''}</div>
     <div id="sheetErr"></div>`, () => { startCamera(); return () => { stopScan(); nfcStop(); }; });
 }
 async function startCamera() {
@@ -933,12 +933,19 @@ function openSheet(title, html, onOpen) {
   layer.innerHTML = `<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="sheet-head"><h3>${esc(title)}</h3><button class="x" data-act="close" aria-label="Close">X</button></div><div class="sheet-body" style="display:grid;gap:14px">${html}</div></div></div>`;
   const body = layer.querySelector('.sheet-body');
   enhanceAmounts(body);
-  sheetCleanup = onOpen ? onOpen(body) : null;
+  sheetCleanup = onOpen ? onOpen(body) : null; fitNums(body);
   const f = layer.querySelector('input,textarea'); if (f && !matchMedia('(pointer:coarse)').matches) f.focus();
   return body;
 }
+function fitNums(root) {
+  (root || document).querySelectorAll('.credit-num,.cash-amt').forEach(el => {
+    if (el.dataset.fs === undefined) el.dataset.fs = el.style.fontSize || '';
+    let fs = parseFloat(getComputedStyle(el).fontSize), i = 0;
+    while (el.scrollWidth > el.clientWidth + 1 && fs > 14 && i++ < 30) { fs -= 1.5; el.style.fontSize = fs + 'px'; }
+  });
+}
 function closeSheet() { if (typeof sheetCleanup === 'function') sheetCleanup(); sheetCleanup = null; $('#layer').innerHTML = ''; }
-function setBody(html, onOpen) { const b = $('#layer .sheet-body'); if (!b) return; if (typeof sheetCleanup === 'function') sheetCleanup(); b.innerHTML = html; enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; }
+function setBody(html, onOpen) { const b = $('#layer .sheet-body'); if (!b) return; if (typeof sheetCleanup === 'function') sheetCleanup(); b.innerHTML = html; enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; fitNums(b); }
 const busyHTML = msg => `<div class="row" style="justify-content:center;padding:24px 0"><span class="spinner">${esc(msg)}</span></div>`;
 const errHTML = e => `<div class="notice red">${esc(e && e.message || e)}</div>`;
 
@@ -1008,7 +1015,9 @@ function render() {
   if (window.NutAudio && !(window.Arcade && window.Arcade.playing())) { if (tab === 'arcade') window.NutAudio.music('title'); else window.NutAudio.stopMusic(); }
   if (tab === 'wallet' && window.Arcade) { const el = $('#topScore'); if (el) el.innerHTML = window.Arcade.topLine(); }
   if (window.PriceChart) { if (tab === 'wallet') window.PriceChart.mount($('#priceMount')); else window.PriceChart.disconnect(); }
+  fitNums(app);
 }
+window.addEventListener('resize', () => { clearTimeout(fitNums.t); fitNums.t = setTimeout(() => { document.querySelectorAll('.credit-num,.cash-amt').forEach(el => { el.style.fontSize = el.dataset.fs || ''; }); fitNums(); }, 150); });
 function refresh() { if ($('#layer .sheet')) { /* keep sheet */ } const y = window.scrollY; render(); window.scrollTo(0, y); }
 
 function txRow(t) {
@@ -1847,7 +1856,7 @@ async function nfcWrite(text) {
   try { await w.write({ records: [rec] }, { overwrite: true, signal: ac.signal }); }
   finally { if (nfcAbort === ac) nfcAbort = null; }
 }
-const nfcBtn = (act, label, extra = '') => nfcOK() ? `<button class="btn sm violet" data-act="${act}" ${extra}><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 2h1v12H3zm2 2h1v8H5zm5-2h1v12h-1zm2 2h1v8h-1zM7 3h2v1h1v2H9V5H7zm0 5h2v1h1v2H9v-1H7z"/></svg>${label}</button>` : '';
+const nfcBtn = (act, label, extra = '', cls = 'btn violet') => nfcOK() ? `<button class="${cls}" data-act="${act}" ${extra}><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 2h1v12H3zm2 2h1v8H5zm5-2h1v12h-1zm2 2h1v8h-1zM7 3h2v1h1v2H9V5H7zm0 5h2v1h1v2H9v-1H7z"/></svg>${label}</button>` : '';
 
 
 /* ---------- contacts ---------- */
@@ -1892,12 +1901,12 @@ function openContacts() {
   if (needSeed()) return;
   openSheet('Contacts', `
     <p style="margin:0">Save the people you pay. A contact can have a Lightning address, a Nostr address for sending ecash (npub or nprofile), or both. Contacts stay on this device${vault.on ? ', encrypted with your PIN' : ''}.</p>
-    ${S.contacts.length ? `<div class="txs">${S.contacts.map(c => `<div class="tx in contact"><span class="ico" aria-hidden="true">${esc(c.name.slice(0, 1).toUpperCase())}</span><span class="mid"><div class="note">${esc(c.name)}</div><div class="meta">${c.ln ? `<span class="chip ln">LN</span>` : ''}${c.pubkey ? '<span class="chip ecash">NOSTR</span>' : ''}<span style="overflow-wrap:anywhere">${esc(c.ln || (c.nostr.slice(0, 16) + '…'))}</span></div></span><span class="row" style="gap:6px"><button class="btn sm pink" data-act="payContact" data-id="${c.id}">Pay</button><button class="btn sm" data-act="contactEdit" data-id="${c.id}">Edit</button></span></div>`).join('')}</div>` : '<div class="empty-state"><b>NO CONTACTS</b>Add someone you pay often.</div>'}
+    ${S.contacts.length ? `<div class="txs">${S.contacts.map(c => `<div class="tx in contact"><span class="ico" aria-hidden="true">${esc(c.name.slice(0, 1).toUpperCase())}</span><span class="mid"><div class="note" data-noi18n>${esc(c.name)}</div><div class="meta">${c.ln ? `<span class="chip ln">LN</span>` : ''}${c.pubkey ? '<span class="chip ecash">NOSTR</span>' : ''}<span class="addr" data-noi18n>${esc(c.ln || (c.nostr.slice(0, 16) + '…')).replace(/([@.])/g, '$1<wbr>')}</span></div></span><span class="row cbtns"><button class="btn sm pink" data-act="payContact" data-id="${c.id}">Pay</button><button class="btn sm" data-act="contactEdit" data-id="${c.id}">Edit</button></span></div>`).join('')}</div>` : '<div class="empty-state"><b>NO CONTACTS</b>Add someone you pay often.</div>'}
     <button class="btn solid gold block" data-act="contactEdit">Add a contact</button>
     <div class="sub">Your ecash address</div>
     <p class="th" style="margin:0">Give this to friends so they can send you ecash over Nostr from NUTCADE or cashu.me.</p>
     <div class="code">${esc(myEcashAddress())}</div>
-    <div class="row wrap"><button class="btn sm" data-act="copy" data-text="${esc(myEcashAddress())}">Copy</button><button class="btn sm violet" data-act="myAddrQR">Show QR</button></div>`);
+    <div class="btngrid"><button class="btn violet" data-act="copy" data-text="${esc(myEcashAddress())}">Copy</button><button class="btn violet" data-act="myAddrQR">Show QR</button></div>`);
 }
 function openContactEdit(id, prefill = {}) {
   const c = id ? contactById(id) : Object.assign({ name: '', ln: '', nostr: '' }, prefill);
@@ -2057,7 +2066,7 @@ function openMintPicker() {
   openSheet('Choose a mint', `
     <div class="notice cyan">A mint holds the Bitcoin behind your ecash. Only add mints you trust, and spread larger amounts across several.</div>
     ${S.mints.length ? `<div class="field"><label>Your mints</label><div class="txs">${S.mints.map(m => `<button class="tx in" data-act="useMint" data-url="${esc(m.url)}"><span class="ico">${m.url === S.active ? '★' : '·'}</span><span class="mid"><div class="note">${esc(m.name)}</div><div class="meta">${esc(host(m.url))}</div></span><span class="amt">${fmt(balanceOf(m.url))}</span></button>`).join('')}</div></div>` : ''}
-    <div class="field"><label for="mintUrl">Mint address</label><div class="row"><input id="mintUrl" class="inp" placeholder="https://mint.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn solid gold" data-act="addMintUrl">Add</button></div></div>
+    <div class="field"><label for="mintUrl">Mint address</label><div class="row inrow"><input id="mintUrl" class="inp" placeholder="https://mint.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn solid gold" data-act="addMintUrl">Add</button></div></div>
     <div id="mintErr"></div>
     <div class="field"><label>Popular mints</label><div class="txs">${CURATED.map(c => card(c.url, c.name, c.blurb, c.test ? '<span class="chip failed">TEST SATS</span>' : '')).join('')}</div></div>
     <div class="field"><label>Discovered on Nostr</label><div id="nostrList" class="txs"><button class="btn block violet" data-act="discover">Find mints people recommend</button></div></div>`,
@@ -2313,7 +2322,7 @@ function showRequest(r) {
     <div class="credit-num" style="text-align:center;font-size:26px">${r.amount ? fmt(r.amount) : 'ANY'}<small>${unitTag()}</small></div>
     ${qrBlock(r.encoded, 'Payment request QR')}
     <div class="code">${esc(r.encoded)}</div>
-    <div class="row wrap"><button class="btn sm" data-act="copy" data-text="${esc(r.encoded)}">Copy request</button>${nfcBtn('nfcWrite', 'Write to NFC', `data-text="${esc(r.encoded)}"`)}${ctBtn(r.encoded)}</div>
+    <button class="btn solid lime block" data-act="copy" data-text="${esc(r.encoded)}">Copy request</button>${nfcBtn('nfcWrite', 'Write to NFC card', `data-text="${esc(r.encoded)}"`, 'btn block violet')}${ctBtn(r.encoded, 'Play as sound', 'btn block violet')}
     <div class="row" style="justify-content:center"><span class="spinner" id="payState">WAITING FOR PAYMENT</span></div>
     <div class="tiny muted">Payments arrive over Nostr while NUTCADE is open, and the ones sent while it's closed arrive the next time you open it (for 30 days).</div>`, () => {
     dmListen();
@@ -2483,7 +2492,7 @@ const A = {
     const data = JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs });
     openSheet('Backup', `<div class="notice red">This contains your recovery phrase and spendable ecash. Keep it private.</div><div class="code" style="max-height:200px">${esc(data)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(data)}">Copy backup</button>`);
   },
-  restore: () => openSheet('Import backup', `<div class="field"><label for="restoreFile">Backup file</label><input id="restoreFile" class="inp" type="file" accept=".json,application/json" style="font-size:16px"></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`),
+  restore: () => openSheet('Import backup', `<div class="field"><span class="flabel">Backup file</span><div class="row filepick"><label class="btn sm violet"><span>Choose a file</span><input id="restoreFile" type="file" accept=".json,application/json"></label><span id="restoreFileName" class="tiny muted">No file chosen</span></div></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`),
   doRestore: () => {
     try {
       const d = JSON.parse(val('restoreIn')); if (d.app !== 'nutcade') throw new Error('Not a NUTCADE backup.');
@@ -2732,7 +2741,7 @@ const A = {
     const r = newRequest(a, val('memoIn').trim(), !!($('#onlyMine') || {}).checked); sfx('coin'); showRequest(r);
   }),
   reqShow: b => { const r = S.requests.find(x => x.id === b.dataset.id); if (r) showRequest(r); },
-  reqPayOpen: () => openSheet('Pay a payment request', `<div class="field"><label for="pasteIn">Paste the request (starts with creqA)</label><textarea id="pasteIn" class="inp" autocomplete="off" spellcheck="false"></textarea></div><div class="row wrap"><button class="btn solid gold" data-act="pasteGo">Continue</button><button class="btn sm violet" data-act="scan" data-hint="Point at a payment request.">Scan</button>${nfcBtn('nfcScan', 'Tap NFC')}</div><div id="sheetErr"></div>`, () => nfcStop),
+  reqPayOpen: () => openSheet('Pay a payment request', `<div class="field"><label for="pasteIn">Paste the request (starts with creqA)</label><textarea id="pasteIn" class="inp" autocomplete="off" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="pasteGo">Continue</button><div class="btngrid"><button class="btn violet" data-act="scan" data-hint="Point at a payment request.">Scan</button>${nfcBtn('nfcScan', 'Tap NFC')}</div><div id="sheetErr"></div>`, () => nfcStop),
   payReq: b => run(b, 'PAYING', async () => {
     const pr = decodeRequest(b.dataset.req);
     const a = pr.amount ? num(pr.amount) : amt();
@@ -2794,7 +2803,7 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => {
   const b = e.target.closest('[data-act="pref"]'); if (b) A.pref(b);
   if (e.target.id === 'scanFile' && e.target.files[0]) scanPhoto(e.target.files[0]);
-  if (e.target.id === 'restoreFile' && e.target.files[0]) { e.target.files[0].text().then(t => { const box = $('#restoreIn'); if (box) box.value = t; }).catch(() => {}); }
+  if (e.target.id === 'restoreFile' && e.target.files[0]) { const nm = $('#restoreFileName'); if (nm) { nm.textContent = e.target.files[0].name; nm.setAttribute('data-noi18n', ''); } e.target.files[0].text().then(t => { const box = $('#restoreIn'); if (box) box.value = t; }).catch(() => {}); }
   const sel = e.target.closest('[data-act="prefSelect"]'); if (sel) { S.prefs[sel.dataset.k] = sel.dataset.k === 'lockAfter' ? +sel.value : sel.value; save(); if (sel.dataset.k === 'lockAfter') { armAutoLock(); return; } if (sel.dataset.k === 'lang') { setLang(); refresh(); return; } if (sel.dataset.k === 'piggyStep') { S.prefs.piggyStep = +sel.value; save(); refresh(); return; } price = { rate: null, at: 0, cur: null }; fetchPrice(true); }
   if (e.target.id === 'giftOn') { const box = $('#giftBox'); if (box) box.hidden = !e.target.checked; sfx('blip'); }
   if (e.target.id === 'giftTo') { const f = $('#giftKeyF'); if (f) f.hidden = !!e.target.value; }
