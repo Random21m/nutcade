@@ -14,6 +14,7 @@ Every push to `main` runs the GitHub Actions workflow `.github/workflows/test-an
    - `tests/v16_qa.py`: multinut payments (NUT-15), payment requests (NUT-18) and NFC, with a stand-in NFC reader
    - `tests/r3_qa.py`: amounts in your currency, #tags and CSV export, contacts, offline use and languages
    - `tests/r4_qa.py`: sending by sound (through a simulated microphone), refundable gifts, bill split, mint health and moving sats, cashier mode, challenges, piggy bank, and the new screens in every language
+   - `tests/polish_qa.py`: layout at 320, 375 and 430 px in every language (game controls, the PIN pad, the tab bar), tap-target and text sizes, toasts, themes, units, dates and translations, and centered dialogs on a computer
 3. Only if every check passes does the **deploy** job publish `public/` to https://random21m.github.io/nutcade/ and write `SHA256SUMS.txt` next to the app.
 
 Logs and screenshots from each run are kept for a week as the run's `qa-out` artifact (Actions tab → the run → Artifacts).
