@@ -370,6 +370,7 @@ function openCashier() {
   if (!cash.el) { cash.el = document.createElement('div'); cash.el.className = 'cashier'; cash.el.setAttribute('role', 'dialog'); cash.el.setAttribute('aria-label', 'Cashier mode'); document.body.appendChild(cash.el); cash.el.addEventListener('click', cashierClick); }
   document.body.style.overflow = 'hidden';
   if (window.NutAudio) window.NutAudio.stopMusic();
+  clearToasts(); const fx = document.getElementById('fxLayer'); if (fx) fx.remove();   // the till starts clean
   const m = activeMint();
   cash.method = supports(m, 'mint', 'bolt11') ? 'ln' : 'ecash';
   cash.mode = 'keys'; cash.amount = ''; cash.label = ''; cash.unit = S.prefs.amtFiat && canFiat() ? 'fiat' : 'sat';
@@ -447,7 +448,7 @@ function cashierPaid(txId) {
   cashierStopWatch();
   updTx(t.id, { cashier: true, note: `Sale${cash.label ? ': ' + cash.label : ''} #cashier` });
   cash.paidAmt = t.amount; cash.mode = 'paid'; cash.tx = null; cash.req = null;
-  sfx('levelup'); celebrate('in', t.amount); cashierRender();
+  sfx('levelup'); cashierRender();
   cash.back = setTimeout(() => { if (cash.mode === 'paid' && cash.el) { cash.mode = 'keys'; cash.amount = ''; cash.label = ''; cashierRender(); } }, 6000);
 }
 async function cashierCharge(btn) {

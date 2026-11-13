@@ -79,8 +79,8 @@ function announce() {
   showing = true;
   const d = queue.shift();
   const n = N();
-  if (n) { n.sfx('levelup'); n.toast(`TROPHY! ${d.name}: ${d.how}`, 'gold'); }
-  setTimeout(() => { showing = false; announce(); }, 2600);
+  if (n) { n.sfx('levelup'); n.toast(`TROPHY! ${d.name}`, 'gold'); }   // one short line; the Arcade tab says how it was won
+  setTimeout(() => { showing = false; announce(); }, 1200);
 }
 function unlock(d, quiet) {
   if (got[d.id]) return false;

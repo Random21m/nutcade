@@ -152,7 +152,12 @@ textarea.inp{min-height:84px;resize:vertical;font-size:21px;line-height:1.1}
 .x{width:40px;height:40px;border:2px solid var(--grid);border-radius:var(--r);background:none;color:var(--ink);font-family:var(--f-display);font-size:12px}
 
 /* Toast */
-.toast{position:fixed;left:50%;top:calc(12px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:300;max-width:min(92vw,440px);padding:10px 14px;border:2px solid var(--c,var(--lime));border-radius:var(--r);background:#0b0820;font-size:20px;box-shadow:4px 4px 0 #000}
+/* Toasts sit just above the tab bar and let taps through, so they never hide a title or a control.
+   With a sheet open they move to the strip of backdrop above it; screens without a tab bar use the bottom edge. */
+.toast{position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:300;width:max-content;max-width:min(calc(100vw - 24px),440px);padding:6px 12px;border:2px solid var(--c,var(--lime));border-radius:var(--r);background:var(--well);font-size:18px;line-height:1.1;text-align:center;box-shadow:3px 3px 0 #000;pointer-events:none;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.toast[hidden]{display:none}
+body:not(:has(.tabbar)) .toast,body:has(.game-view) .toast{bottom:calc(14px + env(safe-area-inset-bottom,0px))}
+body:has(#layer .scrim) .toast{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px))}
 
 /* Arcade */
 .cabinets{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -360,7 +365,7 @@ body.theme-amber,body.theme-phosphor{background-image:linear-gradient(rgba(255,2
   padding:calc(10px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
 .cash-top{width:100%;max-width:480px;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .cash-title{font-family:var(--f-display);font-size:12px;letter-spacing:2px;color:var(--gold);text-shadow:2px 2px 0 var(--pink)}
-.cash-today{display:grid;justify-items:end;gap:2px;font-family:var(--f-display);font-size:7px;letter-spacing:1px;color:var(--dim)}
+.cash-today{display:grid;justify-items:end;gap:3px;font-family:var(--f-display);font-size:9px;letter-spacing:1px;color:var(--dim)}
 .cash-today b{font-weight:normal;font-size:12px;color:var(--lime)}
 #cashExit{touch-action:none;user-select:none;-webkit-user-select:none}
 #cashExit.holding{background:var(--red);color:#120a22}
@@ -457,3 +462,5 @@ ol.steps{margin:0;padding-left:20px;display:grid;gap:6px;font-size:13px}
 /* game-over and initials boxes keep a margin on the smallest phones */
 .game-view .scrim{padding:16px}
 .game-view .sheet.initials{max-height:calc(100% - 32px)}
+.cash-method button{font-size:9px;padding:0 2px}
+@media (max-width:360px){.cash-row{flex-wrap:wrap}.cash-method{flex:1 1 100%;order:-1}.cash-row .btn.sm{flex:1}}

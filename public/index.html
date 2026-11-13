@@ -159,7 +159,12 @@ textarea.inp{min-height:84px;resize:vertical;font-size:21px;line-height:1.1}
 .x{width:40px;height:40px;border:2px solid var(--grid);border-radius:var(--r);background:none;color:var(--ink);font-family:var(--f-display);font-size:12px}
 
 /* Toast */
-.toast{position:fixed;left:50%;top:calc(12px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:300;max-width:min(92vw,440px);padding:10px 14px;border:2px solid var(--c,var(--lime));border-radius:var(--r);background:#0b0820;font-size:20px;box-shadow:4px 4px 0 #000}
+/* Toasts sit just above the tab bar and let taps through, so they never hide a title or a control.
+   With a sheet open they move to the strip of backdrop above it; screens without a tab bar use the bottom edge. */
+.toast{position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:300;width:max-content;max-width:min(calc(100vw - 24px),440px);padding:6px 12px;border:2px solid var(--c,var(--lime));border-radius:var(--r);background:var(--well);font-size:18px;line-height:1.1;text-align:center;box-shadow:3px 3px 0 #000;pointer-events:none;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.toast[hidden]{display:none}
+body:not(:has(.tabbar)) .toast,body:has(.game-view) .toast{bottom:calc(14px + env(safe-area-inset-bottom,0px))}
+body:has(#layer .scrim) .toast{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px))}
 
 /* Arcade */
 .cabinets{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -367,7 +372,7 @@ body.theme-amber,body.theme-phosphor{background-image:linear-gradient(rgba(255,2
   padding:calc(10px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
 .cash-top{width:100%;max-width:480px;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .cash-title{font-family:var(--f-display);font-size:12px;letter-spacing:2px;color:var(--gold);text-shadow:2px 2px 0 var(--pink)}
-.cash-today{display:grid;justify-items:end;gap:2px;font-family:var(--f-display);font-size:7px;letter-spacing:1px;color:var(--dim)}
+.cash-today{display:grid;justify-items:end;gap:3px;font-family:var(--f-display);font-size:9px;letter-spacing:1px;color:var(--dim)}
 .cash-today b{font-weight:normal;font-size:12px;color:var(--lime)}
 #cashExit{touch-action:none;user-select:none;-webkit-user-select:none}
 #cashExit.holding{background:var(--red);color:#120a22}
@@ -463,7 +468,9 @@ ol.steps{margin:0;padding-left:20px;display:grid;gap:6px;font-size:13px}
 
 /* game-over and initials boxes keep a margin on the smallest phones */
 .game-view .scrim{padding:16px}
-.game-view .sheet.initials{max-height:calc(100% - 32px)}</style>
+.game-view .sheet.initials{max-height:calc(100% - 32px)}
+.cash-method button{font-size:9px;padding:0 2px}
+@media (max-width:360px){.cash-row{flex-wrap:wrap}.cash-method{flex:1 1 100%;order:-1}.cash-row .btn.sm{flex:1}}</style>
 
 <div id="app" class="crt"></div>
 <div id="layer"></div>
@@ -3766,6 +3773,7 @@ async function lnurlInvoice(target, sats, comment) {
 /* ---------- payment effects: coin drop on receive, coin launch on send ---------- */
 const COIN = ['..yyyy..', '.yYYYYy.', 'yYyyyyYy', 'yYyYYyYy', 'yYyYYyYy', 'yYyyyyYy', '.yYYYYy.', '..yyyy..'];
 function celebrate(dir, amount) {
+  if (document.querySelector('.cashier')) return;   // the till has its own PAID! screen
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const old = document.getElementById('fxLayer'); if (old) old.remove();
   const layer = document.createElement('div'); layer.id = 'fxLayer'; layer.setAttribute('aria-hidden', 'true');
@@ -3849,11 +3857,28 @@ function animatedQR(el, text, label) {
 }
 
 /* ---------- toasts / copy ---------- */
-let toastT;
+/* Toasts queue up and show one at a time, for a time that fits their length. During a game they wait until the
+   game ends, and the cashier screen only shows errors, so nothing lands on top of a shop sale or a high score. */
+let toastT = 0; const toastQ = [];
+const toastHeld = () => !!(document.querySelector('.cashier') || (window.Arcade && window.Arcade.playing && window.Arcade.playing()));
 function toast(msg, c = 'lime') {
+  msg = tr(String(msg ?? ''));
+  if (document.querySelector('.cashier') && c !== 'red' && c !== 'gold') return;   // the till shows its own PAID! screen
+  if (toastQ.some(t => t.msg === msg)) return;
+  const el = $('#toast');
+  if (el && !el.hidden && el.textContent === msg) { clearTimeout(toastT); toastT = setTimeout(nextToast, toastMs(msg, c)); return; }
+  toastQ.push({ msg, c }); if (toastQ.length > 3) toastQ.splice(0, toastQ.length - 3);
+  if (!toastT) nextToast();
+}
+const toastMs = (msg, c) => Math.min(c === 'red' ? 5000 : 4000, 1600 + msg.length * 32) - (toastQ.length > 1 ? 500 : 0);
+function clearToasts() { for (let i = toastQ.length - 1; i >= 0; i--) if (toastQ[i].c !== 'red') toastQ.splice(i, 1); const el = $('#toast'); if (el) el.hidden = true; clearTimeout(toastT); toastT = 0; if (toastQ.length) nextToast(); }
+function nextToast() {
   let el = $('#toast'); if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
-  el.style.setProperty('--c', `var(--${c})`); el.textContent = tr(msg); el.hidden = false;
-  clearTimeout(toastT); toastT = setTimeout(() => { el.hidden = true; }, 3200);
+  clearTimeout(toastT); toastT = 0;
+  if (toastHeld() && toastQ.length && toastQ[0].c !== 'red') { el.hidden = true; toastT = setTimeout(nextToast, 1000); return; }
+  const t = toastQ.shift(); if (!t) { el.hidden = true; return; }
+  el.style.setProperty('--c', `var(--${t.c})`); el.textContent = t.msg; el.hidden = false;
+  toastT = setTimeout(() => { el.hidden = true; toastT = setTimeout(nextToast, 180); }, toastMs(t.msg, t.c));
 }
 async function copy(text, el) {
   try { await navigator.clipboard.writeText(text); toast('Copied', 'cyan'); sfx('blip'); }
@@ -5761,6 +5786,7 @@ function openCashier() {
   if (!cash.el) { cash.el = document.createElement('div'); cash.el.className = 'cashier'; cash.el.setAttribute('role', 'dialog'); cash.el.setAttribute('aria-label', 'Cashier mode'); document.body.appendChild(cash.el); cash.el.addEventListener('click', cashierClick); }
   document.body.style.overflow = 'hidden';
   if (window.NutAudio) window.NutAudio.stopMusic();
+  clearToasts(); const fx = document.getElementById('fxLayer'); if (fx) fx.remove();   // the till starts clean
   const m = activeMint();
   cash.method = supports(m, 'mint', 'bolt11') ? 'ln' : 'ecash';
   cash.mode = 'keys'; cash.amount = ''; cash.label = ''; cash.unit = S.prefs.amtFiat && canFiat() ? 'fiat' : 'sat';
@@ -5838,7 +5864,7 @@ function cashierPaid(txId) {
   cashierStopWatch();
   updTx(t.id, { cashier: true, note: `Sale${cash.label ? ': ' + cash.label : ''} #cashier` });
   cash.paidAmt = t.amount; cash.mode = 'paid'; cash.tx = null; cash.req = null;
-  sfx('levelup'); celebrate('in', t.amount); cashierRender();
+  sfx('levelup'); cashierRender();
   cash.back = setTimeout(() => { if (cash.mode === 'paid' && cash.el) { cash.mode = 'keys'; cash.amount = ''; cash.label = ''; cashierRender(); } }, 6000);
 }
 async function cashierCharge(btn) {
@@ -7241,8 +7267,8 @@ function announce() {
   showing = true;
   const d = queue.shift();
   const n = N();
-  if (n) { n.sfx('levelup'); n.toast(`TROPHY! ${d.name}: ${d.how}`, 'gold'); }
-  setTimeout(() => { showing = false; announce(); }, 2600);
+  if (n) { n.sfx('levelup'); n.toast(`TROPHY! ${d.name}`, 'gold'); }   // one short line; the Arcade tab says how it was won
+  setTimeout(() => { showing = false; announce(); }, 1200);
 }
 function unlock(d, quiet) {
   if (got[d.id]) return false;

@@ -762,6 +762,7 @@ async function lnurlInvoice(target, sats, comment) {
 /* ---------- payment effects: coin drop on receive, coin launch on send ---------- */
 const COIN = ['..yyyy..', '.yYYYYy.', 'yYyyyyYy', 'yYyYYyYy', 'yYyYYyYy', 'yYyyyyYy', '.yYYYYy.', '..yyyy..'];
 function celebrate(dir, amount) {
+  if (document.querySelector('.cashier')) return;   // the till has its own PAID! screen
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const old = document.getElementById('fxLayer'); if (old) old.remove();
   const layer = document.createElement('div'); layer.id = 'fxLayer'; layer.setAttribute('aria-hidden', 'true');
@@ -845,11 +846,28 @@ function animatedQR(el, text, label) {
 }
 
 /* ---------- toasts / copy ---------- */
-let toastT;
+/* Toasts queue up and show one at a time, for a time that fits their length. During a game they wait until the
+   game ends, and the cashier screen only shows errors, so nothing lands on top of a shop sale or a high score. */
+let toastT = 0; const toastQ = [];
+const toastHeld = () => !!(document.querySelector('.cashier') || (window.Arcade && window.Arcade.playing && window.Arcade.playing()));
 function toast(msg, c = 'lime') {
+  msg = tr(String(msg ?? ''));
+  if (document.querySelector('.cashier') && c !== 'red' && c !== 'gold') return;   // the till shows its own PAID! screen
+  if (toastQ.some(t => t.msg === msg)) return;
+  const el = $('#toast');
+  if (el && !el.hidden && el.textContent === msg) { clearTimeout(toastT); toastT = setTimeout(nextToast, toastMs(msg, c)); return; }
+  toastQ.push({ msg, c }); if (toastQ.length > 3) toastQ.splice(0, toastQ.length - 3);
+  if (!toastT) nextToast();
+}
+const toastMs = (msg, c) => Math.min(c === 'red' ? 5000 : 4000, 1600 + msg.length * 32) - (toastQ.length > 1 ? 500 : 0);
+function clearToasts() { for (let i = toastQ.length - 1; i >= 0; i--) if (toastQ[i].c !== 'red') toastQ.splice(i, 1); const el = $('#toast'); if (el) el.hidden = true; clearTimeout(toastT); toastT = 0; if (toastQ.length) nextToast(); }
+function nextToast() {
   let el = $('#toast'); if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
-  el.style.setProperty('--c', `var(--${c})`); el.textContent = tr(msg); el.hidden = false;
-  clearTimeout(toastT); toastT = setTimeout(() => { el.hidden = true; }, 3200);
+  clearTimeout(toastT); toastT = 0;
+  if (toastHeld() && toastQ.length && toastQ[0].c !== 'red') { el.hidden = true; toastT = setTimeout(nextToast, 1000); return; }
+  const t = toastQ.shift(); if (!t) { el.hidden = true; return; }
+  el.style.setProperty('--c', `var(--${t.c})`); el.textContent = t.msg; el.hidden = false;
+  toastT = setTimeout(() => { el.hidden = true; toastT = setTimeout(nextToast, 180); }, toastMs(t.msg, t.c));
 }
 async function copy(text, el) {
   try { await navigator.clipboard.writeText(text); toast('Copied', 'cyan'); sfx('blip'); }
