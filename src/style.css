@@ -37,7 +37,10 @@ button{cursor:pointer}
 
 /* Marquee */
 .marquee{position:relative;text-align:center;padding:18px 8px 14px;border:3px solid var(--violet);border-radius:var(--r);
-  background:linear-gradient(180deg,#24104a,#130a2b);box-shadow:0 0 0 3px var(--void),0 0 0 6px var(--pink),0 0 26px rgba(255,61,139,.45)}
+  background:linear-gradient(180deg,var(--mq1),var(--mq2));box-shadow:0 0 0 3px var(--void),0 0 0 6px var(--pink),0 0 26px var(--glow)}
+.marquee .logo{filter:var(--logo-filter)}
+.marquee.mini{padding:13px 8px 11px}
+.marquee.mini .logo svg{width:auto;height:38px;max-width:100%}
 .marquee .logo svg{display:block;width:100%;height:auto;max-width:400px;margin:0 auto;filter:drop-shadow(0 0 10px rgba(255,61,139,.35))}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .pad-keys{display:none;font-size:18px;color:var(--faint);text-align:center}
@@ -281,14 +284,19 @@ body.theme-amber,body.theme-phosphor{background-image:linear-gradient(rgba(255,2
 .scan-msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:20px;font-family:var(--f-display);font-size:9px;line-height:1.8;color:var(--dim)}
 .pinpad{display:grid;gap:14px;justify-items:center;width:100%}
 .pin-title{font-family:var(--f-display);font-size:14px;color:var(--gold);letter-spacing:2px}
-.pin-dots{display:flex;gap:10px;min-height:18px}
+.pin-dots{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;min-height:18px;max-width:100%}
 .pin-dots i{width:14px;height:14px;border:2px solid var(--cyan)}
+.pin-dots i.cur{border-color:var(--dim);animation:blink 1s steps(1) infinite}
 .pin-dots i.on{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
 .pin-dots.shake{animation:shake .3s steps(4)}
 @keyframes shake{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
 .pin-err{min-height:20px;font-size:18px;color:var(--red);text-align:center}
 .pin-err.busy{color:var(--gold)}
 .pin-keys{display:grid;grid-template-columns:repeat(3,72px);gap:12px}
+.ico-del{width:26px;height:26px;display:block;margin:auto}
+.ck .ico-del{width:28px;height:28px}
+/* short phones: the whole pad and Forgot PIN stay above the fold */
+@media (max-height:700px){.pinpad{gap:10px}.pin-keys{gap:10px}.pin-k{height:52px}.gate{gap:12px;padding:14px}}
 .pin-k{height:60px;border:2px solid var(--grid);border-radius:var(--r);background:var(--panel-2);color:var(--ink);font-family:var(--f-display);font-size:18px;box-shadow:0 4px 0 #000}
 .pin-k:active{transform:translateY(3px);box-shadow:0 1px 0 #000}
 .pin-k.ok{background:var(--gold);color:#120a22;border-color:var(--gold);font-size:13px}

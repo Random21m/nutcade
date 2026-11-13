@@ -556,21 +556,23 @@ const ACORN = [
   '...1111...',
   '....11....'
 ];
-function logoSVG(word = 'NUTCADE', withTag = true) {
+function logoSVG(word = 'NUTCADE', withTag = true, mini = false) {
+  // mini: one row (acorn beside the word, no stars or tagline) for the compact header on every screen after setup
   const s = 6, gap = 1, cols = word.length * 6 + (word.length - 1) * gap;
-  const pad = 4, mascotH = ACORN.length + 2;
-  const W = cols + pad * 2, H = mascotH + 7 + pad * 2 + (withTag ? 6 : 0);
+  const pad = 4, mascotH = mini ? 2 : ACORN.length + 2, ox = mini ? pad + ACORN[0].length + 3 : pad;
+  if (mini) withTag = false;
+  const W = cols + ox + pad, H = mini ? ACORN.length + pad * 2 - 2 : mascotH + 7 + pad * 2 + (withTag ? 6 : 0);
   const cells = [];
-  [...word].forEach((ch, i) => { const g = GLYPHS[ch]; if (!g) return; g.forEach((row, y) => [...row].forEach((b, x) => { if (b === '1') cells.push([pad + i * 7 + x, pad + mascotH + y]); })); });
+  [...word].forEach((ch, i) => { const g = GLYPHS[ch]; if (!g) return; g.forEach((row, y) => [...row].forEach((b, x) => { if (b === '1') cells.push([ox + i * 7 + x, pad + mascotH + y - (mini ? 1 : 0)]); })); });
   const rect = (x, y, c, o = 0) => `<rect x="${(x - o) * s}" y="${(y - o) * s}" width="${s + o * 2 * s}" height="${s + o * 2 * s}" fill="${c}"/>`;
   const layer = (dx, dy, c, o = 0) => cells.map(([x, y]) => rect(x + dx, y + dy, c, o)).join('');
-  const ax = Math.floor(W / 2 - ACORN[0].length / 2), ay = pad - 1;
+  const ax = mini ? pad - 1 : Math.floor(W / 2 - ACORN[0].length / 2), ay = mini ? pad - 2 : pad - 1;
   const ac = { '1': '#b8651f', '2': '#6b3b12', '3': '#3d2208', '4': '#ffd79a' };
   let acorn = '';
   ACORN.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') acorn += rect(ax + x + 0.5, ay + y, ac[c]); }));
   let acornOutline = '';
   ACORN.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') acornOutline += rect(ax + x + 0.5, ay + y, '#0a0717', 0.5); }));
-  const stars = [[2, 3], [W - 4, 2], [W - 8, 9], [6, 10], [W - 3, 14]].map(([x, y]) => `<g fill="#2de2ff"><rect x="${x * s}" y="${(y - .5) * s}" width="${s}" height="${s * 2}"/><rect x="${(x - .5) * s}" y="${y * s}" width="${s * 2}" height="${s}"/></g>`).join('');
+  const stars = mini ? '' : [[2, 3], [W - 4, 2], [W - 8, 9], [6, 10], [W - 3, 14]].map(([x, y]) => `<g fill="#2de2ff"><rect x="${x * s}" y="${(y - .5) * s}" width="${s}" height="${s * 2}"/><rect x="${(x - .5) * s}" y="${y * s}" width="${s * 2}" height="${s}"/></g>`).join('');
   const tagTop = (pad + mascotH + 7 + 1.6) * s, tagH = 4 * s, tagY = tagTop + tagH / 2;
   return `<svg viewBox="0 0 ${W * s} ${H * s}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NUTCADE logo" shape-rendering="crispEdges">
 <defs><linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
@@ -579,18 +581,22 @@ function logoSVG(word = 'NUTCADE', withTag = true) {
 </linearGradient></defs>
 ${stars}
 <g>${acornOutline}${acorn}</g>
-<g transform="skewX(-8) translate(${Math.round(Math.tan(8 * Math.PI / 180) * (pad + mascotH + 3.5) * s)} 0)">
+<g transform="skewX(-8) translate(${Math.round(Math.tan(8 * Math.PI / 180) * (pad + mascotH + 3.5 - (mini ? 1 : 0)) * s)} 0)">
 <g>${layer(0, 0, '#0a0717', 1)}</g>
 <g>${layer(2, 2, '#ff3d8b')}</g>
 <g>${layer(1, 1, '#2de2ff')}</g>
 <g>${layer(0, 0, '#0a0717', .5)}</g>
-<g fill="url(#chrome)"><rect x="${pad * s}" y="${(pad + mascotH) * s}" width="${cols * s}" height="${7 * s}" fill="url(#chrome)" mask="url(#letters)"/></g>
+<g fill="url(#chrome)"><rect x="${ox * s}" y="${(pad + mascotH - (mini ? 1 : 0)) * s}" width="${cols * s}" height="${7 * s}" fill="url(#chrome)" mask="url(#letters)"/></g>
 <mask id="letters" maskUnits="userSpaceOnUse">${layer(0, 0, '#fff')}</mask>
 </g>
 ${withTag ? `<g class="tagline"><text x="${W * s / 2}" y="${tagY}" dominant-baseline="central" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="${s * 2.6}" fill="#ffcf3a" stroke="#0a0717" stroke-width="${s * 0.6}" stroke-linejoin="round" paint-order="stroke" textLength="${Math.round((W - 8) * s)}" lengthAdjust="spacingAndGlyphs">INSERT ECASH · PRESS START</text></g>` : ''}
 </svg>`;
 }
 window.NutLogo = logoSVG;
+// The full marquee greets new players; every other screen gets a one-row header so the controls fit on a phone.
+const marqueeHTML = full => full
+  ? `<header class="marquee"><div class="bulbs top">${'<i></i>'.repeat(14)}</div><h1 class="sr">NUTCADE</h1><div class="logo">${logoSVG()}</div><div class="bulbs bot">${'<i></i>'.repeat(14)}</div></header>`
+  : `<header class="marquee mini"><div class="bulbs top">${'<i></i>'.repeat(14)}</div><h1 class="sr">NUTCADE</h1><div class="logo">${logoSVG('NUTCADE', false, true)}</div><div class="bulbs bot">${'<i></i>'.repeat(14)}</div></header>`;
 
 
 /* ---------- QR scanner ---------- */
@@ -939,7 +945,7 @@ function render() {
   let body = '';
   if (tabLocked) {
     npcSocketStop(); liveSync(); dmStop();
-    app.innerHTML = `<div class="wrap"><header class="marquee"><div class="bulbs top">${'<i></i>'.repeat(14)}</div><h1 class="sr">NUTCADE</h1><div class="logo">${logoSVG()}</div><div class="bulbs bot">${'<i></i>'.repeat(14)}</div></header>
+    app.innerHTML = `<div class="wrap">${marqueeHTML(false)}
       <section class="screen"><div class="panel hot"><span class="h2" style="color:var(--pink)">Open in another tab</span>
       <p style="margin:0">NUTCADE is already open in another tab or window. Running two copies at once can make them overwrite each other's ecash, so this one is paused.</p>
       <button class="btn solid gold block" data-act="takeover">Use NUTCADE here instead</button></div></section></div>`;
@@ -947,17 +953,18 @@ function render() {
   }
   if (vault.on && !vault.open) {
     app.innerHTML = `<div class="wrap" style="padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))">
-      <header class="marquee"><div class="bulbs top">${'<i></i>'.repeat(14)}</div><h1 class="sr">NUTCADE</h1><div class="logo">${logoSVG()}</div><div class="bulbs bot">${'<i></i>'.repeat(14)}</div></header>
+      ${marqueeHTML(false)}
       ${viewLock()}</div>`;
     if (window.NutAudio) window.NutAudio.stopMusic();
     if (window.PriceChart) window.PriceChart.disconnect();
     return;
   }
   if (needsGate()) {
+    const gv = viewGate();
     app.innerHTML = `<div class="wrap" style="padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))">
-      <header class="marquee"><div class="bulbs top">${'<i></i>'.repeat(14)}</div><h1 class="sr">NUTCADE</h1><div class="logo">${logoSVG()}</div><div class="bulbs bot">${'<i></i>'.repeat(14)}</div></header>
+      ${marqueeHTML(gate.step === 'welcome')}
       ${storageOk ? '' : '<div class="notice red" style="margin-top:14px">This browser is blocking storage, so your wallet would vanish on reload. Open NUTCADE in a normal browser tab.</div>'}
-      ${viewGate()}</div>`;
+      ${gv}</div>`;
     if (window.NutAudio) window.NutAudio.stopMusic();
     return;
   }
@@ -967,7 +974,7 @@ function render() {
   else if (tab === 'mints') body = viewMints();
   else body = viewSettings();
   app.innerHTML = `<div class="wrap">
-    <header class="marquee"><div class="bulbs top">${'<i></i>'.repeat(14)}</div><h1 class="sr">NUTCADE</h1><div class="logo">${logoSVG()}</div><div class="bulbs bot">${'<i></i>'.repeat(14)}</div></header>
+    ${marqueeHTML(false)}
     ${storageOk ? '' : '<div class="notice red" style="margin-top:14px">This browser is blocking storage, so ecash you receive here would vanish on reload. Open NUTCADE in a normal browser tab before adding funds.</div>'}
     ${body}
   </div>
@@ -1171,12 +1178,12 @@ function hydrateFromVault() {
   seedBytes = null; raw.del('pinfails'); requestPersist();
 }
 function padHTML(title, sub, opts = {}) {
-  const n = pinUI.value.length, slots = Math.max(PIN_MIN, n);
+  const n = pinUI.value.length;
   return `<div class="pinpad" data-pinpad="${pinUI.mode}">
     <div class="pin-title">${esc(title)}</div>${sub ? `<div class="th" style="text-align:center">${esc(sub)}</div>` : ''}
-    <div class="pin-dots" aria-label="${n} digits entered">${Array.from({ length: slots }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div>
+    <div class="pin-dots" aria-label="${n} digits entered">${pinDots(n)}</div>
     <div id="pinErr" class="pin-err" role="alert"></div>
-    <div class="pin-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'].map(k => `<button type="button" class="pin-k ${k === 'ok' ? 'ok' : ''}" data-act="pinKey" data-k="${k}" aria-label="${k === 'del' ? 'Delete' : k === 'ok' ? 'Enter' : k}">${k === 'del' ? '⌫' : k === 'ok' ? 'OK' : k}</button>`).join('')}</div>
+    <div class="pin-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'].map(k => `<button type="button" class="pin-k ${k === 'ok' ? 'ok' : ''}" data-act="pinKey" data-k="${k}" aria-label="${k === 'del' ? 'Delete' : k === 'ok' ? 'Enter' : k}">${k === 'del' ? DEL_ICON : k === 'ok' ? 'OK' : k}</button>`).join('')}</div>
     ${opts.extra || ''}</div>`;
 }
 function viewLock() {
@@ -1194,8 +1201,8 @@ function openPinSheet(mode, title, sub) {
 }
 function refreshPad() {
   const pad = document.querySelector('[data-pinpad]'); if (!pad) return;
-  const n = pinUI.value.length, slots = Math.max(PIN_MIN, n);
-  pad.querySelector('.pin-dots').innerHTML = Array.from({ length: slots }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
+  const n = pinUI.value.length;
+  pad.querySelector('.pin-dots').innerHTML = pinDots(n);
   pad.querySelector('.pin-dots').setAttribute('aria-label', `${n} digits entered`);
 }
 function pinError(msg) { sfx('err'); const e = $('#pinErr'); if (e) { e.textContent = msg; } const d = document.querySelector('.pin-dots'); if (d) { d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake'); } pinUI.value = ''; refreshPad(); }

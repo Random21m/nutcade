@@ -390,8 +390,8 @@ function cashierRender() {
     body = `<div class="cash-display"><div class="cash-amt" data-noi18n>${esc(shown)}<small>${esc(curLabel)}</small></div>
       <div class="cash-conv tiny muted">${cash.unit === 'fiat' ? (sats ? '≈ ' + money(sats) : '') : (sats && fiatOf(sats) ? '≈ ' + fiatOf(sats) : '')}</div>
       <input id="cashLabel" class="inp cash-label" maxlength="60" placeholder="Item (optional)" value="${esc(cash.label)}" autocomplete="off"></div>
-      <div class="cash-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', cash.unit === 'fiat' ? '.' : '00', '0', 'del'].map(k => `<button class="ck" data-ck="${k}" aria-label="${k === 'del' ? 'Delete' : k}">${k === 'del' ? '⌫' : k}</button>`).join('')}</div>
-      <div class="cash-row"><button class="btn sm" data-ck="unit" data-noi18n ${canFiat() ? '' : 'disabled'}>${cash.unit === 'fiat' ? 'SAT' : esc(S.prefs.currency)}</button>
+      <div class="cash-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', cash.unit === 'fiat' ? '.' : '00', '0', 'del'].map(k => `<button class="ck" data-ck="${k}" aria-label="${k === 'del' ? 'Delete' : k}">${k === 'del' ? DEL_ICON : k}</button>`).join('')}</div>
+      <div class="cash-row"><button class="btn sm" data-ck="unit" data-noi18n aria-label="Switch between sats and ${esc(S.prefs.currency)}" ${canFiat() ? '' : 'disabled'}>${cash.unit === 'fiat' ? esc(S.prefs.currency) : 'SAT'}</button>
         <div class="seg cash-method" role="group" aria-label="Payment method"><button data-ck="m-ln" aria-pressed="${cash.method === 'ln'}" ${supports(m, 'mint', 'bolt11') ? '' : 'disabled'}>LIGHTNING</button><button data-ck="m-ecash" aria-pressed="${cash.method === 'ecash'}">ECASH</button></div>
         <button class="btn sm" data-ck="clear">Clear</button></div>
       <button class="btn solid lime block cash-charge" data-ck="charge" ${sats ? '' : 'disabled'}>Charge ${sats ? money(sats) : ''}</button>
