@@ -67,7 +67,7 @@ NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a
 | Nibble | Snake |
 | Nut Flipper | Pinball: light N-U-T for a multiplier, drop the S-A-T targets, hunt the gold sat |
 
-Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons (tap **Use D-pad** under the game if you'd rather have arrow buttons).
+Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons (tap **Use D-pad** above the controls if you'd rather have arrow buttons).
 
 **Challenges and bounties**: after a game, tap **Challenge a friend** to send your score to a contact over Nostr or share it as a link. Your friend's game starts from the same seed, so it's laid out the same way, and their score comes back to you. Challenges are signed with your NUTCADE key, so nobody can send one in your name. Sending to a contact, you can also **put sats on it**: they're locked so only that friend can win them, and only by beating your score within a week.
 
@@ -267,6 +267,7 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Changelog
 
+- **v1.11.0:** polish: a compact one-row header after setup so Receive, Send and Scan fit on small phones; game controls that always fit (the fire button no longer slides off narrow screens), with the hint above them and keyboard wording on computers; a PIN pad that fits a 320 px phone and shows one box per digit typed; toasts above the tab bar that never cover a title or a button, shorter and queued; sheets as centered dialogs on wide screens; bigger tap targets (40 px or more) and no text under 9 px in the pixel font; Amber and Green themes reach the inputs and the marquee, and Send stands apart from Receive in Green; amount labels that follow the SAT/currency switch; SAT next to every amount; one date style; friendlier mint errors; a styled file picker for importing backups; a mint you just added is graded NEW rather than F; the last English left in the other languages translated, and German says Optionen on both the tab and the screen
 - **v1.10.0:** replays that prove scores (cross-phone deterministic games), ghosts to race, bounties that only pay on a verified replay; treasure hunts with Shamir-split clue cards; loaded score cards that pay the first person to scan them
 - **v1.9.0:** Nut Flipper, an eighth cabinet (pinball); high-score bounties locked with NUT-14 hash locks; Extra Life, ecash inheritance with NUT-11 time locks; a report card for every mint; animated QR codes (BC-UR, compatible with cashu.me) for long tokens, and scanning them; a joystick for the games on phones, with the D-pad still available
 - **v1.8.1:** moved to GitHub: new address https://random21m.github.io/nutcade/, share cards and preview images point there
