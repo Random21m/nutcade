@@ -407,6 +407,8 @@ ROWS = [
 ("Enter", "Aceptar", "Confirmar", "Bestätigen", "Valider"),
 ("the treasure hunters", "los buscadores del tesoro", "os caçadores do tesouro", "die Schatzsucher", "les chasseurs de trésor"),
 ("whoever scans the card", "quien escanee la tarjeta", "quem escanear o cartão", "wer die Karte scannt", "la personne qui scanne la carte"),
+("word1 word2 word3 …", "palabra1 palabra2 palabra3 …", "palavra1 palavra2 palavra3 …", "Wort1 Wort2 Wort3 …", "mot1 mot2 mot3 …"),
+("cashuB…", "cashuB…", "cashuB…", "cashuB…", "cashuB…"),
 ("Lightning payment", "Pago Lightning", "Pagamento Lightning", "Lightning-Zahlung", "Paiement Lightning"),
 ("Sale #cashier", "Venta #cashier", "Venda #cashier", "Verkauf #cashier", "Vente #cashier"),
 ("Tip to NUTCADE ♥", "Propina a NUTCADE ♥", "Gorjeta para o NUTCADE ♥", "Trinkgeld an NUTCADE ♥", "Pourboire à NUTCADE ♥"),

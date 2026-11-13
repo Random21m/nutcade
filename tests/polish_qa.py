@@ -148,6 +148,10 @@ async def main():
             miss[lang] = got
         check('translations: the 1.11 leftovers are translated in es, pt, de and fr', not any(miss.values()), miss)
         await w.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); const s=document.querySelector('#p_lang'); s.value='de'; s.dispatchEvent(new Event('change',{bubbles:true}))"); await w.wait(300)
+        await w.ev("document.querySelector('[data-act=tab][data-tab=wallet]').click(); document.querySelector('[data-act=send]').click(); document.querySelector('[data-act=sendMethod][data-m=ln]').click()"); await w.wait(250)
+        ph = await w.ev("document.querySelector('#destIn').placeholder")
+        check('German: textarea placeholders are translated too', ph != 'lnbc… or name@domain.com', ph)
+        await w.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click()"); await w.wait(150)
         check('German: the tab and the screen both say Optionen', await w.ev("document.querySelector('[data-tab=settings]').innerText.trim()==='OPTIONEN' && /Optionen/.test(document.querySelector('.screen').innerText)"))
         await w.ev("const s=document.querySelector('#p_lang'); s.value='en'; s.dispatchEvent(new Event('change',{bubbles:true}))"); await w.wait(200)
 

@@ -517,12 +517,14 @@ function tr(s) {
   return m[1] + out + m[3];
 }
 const NOI18N = '.code,.words,textarea,script,style,canvas,.credit-num,.qr,.share-card,[data-noi18n],.tx .note:not(.empty),.mint-pill,.kv dd.tiny';
-const i18nFilter = { acceptNode: n => n.nodeType === 1 && n.matches(NOI18N) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT };
+// what you type in a textarea is never translated, but its placeholder is
+const i18nFilter = { acceptNode: n => { if (n.nodeType === 1 && n.matches(NOI18N)) { if (n.tagName === 'TEXTAREA') trAttrs(n); return NodeFilter.FILTER_REJECT; } return NodeFilter.FILTER_ACCEPT; } };
 function trAttrs(el) { for (const a of ['placeholder', 'aria-label', 'title', 'alt']) { const v = el.getAttribute(a); if (v) { const t = tr(v); if (t !== v) el.setAttribute(a, t); } } }
 function trNode(root) {
   if (LANG === 'en' || !root) return;
   if (root.nodeType === 3) { const p = root.parentElement; if (p && !p.closest(NOI18N)) { const t = tr(root.nodeValue); if (t !== root.nodeValue) root.nodeValue = t; } return; }
-  if (root.nodeType !== 1 || root.closest(NOI18N)) return;
+  if (root.nodeType !== 1) return;
+  if (root.closest(NOI18N)) { if (root.tagName === 'TEXTAREA') trAttrs(root); return; }
   trAttrs(root);
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, i18nFilter);
   let n; while ((n = w.nextNode())) { if (n.nodeType === 1) trAttrs(n); else { const t = tr(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t; } }
