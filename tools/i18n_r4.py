@@ -405,6 +405,8 @@ ROWS = [
 ("part {#} of {#}", "parte {#} de {#}", "parte {#} de {#}", "Teil {#} von {#}", "partie {#} sur {#}"),
 ("cancelled at the till", "cancelado en caja", "cancelado no caixa", "an der Kasse abgebrochen", "annulé en caisse"),
 ("Enter", "Aceptar", "Confirmar", "Bestätigen", "Valider"),
+("the treasure hunters", "los buscadores del tesoro", "os caçadores do tesouro", "die Schatzsucher", "les chasseurs de trésor"),
+("whoever scans the card", "quien escanee la tarjeta", "quem escanear o cartão", "wer die Karte scannt", "la personne qui scanne la carte"),
 ("Lightning payment", "Pago Lightning", "Pagamento Lightning", "Lightning-Zahlung", "Paiement Lightning"),
 ("Sale #cashier", "Venta #cashier", "Venda #cashier", "Verkauf #cashier", "Vente #cashier"),
 ("Tip to NUTCADE ♥", "Propina a NUTCADE ♥", "Gorjeta para o NUTCADE ♥", "Trinkgeld an NUTCADE ♥", "Pourboire à NUTCADE ♥"),

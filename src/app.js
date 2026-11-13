@@ -859,29 +859,33 @@ function animatedQR(el, text, label) {
 }
 
 /* ---------- toasts / copy ---------- */
-/* Toasts queue up and show one at a time, for a time that fits their length. During a game they wait until the
-   game ends, and the cashier screen only shows errors, so nothing lands on top of a shop sale or a high score. */
+/* A new toast replaces the one on screen (the latest thing you did matters most), for a time that fits its
+   length. While a game is open, toasts other than errors wait until you leave it (the last three, one after
+   another), and the cashier screen only shows errors, so nothing lands on a sale or a high score. */
 let toastT = 0; const toastQ = [];
-const toastHeld = () => !!(document.querySelector('.cashier') || (window.Arcade && window.Arcade.playing && window.Arcade.playing()));
+const toastHeld = () => !!(window.Arcade && window.Arcade.playing && window.Arcade.playing());
+const toastMs = (msg, c) => Math.min(c === 'red' ? 5000 : 4000, 1600 + msg.length * 32);
 function toast(msg, c = 'lime') {
   msg = tr(String(msg ?? ''));
-  if (document.querySelector('.cashier') && c !== 'red' && c !== 'gold') return;   // the till shows its own PAID! screen
-  if (toastQ.some(t => t.msg === msg)) return;
-  const el = $('#toast');
-  if (el && !el.hidden && el.textContent === msg) { clearTimeout(toastT); toastT = setTimeout(nextToast, toastMs(msg, c)); return; }
-  toastQ.push({ msg, c }); if (toastQ.length > 3) toastQ.splice(0, toastQ.length - 3);
-  if (!toastT) nextToast();
+  if (document.querySelector('.cashier') && c !== 'red') return;   // the till shows its own PAID! screen
+  if (toastHeld() && c !== 'red') {
+    if (!toastQ.some(t => t.msg === msg)) { toastQ.push({ msg, c }); if (toastQ.length > 3) toastQ.splice(0, toastQ.length - 3); }
+    if (!toastT) toastT = setTimeout(nextToast, 1000); return;
+  }
+  showToast(msg, c);
 }
-const toastMs = (msg, c) => Math.min(c === 'red' ? 5000 : 4000, 1600 + msg.length * 32) - (toastQ.length > 1 ? 500 : 0);
-function clearToasts() { for (let i = toastQ.length - 1; i >= 0; i--) if (toastQ[i].c !== 'red') toastQ.splice(i, 1); const el = $('#toast'); if (el) el.hidden = true; clearTimeout(toastT); toastT = 0; if (toastQ.length) nextToast(); }
-function nextToast() {
+function showToast(msg, c) {
   let el = $('#toast'); if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
-  clearTimeout(toastT); toastT = 0;
-  if (toastHeld() && toastQ.length && toastQ[0].c !== 'red') { el.hidden = true; toastT = setTimeout(nextToast, 1000); return; }
-  const t = toastQ.shift(); if (!t) { el.hidden = true; return; }
-  el.style.setProperty('--c', `var(--${t.c})`); el.textContent = t.msg; el.hidden = false;
-  toastT = setTimeout(() => { el.hidden = true; toastT = setTimeout(nextToast, 180); }, toastMs(t.msg, t.c));
+  clearTimeout(toastT);
+  el.style.setProperty('--c', `var(--${c})`); el.textContent = msg; el.hidden = false;
+  toastT = setTimeout(() => { el.hidden = true; toastT = toastQ.length ? setTimeout(nextToast, 180) : 0; }, toastMs(msg, c));
 }
+function nextToast() {   // held toasts, once the game is closed
+  toastT = 0;
+  if (toastHeld()) { toastT = setTimeout(nextToast, 1000); return; }
+  const t = toastQ.shift(); if (t) showToast(t.msg, t.c);
+}
+function clearToasts() { toastQ.length = 0; clearTimeout(toastT); toastT = 0; const el = $('#toast'); if (el) el.hidden = true; }
 async function copy(text, el) {
   try { await navigator.clipboard.writeText(text); toast('Copied', 'cyan'); sfx('blip'); }
   catch (e) {
