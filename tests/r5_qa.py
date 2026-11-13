@@ -278,6 +278,7 @@ async def main():
         # text that a translation pattern already produced (a toast in Spanish, say) isn't a miss
         outs = [re.compile('^' + re.sub(r'\\\$\d', '.+', re.escape(o)) + '$') for o in known['outs']]
         def real(x):
+            if re.search(r'\b20\d\d\b', x) and len(x) <= 32: return False   # a date, in the app's language
             if any(o.match(x) for o in outs) or re.fullmatch(r'[A-Z][a-z]{2} \d{1,2}(, \d{4})?', x) or x.endswith('…'): return False
             if re.sub(r'\d[\d,.]*', '{#}', x) in vals or x.upper() in titles or any(t.startswith(x.upper() + ' ') for t in titles): return False
             if x[:1] in '▲▼' or x.startswith('#') or x in ('Robin', 'Host', 'Sam', 'Mint A', 'Mint B', 'NUTCADE', 'LN', 'BTC /', 'A', 'B', 'C', 'D', 'F', '?') or '/' in x or '₿' in x or '127.0.0.1' in x: return False

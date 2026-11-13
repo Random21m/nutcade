@@ -316,6 +316,7 @@ async def main():
             const names=[...Arcade.games.map(g=>g.name), ...Trophies.DEFS.map(d=>d.name)].map(x=>x.toUpperCase()); return {v:[...v], names}})()""")
         vals, titles = set(known['v']), set(known['names'])
         def real(x):
+            if re.search(r'\b20\d\d\b', x) and len(x) <= 32: return False   # a date, in the app's language
             if re.sub(r'\d[\d,.]*', '{#}', x) in vals or x.upper() in titles or any(t.startswith(x.upper() + ' ') for t in titles): return False
             if x[:1] in '▲▼' or x.startswith('#') or x in ('Robin', 'Host', 'Mint A', 'Mint B', 'NUTCADE', 'LN', 'BTC /') or '/' in x or '₿' in x: return False
             if re.fullmatch(r'[A-Z]{3}|[\d,]+ (SAT|Sat|sat)|\d+[DHMWY]|\d+M AGO|HI -+', x): return False
