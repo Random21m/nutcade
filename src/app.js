@@ -1003,7 +1003,7 @@ function render() {
     return;
   }
   if (vault.on && !vault.open) {
-    app.innerHTML = `<div class="wrap" style="padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))">
+    app.innerHTML = `<div class="wrap lockwrap${raw.get('vault', {}).bio ? ' bio' : ''}" style="padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))">
       ${marqueeHTML(false)}
       ${viewLock()}</div>`;
     if (window.NutAudio) window.NutAudio.stopMusic();
@@ -1248,8 +1248,9 @@ function hydrateFromVault() {
 const HEART = '<svg class="ico-heart" viewBox="0 0 7 6" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges"><path d="M1 0h2v1h1V0h2v1h1v2H6v1H5v1H4v1H3V5H2V4H1V3H0V1h1z"/></svg>';
 // A drawn backspace key: the pixel font has no ⌫, and the fallback glyph is tiny.
 const DEL_ICON = '<svg class="ico-del" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges"><path fill-rule="evenodd" d="M5 3h10v10H5L1 8zm1 1L2.5 8 6 12h8V4z"/><path d="M7 5h1v1H7zm1 1h1v1H8zm1 1h1v1H9zm1 1h1v1h-1zm1 1h1v1h-1zm0-4h1v1h-1zm-1 1h1v1h-1zM8 8h1v1H8zM7 9h1v1H7z"/></svg>';
-// One box per digit typed plus a blinking cursor box, so the pad never suggests a fixed length (a PIN is 6 to 12 digits).
-const pinDots = n => Array.from({ length: n }, () => '<i class="on"></i>').join('') + (n < PIN_MAX ? '<i class="cur"></i>' : '');
+// Six faint boxes that fill as you type; past six, a box is added per digit up to the 12-digit maximum.
+// The next box to fill has a cyan border that never disappears (a PIN is 6 to 12 digits).
+const pinDots = n => Array.from({ length: Math.max(PIN_MIN, Math.min(PIN_MAX, n + 1)) }, (_, i) => `<i class="${i < n ? 'on' : i === n ? 'cur' : ''}"></i>`).join('');
 function padHTML(title, sub, opts = {}) {
   const n = pinUI.value.length;
   return `<div class="pinpad" data-pinpad="${pinUI.mode}">
