@@ -472,7 +472,15 @@ async function sendEcash(amount, note, lockTo, url = S.active, opts = {}) {
   const have = S.proofs[url] || [];
   if (sum(have) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(have))}.`);
   const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}) }, keep: w.defaultOutputType() } : undefined;
-  const { keep, send } = await withRepair(url, () => w.send(amount, have, { includeFees: true }, outCfg)).catch(e => { throw shortOf(e, w, url, amount, false); });
+  // Sending the most this mint allows after fees: every coin goes into the swap, so nothing is left behind.
+  // (The library picks coins at random, and a smaller pick costs a smaller fee and leaves a SAT or two over.)
+  const all = have.length && amount === maxSendable(w, have) && w._selectProofs;
+  const pick = all ? w._selectProofs : null;
+  if (all) w._selectProofs = ps => ({ keep: [], send: ps });
+  let res;
+  try { res = await withRepair(url, () => w.send(amount, have, { includeFees: true }, outCfg)).catch(e => { throw shortOf(e, w, url, amount, false); }); }
+  finally { if (all) w._selectProofs = pick; }
+  const { keep, send } = res;
   S.proofs[url] = plain(keep);
   const token = L.getEncodedToken({ mint: url, proofs: send, unit: 'sat' });
   save();
