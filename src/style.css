@@ -565,3 +565,6 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
   body.offline:has(.cashier) .netbanner{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 }
 .health .hl{display:inline-flex;align-items:center;gap:8px}   /* the dot stays with its status */
+/* a sheet's column never grows past the sheet: a long title (Pay <a long name>) or label wraps inside it */
+.sheet{grid-template-columns:minmax(0,1fr)}
+.sheet-head h3{overflow-wrap:anywhere}
