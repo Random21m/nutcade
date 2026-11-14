@@ -427,6 +427,169 @@ async def main():
         check('offline (de 320x640): CHARGE and Close the till fit under the banner', r == ['ok', 'ok'], r)
         await o.pg.context.set_offline(False); await o.pg.context.close()
 
+        # ---------- round 4: typed amounts never silently become different amounts ----------
+        # The tester's whole sweep table, typed into a fiat amount field in every language at a rate of $100,000:
+        # each row is read exactly (the ≈ SAT hint, which is what the invoice uses) or refused (no hint, red field,
+        # and Create invoice makes nothing). None = refuse; a pair = either of those readings is fine.
+        SWEEP = [('12,50', 12.5, 12.5), ('12.50', 12.5, 12.5), ('1.234,56', 1234.56, 1234.56), ('1 234,56', 1234.56, 1234.56), ('1,234.56', 1234.56, 1234.56), ('1234,5', 1234.5, 1234.5), ('0,5', 0.5, 0.5),
+                 ('1.000', 1.0, 1000), ('1,000', 1000, 1.0), ('1,234', 1234, 1.234), ('1.234', 1.234, 1234), ('1.234.567,89', 1234567.89, 1234567.89), ('1,234,567.89', 1234567.89, 1234567.89),
+                 ('1,5', 1.5, 1.5), ('1.5', 1.5, 1.5), ('12.34', 12.34, 12.34), ('1 000', 1000, 1000), ('1 000', 1000, 1000), ('1 000,50', 1000.5, 1000.5), ("1'234.50", 1234.5, 1234.5),
+                 (',5', 0.5, 0.5), ('.5', 0.5, 0.5), ('5,', 5, 5), ('5.', 5, 5), ('-5', None, None), ('+5', None, None), ('abc', None, None), ('12abc', None, None), ('1e3', None, None),
+                 ('$12.50', None, None), ('12,50 €', None, None), ('0,001', 0.001, 0.001), ('0.001', 0.001, (0.001, None)), ('0.500', 0.5, (0.5, None)), ('0,500', (0.5, None), 0.5),
+                 ('12..50', None, None), ('12,,50', None, None), ('1.2.3', None, None), ('1,23,4', None, None), ('1.23.456', None, None), ('1.234.56', None, None), ('1,234,56', None, None),
+                 ('1.234,56,7', None, None), ('999999999999', 999999999999, 999999999999), ('99.999.999.999,99', 99999999999.99, 99999999999.99), ('１２', None, None), ('١٢', None, None),
+                 ('1_000', None, None), ('', 0, 0), ('   ', 0, 0), ('.', 0, 0), (',', 0, 0), ('0', 0, 0), ('00012,50', 12.5, 12.5)]
+        from fractions import Fraction
+        def want_sats(x): v = Fraction(str(x)) / 100000 * 10**8; return int(v + Fraction(1, 2)) if v else 0
+        SATS = [('1000', 1000), ('1,000', {'en': 1000}), ('1.000', {'de': 1000, 'es': 1000, 'pt': 1000}), ('1 000', 1000), ('1 000', 1000), (' 2 100 ', 2100), ('007', 7),
+                ('1.5', None), ('1,5', None), ('-500', None), ('+500', None), ('1e3', None), ('12abc', None), ('0x10', None), ('٣٠٠', None), ('１２３', None), ('1_000', None),
+                ('0,5', None), ('12 34', None), ('99999999999999999999', None), ('9007199254740993', None), ('2100000000000001', None)]
+        def sat_want(exp, lang):
+            if isinstance(exp, dict): return exp.get(lang)
+            return exp
+        for lang in LANGS:
+            m = await wallet(b, 375, 667, lang)
+            await m.pg.route(re.compile(r'https://api(\.exchange)?\.coinbase\.com/.*'), lambda r: r.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': '*'}, body=json.dumps({'data': {'currency': 'BTC', 'rates': {'USD': '100000'}}})))
+            await m.create(); await m.add_mint(B); await m.receive_ln(2000); await m.home(); await m.wait(900)
+            await m.click('[data-act=receive]'); await m.wait(150)
+            if await m.ev("document.querySelector('#amtIn').dataset.cur") != 'fiat': await m.click('[data-act=amtUnit]'); await m.wait(100)
+            bad = []
+            for typed, een, edc in SWEEP:
+                exp = een if lang == 'en' else edc
+                okset = set(exp) if isinstance(exp, tuple) else {exp}
+                await m.fill('#amtIn', typed); await m.wait(40)
+                got = await m.ev("[document.querySelector('.amtconv').innerText, document.querySelector('#amtIn').getAttribute('aria-invalid')]")
+                n = int(re.sub(r'[^0-9]', '', got[0]) or 0)
+                reading = None if got[1] == 'true' else n
+                fine = any((reading is None and e is None) or (e is not None and reading == want_sats(e)) for e in okset)
+                if fine and reading is None:   # refused: submitting makes nothing
+                    n0 = await m.ev("Nutcade.S.txs.length"); await m.click('[data-act=doLnInvoice]'); await m.wait(250)
+                    fine = await m.ev("Nutcade.S.txs.length") == n0 and bool(await m.err())
+                if not fine: bad.append((typed, got, [want_sats(e) if e is not None else 'refuse' for e in okset]))
+            check(f'round 4 sweep {lang}: all {len(SWEEP)} typed amounts in your currency are read exactly or refused', not bad, bad[:6])
+            # SAT fields: whole SAT, grouped with spaces or the language's own mark; anything else refused, nothing dropped
+            await m.click('[data-act=amtUnit]'); await m.wait(100); bad = []
+            for typed, exp in SATS:
+                e = sat_want(exp, lang)
+                r = await m.ev(f"(t=>{{try{{return Nutcade.parseSat(t)}}catch(e){{return 'ERR '+e.message}}}})({json.dumps(typed)})")
+                if e is None and not str(r).startswith('ERR'): bad.append((typed, r))
+                if e is not None and r != e: bad.append((typed, r))
+            msgs = await m.ev("['1.5','-500','99999999999999999999'].map(t=>{try{Nutcade.parseSat(t)}catch(e){return Nutcade.tr(e.message)}})")
+            check(f'round 4 SAT {lang}: whole SAT only, decimals and junk refused with a translated reason, never stripped', not bad and all(msgs) and not any('bigint' in x or 'Unsafe' in x for x in msgs) and (lang == 'en' or msgs[0] != 'SAT are whole numbers, with no decimals. Type it like this: 1,500'), (bad, msgs))
+            # SAT -> currency -> SAT keeps exactly what was typed
+            rt = []
+            for v in ['1', '7', '49', '515', '1271123']:
+                await m.fill('#amtIn', v); await m.click('[data-act=amtUnit]'); await m.wait(60); f = await m.ev("document.querySelector('#amtIn').value"); await m.click('[data-act=amtUnit]'); await m.wait(60)
+                rt.append((v, f, await m.ev("document.querySelector('#amtIn').value")))
+            check(f'round 4 toggle {lang}: switching to USD and back restores the exact SAT typed', all(a == c and b not in ('', '0.00', '0,00') for a, b, c in rt), rt)
+            await m.pg.context.close()
+
+        # bitcoin: links and addresses
+        z = await wallet(b, 375, 667, 'en'); await z.create(); await z.add_mint(B)
+        ADDR = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq'
+        bip = [('0.001', 100000), ('1.5', 150000000), ('0.00000001', 1), ('.5', 50000000), ('21000000', 2100000000000000), ('1,5', None), ('1.5.5', None), ('0.1abc', None), ('1e-3', None),
+               ('-1', None), ('abc', None), ('0.000000015', None), ('21000001', None), ('0', None), ('%200.5', None)]
+        bad = []
+        for a, exp in bip:
+            r = await z.ev(f"(r=>[r.kind,r.amount,r.badAmount!=null])(Nutcade.classify({json.dumps('bitcoin:' + ADDR + '?amount=' + a)}))")
+            if r[0] != 'btc' or r[1] != exp or r[2] != (exp is None): bad.append((a, r))
+        r2 = await z.ev(f"[Nutcade.classify({json.dumps('BITCOIN:' + ADDR.upper() + '?AMOUNT=0.5')}).amount, Nutcade.classify({json.dumps('bitcoin:' + ADDR + '?amount=0.001&amount=5')}).amount]")
+        check('round 4 BIP21: amounts are read exactly in BTC or left out (commas, exponents, junk, two amounts, over 21M)', not bad and r2 == [50000000, None], (bad, r2))
+        good = ['bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', 'bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0', '1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2', '3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy', 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx']
+        badA = [ADDR + 'x', ADDR[:-1] + 'p', '1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN3', '3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLz', 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5md']
+        ga = await z.ev(f"{json.dumps(good)}.map(a=>Nutcade.classify(a).kind)"); ba = await z.ev(f"{json.dumps(badA)}.map(a=>Nutcade.classify(a).kind)")
+        check('round 4 addresses: bech32/bech32m and base58check checksums are checked (one extra or wrong letter is refused)', all(k == 'btc' for k in ga) and not any(k == 'btc' for k in ba), (ga, ba))
+        await z.ev(f"Nutcade.handleScan({json.dumps('bitcoin:' + ADDR + '?amount=1,5')})"); await z.wait(300)
+        check('round 4 BIP21: an amount that can\'t be read is left out and the send screen says so', await z.ev("!document.querySelector('#amtIn') || document.querySelector('#amtIn').value===''") and 'left out' in await z.err(), await z.err())
+        await z.ev("Nutcade.closeSheet()")
+        # mint URLs: one spelling; old twins are merged with their ecash
+        n0 = await z.ev("Nutcade.S.mints.length")
+        await z.ev("document.querySelector('[data-act=pickMint]').click()"); await z.wait(200); await z.fill('#mintUrl', 'HTTP://127.0.0.1:3339/'); await z.click('[data-act=addMintUrl]'); await z.wait(1500)
+        check('round 4 mints: HTTP://127.0.0.1:3339/ is the same mint, not a second copy', await z.ev("Nutcade.S.mints.length") == n0, await z.ev("Nutcade.S.mints.map(m=>m.url)"))
+        await z.ev("Nutcade.closeSheet()"); await z.receive_ln(300)
+        total0 = await z.bal()
+        await z.ev("""(()=>{const g=k=>JSON.parse(localStorage.getItem('nutcade:'+k));const ms=g('mints'),ps=g('proofs');const u='http://127.0.0.1:3339';
+          ms.push(Object.assign({},ms.find(m=>m.url===u),{url:'HTTP://127.0.0.1:3339/'}));const p=ps[u];ps['HTTP://127.0.0.1:3339/']=[p[0]].concat(p.slice(1,2).map(x=>Object.assign({},x)));ps[u]=p.slice(1);
+          localStorage.setItem('nutcade:mints',JSON.stringify(ms));localStorage.setItem('nutcade:proofs',JSON.stringify(ps))})()""")
+        await z.pg.reload(); await z.wait(900)
+        mg = await z.ev("[Nutcade.S.mints.map(m=>m.url), Object.keys(Nutcade.S.proofs), Object.values(Nutcade.S.proofs).flat().length, new Set(Object.values(Nutcade.S.proofs).flat().map(p=>p.secret)).size]")
+        check('round 4 mints: a wallet that already holds a twin spelling is merged on load, each coin once, nothing lost', mg[0] == ['http://127.0.0.1:3339'] and mg[1] == ['http://127.0.0.1:3339'] and mg[2] == mg[3] and await z.bal() == total0, (mg, total0, await z.bal()))
+        # counts, split, request for 0, duplicate contacts
+        await z.home(); res = []
+        for tot, n in [('1000', '2.5'), ('1000', '1e1'), ('3', '30')]:
+            await z.click('[data-act=splitOpen]'); await z.wait(150); n0 = await z.ev("Nutcade.S.requests.length")
+            await z.fill('#amtIn', tot); await z.ev(f"document.querySelector('#splitN').value={json.dumps(n)}"); await z.click('[data-act=splitCreate]'); await z.wait(300)
+            res.append((tot, n, await z.ev("Nutcade.S.requests.length") - n0, (await z.err())[:40])); await z.ev("Nutcade.closeSheet()")
+        await z.click('[data-act=huntNew]'); await z.wait(150); await z.fill('#amtIn', '100'); await z.fill('#huntN', '2.5'); await z.click('[data-act=huntCreate]'); await z.wait(300)
+        res.append(('hunt', '2.5', 0 if await z.err() else 1, (await z.err())[:40])); await z.ev("Nutcade.closeSheet()")
+        check('round 4 counts: 2.5 people, 1e1 people and 2.5 clue cards are refused, and 3 SAT among 30 people', all(r[2] == 0 and r[3] for r in res), res)
+        await z.click('[data-act=receive]'); await z.wait(150); await z.click('[data-act=recvMethod][data-m=ecash]'); await z.wait(100); await z.click('[data-act=reqOpen]'); await z.wait(200)
+        n0 = await z.ev("Nutcade.S.requests.length"); await z.fill('#amtIn', '0'); await z.click('[data-act=reqCreate]'); await z.wait(300)
+        check('round 4 request: 0 is refused (empty means any amount)', await z.ev("Nutcade.S.requests.length") == n0 and 'empty' in await z.err(), await z.err())
+        await z.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click()"); await z.wait(150)
+        made = []
+        for ln in ['bob@pay.test', ' BOB@Pay.Test ']:
+            await z.click('[data-act=contactsOpen]'); await z.wait(150); await z.ev("document.querySelector('[data-act=contactEdit]:not([data-id])').click()"); await z.wait(150)
+            await z.fill('#cName', 'Bob'); await z.fill('#cLn', ln); await z.click('[data-act=contactSave]'); await z.wait(300); made.append(await z.ev("Nutcade.S.contacts.length"))
+            e = await z.ev("[(document.querySelector('#sheetErr')||{}).innerText||'', !!document.querySelector('#sheetErr [data-act=contactEdit][data-id]')]"); await z.ev("Nutcade.closeSheet()")
+        check('round 4 contacts: the same Lightning address can\'t be saved twice; the message offers the existing contact', made == [1, 1] and 'already has' in e[0] and e[1], (made, e))
+        await z.pg.context.close()
+
+        # fees on the fee mint: amount + fee is exactly what the balance dropped by
+        fz = await wallet(b, 375, 667, 'en'); await fz.create(); await fz.add_mint(A); await fz.use(A); await fz.receive_ln(4000)
+        b0 = await fz.bal(A); tok, e = await fz.send_ecash(1000); t = await fz.ev("Nutcade.S.txs[0]"); b1 = await fz.bal(A)
+        b2 = None; t2 = None
+        e2, q = await fz.pay_ln(__import__('wallet_qa').invoice(700, B)); t2 = await fz.ev("Nutcade.S.txs[0]"); b2 = await fz.bal(A)
+        check('round 4 fees: ecash send and Lightning payment on a fee mint record fee = balance drop - amount', not e and not e2 and b0 - b1 == t['amount'] + t['fee'] and t['fee'] >= 2 and b1 - b2 == t2['amount'] + t2['fee'] and t2['status'] == 'done',
+              (b0, b1, b2, t['amount'], t['fee'], t2['amount'], t2['fee'], e, e2))
+        await fz.home(); await fz.click('[data-act=send]'); await fz.wait(150); await fz.fill('#amtIn', str(b2)); await fz.click('[data-act=doSendEcash]'); await fz.wait(1500)
+        msg = await fz.err(); has_btn = await fz.has('#sheetErr [data-act=sendMax]') if hasattr(fz, 'has') else await fz.ev("!!document.querySelector('#sheetErr [data-act=sendMax]')")
+        await fz.click('#sheetErr [data-act=sendMax]'); await fz.until("!!document.querySelector('#layer .qr')", 8000); t3 = await fz.ev("Nutcade.S.txs[0]"); b3 = await fz.bal(A)
+        check('round 4 fees: sending the whole balance explains the fee and offers the most that can be sent, which works', 'most you can send' in msg and 'Not enough funds available' not in msg and has_btn and b2 - b3 == t3['amount'] + t3['fee'] and b3 < 5,
+              (msg, b2, b3, t3['amount'], t3['fee']))
+        await fz.pg.context.close()
+
+        # the till: opened with the mouse, Enter charges (once), and doesn't reset the amount
+        k = await wallet(b, 1440, 900, 'en', mobile=False); await k.create(); await k.add_mint(B); await k.home(); await k.wait(300)
+        await k.pg.locator('#app [data-act=cashier]').click(); await k.wait(300)
+        inside = await k.ev("!!document.activeElement.closest('.cashier')")
+        await k.pg.keyboard.type('250'); n0 = await k.ev("Nutcade.S.quotes.length+'/'+Nutcade.S.txs.length")
+        await k.pg.keyboard.down('Enter')
+        for _ in range(5): await k.pg.keyboard.down('Enter')
+        await k.pg.keyboard.up('Enter'); await k.until("!!document.querySelector('.cash-pay,.cash-paid')", 10000); await k.wait(500)
+        txs = await k.ev("Nutcade.S.txs.filter(t=>/#cashier/.test(t.note||'')).map(t=>t.amount)")
+        check('round 4 till: opened by mouse, focus is in the till and Enter (even held) charges exactly once, the typed amount', inside and txs == [250], (inside, n0, txs))
+        await k.pg.context.close()
+
+        # D-pad: switching re-fits the screen, so the hint never sits on the canvas
+        dp = []
+        for lang, vw, g in [('en', 320, 'flipper'), ('fr', 320, 'swarm'), ('es', 375, 'shield')]:
+            q = await wallet(b, vw, 640 if vw == 320 else 667, lang); await q.create()
+            await q.ev("localStorage.removeItem('nutcade:pad')"); await q.click('[data-act=tab][data-tab=arcade]'); await q.wait(150); await q.ev(f"document.querySelector('[data-game={g}]').click()"); await q.wait(400)
+            await q.ev("document.querySelector('[data-g=pad]').click()"); await q.wait(200)
+            r = await q.ev("(()=>{const c=document.querySelector('#gameCanvas').getBoundingClientRect(),h=document.querySelector('.game-view .hint').getBoundingClientRect();return [Math.round(c.bottom),Math.round(h.top)]})()")
+            dp.append((lang, vw, g, r)); await q.pg.context.close()
+        check('round 4 D-pad: the hint sits under the game screen after switching to the D-pad', all(r[0] <= r[1] for *_, r in dp), dp)
+
+        # German sheet title at 320 and 375: it only breaks at a soft hyphen
+        for vw in (320, 375):
+            q = await wallet(b, vw, 667, 'de'); await q.create()
+            await q.ev("document.querySelector('[data-act=tab][data-tab=settings]').click()"); await q.wait(150); await q.click('[data-act=seedShow]'); await q.wait(300)
+            br = await q.ev("""(()=>{const out=[];for(const h of document.querySelectorAll('#layer .sheet-head h3')){const n=h.firstChild;if(!n||n.nodeType!==3)continue;const t=n.nodeValue;let top=null;
+              for(let i=0;i<t.length;i++){const r=document.createRange();r.setStart(n,i);r.setEnd(n,i+1);const q=[...r.getClientRects()].filter(x=>x.width>0).pop();if(!q)continue;const y=Math.round(q.top);
+                if(top!==null&&y>top+2){out.push({at:i,ok:/[\\u00ad\\s-]$/.test(t.slice(0,i))||t[i-1]===' '})}top=y}}return [document.querySelector('#layer .sheet-head h3').innerText,out]})()""")
+            check(f'round 4 German title at {vw}: breaks only at a soft hyphen or a space', all(x['ok'] for x in br[1]), br)
+            await q.pg.context.close()
+
+        # keyboard focus survives a redraw right after a sheet closes (why the tester's Restore wallet check failed)
+        rf = await wallet(b, 1440, 900, 'en', mobile=False); await rf.create(); await rf.add_mint(B)
+        await rf.click('[data-act=tab][data-tab=settings]'); await rf.wait(150); await rf.pg.locator('#app [data-act=seedRestore]').focus(); await rf.pg.keyboard.press('Enter'); await rf.wait(400)
+        for _ in range(22): await rf.pg.keyboard.press('Tab')
+        await rf.pg.keyboard.press('Escape'); await rf.wait(100); a1 = await rf.ev("document.activeElement.dataset.act||document.activeElement.tagName")
+        await rf.ev("Nutcade.refresh()"); await rf.wait(100); a2 = await rf.ev("document.activeElement.dataset.act||document.activeElement.tagName")
+        check('round 4 focus: after Esc on Restore wallet, focus is on its button, and stays there through a screen refresh', a1 == a2 == 'seedRestore', (a1, a2))
+        await rf.pg.context.close()
+
         # ---------- desktop: sheets are centered dialogs, the tool row is an even grid, keyboard wording ----------
         d = await wallet(b, 1440, 900, 'en', mobile=False)
         await d.create(); await d.add_mint(B); await d.receive_ln(2000)
