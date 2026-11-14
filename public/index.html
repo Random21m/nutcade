@@ -4482,7 +4482,7 @@ function fmtDate(ms, withTime) {
   catch (e) { return d.toDateString(); }
 }
 // Notes NUTCADE writes itself (not ones you typed) are shown in your language.
-const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|To )|\((part \d+ of \d+|cancelled at the till)\)$/;
+const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|To |Zap to |Wallet Connect: |LNURL voucher$)|\((part \d+ of \d+|cancelled at the till)\)$/;
 function noteText(n) {
   if (!n || !AUTO_NOTE.test(n)) return n;
   const m = /^(.*) \((part \d+ of \d+|cancelled at the till)\)$/.exec(n);   // your own words before the suffix stay as you typed them
@@ -4919,11 +4919,11 @@ function relayPublish(ev, timeout = 7000, list = relays()) {
     setTimeout(end, timeout);
   });
 }
-function relayQuery(filter, timeout = 7000) {
+function relayQuery(filter, timeout = 7000, list = relays()) {
   return new Promise(res => {
     const out = new Map(); let left = 0; const socks = []; let fin = false;
     const end = () => { if (fin) return; fin = true; socks.forEach(s => { try { s.close(); } catch (e) {} }); res([...out.values()]); };
-    for (const r of relays()) {
+    for (const r of list) {
       let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
       socks.push(ws); left++;
       const drop = () => { if (ws._done) return; ws._done = true; if (--left <= 0) end(); };
@@ -5391,7 +5391,7 @@ function openContactEdit(id, prefill = {}) {
     <div class="field"><label for="cLn">Lightning address (optional)</label><input id="cLn" class="inp" data-noi18n value="${esc(c.ln)}" placeholder="alex@wallet.com" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
     <div class="field"><label for="cNostr">Nostr address for ecash (optional)</label><input id="cNostr" class="inp" value="${esc(c.nostr)}" placeholder="npub1… or nprofile1…" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
     <button class="btn solid gold block" data-act="contactSave" data-id="${id || ''}">Save</button>
-    ${id ? `<button class="btn block red" data-act="contactDel" data-id="${id}">Delete contact</button>` : ''}<div id="sheetErr"></div>`);
+    ${id ? `<button class="btn block red" data-act="contactDel" data-id="${id}">Delete contact</button>` : prefill.nostr ? `<button class="btn block" data-act="zapOpen" data-pk="${esc(prefill.nostr)}">Zap them without saving</button>` : ''}<div id="sheetErr"></div>`);
 }
 function openPayContact(id) {
   const c = contactById(id); if (!c) return;
@@ -5402,7 +5402,7 @@ function openPayContact(id) {
     <div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
     <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Lunch"></div>
-    ${c.pubkey ? `<button class="btn solid pink block" data-act="contactEcash" data-id="${c.id}">Send ecash over Nostr</button>` : ''}
+    ${c.pubkey ? `<button class="btn solid pink block" data-act="contactEcash" data-id="${c.id}">Send ecash over Nostr</button><button class="btn block" data-act="zapContact" data-id="${c.id}">Zap <span data-noi18n>${esc(c.name)}</span></button>` : ''}
     ${canLn ? `<button class="btn ${c.pubkey ? '' : 'solid pink'} block" data-act="contactLn" data-id="${c.id}">Pay ${esc(c.ln)}</button>` : c.ln ? `<div class="tiny muted">${esc(m.name)} can't pay Lightning. Pick another mint to pay ${esc(c.ln)}.</div>` : ''}
     <div id="sheetErr"></div>`);
 }
@@ -5746,12 +5746,13 @@ function showMeltQuote(kind, mq, dest, note) {
     body.querySelector('#payBtn').onclick = e => run(e.currentTarget, 'PAYING', async () => {
       const fi = kind === 'onchain' ? parseInt((body.querySelector('input[name=fee]:checked') || {}).value || '0', 10) : 0;
       const tx = await payMelt(kind, mq, fi, note, dest);
+      const zx = zapByQuote.get(mq.quote); if (zx) updTx(tx.id, zx);
       const isAddr = kind === 'ln' && /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(dest);
       const ct = isAddr && (S.contacts.find(c => c.ln === dest.toLowerCase()) || null);
       if (ct) updTx(tx.id, { contactId: ct.id, contactName: ct.name });
       lastContact = null;
       const save = isAddr && !ct ? `<button class="btn block violet" data-act="contactFrom" data-ln="${esc(dest.toLowerCase())}">Save ${esc(dest)} as a contact</button>` : '';
-      if (tx.status === 'done') showDone('out', amount, kind === 'ln' ? (ct ? `Lightning to ${ct.name}` : 'Lightning') : 'On-chain' + (tx.outpoint ? ' · ' + tx.outpoint.slice(0, 12) + '…' : ''), save);
+      if (tx.status === 'done') showDone('out', amount, kind === 'ln' ? (zx ? note : ct ? `Lightning to ${ct.name}` : 'Lightning') : 'On-chain' + (tx.outpoint ? ' · ' + tx.outpoint.slice(0, 12) + '…' : ''), save);
       else { setBody(`<div class="notice">Payment is in flight. NUTCADE will settle it when the mint confirms. Check the transaction in your notes.</div><button class="btn block gold" data-act="close">OK</button>`); refresh(); }
     });
     return null;
@@ -7347,6 +7348,72 @@ function showWithdrawWait(res) {
   });
 }
 
+/* ---------- zaps (NIP-57) ----------
+   Their kind-0 profile gives a Lightning address (lud16, or an lud06 LNURL). If its LNURL-pay endpoint says
+   allowsNostr and names its nostrPubkey, a kind-9734 zap request signed with this wallet's Nostr key (the same key
+   cashu.me uses, from the 12 words) goes with the amount; the invoice must be for exactly that amount, and is then
+   paid like any Lightning payment, with the fee shown first. Without zap support, a plain payment is offered. */
+let curZap = null;
+const zapByQuote = new Map();
+async function nostrProfile(pubkey, extra = []) {
+  const list = [...new Set((extra || []).filter(u => /^wss?:\/\//.test(u)).concat(relays()))].slice(0, 8);
+  const evs = await relayQuery({ kinds: [0], authors: [pubkey], limit: 3 }, 6000, list);
+  const ev = evs.filter(e => e.pubkey === pubkey && e.kind === 0 && L.verifyEvent(e)).sort((a, b) => b.created_at - a.created_at)[0];
+  if (!ev) return null;
+  try { const p = JSON.parse(ev.content); return p && typeof p === 'object' ? p : null; } catch (e) { return null; }
+}
+const shortNpub = pk => { try { const n = L.npubEncode(pk); return n.slice(0, 12) + '…' + n.slice(-4); } catch (e) { return pk.slice(0, 8) + '…'; } };
+async function openZap(target) {
+  if (needMint()) return;
+  const pk = target.pubkey;
+  curZap = null;
+  openSheet('Zap', busyHTML('LOOKING UP THEIR PROFILE') + '<div id="sheetErr"></div>');
+  let prof = null;
+  try { prof = await nostrProfile(pk, target.relays); } catch (e) {}
+  if (!$('#layer .sheet')) return;
+  const name = String(target.name || (prof && (prof.display_name || prof.displayName || prof.name)) || shortNpub(pk)).trim().slice(0, 40);
+  const addr = prof ? String(prof.lud16 || '').trim().toLowerCase() || String(prof.lud06 || '').trim().toLowerCase() : '';
+  const fail = msg => setBody(`<div class="label">To</div><div class="code" style="color:var(--ink)" data-noi18n>${esc(name)}</div>${errHTML(serviceErr(msg))}<button class="btn block" data-act="close">Close</button>`);
+  if (!prof) return fail("Couldn't find this person's Nostr profile on your relays, so there's no Lightning address to zap.");
+  if (!addr || !(/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(addr) || /^lnurl1[0-9a-z]+$/.test(addr))) return fail("This Nostr profile has no Lightning address, so it can't be zapped.");
+  let base;
+  try { base = await getJson(lnurlToUrl(addr), lnurlMs()); } catch (e) { if ($('#layer .sheet')) fail(e.timeout ? `${addr} didn't answer in time. Try again in a moment.` : `Couldn't reach ${addr}. Check your connection and try again.`); return; }
+  if (!$('#layer .sheet')) return;
+  if (base.status === 'ERROR') { setBody(errHTML(serviceErr(`${addr} turned this down.`, base.reason)) + '<button class="btn block" data-act="close">Close</button>'); return; }
+  if (base.tag !== 'payRequest' || !base.callback) return fail(`${addr} isn't set up to receive payments.`);
+  const zapOk = base.allowsNostr === true && /^[0-9a-f]{64}$/i.test(String(base.nostrPubkey || ''));
+  const min = Math.max(1, Math.ceil(num(base.minSendable) / 1000)), max = Math.floor(num(base.maxSendable) / 1000);
+  curZap = { pubkey: pk, name, addr, base, zapOk, min, max, url: lnurlToUrl(addr), relays: (target.relays || []).slice(0, 3) };
+  const m = activeMint();
+  setBody(`<div class="label">To</div><div class="code" style="color:var(--ink)"><span data-noi18n>${esc(name)}</span><br><span class="tiny muted" data-noi18n>${esc(addr)}</span></div>
+    ${zapOk ? '' : `<div class="notice">${esc(addr)} doesn't support zaps. You can pay it as a plain Lightning payment instead; it won't show as a zap on Nostr.</div>`}
+    <div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
+    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="21" autocomplete="off"></div>
+    ${max >= min ? `<div class="tiny muted">${min === max ? `Exactly ${money(max)}.` : `Any amount from ${money(min)} to ${money(max)}.`}</div>` : ''}
+    ${zapOk || num(base.commentAllowed) > 0 ? `<div class="field"><label for="zapComment">${zapOk ? 'Comment (optional, public on Nostr)' : 'Comment (optional, the receiver sees it)'}</label><input id="zapComment" class="inp" maxlength="${zapOk ? 280 : Math.min(280, num(base.commentAllowed))}" autocomplete="off"></div>` : ''}
+    <button class="btn solid gold block" data-act="zapQuote">${zapOk ? 'Zap' : 'Pay as a plain Lightning payment'}</button><div id="sheetErr"></div>`);
+}
+async function zapInvoice(z, sats, comment) {
+  if (z.max < z.min) throw keepErr(new Error(`${z.addr} isn't accepting payments right now.`));
+  if (sats < z.min || sats > z.max) throw keepErr(amtErr(z.min === z.max ? `${z.addr} takes exactly ${money(z.max)}.` : `${z.addr} takes ${money(z.min)} to ${money(z.max)}.`, 'range'));
+  const msat = sats * 1000;
+  const cb = new URL(z.base.callback); cb.searchParams.set('amount', String(msat));
+  let zapReq = null;
+  if (z.zapOk) {
+    const lnurl = lnurlEncode(z.url);
+    const rl = [...new Set(z.relays.concat(relays()))].slice(0, 5);
+    zapReq = L.finalizeEvent({ kind: 9734, created_at: Math.floor(Date.now() / 1000), content: comment || '', tags: [['relays', ...rl], ['amount', String(msat)], ['lnurl', lnurl], ['p', z.pubkey]] }, nostrKey());
+    cb.searchParams.set('nostr', JSON.stringify(zapReq)); cb.searchParams.set('lnurl', lnurl);
+  } else if (comment && num(z.base.commentAllowed) > 0) cb.searchParams.set('comment', comment.slice(0, num(z.base.commentAllowed)));
+  let r;
+  try { r = await getJson(cb.toString(), lnurlMs()); }
+  catch (e) { throw serviceErr(e.timeout ? `${z.addr} didn't answer in time. Nothing was sent.` : `Couldn't reach ${z.addr}. Nothing was sent.`); }
+  if (r.status === 'ERROR' || !r.pr) throw serviceErr(`${z.addr} didn't give an invoice. Nothing was sent.`, r.reason);
+  let d; try { d = decodeBolt11(r.pr); } catch (e) { throw serviceErr(`${z.addr} sent an invoice that can't be read. Nothing was sent.`); }
+  if (d.msat == null || d.msat !== BigInt(msat)) throw serviceErr(d.msat == null ? `${z.addr} sent an invoice with no amount. Nothing was sent.` : `The invoice asked for ${money(Math.ceil(Number(d.msat) / 1000))} instead of ${money(sats)}. Nothing was sent.`);
+  return { pr: String(r.pr).toLowerCase(), zapReq };
+}
+
 
 
 /* ---------- actions ---------- */
@@ -7409,7 +7476,7 @@ const A = {
   doMeltQuote: b => run(b, 'QUOTING', async () => {
     const k = b.dataset.k; let dest = val('destIn').trim().replace(/^(lightning|bitcoin):/i, '').split('?')[0];
     const note = val('noteIn').trim();
-    if (k === 'ln') { const c = classify(dest); if (c.kind === 'lnaddress' || c.kind === 'lnurl') { const n = val('noteIn').trim(); openPayLnurl(c.value); if (n && $('#noteIn')) $('#noteIn').value = n; return; }
+    if (k === 'ln') { const raw0 = val('destIn').trim(), cz = classify(raw0); if (cz.kind === 'nostr') { const t = parseNostrAddr(cz.value); const ct = S.contacts.find(x => x.pubkey === t.pubkey); openZap({ pubkey: t.pubkey, relays: t.relays, name: ct ? ct.name : '' }); return; } if (cz.kind === 'lnurl') { openLnurl(cz.value); return; } const c = classify(dest); if (c.kind === 'lnaddress' || c.kind === 'lnurl') { const n = val('noteIn').trim(); openPayLnurl(c.value); if (n && $('#noteIn')) $('#noteIn').value = n; return; }
       if (!/^ln(bc|tb|bcrt|tbs)[0-9a-z]{50,}$/i.test(dest)) throw new Error("That isn't a complete Lightning invoice. Copy the whole invoice (it starts with lnbc) and paste again."); dest = dest.toLowerCase(); let mq; try { mq = await meltQuote('ln', dest); } catch (e) { if (/bech32|checksum|decode|invalid invoice|parse/i.test(e.message)) throw new Error("That Lightning invoice isn't valid. Check you copied all of it."); throw e; } showMeltQuote('ln', mq, dest, note); }
     else { checkBtcAddr(dest, S.active); const a = amt(); const mq = await meltQuote('onchain', dest, a); showMeltQuote('onchain', mq, dest, note); }
   }),
@@ -7855,7 +7922,19 @@ Object.assign(A, {
     unblockMint(u); sfx('coin'); toast(`${n} unblocked`, 'lime');
     const er = b.closest('.notice'); if (er && b.closest('#layer')) er.remove();   // the refusal it answered goes; tap the main button again
     refresh();
-  }
+  },
+  zapOpen: b => { const t = parseNostrAddr(b.dataset.pk); if (t) openZap({ pubkey: t.pubkey, relays: t.relays, name: b.dataset.name || '' }); },
+  zapContact: b => { const c = contactById(b.dataset.id); if (c && c.pubkey) openZap({ pubkey: c.pubkey, relays: c.relays || [], name: c.name, contactId: c.id }); },
+  zapQuote: b => run(b, 'ASKING', async () => {
+    const z = curZap; if (!z) return;
+    const sats = amt(), comment = val('zapComment').trim();
+    const { pr, zapReq } = await zapInvoice(z, sats, comment);
+    const mq = await meltQuote('ln', pr);
+    if (num(mq.amount) !== sats) throw serviceErr(`The invoice asked for ${money(num(mq.amount))} instead of ${money(sats)}. Nothing was sent.`);
+    const note = z.zapOk ? `Zap to ${z.name}` : `To ${z.name}`;
+    zapByQuote.set(mq.quote, z.zapOk ? { zap: { pubkey: z.pubkey, id: zapReq.id }, zapName: z.name } : { lnName: z.name });
+    showMeltQuote('ln', mq, z.addr, note);
+  })
 });
 
 function setTrust(meta) {

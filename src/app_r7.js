@@ -201,3 +201,69 @@ function showWithdrawWait(res) {
   });
 }
 
+/* ---------- zaps (NIP-57) ----------
+   Their kind-0 profile gives a Lightning address (lud16, or an lud06 LNURL). If its LNURL-pay endpoint says
+   allowsNostr and names its nostrPubkey, a kind-9734 zap request signed with this wallet's Nostr key (the same key
+   cashu.me uses, from the 12 words) goes with the amount; the invoice must be for exactly that amount, and is then
+   paid like any Lightning payment, with the fee shown first. Without zap support, a plain payment is offered. */
+let curZap = null;
+const zapByQuote = new Map();
+async function nostrProfile(pubkey, extra = []) {
+  const list = [...new Set((extra || []).filter(u => /^wss?:\/\//.test(u)).concat(relays()))].slice(0, 8);
+  const evs = await relayQuery({ kinds: [0], authors: [pubkey], limit: 3 }, 6000, list);
+  const ev = evs.filter(e => e.pubkey === pubkey && e.kind === 0 && L.verifyEvent(e)).sort((a, b) => b.created_at - a.created_at)[0];
+  if (!ev) return null;
+  try { const p = JSON.parse(ev.content); return p && typeof p === 'object' ? p : null; } catch (e) { return null; }
+}
+const shortNpub = pk => { try { const n = L.npubEncode(pk); return n.slice(0, 12) + '…' + n.slice(-4); } catch (e) { return pk.slice(0, 8) + '…'; } };
+async function openZap(target) {
+  if (needMint()) return;
+  const pk = target.pubkey;
+  curZap = null;
+  openSheet('Zap', busyHTML('LOOKING UP THEIR PROFILE') + '<div id="sheetErr"></div>');
+  let prof = null;
+  try { prof = await nostrProfile(pk, target.relays); } catch (e) {}
+  if (!$('#layer .sheet')) return;
+  const name = String(target.name || (prof && (prof.display_name || prof.displayName || prof.name)) || shortNpub(pk)).trim().slice(0, 40);
+  const addr = prof ? String(prof.lud16 || '').trim().toLowerCase() || String(prof.lud06 || '').trim().toLowerCase() : '';
+  const fail = msg => setBody(`<div class="label">To</div><div class="code" style="color:var(--ink)" data-noi18n>${esc(name)}</div>${errHTML(serviceErr(msg))}<button class="btn block" data-act="close">Close</button>`);
+  if (!prof) return fail("Couldn't find this person's Nostr profile on your relays, so there's no Lightning address to zap.");
+  if (!addr || !(/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(addr) || /^lnurl1[0-9a-z]+$/.test(addr))) return fail("This Nostr profile has no Lightning address, so it can't be zapped.");
+  let base;
+  try { base = await getJson(lnurlToUrl(addr), lnurlMs()); } catch (e) { if ($('#layer .sheet')) fail(e.timeout ? `${addr} didn't answer in time. Try again in a moment.` : `Couldn't reach ${addr}. Check your connection and try again.`); return; }
+  if (!$('#layer .sheet')) return;
+  if (base.status === 'ERROR') { setBody(errHTML(serviceErr(`${addr} turned this down.`, base.reason)) + '<button class="btn block" data-act="close">Close</button>'); return; }
+  if (base.tag !== 'payRequest' || !base.callback) return fail(`${addr} isn't set up to receive payments.`);
+  const zapOk = base.allowsNostr === true && /^[0-9a-f]{64}$/i.test(String(base.nostrPubkey || ''));
+  const min = Math.max(1, Math.ceil(num(base.minSendable) / 1000)), max = Math.floor(num(base.maxSendable) / 1000);
+  curZap = { pubkey: pk, name, addr, base, zapOk, min, max, url: lnurlToUrl(addr), relays: (target.relays || []).slice(0, 3) };
+  const m = activeMint();
+  setBody(`<div class="label">To</div><div class="code" style="color:var(--ink)"><span data-noi18n>${esc(name)}</span><br><span class="tiny muted" data-noi18n>${esc(addr)}</span></div>
+    ${zapOk ? '' : `<div class="notice">${esc(addr)} doesn't support zaps. You can pay it as a plain Lightning payment instead; it won't show as a zap on Nostr.</div>`}
+    <div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
+    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="21" autocomplete="off"></div>
+    ${max >= min ? `<div class="tiny muted">${min === max ? `Exactly ${money(max)}.` : `Any amount from ${money(min)} to ${money(max)}.`}</div>` : ''}
+    ${zapOk || num(base.commentAllowed) > 0 ? `<div class="field"><label for="zapComment">${zapOk ? 'Comment (optional, public on Nostr)' : 'Comment (optional, the receiver sees it)'}</label><input id="zapComment" class="inp" maxlength="${zapOk ? 280 : Math.min(280, num(base.commentAllowed))}" autocomplete="off"></div>` : ''}
+    <button class="btn solid gold block" data-act="zapQuote">${zapOk ? 'Zap' : 'Pay as a plain Lightning payment'}</button><div id="sheetErr"></div>`);
+}
+async function zapInvoice(z, sats, comment) {
+  if (z.max < z.min) throw keepErr(new Error(`${z.addr} isn't accepting payments right now.`));
+  if (sats < z.min || sats > z.max) throw keepErr(amtErr(z.min === z.max ? `${z.addr} takes exactly ${money(z.max)}.` : `${z.addr} takes ${money(z.min)} to ${money(z.max)}.`, 'range'));
+  const msat = sats * 1000;
+  const cb = new URL(z.base.callback); cb.searchParams.set('amount', String(msat));
+  let zapReq = null;
+  if (z.zapOk) {
+    const lnurl = lnurlEncode(z.url);
+    const rl = [...new Set(z.relays.concat(relays()))].slice(0, 5);
+    zapReq = L.finalizeEvent({ kind: 9734, created_at: Math.floor(Date.now() / 1000), content: comment || '', tags: [['relays', ...rl], ['amount', String(msat)], ['lnurl', lnurl], ['p', z.pubkey]] }, nostrKey());
+    cb.searchParams.set('nostr', JSON.stringify(zapReq)); cb.searchParams.set('lnurl', lnurl);
+  } else if (comment && num(z.base.commentAllowed) > 0) cb.searchParams.set('comment', comment.slice(0, num(z.base.commentAllowed)));
+  let r;
+  try { r = await getJson(cb.toString(), lnurlMs()); }
+  catch (e) { throw serviceErr(e.timeout ? `${z.addr} didn't answer in time. Nothing was sent.` : `Couldn't reach ${z.addr}. Nothing was sent.`); }
+  if (r.status === 'ERROR' || !r.pr) throw serviceErr(`${z.addr} didn't give an invoice. Nothing was sent.`, r.reason);
+  let d; try { d = decodeBolt11(r.pr); } catch (e) { throw serviceErr(`${z.addr} sent an invoice that can't be read. Nothing was sent.`); }
+  if (d.msat == null || d.msat !== BigInt(msat)) throw serviceErr(d.msat == null ? `${z.addr} sent an invoice with no amount. Nothing was sent.` : `The invoice asked for ${money(Math.ceil(Number(d.msat) / 1000))} instead of ${money(sats)}. Nothing was sent.`);
+  return { pr: String(r.pr).toLowerCase(), zapReq };
+}
+

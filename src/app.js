@@ -1363,7 +1363,7 @@ function fmtDate(ms, withTime) {
   catch (e) { return d.toDateString(); }
 }
 // Notes NUTCADE writes itself (not ones you typed) are shown in your language.
-const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|To )|\((part \d+ of \d+|cancelled at the till)\)$/;
+const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|To |Zap to |Wallet Connect: |LNURL voucher$)|\((part \d+ of \d+|cancelled at the till)\)$/;
 function noteText(n) {
   if (!n || !AUTO_NOTE.test(n)) return n;
   const m = /^(.*) \((part \d+ of \d+|cancelled at the till)\)$/.exec(n);   // your own words before the suffix stay as you typed them
@@ -1800,11 +1800,11 @@ function relayPublish(ev, timeout = 7000, list = relays()) {
     setTimeout(end, timeout);
   });
 }
-function relayQuery(filter, timeout = 7000) {
+function relayQuery(filter, timeout = 7000, list = relays()) {
   return new Promise(res => {
     const out = new Map(); let left = 0; const socks = []; let fin = false;
     const end = () => { if (fin) return; fin = true; socks.forEach(s => { try { s.close(); } catch (e) {} }); res([...out.values()]); };
-    for (const r of relays()) {
+    for (const r of list) {
       let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
       socks.push(ws); left++;
       const drop = () => { if (ws._done) return; ws._done = true; if (--left <= 0) end(); };
@@ -2272,7 +2272,7 @@ function openContactEdit(id, prefill = {}) {
     <div class="field"><label for="cLn">Lightning address (optional)</label><input id="cLn" class="inp" data-noi18n value="${esc(c.ln)}" placeholder="alex@wallet.com" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
     <div class="field"><label for="cNostr">Nostr address for ecash (optional)</label><input id="cNostr" class="inp" value="${esc(c.nostr)}" placeholder="npub1… or nprofile1…" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
     <button class="btn solid gold block" data-act="contactSave" data-id="${id || ''}">Save</button>
-    ${id ? `<button class="btn block red" data-act="contactDel" data-id="${id}">Delete contact</button>` : ''}<div id="sheetErr"></div>`);
+    ${id ? `<button class="btn block red" data-act="contactDel" data-id="${id}">Delete contact</button>` : prefill.nostr ? `<button class="btn block" data-act="zapOpen" data-pk="${esc(prefill.nostr)}">Zap them without saving</button>` : ''}<div id="sheetErr"></div>`);
 }
 function openPayContact(id) {
   const c = contactById(id); if (!c) return;
@@ -2283,7 +2283,7 @@ function openPayContact(id) {
     <div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
     <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Lunch"></div>
-    ${c.pubkey ? `<button class="btn solid pink block" data-act="contactEcash" data-id="${c.id}">Send ecash over Nostr</button>` : ''}
+    ${c.pubkey ? `<button class="btn solid pink block" data-act="contactEcash" data-id="${c.id}">Send ecash over Nostr</button><button class="btn block" data-act="zapContact" data-id="${c.id}">Zap <span data-noi18n>${esc(c.name)}</span></button>` : ''}
     ${canLn ? `<button class="btn ${c.pubkey ? '' : 'solid pink'} block" data-act="contactLn" data-id="${c.id}">Pay ${esc(c.ln)}</button>` : c.ln ? `<div class="tiny muted">${esc(m.name)} can't pay Lightning. Pick another mint to pay ${esc(c.ln)}.</div>` : ''}
     <div id="sheetErr"></div>`);
 }
@@ -2627,12 +2627,13 @@ function showMeltQuote(kind, mq, dest, note) {
     body.querySelector('#payBtn').onclick = e => run(e.currentTarget, 'PAYING', async () => {
       const fi = kind === 'onchain' ? parseInt((body.querySelector('input[name=fee]:checked') || {}).value || '0', 10) : 0;
       const tx = await payMelt(kind, mq, fi, note, dest);
+      const zx = zapByQuote.get(mq.quote); if (zx) updTx(tx.id, zx);
       const isAddr = kind === 'ln' && /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(dest);
       const ct = isAddr && (S.contacts.find(c => c.ln === dest.toLowerCase()) || null);
       if (ct) updTx(tx.id, { contactId: ct.id, contactName: ct.name });
       lastContact = null;
       const save = isAddr && !ct ? `<button class="btn block violet" data-act="contactFrom" data-ln="${esc(dest.toLowerCase())}">Save ${esc(dest)} as a contact</button>` : '';
-      if (tx.status === 'done') showDone('out', amount, kind === 'ln' ? (ct ? `Lightning to ${ct.name}` : 'Lightning') : 'On-chain' + (tx.outpoint ? ' · ' + tx.outpoint.slice(0, 12) + '…' : ''), save);
+      if (tx.status === 'done') showDone('out', amount, kind === 'ln' ? (zx ? note : ct ? `Lightning to ${ct.name}` : 'Lightning') : 'On-chain' + (tx.outpoint ? ' · ' + tx.outpoint.slice(0, 12) + '…' : ''), save);
       else { setBody(`<div class="notice">Payment is in flight. NUTCADE will settle it when the mint confirms. Check the transaction in your notes.</div><button class="btn block gold" data-act="close">OK</button>`); refresh(); }
     });
     return null;
@@ -2844,7 +2845,7 @@ const A = {
   doMeltQuote: b => run(b, 'QUOTING', async () => {
     const k = b.dataset.k; let dest = val('destIn').trim().replace(/^(lightning|bitcoin):/i, '').split('?')[0];
     const note = val('noteIn').trim();
-    if (k === 'ln') { const c = classify(dest); if (c.kind === 'lnaddress' || c.kind === 'lnurl') { const n = val('noteIn').trim(); openPayLnurl(c.value); if (n && $('#noteIn')) $('#noteIn').value = n; return; }
+    if (k === 'ln') { const raw0 = val('destIn').trim(), cz = classify(raw0); if (cz.kind === 'nostr') { const t = parseNostrAddr(cz.value); const ct = S.contacts.find(x => x.pubkey === t.pubkey); openZap({ pubkey: t.pubkey, relays: t.relays, name: ct ? ct.name : '' }); return; } if (cz.kind === 'lnurl') { openLnurl(cz.value); return; } const c = classify(dest); if (c.kind === 'lnaddress' || c.kind === 'lnurl') { const n = val('noteIn').trim(); openPayLnurl(c.value); if (n && $('#noteIn')) $('#noteIn').value = n; return; }
       if (!/^ln(bc|tb|bcrt|tbs)[0-9a-z]{50,}$/i.test(dest)) throw new Error("That isn't a complete Lightning invoice. Copy the whole invoice (it starts with lnbc) and paste again."); dest = dest.toLowerCase(); let mq; try { mq = await meltQuote('ln', dest); } catch (e) { if (/bech32|checksum|decode|invalid invoice|parse/i.test(e.message)) throw new Error("That Lightning invoice isn't valid. Check you copied all of it."); throw e; } showMeltQuote('ln', mq, dest, note); }
     else { checkBtcAddr(dest, S.active); const a = amt(); const mq = await meltQuote('onchain', dest, a); showMeltQuote('onchain', mq, dest, note); }
   }),

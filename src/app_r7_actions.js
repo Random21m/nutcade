@@ -21,5 +21,17 @@ Object.assign(A, {
     unblockMint(u); sfx('coin'); toast(`${n} unblocked`, 'lime');
     const er = b.closest('.notice'); if (er && b.closest('#layer')) er.remove();   // the refusal it answered goes; tap the main button again
     refresh();
-  }
+  },
+  zapOpen: b => { const t = parseNostrAddr(b.dataset.pk); if (t) openZap({ pubkey: t.pubkey, relays: t.relays, name: b.dataset.name || '' }); },
+  zapContact: b => { const c = contactById(b.dataset.id); if (c && c.pubkey) openZap({ pubkey: c.pubkey, relays: c.relays || [], name: c.name, contactId: c.id }); },
+  zapQuote: b => run(b, 'ASKING', async () => {
+    const z = curZap; if (!z) return;
+    const sats = amt(), comment = val('zapComment').trim();
+    const { pr, zapReq } = await zapInvoice(z, sats, comment);
+    const mq = await meltQuote('ln', pr);
+    if (num(mq.amount) !== sats) throw serviceErr(`The invoice asked for ${money(num(mq.amount))} instead of ${money(sats)}. Nothing was sent.`);
+    const note = z.zapOk ? `Zap to ${z.name}` : `To ${z.name}`;
+    zapByQuote.set(mq.quote, z.zapOk ? { zap: { pubkey: z.pubkey, id: zapReq.id }, zapName: z.name } : { lnName: z.name });
+    showMeltQuote('ln', mq, z.addr, note);
+  })
 });
