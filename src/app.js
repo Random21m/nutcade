@@ -1152,12 +1152,14 @@ function satsOf(id) {
   const el = typeof id === 'string' ? $('#' + id) : id; if (!el) return 0;
   const v = String(el.value || '').trim(); if (!v) return 0;
   if (el.dataset.cur === 'fiat') {
+    // typed in SAT and only the view was switched: the amount is still exactly the SAT typed
+    const bk = el._unitBack; if (bk && bk.cur === 'sat' && bk.shown === el.value) return parseSat(bk.typed);
     if (!canFiat()) throw new Error('The exchange rate is not available right now. Switch the amount to SAT.');
     return fiatToSats(parseFiatText(v));
   }
   return parseSat(v);
 }
-function setSats(el, n) { if (!el) return; el.dataset.cur = 'sat'; el.value = n; const w = el.closest('.amtwrap'); if (w) { const b = w.querySelector('.unitbtn'); if (b) b.textContent = 'SAT'; el.setAttribute('inputmode', 'numeric'); } unitLabel(el); amtConv(el); }
+function setSats(el, n) { if (!el) return; el._unitBack = null; el.dataset.cur = 'sat'; el.value = n; const w = el.closest('.amtwrap'); if (w) { const b = w.querySelector('.unitbtn'); if (b) b.textContent = 'SAT'; el.setAttribute('inputmode', 'numeric'); } unitLabel(el); amtConv(el); }
 // "Amount (SAT)" becomes "Amount (USD)" when you type in your currency
 function unitLabel(el) {
   const lab = el.id && document.querySelector(`label[for="${el.id}"]`); if (!lab) return;

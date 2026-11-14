@@ -362,6 +362,7 @@ const todaysSales = () => S.txs.filter(t => t.cashier && t.status === 'done' && 
 function cashSats() {
   const v = cash.amount; if (!v) return 0;
   // the till's keys only ever make plain digits with one '.', so these are exact
+  const bk = cash.unitBack; if (cash.unit === 'fiat' && bk && bk.unit === 'sat' && bk.shown === v) return Number(bk.typed) || 0;   // typed in SAT, only the view switched
   if (cash.unit === 'fiat') { if (!canFiat()) return 0; try { return fiatToSats(v); } catch (e) { return 0; } }
   return Number(v) || 0;
 }
