@@ -6023,11 +6023,11 @@ function cashierRender() {
   let body = '';
   if (cash.mode === 'keys') {
     const sats = cashSats();
-    const shown = cash.amount ? (cash.unit === 'fiat' ? cash.amount : fmt(cash.amount)) : '0';
+    const shown = cash.amount ? (cash.unit === 'fiat' ? fiatTyped(cash.amount) : fmt(cash.amount)) : '0';
     body = `<div class="cash-display"><div class="cash-amt" data-noi18n>${esc(shown)}<small>${esc(curLabel)}</small></div>
       <div class="cash-conv tiny muted">${cash.unit === 'fiat' ? (sats ? '≈ ' + money(sats) : '') : (sats && fiatOf(sats) ? '≈ ' + fiatOf(sats) : '')}</div>
       <input id="cashLabel" class="inp cash-label" maxlength="60" placeholder="Item (optional)" value="${esc(cash.label)}" autocomplete="off"></div>
-      <div class="cash-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', cash.unit === 'fiat' ? '.' : '00', '0', 'del'].map(k => `<button class="ck" data-ck="${k}" aria-label="${k === 'del' ? 'Delete' : k}">${k === 'del' ? DEL_ICON : k}</button>`).join('')}</div>
+      <div class="cash-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', cash.unit === 'fiat' ? '.' : '00', '0', 'del'].map(k => `<button class="ck" data-ck="${k}" aria-label="${k === 'del' ? 'Delete' : k === '.' ? 'Decimal mark' : k}">${k === 'del' ? DEL_ICON : k === '.' ? decMark() : k}</button>`).join('')}</div>
       <div class="cash-row"><button class="btn sm" data-ck="unit" data-noi18n aria-label="${esc(tr('Switch between sats and ' + S.prefs.currency))}" ${canFiat() ? '' : 'disabled'}>${cash.unit === 'fiat' ? esc(S.prefs.currency) : 'SAT'}</button>
         <div class="seg cash-method" role="group" aria-label="Payment method"><button data-ck="m-ln" aria-pressed="${cash.method === 'ln'}" ${supports(m, 'mint', 'bolt11') ? '' : 'disabled'}>LIGHTNING</button><button data-ck="m-ecash" aria-pressed="${cash.method === 'ecash'}">ECASH</button></div>
         <button class="btn sm" data-ck="clear">Clear</button></div>
@@ -6055,6 +6055,17 @@ function cashierRender() {
   if (window.Nutcade && LANG !== 'en') trNode(cash.el);
   fitNums(cash.el);
 }
+// the amount as typed on the till, shown the way your language writes it: 123.456,78 in German.
+// cash.amount itself stays plain digits with a '.' decimal point.
+function fiatTyped(v) { const [w, f] = String(v).split('.'); return fmt(w || 0) + (f !== undefined ? decMark() + f : ''); }
+// Desktop: number keys, Backspace, . or , and Enter (= CHARGE, only when it's enabled) work on the till's keypad
+document.addEventListener('keydown', e => {
+  if (!cash.el || cash.mode !== 'keys' || e.ctrlKey || e.metaKey || e.altKey || (e.target.matches && e.target.matches('input,textarea,select'))) return;
+  const k = /^[0-9]$/.test(e.key) ? e.key : e.key === 'Backspace' ? 'del' : (e.key === '.' || e.key === ',') ? '.' : e.key === 'Enter' ? 'charge' : null;
+  if (!k || (k === 'charge' && e.target.closest && e.target.closest('button'))) return;   // Enter on a focused button presses that button
+  const b = cash.el.querySelector(`[data-ck="${k}"]`); if (!b || b.disabled) return;
+  e.preventDefault(); b.click();
+});
 function cashierClick(e) {
   const b = e.target.closest('[data-ck]'); if (!b || b.disabled) return;
   const k = b.dataset.ck;
