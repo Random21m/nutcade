@@ -554,13 +554,14 @@ function pickLang() {
   for (const x of nav) { if (x === 'en') return 'en'; if (I18N[x]) return x; }
   return 'en';
 }
-const NUMRE = /\d[\d,.\u00a0\u202f]*/g;
+const NUMRE = /\d[\d,.\u00a0\u202f]*/g, NUMEND = /\d(?:[\d,.\u00a0\u202f]*\d)?/g;
 function tr(s) {
   if (LANG === 'en' || !s) return s;
   const d = I18N[LANG]; if (!d) return s; if (!d.done) d.done = new Set();
   const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(s); const core = m[2].replace(/[ \t\r\n]+/g, ' '); if (!core || !/[A-Za-z]/.test(core)) return s;   // (the narrow no-break space French puts inside numbers is kept)
   let out = d.t[core];
-  if (out === undefined) { const nums = []; const key = core.replace(NUMRE, x => { nums.push(x); return '{#}'; }); if (nums.length && d.t[key] !== undefined) { let i = 0; out = d.t[key].replace(/\{#\}/g, () => nums[i++] ?? ''); } }
+  // numbers become {#}; a second try keeps punctuation right after a number ("like 1000." is "like {#}.")
+  for (const re of [NUMRE, NUMEND]) { if (out !== undefined) break; const nums = []; const key = core.replace(re, x => { nums.push(x); return '{#}'; }); if (nums.length && d.t[key] !== undefined) { let i = 0; out = d.t[key].replace(/\{#\}/g, () => nums[i++] ?? ''); } }
   if (out === undefined && d.re) for (const [re, rep_] of d.re) { const mm = re.exec(core); if (mm) { out = rep_.replace(/\$(\d)/g, (_, k) => tr(mm[+k] || '')); break; } }
   if (out === undefined && core.includes('₿')) {   // "₿67 in your piggy bank" uses the "67 SAT in your piggy bank" translation
     const asSat = core.replace(/₿(\d[\d,.\u00a0\u202f]*\d|\d)/g, '$1 SAT'); let t = asSat; if (asSat !== core) { const miss = window.__i18nMiss; window.__i18nMiss = null; try { t = tr(asSat); } finally { window.__i18nMiss = miss; } }
@@ -1525,7 +1526,7 @@ async function pinSubmit() {
       const f = pinFails(); if (f.until > Date.now()) return pinError(`Wait ${Math.ceil((f.until - Date.now()) / 1000)}s before trying again.`);
       busy('CHECKING…');
       const dek = await pinToDek(v);
-      if (!dek) { const f2 = notePinFail(); return pinError(f2.until > Date.now() ? `Wrong PIN. Wait ${Math.ceil((f2.until - Date.now()) / 1000)}s.` : `Wrong PIN. ${Math.max(0, 5 - f2.n)} tries before a wait.`); }
+      if (!dek) { const f2 = notePinFail(); return pinError(f2.until > Date.now() ? `Wrong PIN. Wait ${Math.ceil((f2.until - Date.now()) / 1000)}s.` : (5 - f2.n === 1 ? 'Wrong PIN. 1 try before a wait.' : `Wrong PIN. ${Math.max(0, 5 - f2.n)} tries before a wait.`)); }
       await openVault(dek); hydrateFromVault(); pinUI.mode = null; sfx('start'); render(); armAutoLock();
       setTimeout(() => backgroundTick(true).then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 300);
       return;
