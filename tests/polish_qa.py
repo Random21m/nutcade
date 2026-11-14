@@ -146,7 +146,7 @@ async def main():
                 'Arrow keys steer','PRESS A OR TAP','PRESS SPACE TO START','Recovered with recovery phrase','Extra Life for Bo','Choose a file','No file chosen','Pending','Complete',
                 'Send or move the 49,700 SAT out of this mint before removing it.','Amount (SAT)','Amount (USD)','Not enough funds. This mint holds 49,700 SAT.','The mint turned this down.',
                 'Type the same PIN again.','WALLET LOCKED DOWN!','Enter it again.','PAUSED','A OR TAP TO RESUME','ENTER TO RESUME','Your hunt','Treasure hunt','the treasure hunters',
-                'Ecash token QR','Lightning invoice QR, animated','6 digits entered','Joystick','Pause','Clue card 2','Fee reserve 7 SAT','Holds 49,700 SAT',
+                'Ecash token QR','Lightning invoice QR, animated','6 digits entered','Joystick','Pause','Clue card 2','STAR SWARM game screen','Fee reserve 7 SAT','Holds 49,700 SAT',
                 '₿67 in your piggy bank · ₿49,288 to spend','Rounds up to the nearest ₿100. Next goal: ₿1,000'].filter(s=>Nutcade.tr(s)===s && !(s==='Joystick'||(s==='Pause'&&/de|fr/.test(document.documentElement.lang))))""")
             if lang == 'de': miss['de-numbers'] = [] if await w.ev("Nutcade.fmt(30000)==='30.000' && Nutcade.fmt(1500)==='1.500'") else [await w.ev("Nutcade.fmt(30000)")]
             if lang == 'fr': miss['fr-numbers'] = [] if await w.ev("Nutcade.fmt(30000)==='30\u202f000'") else [await w.ev("Nutcade.fmt(30000)")]
