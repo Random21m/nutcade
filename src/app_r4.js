@@ -629,8 +629,10 @@ function piggyGuard(spend) {
 }
 const PIG = ['..pp....pp..', '.pppppppppp.', 'ppppppppppppp', 'ppwkppppppppp', 'pppppppppppp.', 'pnnppppppppp.', 'pnnppppppppp.', '.pppppppppp..', '.pp.pp..pp.pp', '.pp.pp..pp.pp'];
 function pigSVG(cls = '') {
-  const pal = { p: 'var(--pink)', w: 'var(--ink)', k: 'var(--void)', n: 'color-mix(in srgb,var(--pink) 60%,#000)' };
-  let out = ''; PIG.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') out += `<rect x="${x}" y="${y}" width="1" height="1" fill="${pal[c]}"/>`; }));
+  const pal = { p: 'var(--pink)', w: 'var(--ink)', k: 'var(--void)' };
+  // the snout's darker pink falls back to the panel color where color-mix() isn't supported (Safari before 16.2)
+  const fill = c => c === 'n' ? 'style="fill:var(--void);fill:color-mix(in srgb,var(--pink) 60%,#000)"' : `fill="${pal[c]}"`;
+  let out = ''; PIG.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') out += `<rect x="${x}" y="${y}" width="1" height="1" ${fill(c)}/>`; }));
   return `<svg class="pig ${cls}" viewBox="-1 -1 15 12" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="-1" width="3" height="1" fill="var(--gold)"/>${out}</svg>`;
 }
 function piggyPanel() {
