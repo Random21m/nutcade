@@ -271,7 +271,7 @@ async def main():
         await fr.ev("document.querySelector('[data-act=tab][data-tab=arcade]').click()"); await fr.wait(300)
         await fr.ev("document.querySelector('#challenges [data-act=chalOpen]').click()"); await fr.wait(300)
         miss['es-friend'] = await fr.ev("[...window.__i18nMiss]")
-        known = await w.ev("""(()=>{const v=new Set(); for (const d of Object.values(NUTCADE_I18N)) for (const x of Object.values(d.t)) v.add(x.replace(/\\d[\\d,.]*/g,'{#}'));
+        known = await w.ev("""(()=>{const v=new Set(); for (const d of Object.values(NUTCADE_I18N)) for (const x of Object.values(d.t)) v.add(x.replace(/\\d[\\d,.\\u202f\\u00a0]*/g,'{#}'));
             const names=[...Arcade.games.map(g=>g.name), ...Trophies.DEFS.map(d=>d.name)].map(x=>x.toUpperCase());
             const outs=[]; for (const d of Object.values(NUTCADE_I18N)) for (const [, r] of (d.re || [])) outs.push(r); return {v:[...v], names, outs}})()""")
         vals, titles = set(known['v']), set(known['names'])
@@ -280,9 +280,9 @@ async def main():
         def real(x):
             if re.search(r'\b20\d\d\b', x) and len(x) <= 32: return False   # a date, in the app's language
             if any(o.match(x) for o in outs) or re.fullmatch(r'[A-Z][a-z]{2} \d{1,2}(, \d{4})?', x) or x.endswith('…'): return False
-            if re.sub(r'\d[\d,.]*', '{#}', x) in vals or x.upper() in titles or any(t.startswith(x.upper() + ' ') for t in titles): return False
+            if re.sub(r'\d[\d,.  ]*', '{#}', x) in vals or x.upper() in titles or any(t.startswith(x.upper() + ' ') for t in titles): return False
             if x[:1] in '▲▼' or x.startswith('#') or x in ('Robin', 'Host', 'Sam', 'Mint A', 'Mint B', 'NUTCADE', 'LN', 'BTC /', 'A', 'B', 'C', 'D', 'F', '?') or '/' in x or '₿' in x or '127.0.0.1' in x: return False
-            if re.fullmatch(r'[A-Z]{3}|[\d,]+ (SAT|Sat|sat)|\d+[DHMWY]|\d+M AGO|HI -+|[\d,]+', x): return False
+            if re.fullmatch(r'[A-Z]{3}|[\d,. ]+ (SAT|Sat|sat)|\d+[DHMWY]|\d+M AGO|HI -+|[\d,. ]+', x): return False
             return True
         allmiss = sorted(set(x for x in sum(miss.values(), []) if real(x)))
         open(os.path.join(OUT, 'r5_i18n_missing.txt'), 'w').write('\n'.join(allmiss))

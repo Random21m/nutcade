@@ -144,7 +144,12 @@ async def main():
             await w.ev(f"Nutcade.closeSheet(); Nutcade.S.prefs.lang='{lang}'; document.querySelector('[data-act=tab][data-tab=settings]').click(); const s=document.querySelector('#p_lang'); s.value='{lang}'; s.dispatchEvent(new Event('change',{{bubbles:true}}))"); await w.wait(200)
             got = await w.ev("""['Your wallet is locked.','Wrong PIN. 4 tries before a wait.','CHECKING…','Found 321 SAT','lnbc… or name@domain.com','✚ or swipe to steer',
                 'Arrow keys steer','PRESS A OR TAP','PRESS SPACE TO START','Recovered with recovery phrase','Extra Life for Bo','Choose a file','No file chosen','Pending','Complete',
-                'Send or move the 49,700 SAT out of this mint before removing it.','Amount (SAT)','Amount (USD)','Not enough funds. This mint holds 49,700 SAT.','The mint turned this down.'].filter(s=>Nutcade.tr(s)===s)""")
+                'Send or move the 49,700 SAT out of this mint before removing it.','Amount (SAT)','Amount (USD)','Not enough funds. This mint holds 49,700 SAT.','The mint turned this down.',
+                'Type the same PIN again.','WALLET LOCKED DOWN!','Enter it again.','PAUSED','A OR TAP TO RESUME','ENTER TO RESUME','Your hunt','Treasure hunt','the treasure hunters',
+                'Ecash token QR','Lightning invoice QR, animated','6 digits entered','Joystick','Pause','Clue card 2','Fee reserve 7 SAT','Holds 49,700 SAT',
+                '₿67 in your piggy bank · ₿49,288 to spend','Rounds up to the nearest ₿100. Next goal: ₿1,000'].filter(s=>Nutcade.tr(s)===s && !(s==='Joystick'||(s==='Pause'&&/de|fr/.test(document.documentElement.lang))))""")
+            if lang == 'de': miss['de-numbers'] = [] if await w.ev("Nutcade.fmt(30000)==='30.000' && Nutcade.fmt(1500)==='1.500'") else [await w.ev("Nutcade.fmt(30000)")]
+            if lang == 'fr': miss['fr-numbers'] = [] if await w.ev("Nutcade.fmt(30000)==='30\u202f000'") else [await w.ev("Nutcade.fmt(30000)")]
             miss[lang] = got
         check('translations: the 1.11 leftovers are translated in es, pt, de and fr', not any(miss.values()), miss)
         await w.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); const s=document.querySelector('#p_lang'); s.value='de'; s.dispatchEvent(new Event('change',{bubbles:true}))"); await w.wait(300)
@@ -226,11 +231,102 @@ async def main():
                 check(f'lock {vw}x{vh} {lang}: the whole keypad and Forgot PIN fit without scrolling', all(v == 'ok' for v in where.values()), where)
                 sub = await k.ev("document.querySelector('.pinpad .th').innerText")
                 check(f'lock {vw}x{vh} {lang}: the lock screen is translated', lang == 'en' or sub != 'Your wallet is locked.', sub)
+                top0 = await k.ev("Math.round(document.querySelector('.pin-keys').getBoundingClientRect().top)")
+                for d in '111111': await k.click(f'[data-pinpad] [data-k="{d}"]')
+                await k.click('[data-pinpad] [data-k=ok]'); await k.until("document.querySelector('#pinErr').innerText.length>0 && !document.querySelector('#pinErr').classList.contains('busy')", 20000); await k.wait(300)
+                top1 = await k.ev("Math.round(document.querySelector('.pin-keys').getBoundingClientRect().top)")
+                check(f'lock {vw}x{vh} {lang}: a wrong-PIN message does not move the keypad', top0 == top1, (top0, top1, await k.ev("document.querySelector('#pinErr').innerText")))
                 if vw == 320 and lang == 'en':
-                    dots = await k.ev("document.querySelectorAll('.pin-dots i').length")
-                    check('lock: no fixed row of six boxes before you type', dots == 1, dots)
+                    d0 = await k.ev("[...document.querySelectorAll('.pin-dots i')].map(i=>i.className)")
+                    check('lock: six faint boxes before you type, the first one the cursor', len(d0) == 6 and d0[0] == 'cur', d0)
+                    ops = []
+                    for _ in range(6): ops.append(float(await k.ev("getComputedStyle(document.querySelector('.pin-dots i.cur')).opacity"))); await k.wait(180)
+                    check('lock: the cursor box never goes below 40% opacity', min(ops) >= 0.39, ops)
+                    for d in '123456789012': await k.click(f'[data-pinpad] [data-k="{d}"]')
+                    fit = await k.ev("(()=>{const b=[...document.querySelectorAll('.pin-dots i')];const p=document.querySelector('.panel').getBoundingClientRect();return {n:b.length,on:b.filter(i=>i.classList.contains('on')).length,inside:b.every(i=>{const r=i.getBoundingClientRect();return r.left>=p.left&&r.right<=p.right})}})()")
+                    check('lock: twelve digits show twelve boxes and fit a 320 px phone', fit['n'] == 12 and fit['on'] == 12 and fit['inside'], fit)
+                    await k.pg.emulate_media(reduced_motion='reduce'); await k.click('[data-pinpad] [data-k=del]'); await k.wait(100)
+                    check('lock: no blinking with reduced motion', await k.ev("getComputedStyle(document.querySelector('.pin-dots i.cur')).animationName") == 'none')
                     await k.pg.screenshot(path=OUT + 'polish_lock_320.png')
+                # Face ID on (the flag is faked: headless Chrome has no passkeys): button and Forgot PIN still fit
+                await k.ev("(()=>{const v=JSON.parse(localStorage.getItem('nutcade:vault'));v.bio={id:'x'};localStorage.setItem('nutcade:vault',JSON.stringify(v))})()")
+                await k.pg.reload(); await k.wait(700)
+                where = {s: await k.ev(f"({INVIEW})('{s}')") for s in ['[data-k=ok]', '[data-act=bioUnlock]', '[data-act=forgotPin]']}
+                check(f'lock {vw}x{vh} {lang}: with Face ID on, the button and Forgot PIN fit', all(v == 'ok' for v in where.values()), where)
                 await k.pg.context.close()
+
+        # ---------- round 2: the cashier with big amounts, long unbroken text, the token sheet, toasts ----------
+        for vw, vh in [(320, 640), (375, 667)]:
+            c = await wallet(b, vw, vh, 'en')
+            await c.pg.route(re.compile(r'https://api(\.exchange)?\.coinbase\.com/.*'), lambda r: r.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': '*'}, body=json.dumps({'data': {'currency': 'BTC', 'rates': {'USD': '100000'}}})))
+            await c.create(); await c.add_mint(B); await c.receive_ln(3000); await c.home(); await c.wait(800)
+            await c.click('[data-act=cashier]'); await c.wait(300)
+            CASH = "(()=>{const W=innerWidth,H=innerHeight,bad=[];for(const e of document.querySelectorAll('.cashier *')){const r=e.getBoundingClientRect();if(r.width&&(r.right>W+1||r.left<-1))bad.push(e.className+':'+Math.round(r.right))}for(const s of ['[data-ck=\"3\"]','[data-ck=del]','[data-ck=clear]','[data-ck=m-ecash]','[data-ck=unit]','.cash-charge','[data-ck=close]']){const e=document.querySelector(s);const r=e&&e.getBoundingClientRect();if(!r||r.right>W||r.bottom>H)bad.push('hidden '+s)}return bad.slice(0,5)})()"
+            b0 = await c.ev(CASH)
+            for k in '12345678': await c.click(f'[data-ck="{k}"]')
+            b8 = await c.ev(CASH); await c.click('[data-ck="9"]'); b9 = await c.ev(CASH)
+            check(f'cashier {vw}x{vh}: empty, 8 and 9 digits all fit, every key, CHARGE and Close the till visible', not b0 and not b8 and not b9, (b0, b8, b9))
+            await c.click('[data-ck=clear]'); await c.click('[data-ck=unit]'); await c.wait(150)
+            for k in '9999999.99': await c.click(f'[data-ck="{k}"]')
+            bf = await c.ev(CASH)
+            check(f'cashier {vw}x{vh}: a big amount in your currency fits too', not bf and await c.ev("document.querySelector('[data-ck=unit]').innerText.trim()") == 'USD', bf)
+            await c.pg.screenshot(path=OUT + f'polish_cashier_{vw}.png')
+            await c.ev("document.querySelector('.cashier').remove(); document.body.style.overflow=''; Nutcade.refresh()"); await c.wait(150)
+            # the token sheet's main button is visible without scrolling
+            await c.click('[data-act=send]'); await c.wait(150); await c.fill('#amtIn', '300'); await c.click('[data-act=doSendEcash]'); await c.until("!!document.querySelector('#layer .qr')", 8000); await c.wait(400)
+            r = await c.ev(f"({INVIEW})('#layer .sheet-body [data-act=copy]')")
+            check(f'token sheet {vw}x{vh}: COPY TOKEN visible without scrolling', r == 'ok', r)
+            # a three-line toast stays in the strip above the sheet
+            await c.ev("Nutcade.toast('Send or move the 1,234,567 SAT out of this mint before removing it, or you will lose them for good.','red')"); await c.wait(150)
+            t = await c.ev("(()=>{const t=document.querySelector('#toast').getBoundingClientRect(),s=document.querySelector('#layer .sheet').getBoundingClientRect();return {t:Math.round(t.bottom),s:Math.round(s.top)}})()")
+            check(f'toasts {vw}x{vh}: a three-line toast stays above the sheet and its X', t['t'] <= t['s'], t)
+            await c.ev("Nutcade.closeSheet()")
+            # in a game every toast waits
+            await c.click('[data-act=tab][data-tab=arcade]'); await c.wait(150); await c.ev("document.querySelector('[data-game=swarm]').click()"); await c.wait(300)
+            await c.ev("Nutcade.toast('Something failed','red')"); await c.wait(200)
+            held = await c.ev("!document.querySelector('#toast') || document.querySelector('#toast').hidden")
+            await c.ev("document.querySelector('[data-g=exit]').click()"); await c.wait(1500)
+            check(f'toasts {vw}x{vh}: nothing covers the game controls; the toast shows after leaving', held and await c.ev("!document.querySelector('#toast').hidden"))
+            await c.pg.context.close()
+        L60 = 'W' * 20 + 'Supercalifragilistic' + 'X' * 20
+        for lang in LANGS:
+            n = await wallet(b, 320, 640, lang)
+            await n.create(); await n.add_mint(B); await n.receive_ln(3000)
+            await n.ev(f"""(()=>{{const S=Nutcade.S;S.mints[0].name={json.dumps(L60)};
+              S.mints.push({{url:'https://'+{json.dumps(L60.lower())}+'.example.com/'+{json.dumps(L60)},name:{json.dumps(L60)},methods:{{}},keysets:[]}});
+              S.contacts.push({{id:'cL',name:{json.dumps(L60)},ln:{json.dumps(L60.lower()+'@'+L60.lower()+'.com')},nostr:''}});
+              S.requests.unshift({{id:'rL',encoded:'creqA',amount:100,memo:{json.dumps(L60)},created:Date.now(),paid:[]}});
+              S.txs.forEach(t=>{{t.note={json.dumps(L60 + ' #' + L60[:20])};t.contactName={json.dumps(L60)}}}); Nutcade.render()}})()"""); await n.wait(200)
+            wide = {}
+            for name, js in [('wallet', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=wallet]').click()"), ('history', "document.querySelector('[data-act=tab][data-tab=history]').click()"),
+                             ('tx', "document.querySelector('[data-act=tx]').click()"), ('mints', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=mints]').click()"),
+                             ('report', "document.querySelector('[data-act=reportOpen]').click()"), ('contacts', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); document.querySelector('[data-act=contactsOpen]').click()"),
+                             ('pay-contact', "document.querySelector('[data-act=payContact]').click()"), ('pickmint', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=wallet]').click(); document.querySelector('[data-act=pickMint]').click()"),
+                             ('send', "Nutcade.closeSheet(); document.querySelector('[data-act=send]').click()"), ('receive', "Nutcade.closeSheet(); document.querySelector('[data-act=receive]').click()"),
+                             ('requests', "document.querySelector('[data-act=recvMethod][data-m=ecash]').click(); document.querySelector('[data-act=reqOpen]').click()"),
+                             ('lnaddr', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); document.querySelector('[data-act=lnAddr]').click()"),
+                             ('cashier', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=wallet]').click(); document.querySelector('[data-act=cashier]').click()")]:
+                try: await n.ev(js); await n.wait(300)
+                except Exception as e: wide[name] = 'could not open: ' + str(e)[:60]; continue
+                o = await n.ev(OVER_JS); iw = await n.ev("innerWidth")
+                if o or iw != 320: wide[name] = (iw, o)
+            check(f'long text 320 px {lang}: a 60-character unbroken name, address, note or memo never widens a screen', not wide, wide)
+            await n.pg.context.close()
+
+        # small leftovers in German at 320: a huge amount, the mint status line, the offline banner
+        g = await wallet(b, 320, 640, 'de')
+        await g.create(); await g.add_mint(B); await g.receive_ln(3000)
+        await g.ev("(()=>{const S=Nutcade.S;const t=JSON.parse(JSON.stringify(S.txs[0]));t.id='big';t.amount=100000000000;S.txs.unshift(t);Nutcade.render()})()")
+        await g.click('[data-act=tab][data-tab=history]'); await g.wait(200)
+        ov = await g.ev("(()=>{const r=document.querySelector('.tx');const a=r.querySelector('.amt').getBoundingClientRect(),m=r.querySelector('.meta').getBoundingClientRect();return !(a.left<m.right&&m.left<a.right&&a.top<m.bottom&&m.top<a.bottom)})()")
+        check('history: a 1,000 BTC amount does not cover the row\'s chips', ov)
+        await g.click('[data-act=tab][data-tab=mints]'); await g.wait(2500)
+        h = await g.ev("(()=>{const e=document.querySelector('.health span.nowrap');return e?Math.round(e.getBoundingClientRect().height):0})()")
+        check('mints: the status (ONLINE · 9 MS) stays on one line in German', 0 < h < 20, h)
+        await g.pg.context.set_offline(True); await g.click('[data-act=tab][data-tab=wallet]'); await g.wait(600)
+        nb = await g.ev("(()=>{const b=document.querySelector('#netBanner').getBoundingClientRect(),m=document.querySelector('.marquee').getBoundingClientRect();return {b:Math.round(b.bottom),m:Math.round(m.top)}})()")
+        check('offline: the banner sits above the header, not on it', nb['b'] <= nb['m'], nb)
+        await g.pg.context.set_offline(False); await g.pg.context.close()
 
         # ---------- desktop: sheets are centered dialogs, the tool row is an even grid, keyboard wording ----------
         d = await wallet(b, 1440, 900, 'en', mobile=False)
@@ -246,6 +342,26 @@ async def main():
         await d.ev("document.querySelector('[data-game=swarm]').click()"); await d.wait(300)
         check('desktop: games explain the keys, not the touch buttons', await d.ev("getComputedStyle(document.querySelector('.pad-keys')).display!=='none' && getComputedStyle(document.querySelector('.pad')).display==='none'"))
         await d.pg.screenshot(path=OUT + 'polish_desktop_game.png')
+        await d.ev("document.querySelector('[data-g=exit]').click()"); await d.wait(200)
+        await d.click('[data-act=tab][data-tab=wallet]'); await d.wait(200)
+        await d.pg.locator('[data-act=send]').focus(); await d.pg.keyboard.press('Enter'); await d.wait(300)
+        inside = []
+        for _ in range(16): await d.pg.keyboard.press('Tab'); inside.append(await d.ev("!!document.activeElement.closest('#layer .sheet')"))
+        check('desktop: Tab stays inside an open sheet', all(inside), inside)
+        await d.pg.fill('#amtIn', '21'); await d.pg.focus('#amtIn'); await d.pg.keyboard.press('Enter'); await d.until("!!document.querySelector('#layer .qr')", 8000)
+        check('desktop: Enter in the amount field presses the main button', await d.ev("Nutcade.S.txs[0].amount") == 21)
+        await d.pg.keyboard.press('Escape'); await d.wait(200)
+        check('desktop: closing a sheet puts focus back on the button that opened it', await d.ev("document.activeElement && document.activeElement.dataset.act") == 'send')
+        foc = {}
+        for th in ['neon', 'amber', 'phosphor']:
+            await d.ev(f"Nutcade.S.prefs.theme='{th}'; Nutcade.render()"); await d.click('[data-act=receive]'); await d.wait(200); await d.pg.focus('#amtIn')
+            foc[th] = await d.ev("[getComputedStyle(document.querySelector('#amtIn')).boxShadow, getComputedStyle(document.querySelector('.sheet')).boxShadow]"); await d.ev("Nutcade.closeSheet()")
+        check('themes: the focus ring and the sheet glow follow the theme', len({foc[t][0] for t in foc}) == 3 and len({foc[t][1] for t in foc}) == 3, foc)
+        await d.ev("Nutcade.S.prefs.theme='neon'; Nutcade.render()")
+        await d.pg.set_viewport_size({'width': 667, 'height': 375}); await d.click('[data-act=tab][data-tab=arcade]'); await d.wait(200)
+        await d.ev("document.querySelector('[data-game=swarm]').click()"); await d.wait(400)
+        g = await d.ev("(()=>{const c=document.querySelector('#gameCanvas').getBoundingClientRect(),k=document.querySelector('.pad-keys').getBoundingClientRect();return {c:Math.round(c.bottom),k:Math.round(k.top),kb:Math.round(k.bottom),H:innerHeight}})()")
+        check('desktop: in a 667x375 window the key hints sit under the game, not on it', g['c'] <= g['k'] and g['kb'] <= g['H'], g)
         await d.pg.context.close()
         await b.close()
     n = len(results); ok = sum(1 for r in results if r[1])
