@@ -34,7 +34,7 @@ const raw = {
   set(k, v) { try { localStorage.setItem('nutcade:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
   del(k) { try { localStorage.removeItem('nutcade:' + k); } catch (e) {} }
 };
-const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts'];
+const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc'];
 const vault = { on: raw.get('vault', null) != null, open: false, data: {}, dek: null, chain: Promise.resolve(), queued: false };
 const store = {
   get(k, d) { if (vault.on && VAULT_KEYS.includes(k)) return vault.open && vault.data[k] !== undefined ? vault.data[k] : d; return raw.get(k, d); },
@@ -1281,7 +1281,7 @@ function render() {
   if (S.prefs.fiat && S.seed) fetchPrice();
   let body = '';
   if (tabLocked) {
-    npcSocketStop(); liveSync(); dmStop();
+    npcSocketStop(); liveSync(); dmStop(); nwcStop();
     app.innerHTML = `<div class="wrap">${marqueeHTML(false)}
       <section class="screen"><div class="panel hot"><span class="h2" style="color:var(--pink)">Open in another tab</span>
       <p style="margin:0">NUTCADE is already open in another tab or window. Running two copies at once can make them overwrite each other's ecash, so this one is paused.</p>
@@ -1325,6 +1325,7 @@ function render() {
   if (window.Trophies) setTimeout(() => window.Trophies.checkWallet(), 0);
   setTimeout(liveSync, 0);
   setTimeout(dmListen, 0);
+  setTimeout(nwcListen, 0);
   netBanner();
   if (pendingLink && S.seed && S.seed.backedUp) { const t = pendingLink; pendingLink = null; setTimeout(() => openLink(t), 300); }
   if (S.prefs.npc) npcSocketStart();
@@ -1341,7 +1342,7 @@ function txRow(t) {
   const sign = t.type === 'in' ? '+' : '-';   // the pixel font's hyphen sits mid-height; its − glyph falls back to the baseline
   const method = { ln: 'LN', ecash: 'ECASH', onchain: 'ON-CHAIN', fee: 'FEE' }[t.method];
   const moved = !(t.status === 'failed' || t.status === 'expired');   // a failed or expired payment moved nothing: its amount is struck through
-  const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '');
+  const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '') + (t.nwc ? '<span class="chip ecash">NWC</span>' : '') + (t.zap ? '<span class="chip claimed">ZAP</span>' : '') + (t.refused && t.status === 'pending' && isBlocked(t.mint) ? '<span class="chip failed">BLOCKED</span>' : '');
   const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : t.method === 'fee' ? '-' + fmt(t.fee) : (moved ? sign : '') + fmt(t.amount);
   const wide = amt.length > 11;   // a huge amount gets its own line under the note instead of squeezing the chips
   return `<button class="tx ${t.type}" data-act="tx" data-id="${t.id}"><span class="ico" aria-hidden="true">${t.type === 'in' ? '↓' : '↑'}</span>
@@ -1539,7 +1540,7 @@ const pinUI = { mode: null, value: '', first: '', old: '' };
 const PIN_MIN = 6, PIN_MAX = 12;
 function hydrateFromVault() {
   const d = vault.data;
-  S.seed = d.seed || null; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || [];
+  S.seed = d.seed || null; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || []; S.nwc = d.nwc || [];
   seedBytes = null; raw.del('pinfails'); requestPersist(); mergeMintSpellings();
 }
 const HEART = '<svg class="ico-heart" viewBox="0 0 7 6" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges"><path d="M1 0h2v1h1V0h2v1h1v2H6v1H5v1H4v1H3V5H2V4H1V3H0V1h1z"/></svg>';
@@ -1665,7 +1666,7 @@ document.addEventListener('visibilitychange', () => {
 const APP_VERSION = '1.11.0';
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
 const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
-const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-about', 'About']];
+const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-about', 'About']];
 const toggle = (k, label, help) => `<label class="toggle set" for="p_${k}"><span><span class="tl">${label}</span>${help ? `<span class="th">${help}</span>` : ''}</span><input id="p_${k}" type="checkbox" data-act="pref" data-k="${k}" ${S.prefs[k] ? 'checked' : ''}></label>`;
 function viewSettings() {
   const inflight = S.pending.length;
@@ -1713,6 +1714,8 @@ function viewSettings() {
       <div class="row wrap"><button class="btn sm gold" data-act="lnAddr">Manage</button><button class="btn sm" data-act="copy" data-text="${esc(npcAddress())}">Copy</button></div>`
       : `<p class="th" style="margin:0">A permanent address like name@npub.cash that anyone can pay from any Lightning wallet. It's free, uses npub.cash, and is the same address cashu.me gives these 12 words.</p><button class="btn sm gold" data-act="lnAddr">Set it up</button>`}
     </div>
+
+    ${nwcPanel()}
 
     <div class="panel" id="set-look"><span class="h2">Look &amp; sound</span>
       <div class="field"><label>Cabinet theme</label><div class="seg three" role="group" aria-label="Theme">${THEMES.map(([k, l]) => `<button data-act="setTheme" data-t="${k}" aria-pressed="${S.prefs.theme === k}">${l.split(' ')[0].toUpperCase()}</button>`).join('')}</div></div>
@@ -2663,7 +2666,7 @@ function openTx(id) {
     <button class="btn solid gold block" data-act="saveNote" data-id="${t.id}">Save note</button>
     <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(TX_STATUS[t.status] || t.status)}</dd>${t.fee && t.method !== 'fee' ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
     <dt>Mint</dt><dd data-noi18n>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd data-noi18n>${fmtDate(t.ts, true)}</dd>
-    ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
+    ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.nwcName ? `<dt>App</dt><dd data-noi18n>${esc(t.nwcName)}</dd>` : ''}${t.lnurlw ? `<dt>Voucher</dt><dd data-noi18n>${esc(t.lnurlw)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
     ${extra}<div id="sheetErr"></div>`);
 }
 
@@ -3048,7 +3051,7 @@ const A = {
     <button class="btn solid red block" data-act="doReset">Reset wallet</button><div id="sheetErr"></div>`),
   doReset: () => {
     if (val('confirmWord').trim().toUpperCase() !== 'RESET') { showErr(new Error('Type RESET to confirm.')); return; }
-    try { for (const k of Object.keys(localStorage)) if (/^nutcade:(seed|counters|mints|active|proofs|pending|txs|quotes|p2pk|requests|contacts|dmseen|vault|pinfails|piggy|challenges)$/.test(k)) localStorage.removeItem(k); } catch (e) {}
+    try { for (const k of Object.keys(localStorage)) if (/^nutcade:(seed|counters|mints|active|proofs|pending|txs|quotes|p2pk|requests|contacts|dmseen|vault|pinfails|piggy|challenges|nwc|nwcseen|blocked|lnurlwUsed)$/.test(k)) localStorage.removeItem(k); } catch (e) {}
     try { npcSocketStop(); dmStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
     location.reload();
   },
@@ -3179,6 +3182,7 @@ document.addEventListener('change', e => {
   if (e.target.id === 'scanFile' && e.target.files[0]) scanPhoto(e.target.files[0]);
   if (e.target.id === 'restoreFile' && e.target.files[0]) { const nm = $('#restoreFileName'); if (nm) { nm.textContent = e.target.files[0].name; nm.setAttribute('data-noi18n', ''); } e.target.files[0].text().then(t => { const box = $('#restoreIn'); if (box) box.value = t; }).catch(() => {}); }
   const sel = e.target.closest('[data-act="prefSelect"]'); if (sel) { S.prefs[sel.dataset.k] = sel.dataset.k === 'lockAfter' ? +sel.value : sel.value; save(); if (sel.dataset.k === 'lockAfter') { armAutoLock(); return; } if (sel.dataset.k === 'lang') { setLang(); refresh(); return; } if (sel.dataset.k === 'piggyStep') { S.prefs.piggyStep = +sel.value; save(); refresh(); return; } price = { rate: null, at: 0, cur: null }; fetchPrice(true); }
+  if (e.target.id === 'nwcPer') { const f = $('#nwcAmtF'); if (f) f.hidden = e.target.value === 'none'; }
   if (e.target.id === 'giftOn') { const box = $('#giftBox'); if (box) box.hidden = !e.target.checked; sfx('blip'); }
   if (e.target.id === 'giftTo') { const f = $('#giftKeyF'); if (f) f.hidden = !!e.target.value; }
   const g = e.target.dataset && e.target.dataset.gatecheck;
@@ -3256,7 +3260,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved };
+window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed } };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}

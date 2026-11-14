@@ -267,3 +267,337 @@ async function zapInvoice(z, sats, comment) {
   return { pr: String(r.pr).toLowerCase(), zapReq };
 }
 
+/* ---------- Nostr Wallet Connect (NIP-47), the wallet-service side ----------
+   Each connection has its own service key (kept with your other secrets: encrypted when a PIN is set) and knows
+   only the app's public key; the app's secret is in the link shown once at setup and is never stored here.
+   Requests (kind 23194) are answered (kind 23195) while NUTCADE is open and unlocked in a tab, one at a time, so
+   two payments can't race past a budget. NIP-44 is used when the app asks for it, NIP-04 otherwise. A request
+   older than two minutes is ignored, so nothing made while NUTCADE was closed is paid later by surprise. */
+S.nwc = store.get('nwc', []);   // [{id, name, sk, pub, client, relays, created, budget:{per, sats}, enc, used}]
+const saveNwc = () => store.set('nwc', S.nwc);
+const NWC_METHODS = ['pay_invoice', 'get_balance', 'get_info', 'make_invoice', 'lookup_invoice', 'list_transactions'];
+const NWC_NOTES = ['payment_received', 'payment_sent'];
+const nwcNote = c => `Wallet Connect: ${c.name}`;
+const PERIODS = [['none', 'No budget'], ['day', 'Per day'], ['week', 'Per week'], ['month', 'Per month'], ['total', 'In total']];
+function periodStart(per) {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  if (per === 'day') return d.getTime();
+  if (per === 'week') { d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); }   // weeks start on Monday
+  if (per === 'month') { d.setDate(1); return d.getTime(); }
+  return 0;
+}
+// what a connection has spent in its budget period: payments that went through or are in flight, with their fees,
+// and the mint fee of a failed one
+function nwcSpent(c) {
+  const from = periodStart(c.budget && c.budget.per);
+  let s = 0;
+  for (const t of S.txs) {
+    if (t.ts < from) continue;
+    if (t.nwc === c.id && t.type === 'out' && t.method !== 'fee' && t.status !== 'failed' && t.status !== 'expired') s += num(t.amount) + num(t.fee);
+    else if (t.method === 'fee' && t.feeFor && (txById(t.feeFor) || {}).nwc === c.id) s += num(t.fee);
+  }
+  return s;
+}
+const nwcLeft = c => (c.budget && c.budget.per && c.budget.per !== 'none') ? Math.max(0, num(c.budget.sats) - nwcSpent(c)) : null;
+function nwcBudgetText(c) {
+  const left = nwcLeft(c);
+  if (left == null) return 'No budget: it can spend your whole balance';
+  const b = num(c.budget.sats);
+  return { day: `${money(left)} of ${money(b)} left today`, week: `${money(left)} of ${money(b)} left this week`, month: `${money(left)} of ${money(b)} left this month`, total: `${money(left)} of ${money(b)} left in total` }[c.budget.per];
+}
+function nwcUri(c, clientSk) {
+  const q = c.relays.map(r => 'relay=' + encodeURIComponent(r)).join('&') + '&secret=' + clientSk + (S.prefs.npc ? '&lud16=' + encodeURIComponent(npcAddress()) : '');
+  return `nostr+walletconnect://${c.pub}?${q}`;
+}
+function nwcCreate(name, budget) {
+  name = String(name || '').trim().slice(0, 40);
+  if (!name) throw new Error('Give the connection a name, like the app it is for.');
+  const sk = rnd(32), csk = rnd(32);
+  const c = { id: uid(), name, sk: hex(sk), pub: L.nostrPub(sk), client: L.nostrPub(csk), relays: relays().slice(0, 3), created: Date.now(), budget, enc: null, used: 0 };
+  S.nwc.push(c);
+  if (!saveNwc()) { S.nwc = S.nwc.filter(x => x.id !== c.id); throw new Error("This browser won't save data."); }
+  nwcListen(true); nwcInfo(c).catch(() => {});
+  return { c, uri: nwcUri(c, hex(csk)) };
+}
+function nwcRevoke(id) { S.nwc = S.nwc.filter(c => c.id !== id); saveNwc(); nwcInfoSent.delete(id); nwcListen(true); }
+
+// NIP-04 needs the plain ECDH x-coordinate, which the bundled library doesn't expose: a small secp256k1 point
+// multiplication (Jacobian coordinates, BigInt) gives it. Only used for apps that don't speak NIP-44.
+const SECP = (() => {
+  const P = 2n ** 256n - 2n ** 32n - 977n, N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n;
+  const md = a => { const r = a % P; return r >= 0n ? r : r + P; };
+  const pw = (b, e) => { let r = 1n; b = md(b); while (e > 0n) { if (e & 1n) r = r * b % P; b = b * b % P; e >>= 1n; } return r; };
+  const dbl = ([X, Y, Z]) => {
+    if (!Z || !Y) return [0n, 1n, 0n];
+    const A = X * X % P, B = Y * Y % P, C = B * B % P, D = md(2n * (md((X + B) ** 2n) - A - C)), E = 3n * A % P, F = E * E % P;
+    const X3 = md(F - 2n * D); return [X3, md(E * (D - X3) - 8n * C), md(2n * Y * Z)];
+  };
+  const add = (p, q) => {
+    if (!p[2]) return q; if (!q[2]) return p;
+    const [X1, Y1, Z1] = p, [X2, Y2, Z2] = q, Z1Z1 = Z1 * Z1 % P, Z2Z2 = Z2 * Z2 % P, U1 = X1 * Z2Z2 % P, U2 = X2 * Z1Z1 % P, S1 = Y1 * Z2 % P * Z2Z2 % P, S2 = Y2 * Z1 % P * Z1Z1 % P;
+    if (U1 === U2) return S1 === S2 ? dbl(p) : [0n, 1n, 0n];
+    const H = md(U2 - U1), I = (2n * H) ** 2n % P, J = H * I % P, r = md(2n * (S2 - S1)), V = U1 * I % P, X3 = md(r * r - J - 2n * V);
+    return [X3, md(r * (V - X3) - 2n * S1 * J), md((md((Z1 + Z2) ** 2n) - Z1Z1 - Z2Z2) * H)];
+  };
+  return {
+    sharedX(sk, pubHex) {
+      const k = BigInt('0x' + hex(sk)), x = BigInt('0x' + pubHex);
+      if (!(k > 0n && k < N) || x >= P) throw new Error('bad key');
+      const c = md(x * x % P * x + 7n), y = pw(c, (P + 1n) / 4n); if (y * y % P !== c) throw new Error('bad key');
+      let R = [0n, 1n, 0n], Q = [x, y, 1n];
+      for (let e = k; e > 0n; e >>= 1n) { if (e & 1n) R = add(R, Q); Q = dbl(Q); }
+      const zi = pw(R[2], P - 2n);
+      return L.hexToBytes((R[0] * zi % P * zi % P).toString(16).padStart(64, '0'));
+    }
+  };
+})();
+const nwcKeys = new Map();   // connection id -> { sk, ck (NIP-44), aes (NIP-04) }
+function nwcKey(c) {
+  let k = nwcKeys.get(c.id);
+  if (!k || k.client !== c.client) { const sk = L.hexToBytes(c.sk); k = { client: c.client, sk, ck: L.nip44.v2.utils.getConversationKey(sk, c.client), aes: null }; nwcKeys.set(c.id, k); }
+  return k;
+}
+async function nip04Key(c) { const k = nwcKey(c); if (!k.aes) k.aes = await crypto.subtle.importKey('raw', SECP.sharedX(k.sk, c.client), 'AES-CBC', false, ['encrypt', 'decrypt']); return k.aes; }
+async function nwcEncrypt(c, enc, text) {
+  if (enc === 'nip44') return L.nip44.v2.encrypt(text, nwcKey(c).ck);
+  const iv = rnd(16), ct = await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, await nip04Key(c), new TextEncoder().encode(text));
+  return b64big(ct) + '?iv=' + b64e(iv);
+}
+async function nwcDecrypt(c, enc, payload) {
+  if (enc === 'nip44') return L.nip44.v2.decrypt(payload, nwcKey(c).ck);
+  const [ct, iv] = String(payload).split('?iv=');
+  const pt = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: b64d(iv) }, await nip04Key(c), b64d(ct));
+  return new TextDecoder().decode(pt);
+}
+
+let nwcSocks = [], nwcKeyNow = '', nwcRetry = 0, nwcChain = Promise.resolve();
+const nwcInfoSent = new Set();
+const nwcSeen = new Set(raw.get('nwcseen', []));
+const nwcWanted = () => !!(S.seed && S.nwc.length && !tabLocked && !(vault.on && !vault.open));
+const nwcRelays = () => [...new Set(S.nwc.flatMap(c => c.relays || []))].slice(0, 6);
+const nwcLive = () => nwcSocks.some(s => s.readyState === 1);
+function nwcStop() { const s = nwcSocks; nwcSocks = []; nwcKeyNow = ''; s.forEach(w => { try { w.close(); } catch (e) {} }); }
+function nwcListen(force) {
+  if (!nwcWanted()) { nwcStop(); return; }
+  const pubs = S.nwc.map(c => c.pub), key = pubs.join(',') + '|' + nwcRelays().join(',');
+  if (!force && key === nwcKeyNow && nwcSocks.some(s => s.readyState <= 1)) return;
+  nwcStop(); nwcKeyNow = key;
+  const since = Math.floor(Date.now() / 1000) - 120;
+  for (const r of nwcRelays()) {
+    let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
+    nwcSocks.push(ws);
+    ws.onopen = () => {
+      nwcRetry = 0;
+      ws.send(JSON.stringify(['REQ', 'nwc', { kinds: [23194], '#p': pubs, since }]));
+      for (const c of S.nwc) if (!nwcInfoSent.has(c.id)) nwcInfo(c).catch(() => {});
+    };
+    ws.onmessage = m => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } if (d[0] === 'EVENT' && d[2]) onNwcEvent(d[2]); };
+    ws.onclose = () => {
+      if (!nwcSocks.includes(ws)) return;
+      if (nwcSocks.every(s => s.readyState >= 2)) { const d = Math.min(120e3, 3000 * 2 ** nwcRetry++); nwcKeyNow = ''; setTimeout(() => nwcListen(), d); }
+    };
+  }
+}
+// the info event (kind 13194) tells apps what this wallet answers and which encryption it speaks
+async function nwcInfo(c) {
+  const ev = L.finalizeEvent({ kind: 13194, created_at: Math.floor(Date.now() / 1000), tags: [['encryption', 'nip44_v2 nip04'], ['notifications', NWC_NOTES.join(' ')]], content: NWC_METHODS.concat(['notifications']).join(' ') }, nwcKey(c).sk);
+  const n = await relayPublish(ev, 6000, c.relays);
+  if (n) nwcInfoSent.add(c.id);
+}
+function nwcSend(c, ev) {
+  const open = nwcSocks.filter(s => s.readyState === 1);
+  if (!open.length) return relayPublish(ev, 6000, c.relays);
+  for (const s of open) { try { s.send(JSON.stringify(['EVENT', ev])); } catch (e) {} }
+  return Promise.resolve(open.length);
+}
+function onNwcEvent(ev) {
+  if (!ev || ev.kind !== 23194 || nwcSeen.has(ev.id)) return;
+  const p = (ev.tags || []).find(t => t[0] === 'p'); const c = p && S.nwc.find(x => x.pub === p[1]);
+  if (!c || ev.pubkey !== c.client) return;
+  const now = Math.floor(Date.now() / 1000), exp = (ev.tags || []).find(t => t[0] === 'expiration');
+  if (ev.created_at < now - 120 || ev.created_at > now + 300 || (exp && +exp[1] < now)) return;
+  if (!L.verifyEvent(ev)) return;
+  nwcSeen.add(ev.id); raw.set('nwcseen', [...nwcSeen].slice(-300));
+  nwcChain = nwcChain.then(() => nwcHandle(c.id, ev)).catch(() => {});
+}
+const nwcErr = (code, message) => { const e = new Error(message); e.nwc = code; return e; };
+async function nwcHandle(id, ev) {
+  let c = S.nwc.find(x => x.id === id); if (!c) return;   // revoked: no answer
+  const tagged = ((ev.tags || []).find(t => t[0] === 'encryption') || [])[1] || '';
+  const enc = /nip44/.test(tagged) ? 'nip44' : /\?iv=/.test(ev.content) ? 'nip04' : 'nip44';
+  let req; try { req = JSON.parse(await nwcDecrypt(c, enc, ev.content)); } catch (e) { return; }
+  const method = String(req && req.method || '');
+  let result = null, error = null;
+  try {
+    if (!NWC_METHODS.includes(method)) throw nwcErr('NOT_IMPLEMENTED', `${method || 'This method'} is not supported.`);
+    result = await NWC[method](c, req.params || {});
+  } catch (e) { error = { code: e.nwc || 'INTERNAL', message: String(e.message || e).slice(0, 300) }; }
+  c = S.nwc.find(x => x.id === id); if (!c) return;   // revoked while it ran: no answer
+  c.used = Date.now(); c.enc = enc; saveNwc();
+  const content = await nwcEncrypt(c, enc, JSON.stringify({ result_type: method, error, result }));
+  const tags = [['p', ev.pubkey], ['e', ev.id]]; if (enc === 'nip44') tags.push(['encryption', 'nip44_v2']);
+  await nwcSend(c, L.finalizeEvent({ kind: 23195, created_at: Math.floor(Date.now() / 1000), tags, content }, nwcKey(c).sk));
+  if (tab === 'settings' && !$('#layer .sheet')) refresh();
+}
+async function nwcNotify(c, type, t) {
+  try {
+    const enc = c.enc === 'nip04' ? 'nip04' : 'nip44';
+    const content = await nwcEncrypt(c, enc, JSON.stringify({ notification_type: type, notification: nwcTx(t) }));
+    const tags = [['p', c.client]]; if (enc === 'nip44') tags.push(['encryption', 'nip44_v2']);
+    await nwcSend(c, L.finalizeEvent({ kind: enc === 'nip44' ? 23197 : 23196, created_at: Math.floor(Date.now() / 1000), tags, content }, nwcKey(c).sk));
+  } catch (e) {}
+}
+document.addEventListener('nutcade:paid', e => {
+  const t = S.txs.find(x => x.quote === e.detail && x.nwc && x.type === 'in'); const c = t && S.nwc.find(x => x.id === t.nwc);
+  if (c) nwcNotify(c, 'payment_received', t);
+});
+const bolt11Cache = new Map();
+function invInfo(pr) { if (!pr) return null; let d = bolt11Cache.get(pr); if (d === undefined) { try { d = decodeBolt11(pr); } catch (e) { d = null; } bolt11Cache.set(pr, d); } return d; }
+function nwcTx(t) {
+  const d = invInfo(t.request) || {};
+  const o = { type: t.type === 'in' ? 'incoming' : 'outgoing', state: { done: 'settled', pending: 'pending', failed: 'failed', expired: 'expired' }[t.status] || 'pending',
+    invoice: t.request || '', description: d.description || '', description_hash: d.descriptionHash || '', preimage: t.preimage || '', payment_hash: d.paymentHash || '',
+    amount: num(t.amount) * 1000, fees_paid: num(t.fee) * 1000, created_at: d.timestamp || Math.floor((t.created || t.ts) / 1000), expires_at: d.timestamp ? d.timestamp + d.expiry : null, metadata: {} };
+  if (t.status === 'done') o.settled_at = Math.floor(t.ts / 1000);
+  return o;
+}
+const lnTxs = () => S.txs.filter(t => t.method === 'ln' && t.request);
+const NWC = {
+  async get_info(c) { return { alias: 'NUTCADE', color: '#ffc700', pubkey: c.pub, network: 'mainnet', block_height: 0, block_hash: '', methods: NWC_METHODS, notifications: NWC_NOTES }; },
+  async get_balance(c) {
+    let b = Math.max(0, totalBalance() - (S.prefs.piggy ? piggySaved() : 0));
+    const left = nwcLeft(c); if (left != null) b = Math.min(b, left);
+    return { balance: b * 1000 };
+  },
+  async pay_invoice(c, p) {
+    const inv = String(p.invoice || '').trim().toLowerCase().replace(/^lightning:/, '');
+    let d; try { d = decodeBolt11(inv); } catch (e) { throw nwcErr('OTHER', "The invoice can't be read."); }
+    if (d.msat == null) throw nwcErr('NOT_IMPLEMENTED', 'Invoices without an amount are not supported.');
+    if (p.amount != null && String(p.amount) !== String(d.msat)) throw nwcErr('OTHER', 'The amount does not match the invoice.');
+    if (d.sats == null) throw nwcErr('OTHER', 'Amounts that are not whole sats are not supported.');
+    if (d.timestamp + d.expiry < Date.now() / 1000) throw nwcErr('OTHER', 'The invoice has expired.');
+    const sats = d.sats;
+    // the same invoice is never paid twice: a paid one answers with its proof, one in flight is refused
+    const prev = S.txs.find(t => t.type === 'out' && t.method === 'ln' && t.request === inv && t.status !== 'failed' && t.status !== 'expired');
+    if (prev && prev.status === 'done') return { preimage: prev.preimage || '', fees_paid: num(prev.fee) * 1000 };
+    if (prev) throw nwcErr('OTHER', 'This invoice is already being paid.');
+    const cands = S.mints.filter(m => supports(m, 'melt', 'bolt11') && balanceOf(m.url) >= sats).sort((a, b) => (b.url === S.active) - (a.url === S.active) || balanceOf(b.url) - balanceOf(a.url));
+    if (!cands.length) throw nwcErr('INSUFFICIENT_BALANCE', `Not enough sats: no mint in this wallet holds ${sats} sat.`);
+    let mq = null, url = null;
+    for (const m of cands) {
+      const w = await getWallet(m.url);
+      const q = await w.createMeltQuoteBolt11(inv).catch(() => null);
+      if (!q) continue;
+      if (num(q.amount) !== sats) throw nwcErr('OTHER', `The mint read this invoice as ${num(q.amount)} sat instead of ${sats} sat, so it was not paid.`);
+      if (balanceOf(m.url) >= sats + num(q.fee_reserve)) { mq = q; url = m.url; break; }
+    }
+    if (!mq) throw nwcErr('INSUFFICIENT_BALANCE', `Not enough sats for ${sats} sat plus the Lightning fee reserve in any one mint.`);
+    const need = sats + num(mq.fee_reserve), left = nwcLeft(c);
+    if (left != null && need > left) { toast(`${c.name} asked to pay ${money(sats)}, more than its budget has left, so NUTCADE refused.`, 'gold'); throw nwcErr('QUOTA_EXCEEDED', `Over budget: this payment needs up to ${need} sat with its fee reserve, and ${left} sat of the budget is left.`); }
+    if (!S.nwc.find(x => x.id === c.id)) throw nwcErr('UNAUTHORIZED', 'This connection was revoked.');
+    let tx;
+    try { tx = await payMelt('ln', mq, 0, nwcNote(c), inv, url); }
+    catch (e) {
+      const t = S.txs.find(x => x.quote === mq.quote); if (t) updTx(t.id, { nwc: c.id, nwcName: c.name });
+      refresh();
+      if (e && e.piggy) throw nwcErr('RESTRICTED', 'This payment would dip into the piggy bank, which needs a countdown in NUTCADE.');
+      const f = friendly(e, url);
+      toast(`${c.name}'s payment of ${money(sats)} through Wallet Connect failed. ${f.also || f.message}`, 'red');
+      throw nwcErr(/enough/i.test(f.message) ? 'INSUFFICIENT_BALANCE' : 'PAYMENT_FAILED', f.message + (f.also ? ' ' + f.also : ''));
+    }
+    updTx(tx.id, { nwc: c.id, nwcName: c.name });
+    for (let i = 0; i < 15 && tx.status === 'pending'; i++) { await sleep(2000); const pd = S.pending.find(x => x.txId === tx.id); if (pd) await reconcile(pd).catch(() => {}); tx = txById(tx.id); }
+    sfx('coin'); refresh();
+    if (tx.status === 'done') {
+      toast(`${c.name} paid ${money(sats)} through Wallet Connect`, 'cyan');
+      nwcNotify(c, 'payment_sent', tx);
+      return { preimage: tx.preimage || '', fees_paid: num(tx.fee) * 1000 };
+    }
+    if (tx.status === 'failed') throw nwcErr('PAYMENT_FAILED', tx.cost ? `The payment failed; the mint kept ${tx.cost} sat as its fee.` : 'The payment failed. Nothing left the wallet.');
+    throw nwcErr('OTHER', 'The payment is still pending at the mint. Look it up again later.');
+  },
+  async make_invoice(c, p) {
+    const msat = Number(p.amount);
+    if (!Number.isSafeInteger(msat) || msat <= 0) throw nwcErr('OTHER', 'Give an amount in millisats, more than 0.');
+    if (msat % 1000) throw nwcErr('OTHER', 'Amounts that are not whole sats are not supported.');
+    const sats = msat / 1000;
+    if (sats > MAX_SAT) throw nwcErr('OTHER', 'That amount is too large.');
+    const pick = [activeMint()].concat(S.mints).find(m => m && supports(m, 'mint', 'bolt11') && !isBlocked(m.url));
+    if (!pick) throw nwcErr('OTHER', isBlocked(S.active) ? `${mintName(S.active)} is blocked in NUTCADE, and no other mint can receive Lightning.` : 'No mint in this wallet can receive Lightning.');
+    const mi = methodInfo(pick, 'mint', 'bolt11');
+    if (mi && ((mi.min && sats < mi.min) || (mi.max && sats > mi.max))) throw nwcErr('OTHER', `The mint takes ${mi.min || 1} to ${mi.max || MAX_SAT} sat.`);
+    const tx = await lnMintQuote(sats, nwcNote(c), pick.url);
+    updTx(tx.id, { nwc: c.id, nwcName: c.name, created: Date.now() });
+    liveSync(); if (tab !== 'arcade' && !$('#layer .sheet')) refresh();
+    const o = nwcTx(txById(tx.id)); if (p.description && !o.description) o.description = String(p.description).slice(0, 640);
+    return o;
+  },
+  async lookup_invoice(c, p) {
+    const inv = p.invoice ? String(p.invoice).trim().toLowerCase() : '', h = p.payment_hash ? String(p.payment_hash).toLowerCase() : '';
+    if (!inv && !h) throw nwcErr('OTHER', 'Give a payment_hash or an invoice.');
+    const t = lnTxs().find(t => (inv && t.request === inv) || (h && (invInfo(t.request) || {}).paymentHash === h));
+    if (!t) throw nwcErr('NOT_FOUND', 'No invoice like that in this wallet.');
+    return nwcTx(t);
+  },
+  async list_transactions(c, p) {
+    const from = +p.from || 0, until = +p.until || Infinity, lim = Math.min(Math.max(+p.limit || 50, 1), 200), off = Math.max(+p.offset || 0, 0);
+    const list = lnTxs().map(nwcTx).filter(o => (p.unpaid || o.state === 'settled' || (o.type === 'outgoing' && o.state === 'pending')) && (!p.type || o.type === p.type) && o.created_at >= from && o.created_at <= until)
+      .sort((a, b) => b.created_at - a.created_at);
+    return { transactions: list.slice(off, off + lim) };
+  }
+};
+
+/* ---------- Wallet Connect sheets ---------- */
+function budgetFields(b) {
+  b = b || { per: 'none', sats: 0 };
+  return `<div class="field"><label for="nwcPer">Budget</label><select id="nwcPer" class="inp">${PERIODS.map(([k, l]) => `<option value="${k}" ${b.per === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="field" id="nwcAmtF" ${b.per && b.per !== 'none' ? '' : 'hidden'}><label for="amtIn">Budget amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="10000" value="${b.per && b.per !== 'none' && b.sats ? esc(b.sats) : ''}" autocomplete="off"></div>`;
+}
+function readBudget() {
+  const per = val('nwcPer') || 'none';
+  if (!PERIODS.some(p => p[0] === per)) throw new Error('Pick a budget.');
+  if (per === 'none') return { per: 'none', sats: 0 };
+  const n = satsOf('amtIn'); if (!n || n <= 0) throw amtErr('Type the budget in SAT, like 10000, or pick No budget.', 'zero');
+  return { per, sats: n };
+}
+const NWC_HONEST = 'Wallet Connect only answers while NUTCADE is open and unlocked in a browser tab. When it is closed, connected apps get no answer, and requests made meanwhile are not paid later.';
+const NWC_WARN = 'Whoever has this connection can spend from this wallet without asking you: up to its budget, or your whole balance if there is no budget.';
+function openNwcNew() {
+  if (needSeed()) return;
+  openSheet('Connect an app', `<p style="margin:0">Let another app, like a Nostr client, pay and receive with this wallet using Nostr Wallet Connect (NWC).</p>
+    <div class="notice">${NWC_HONEST}</div>
+    <div class="field"><label for="nwcName">Name</label><input id="nwcName" class="inp" data-noi18n maxlength="40" placeholder="Damus" autocomplete="off"></div>
+    ${budgetFields()}
+    <div class="notice red">${NWC_WARN}</div>
+    <button class="btn solid gold block" data-act="nwcCreate">Create connection</button><div id="sheetErr"></div>`);
+}
+function showNwcUri(c, uri) {
+  setBody(`<div class="label" style="text-align:center"><span data-noi18n>${esc(c.name)}</span></div>
+    ${qrBlock(uri, 'Wallet Connect QR')}
+    <div class="code" data-noi18n>${esc(uri)}</div>
+    <button class="btn solid gold block" data-act="copy" data-text="${esc(uri)}">Copy connection link</button>
+    <div class="notice red">This is shown only once. Paste or scan it into the app now. Anyone with it can spend from this wallet: up to its budget, or your whole balance if there is no budget.</div>
+    <div class="notice">${NWC_HONEST}</div>
+    <button class="btn block" data-act="close">Done</button>`);
+}
+function openNwcEdit(id) {
+  const c = S.nwc.find(x => x.id === id); if (!c) return;
+  openSheet('Wallet Connect', `<div class="field"><label for="nwcName">Name</label><input id="nwcName" class="inp" data-noi18n maxlength="40" value="${esc(c.name)}" autocomplete="off"></div>
+    ${budgetFields(c.budget)}
+    <div class="tiny muted">${nwcBudgetText(c)}</div>
+    <div class="notice red">${NWC_WARN}</div>
+    <button class="btn solid gold block" data-act="nwcSave" data-id="${esc(c.id)}">Save</button>
+    <button class="btn block red" data-act="nwcRevokeAsk" data-id="${esc(c.id)}">Revoke</button><div id="sheetErr"></div>`);
+}
+function nwcPanel() {
+  const live = nwcLive();
+  return `<div class="panel" id="set-nwc"><span class="h2">Wallet Connect</span>
+    <p class="th" style="margin:0">Let apps pay and receive with this wallet over Nostr (NWC, NIP-47).</p>
+    <div class="notice">${NWC_HONEST}</div>
+    ${S.nwc.length ? `<div class="row between tiny"><span>This tab</span><span style="color:${live ? 'var(--lime)' : 'var(--gold)'}">${live ? 'ANSWERING' : 'CONNECTING'}</span></div>
+    <div class="txs">${S.nwc.map(c => `<div class="tx out contact"><span class="ico" aria-hidden="true">⚡</span><span class="mid"><div class="note" data-noi18n>${esc(c.name)}</div>
+      <div class="meta"><span>${esc(nwcBudgetText(c))}</span></div><div class="meta"><span>${c.used ? `Last used ${timeAgo(c.used)}` : 'Not used yet'}</span></div></span>
+      <span class="row cbtns"><button class="btn sm" data-act="nwcEdit" data-id="${esc(c.id)}">Edit</button><button class="btn sm red" data-act="nwcRevokeAsk" data-id="${esc(c.id)}">Revoke</button></span></div>`).join('')}</div>` : ''}
+    <button class="btn sm gold" data-act="nwcNew">Connect an app</button>
+  </div>`;
+}
