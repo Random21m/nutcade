@@ -371,6 +371,7 @@ function openCashier() {
   document.body.style.overflow = 'hidden';
   if (window.NutAudio) window.NutAudio.stopMusic();
   clearToasts(); const fx = document.getElementById('fxLayer'); if (fx) fx.remove();   // the till starts clean
+  netBanner();   // offline: re-measure the banner, which is one line over the till
   const m = activeMint();
   cash.method = supports(m, 'mint', 'bolt11') ? 'ln' : 'ecash';
   cash.mode = 'keys'; cash.amount = ''; cash.label = ''; cash.unit = S.prefs.amtFiat && canFiat() ? 'fiat' : 'sat';

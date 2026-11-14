@@ -1281,12 +1281,13 @@ const HEART = '<svg class="ico-heart" viewBox="0 0 7 6" fill="currentColor" aria
 const DEL_ICON = '<svg class="ico-del" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges"><path fill-rule="evenodd" d="M5 3h10v10H5L1 8zm1 1L2.5 8 6 12h8V4z"/><path d="M7 5h1v1H7zm1 1h1v1H8zm1 1h1v1H9zm1 1h1v1h-1zm1 1h1v1h-1zm0-4h1v1h-1zm-1 1h1v1h-1zM8 8h1v1H8zM7 9h1v1H7z"/></svg>';
 // Six faint boxes that fill as you type; past six, a box is added per digit up to the 12-digit maximum.
 // The next box to fill has a cyan border that never disappears (a PIN is 6 to 12 digits).
+const digitsLabel = n => tr(n === 1 ? '1 digit entered' : `${n} digits entered`);   // singular and plural, also for screen readers
 const pinDots = n => Array.from({ length: Math.max(PIN_MIN, Math.min(PIN_MAX, n + 1)) }, (_, i) => `<i class="${i < n ? 'on' : i === n ? 'cur' : ''}"></i>`).join('');
 function padHTML(title, sub, opts = {}) {
   const n = pinUI.value.length;
   return `<div class="pinpad" data-pinpad="${pinUI.mode}">
     <div class="pin-title">${esc(title)}</div>${sub ? `<div class="th${opts.warn ? ' warn' : ''}" style="text-align:center">${esc(sub)}</div>` : ''}
-    <div class="pin-dots" aria-label="${esc(tr(`${n} digits entered`))}">${pinDots(n)}</div>
+    <div class="pin-dots" aria-label="${esc(digitsLabel(n))}">${pinDots(n)}</div>
     <div id="pinErr" class="pin-err" role="alert"></div>
     <div class="pin-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'].map(k => `<button type="button" class="pin-k ${k === 'ok' ? 'ok' : ''}" data-act="pinKey" data-k="${k}" aria-label="${k === 'del' ? 'Delete' : k === 'ok' ? 'Enter' : k}">${k === 'del' ? DEL_ICON : k === 'ok' ? 'OK' : k}</button>`).join('')}</div>
     ${opts.extra || ''}</div>`;
@@ -1308,7 +1309,7 @@ function refreshPad() {
   const pad = document.querySelector('[data-pinpad]'); if (!pad) return;
   const n = pinUI.value.length;
   pad.querySelector('.pin-dots').innerHTML = pinDots(n);
-  pad.querySelector('.pin-dots').setAttribute('aria-label', tr(`${n} digits entered`));
+  pad.querySelector('.pin-dots').setAttribute('aria-label', digitsLabel(n));
 }
 function pinError(msg) { sfx('err'); const e = $('#pinErr'); if (e) { e.textContent = msg; } const d = document.querySelector('.pin-dots'); if (d) { d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake'); } pinUI.value = ''; refreshPad(); }
 const nextPad = mode => { pinUI.mode = mode; pinUI.value = ''; };

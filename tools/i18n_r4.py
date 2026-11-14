@@ -470,6 +470,10 @@ ROWS = [
 ("Bitcoin price chart, no data yet", "Gráfico del precio de Bitcoin, aún sin datos", "Gráfico do preço do Bitcoin, ainda sem dados", "Bitcoin-Preisdiagramm, noch keine Daten", "Graphique du prix du Bitcoin, pas encore de données"),
 ("Fee reserve {#} SAT", "Reserva para comisión {#} SAT", "Reserva de taxa {#} SAT", "Gebührenreserve {#} SAT", "Réserve de frais {#} SAT"),
 ("Holds {#} SAT", "Tiene {#} SAT", "Tem {#} SAT", "Hält {#} SAT", "Détient {#} SAT"),
+("1 digit entered", "1 dígito introducido", "1 dígito digitado", "1 Ziffer eingegeben", "1 chiffre saisi"),
+("0 digits entered", "0 dígitos introducidos", "0 dígitos digitados", "0 Ziffern eingegeben", "0 chiffre saisi"),
+("Decimal mark", "Separador decimal", "Separador decimal", "Dezimalzeichen", "Séparateur décimal"),
+("That amount can't be read. Type it like this: {#}", "No se puede leer esa cantidad. Escríbela así: {#}", "Não foi possível ler esse valor. Digite assim: {#}", "Dieser Betrag ist nicht lesbar. Schreib ihn so: {#}", "Ce montant est illisible. Saisissez-le ainsi : {#}"),
 ("Clue card {#}", "Tarjeta de pista {#}", "Cartão de pista {#}", "Hinweiskarte {#}", "Carte indice {#}"),
 ]
 
