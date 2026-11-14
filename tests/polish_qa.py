@@ -590,6 +590,109 @@ async def main():
         check('round 4 focus: after Esc on Restore wallet, focus is on its button, and stays there through a screen refresh', a1 == a2 == 'seedRestore', (a1, a2))
         await rf.pg.context.close()
 
+        # ---------- round 5 ----------
+        # The history always adds up to the balance, on both kinds of mint, after every money path, failures included.
+        # ledger(mint) = sum of received (done/claimed) - sum of sent (amount + fee), skipping payments that failed or
+        # expired (they moved nothing; a cost that didn't come back is its own "Mint fee" line).
+        LEDGER = """(u=>{let s=0;for(const t of Nutcade.S.txs){if(t.mint!==u||t.status==='failed'||t.status==='expired')continue;if(t.type==='in'){if(t.status==='done'||t.status==='claimed')s+=t.amount}else s-=t.amount+(t.fee||0)}return [s,(Nutcade.S.proofs[u]||[]).reduce((a,p)=>a+p.amount,0)]})"""
+        FM = 'http://127.0.0.1:3340'
+        from wallet_qa import invoice as qinv
+        mw = await wallet(b, 375, 667, 'en')
+        await mw.create(); await mw.add_mint(B); await mw.add_mint(A); await mw.add_mint(FM)
+        broken = []
+        async def books(step):
+            for u in (A, B, FM):
+                l, p = await mw.ev(LEDGER + f"({json.dumps(u)})")
+                if l != p: broken.append((step, u[-4:], l, p))
+        for M, O in ((A, B), (B, A)):
+            await mw.use(M); await mw.receive_ln(6000); await books('receive ' + M[-4:])
+            tok, e = await mw.send_ecash(1000); await books('send ecash ' + M[-4:])
+            await mw.receive_token(tok); await books('reclaim own token ' + M[-4:])
+            e, q = await mw.pay_ln(qinv(700, O)); await books('pay invoice ' + M[-4:])
+            e, q = await mw.pay_ln(qinv(300, M)); await books('failed self-payment ' + M[-4:])   # the test mint already counts its own invoices as paid
+            await mw.home(); await mw.click('[data-act=huntNew]'); await mw.wait(150); await mw.fill('#amtIn', '200'); await mw.click('[data-act=huntCreate]'); await mw.wait(2500); await mw.ev("Nutcade.closeSheet()"); await books('treasure hunt ' + M[-4:])
+            await mw.home(); await mw.click('[data-act=cashier]'); await mw.wait(300)
+            for k in '150': await mw.click(f'[data-ck="{k}"]')
+            await mw.click('[data-ck=charge]'); await mw.until("!!document.querySelector('.cash-paid')", 15000); await mw.ev("document.querySelector('#cashExit').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'}))"); await mw.wait(300); await books('till sale ' + M[-4:])
+        fee_rows = await mw.ev(f"Nutcade.S.txs.filter(t=>t.method==='fee').map(t=>[t.mint.slice(-4),t.fee,t.status,!!(Nutcade.S.txs.find(x=>x.id===t.feeFor)||{{}}).cost])")
+        failed = await mw.ev("Nutcade.S.txs.filter(t=>t.status==='failed'&&t.type==='out').map(t=>[t.mint.slice(-4),t.amount,t.fee||0,t.cost||0])")
+        # the always-fail mint (no input fees): a failed payment costs nothing and records no fee
+        await mw.use(FM); await mw.receive_ln(3000); e, q = await mw.pay_ln(qinv(400, B)); await books('failed payment, no-fee mint')
+        f0 = await mw.ev(f"(t=>[t.status,t.fee||0,t.cost||0])(Nutcade.S.txs.find(t=>t.mint==={json.dumps(FM)}&&t.type==='out'))")
+        check('round 5 money: after every path on the fee mint and the no-fee mint (receive, send, reclaim, pay, failed payment, hunt, till) the history adds up to the balance', not broken, broken)
+        check('round 5 money: a failed payment that cost a swap fee records no fee itself and one linked "Mint fee" line with the real cost', all(f[2] == 0 for f in failed) and any(r[0] == A[-4:] and r[1] >= 1 and r[3] for r in fee_rows) and not any(r[0] == B[-4:] for r in fee_rows), (failed, fee_rows))
+        check('round 5 money: a failed payment that cost nothing records no fee and no fee line', f0[0] == 'failed' and f0[1] == 0 and f0[2] == 0, f0)
+        # the failed payment says what it cost, and its detail and history row show nothing moved
+        await mw.use(A); n0 = await mw.ev("Nutcade.S.txs.length"); e, q = await mw.pay_ln(qinv(250, A))
+        await mw.click('[data-act=tab][data-tab=history]'); await mw.wait(200)
+        rows = await mw.ev("[...document.querySelectorAll('#txList .tx')].slice(0,2).map(r=>r.innerText.replace(/\\s+/g,' ')+'|'+r.querySelector('.amt').className)")
+        await mw.ev("[...document.querySelectorAll('#txList .tx')].find(r=>/FAILED/.test(r.innerText)).click()"); await mw.wait(250); det = await mw.sheet_text(); await mw.ev("Nutcade.closeSheet()")
+        check('round 5 money: the failed payment is struck through, says the mint kept 1 SAT, and the fee line shows -1', 'except 1 SAT the mint kept' in det and any('void' in r for r in rows) and any('FEE' in r and '-1' in r for r in rows), (rows, det[:200]))
+        await mw.pg.context.close()
+
+        # SAT typed, only the view switched to USD: the hint and the invoice are exactly the SAT typed
+        tg = await wallet(b, 375, 667, 'en')
+        await tg.pg.route(re.compile(r'https://api(\.exchange)?\.coinbase\.com/.*'), lambda r: r.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': '*'}, body=json.dumps({'data': {'currency': 'BTC', 'rates': {'USD': '97123.55'}}})))
+        await tg.create(); await tg.add_mint(B); await tg.receive_ln(5000); await tg.home(); await tg.wait(900)
+        await tg.click('[data-act=receive]'); await tg.wait(150); await tg.fill('#amtIn', '49'); await tg.click('[data-act=amtUnit]'); await tg.wait(100)
+        view = await tg.ev("[document.querySelector('#amtIn').value, document.querySelector('.amtconv').innerText]")
+        await tg.click('[data-act=doLnInvoice]'); await tg.wait(1500); a49 = await tg.ev("Nutcade.S.txs[0].amount")
+        check('round 5 switch: 49 SAT shown in USD still says ≈ 49 SAT and invoices 49', '49 SAT' in view[1] and a49 == 49, (view, a49))
+        await tg.ev("Nutcade.closeSheet()"); await tg.click('[data-act=cashier]'); await tg.wait(200)
+        if await tg.ev("document.querySelector('[data-ck=unit]').innerText.trim()") != 'SAT': await tg.click('[data-ck=unit]'); await tg.wait(100)   # start from SAT
+        for k in '49': await tg.click(f'[data-ck="{k}"]')
+        await tg.click('[data-ck=unit]'); await tg.wait(100); till = await tg.ev("document.querySelector('.cash-charge').innerText")
+        check('round 5 switch: on the till too, 49 SAT viewed in USD charges 49', '49 SAT' in till, till)
+        await tg.pg.context.close()
+        # "01.000" and friends are refused in every language; plain decimals still read
+        for lang in LANGS:
+            z = await wallet(b, 375, 667, lang)
+            r = await z.ev("['01.000','01,000','00.500','0.5','0,5','00012,50'].map(t=>{try{return Nutcade.parseFiat(t)}catch(e){return 'refused'}})")
+            check(f'round 5 leading zero {lang}: 01.000, 01,000 and 00.500 are refused; 0.5, 0,5 and 00012,50 read', r == ['refused', 'refused', 'refused', 0.5, 0.5, 12.5], r)
+            await z.pg.context.close()
+        # merging twin mint spellings also remaps Extra Life, heirlooms, challenges, hunts and the mint log
+        mg = await wallet(b, 375, 667, 'en'); await mg.create(); await mg.add_mint(B); await mg.receive_ln(500)
+        await mg.ev("""(()=>{const g=k=>JSON.parse(localStorage.getItem('nutcade:'+k)||'null');const T='HTTP://127.0.0.1:3339/';
+          localStorage.setItem('nutcade:extra',JSON.stringify({mint:T,amount:1,proofs:[],heir:{pubkey:'02',name:'Al'},until:Date.now()+9e9,days:30}));
+          localStorage.setItem('nutcade:heirlooms',JSON.stringify([{from:'x',name:'Al',token:'',amount:1,mint:T,until:0,state:'waiting'}]));
+          localStorage.setItem('nutcade:challenges',JSON.stringify([{id:'c1',dir:'out',game:'swarm',score:1,bounties:[{mint:T,amount:1}]}]));
+          localStorage.setItem('nutcade:hunts',JSON.stringify([{pub:'p',mint:T,amount:1}]));
+          const ml=g('mintlog')||{};ml[T]={first:1,ms:[5],ops:[1,0],keysets:{},changes:[]};localStorage.setItem('nutcade:mintlog',JSON.stringify(ml))})()""")
+        await mg.pg.reload(); await mg.wait(900)
+        st = await mg.ev("JSON.stringify([Nutcade.S.extra&&Nutcade.S.extra.mint,(Nutcade.S.heirlooms||[]).map(h=>h.mint),(Nutcade.S.challenges||[]).map(c=>c.bounties.map(b=>b.mint)),(Nutcade.S.hunts||[]).map(h=>h.mint),Object.keys(Nutcade.S.mintlog||{})])")
+        check('round 5 merge: Extra Life, heirlooms, challenge bounties, hunts and the mint log all point at the merged mint', 'HTTP' not in st and st.count('http://127.0.0.1:3339') >= 5, st)
+        await mg.pg.context.close()
+
+        # No English left on screen in the other languages: main screens, sheets, toasts, game screens and aria labels.
+        # Every string the page translates and doesn't find is recorded; only brand names, units and currency codes may stay.
+        ALLOW = re.compile(r'^(NUTCADE|SAT|BTC|LN|NOSTR|[A-Z]{3}|(STAR SWARM|NUT MAZE|BRICK BLITZ|VOID ROCKS|HOP LANES|SKY SHIELD|NIBBLE|NUT FLIPPER))$')
+        SHEETS = [('wallet', 'receive'), ('wallet', 'send'), ('wallet', 'scan'), ('wallet', 'splitOpen'), ('wallet', 'huntNew'), ('wallet', 'extraOpen'), ('wallet', 'pickMint'), ('wallet', 'ctListen'),
+                  ('settings', 'seedShow'), ('settings', 'seedRestore'), ('settings', 'restore'), ('settings', 'resetAsk'), ('settings', 'lnAddr'), ('settings', 'support'), ('settings', 'contactsOpen'),
+                  ('settings', 'moveOpen'), ('settings', 'tillOpen'), ('settings', 'pinSet'), ('settings', 'findLost'), ('mints', 'reportOpen')]
+        for lang in ('de', 'fr', 'es', 'pt'):
+            h = await wallet(b, 375, 667, lang)
+            await h.pg.add_init_script("(()=>{const s=window.__i18nMiss;const a=s.add.bind(s);s.add=v=>{try{const k='qa:miss5';const c=JSON.parse(localStorage.getItem(k)||'[]');if(!c.includes(v)){c.push(v);localStorage.setItem(k,JSON.stringify(c))}}catch(e){}return a(v)}})()")
+            await h.pg.reload(); await h.wait(700)
+            await h.create(); await h.add_mint(B); await h.add_mint(A); await h.use(B); await h.receive_ln(4000, 'Lunch #food'); await h.send_ecash(300, 'Pizza')
+            for t in ('wallet', 'arcade', 'history', 'mints', 'settings'):
+                await h.ev(f"Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab={t}]').click()"); await h.wait(400)
+            for t, a in SHEETS:
+                await h.ev(f"Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab={t}]').click()"); await h.wait(150)
+                await h.ev(f"(e=>e&&e.click())(document.querySelector('#app [data-act={a}]'))"); await h.wait(500)
+            await h.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=history]').click()"); await h.wait(150); await h.ev("document.querySelector('[data-act=tx]').click()"); await h.wait(300)
+            await h.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=wallet]').click()"); await h.wait(150); await h.click('[data-act=send]'); await h.wait(150)
+            for v in ('1.5', '-5', '99999999999999999999'):
+                await h.fill('#amtIn', v); await h.click('[data-act=doSendEcash]'); await h.wait(300)
+            await h.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=arcade]').click()"); await h.wait(200)
+            for g in ('swarm', 'flipper'):
+                await h.ev(f"document.querySelector('[data-game={g}]').click()"); await h.wait(500); await h.ev("document.querySelector('[data-g=pad]').click()"); await h.wait(200); await h.ev("document.querySelector('[data-g=exit]').click()"); await h.wait(200)
+            await h.ev("document.querySelector('[data-act=tab][data-tab=wallet]').click()"); await h.wait(200); await h.click('[data-act=cashier]'); await h.wait(300)
+            for k in '25': await h.click(f'[data-ck="{k}"]')
+            await h.ev("Nutcade.toast('Contact deleted','gold')"); await h.wait(200)
+            miss = [m for m in await h.ev("JSON.parse(localStorage.getItem('qa:miss5')||'[]')") if not ALLOW.match(m.strip())]
+            check(f'round 5 i18n {lang}: no English left on the main screens, sheets, toasts, game screens and aria labels', not miss, miss[:12])
+            await h.pg.context.close()
+
         # ---------- desktop: sheets are centered dialogs, the tool row is an even grid, keyboard wording ----------
         d = await wallet(b, 1440, 900, 'en', mobile=False)
         await d.create(); await d.add_mint(B); await d.receive_ln(2000)
