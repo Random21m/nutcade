@@ -496,6 +496,8 @@ ROWS = [
 ("This mint's fee is more than its balance of {#} SAT, so nothing can be sent from it.", "La comisión de este mint es mayor que su saldo de {#} SAT, así que no se puede enviar nada desde él.", "A taxa deste mint é maior que o saldo de {#} SAT, então nada pode ser enviado dele.", "Die Gebühr dieses Mints ist höher als sein Guthaben von {#} SAT, also lässt sich nichts davon senden.", "Les frais de ce mint dépassent son solde de {#} SAT, donc rien ne peut en être envoyé."),
 ("Send {#} SAT", "Enviar {#} SAT", "Enviar {#} SAT", "{#} SAT senden", "Envoyer {#} SAT"),
 ("Use {#} SAT", "Usar {#} SAT", "Usar {#} SAT", "{#} SAT nehmen", "Utiliser {#} SAT"),
+("Leave the amount empty to accept any amount, or type more than {#}.", "Deja la cantidad vacía para aceptar cualquier cantidad, o escribe más de {#}.", "Deixe o valor vazio para aceitar qualquer valor, ou digite mais de {#}.", "Lass den Betrag leer, um jeden Betrag anzunehmen, oder gib mehr als {#} ein.", "Laissez le montant vide pour accepter n'importe quel montant, ou saisissez plus de {#}."),
+("Edit that contact", "Editar ese contacto", "Editar esse contato", "Diesen Kontakt bearbeiten", "Modifier ce contact"),
 ]
 
 # Patterns for sentences that carry names or dates. $1, $2… are filled in (and translated again if they're known words).
@@ -583,6 +585,8 @@ RE = [
 (r"^(STAR SWARM|NUT MAZE|BRICK BLITZ|VOID ROCKS|HOP LANES|SKY SHIELD|NIBBLE|NUT FLIPPER) game screen$", "Pantalla del juego $1", "Tela do jogo $1", "Spielbildschirm $1", "Écran du jeu $1"),
 (r"^QR code for the Lightning address (.+)$", "Código QR de la dirección Lightning $1", "QR code do endereço Lightning $1", "QR-Code der Lightning-Adresse $1", "QR code de l'adresse Lightning $1"),
 (r"^Bitcoin price in ([A-Z]{3}) over (\w+): now (.+), high (.+), low (.+)\. Use left and right arrow keys to read values\.$", "Precio de Bitcoin en $1 en $2: ahora $3, máximo $4, mínimo $5. Usa las flechas izquierda y derecha para leer los valores.", "Preço do Bitcoin em $1 em $2: agora $3, máxima $4, mínima $5. Use as setas esquerda e direita para ler os valores.", "Bitcoin-Preis in $1 über $2: jetzt $3, Hoch $4, Tief $5. Mit den Pfeiltasten links und rechts liest du die Werte.", "Prix du Bitcoin en $1 sur $2 : maintenant $3, haut $4, bas $5. Utilisez les flèches gauche et droite pour lire les valeurs."),
+(r"^(.+) already has this Lightning address\. Edit that contact instead\.$", "$1 ya tiene esta dirección Lightning. Edita ese contacto.", "$1 já tem este endereço Lightning. Edite esse contato.", "$1 hat diese Lightning-Adresse schon. Bearbeite diesen Kontakt.", "$1 a déjà cette adresse Lightning. Modifiez ce contact."),
+(r"^(.+) already has this Nostr address\. Edit that contact instead\.$", "$1 ya tiene esta dirección de Nostr. Edita ese contacto.", "$1 já tem este endereço Nostr. Edite esse contato.", "$1 hat diese Nostr-Adresse schon. Bearbeite diesen Kontakt.", "$1 a déjà cette adresse Nostr. Modifiez ce contact."),
 ]
 
 LANGS = ['es', 'pt', 'de', 'fr']

@@ -2153,6 +2153,9 @@ function saveContact(c) {
   let nostr = null;
   if (String(c.nostr || '').trim()) { nostr = parseNostrAddr(c.nostr); if (!nostr) throw new Error("That Nostr address can't be read. Paste an npub or nprofile."); }
   if (!ln && !nostr) throw new Error('Add a Lightning address, a Nostr address, or both.');
+  // one contact per person: the same Lightning or Nostr address can't be saved twice
+  const twin = S.contacts.find(x => x.id !== c.id && ((ln && x.ln === ln) || (nostr && x.pubkey === nostr.pubkey)));
+  if (twin) { const e = new Error(`${twin.name} already has ${ln && twin.ln === ln ? 'this Lightning address' : 'this Nostr address'}. Edit that contact instead.`); e.fix = { act: 'contactEdit', id: twin.id, label: 'Edit that contact' }; throw e; }
   const rec = { id: c.id || uid(), name, ln, nostr: nostr ? String(c.nostr).trim().replace(/^nostr:/i, '') : '', pubkey: nostr ? nostr.pubkey : '', relays: nostr ? nostr.relays : [], created: c.created || Date.now() };
   const i = S.contacts.findIndex(x => x.id === rec.id);
   if (i >= 0) S.contacts[i] = rec; else S.contacts.push(rec);
@@ -3019,6 +3022,7 @@ const A = {
   reqOpen: () => { sfx('select'); openRequest(); },
   reqCreate: b => run(b, 'CREATING', async () => {
     const a = satsOf('amtIn');
+    if (!a && val('amtIn').trim()) throw amtErr('Leave the amount empty to accept any amount, or type more than 0.', 'zero');
     const r = newRequest(a, val('memoIn').trim(), !!($('#onlyMine') || {}).checked); sfx('coin'); showRequest(r);
   }),
   reqShow: b => { const r = S.requests.find(x => x.id === b.dataset.id); if (r) showRequest(r); },

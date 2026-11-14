@@ -867,6 +867,7 @@ function openGame(id, opts) {
     const old = view.querySelector('.stick, .dpad'); old.insertAdjacentHTML('afterend', padHTML()); old.remove();
     e.currentTarget.textContent = next === 'stick' ? 'Use D-pad' : 'Use joystick';
     bindStick(view); bindKeys(view.querySelector('.dpad')); A().sfx('blip');
+    fit();   // the D-pad is a little taller than the joystick: the screen re-fits so the hint never sits on it
   };
   bindKeys(view);
   function bindKeys(root) { if (!root) return; root.querySelectorAll('[data-k]').forEach(b => {
