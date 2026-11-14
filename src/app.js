@@ -916,12 +916,40 @@ async function copy(text, el) {
 let sheetCleanup = null;
 /* Amount fields: type sats, or flip to your currency (uses the live price, when Show Bitcoin price is on). */
 const canFiat = () => !!(S.prefs.fiat && price.rate && price.cur === S.prefs.currency);
+/* Typed amounts in your currency, read the way your language writes them. German, Spanish, Portuguese and
+   French use a decimal comma and group with dots or spaces; English uses a decimal point and groups with commas.
+   When both marks appear, the last one is the decimal mark (1.234,56 and 1,234.56 both mean 1234.56). A lone
+   mark of the other kind followed by exactly three digits is grouping (1.000 in German is a thousand); with one
+   or two digits after it, it's a decimal mark (1234.56 and 0,5 read as typed). Amounts are never read 1000x off. */
+const decMark = () => (1.5).toLocaleString(numLocale()).replace(/\d/g, '') || '.';
+function parseFiat(v) {
+  let t = String(v || '').replace(/[\s\u00a0\u202f'’]/g, '');
+  if (!t) return 0;
+  if (!/^[0-9.,]+$/.test(t)) return NaN;
+  const dec = decMark(), other = dec === ',' ? '.' : ',';
+  const lastDot = t.lastIndexOf('.'), lastComma = t.lastIndexOf(',');
+  let point = -1;
+  if (lastDot >= 0 && lastComma >= 0) point = Math.max(lastDot, lastComma);
+  else if (lastDot >= 0 || lastComma >= 0) {
+    const mark = lastDot >= 0 ? '.' : ',', at = Math.max(lastDot, lastComma), count = t.split(mark).length - 1, after = t.length - at - 1;
+    if (count > 1) point = -1;                                   // 1.234.567: grouping
+    else if (mark === dec) point = at;                           // the language's own decimal mark
+    else point = after === 3 ? -1 : at;                          // 1.000 in German is grouping; 1234.56 and 0,5 are decimals
+  }
+  const whole = (point >= 0 ? t.slice(0, point) : t).replace(/[.,]/g, ''), frac = point >= 0 ? t.slice(point + 1) : '';
+  if (/[.,]/.test(frac)) return NaN;
+  const n = parseFloat((whole || '0') + (frac ? '.' + frac : ''));
+  return isFinite(n) ? n : NaN;
+}
+// your currency without grouping, with the language's decimal mark: 12,50 in German, 12.50 in English
+const fmtFiatPlain = (x, dp = 2) => Number(x).toLocaleString(numLocale(), { minimumFractionDigits: dp, maximumFractionDigits: dp, useGrouping: false });
 function satsOf(id) {
   const el = typeof id === 'string' ? $('#' + id) : id; if (!el) return 0;
   const v = String(el.value || '').trim(); if (!v) return 0;
   if (el.dataset.cur === 'fiat') {
     if (!canFiat()) throw new Error('The exchange rate is not available right now. Switch the amount to SAT.');
-    const f = parseFloat(v.replace(/[^0-9.,]/g, '').replace(/,(?=\d{1,2}$)/, '.').replace(/,/g, ''));
+    const f = parseFiat(v);
+    if (isNaN(f)) throw new Error("That amount can't be read. Type it like this: " + fmtFiatPlain(1234.56));
     return f > 0 ? Math.round(f / price.rate * 1e8) : 0;
   }
   return parseInt(v.replace(/[^0-9]/g, ''), 10) || 0;
@@ -964,7 +992,7 @@ function toggleUnit(el) {
   const toFiat = el.dataset.cur !== 'fiat';
   el.dataset.cur = toFiat ? 'fiat' : 'sat';
   el.setAttribute('inputmode', toFiat ? 'decimal' : 'numeric');
-  el.value = n ? (toFiat ? (n / 1e8 * price.rate).toFixed(2) : String(n)) : '';
+  el.value = n ? (toFiat ? fmtFiatPlain(n / 1e8 * price.rate) : String(n)) : '';
   const b = el.parentElement.querySelector('.unitbtn'); if (b) b.textContent = toFiat ? S.prefs.currency : 'SAT';
   unitLabel(el); S.prefs.amtFiat = toFiat; save(); amtConv(el);
 }
