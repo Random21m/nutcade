@@ -401,7 +401,7 @@ function cashierRender() {
         <div class="seg cash-method" role="group" aria-label="Payment method"><button data-ck="m-ln" aria-pressed="${cash.method === 'ln'}" ${supports(m, 'mint', 'bolt11') ? '' : 'disabled'}>LIGHTNING</button><button data-ck="m-ecash" aria-pressed="${cash.method === 'ecash'}">ECASH</button></div>
         <button class="btn sm" data-ck="clear">Clear</button></div>
       <button class="btn solid lime block cash-charge" data-ck="charge" ${sats ? '' : 'disabled'}>Charge ${sats ? money(sats) : ''}</button>
-      <div class="row" style="justify-content:center;gap:10px;flex-wrap:wrap"><span class="tiny muted uname">Into ${esc(m.name)}</span><button class="linkbtn tiny" data-ck="close">Close the till</button></div>`;
+      <div class="row" style="justify-content:center;gap:10px;flex-wrap:wrap"><span class="tiny muted">${(() => { const [a, b = ''] = tr('Into \u0001').split('\u0001'); return `<span data-noi18n>${esc(a)}</span><span class="uname">${esc(m.name)}</span><span data-noi18n>${esc(b)}</span>`; })()}</span><button class="linkbtn tiny" data-ck="close">Close the till</button></div>`;
   } else if (cash.mode === 'charge') {
     const amtNow = cash.tx ? cash.tx.amount : cash.req.amount;
     const code = cash.tx ? 'lightning:' + cash.tx.request.toUpperCase() : cash.req.encoded;

@@ -1035,6 +1035,8 @@ function showToast(msg, c) {
   let el = $('#toast'); if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
   clearTimeout(toastT);
   el.style.setProperty('--c', `var(--${c})`); el.textContent = msg; el.hidden = false;
+  const ct = document.querySelector('.cashier .cash-top');   // on the till the toast sits just under its top row, however tall a translated button makes it
+  el.style.top = ct ? Math.max(4, Math.round(ct.getBoundingClientRect().bottom + 6)) + 'px' : '';
   toastT = setTimeout(() => { el.hidden = true; toastT = toastQ.length ? setTimeout(nextToast, 180) : 0; }, toastMs(msg, c));
 }
 function nextToast() {   // held toasts, once the game is closed
@@ -2600,7 +2602,7 @@ function showMeltQuote(kind, mq, dest, note) {
   const head = $('#layer .sheet-head h3'); if (head) { head.textContent = tr('Pay'); head.closest('.sheet').setAttribute('aria-label', tr('Pay')); }
   const opts = kind === 'onchain' ? (mq.fee_options || []) : [];
   const feeRow = kind === 'ln' ? `<dt>Fee reserve</dt><dd>${money(mq.fee_reserve)}</dd>` : '';
-  setBody(`<dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd data-noi18n>${esc(note)}</dd>` : ''}</dl>
+  setBody(`<dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd ${AUTO_NOTE.test(note) ? '' : 'data-noi18n'}>${esc(note)}</dd>` : ''}</dl>
     ${opts.length ? `<div class="field"><label>Fee speed</label><div class="txs">${opts.map((o, i) => `<label class="tx out" style="cursor:pointer"><span class="ico"><input type="radio" name="fee" value="${o.fee_index}" ${i === 0 ? 'checked' : ''} style="accent-color:var(--pink)"></span><span class="mid"><div class="note">${esc(tr(`~${o.estimated_blocks} block${o.estimated_blocks === 1 ? '' : 's'}`))}</div><div class="meta">≈ ${Math.round(o.estimated_blocks * 10)} min</div></span><span class="amt">${fmt(o.fee_reserve)}</span></label>`).join('')}</div></div>` : ''}
     ${kind === 'ln' ? '<div class="tiny muted">Unused fee reserve comes back as change.</div>' : ''}
     ${kind === 'ln' && balanceOf(S.active) < amount + num(mq.fee_reserve) ? `<div class="notice">${esc((activeMint() || {}).name || 'This mint')} holds ${money(balanceOf(S.active))}, not enough on its own.${S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? ' You can split the payment across your mints.' : ''}</div>` : ''}
