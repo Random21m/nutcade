@@ -238,7 +238,7 @@ function openExtra() {
     <ol class="steps"><li>Lock some sats. They stay yours: spend them any time.</li><li>Your heir gets a copy that only opens after the date.</li><li>Press CONTINUE now and then (or just open NUTCADE) to push the date back.</li><li>If you stop, your heir's NUTCADE claims the sats once the date passes.</li></ol>
     <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="10000" autocomplete="off"></div>
     <div class="field"><label for="xlTo">Heir</label><select id="xlTo" class="inp">${cs.map(c => `<option value="${esc(c.id)}" data-noi18n>${esc(c.name)}</option>`).join('')}<option value="">Someone else (paste their npub)</option></select></div>
-    <div class="field" id="xlKeyF" ${cs.length ? 'hidden' : ''}><label for="xlKey">Their npub</label><input id="xlKey" class="inp" placeholder="npub1…" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+    <div class="field" id="xlKeyF" ${cs.length ? 'hidden' : ''}><label for="xlKey">Their npub</label><input id="xlKey" class="inp" data-noi18n placeholder="npub1…" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
     <div class="field"><label>If I stop pressing CONTINUE, it opens for them after</label><div class="seg three" role="group" aria-label="Opens after">${EXTRA_PERIODS.map(([d, l]) => `<button type="button" data-act="giftDays" data-days="${d}" aria-pressed="${d === 182}">${l}</button>`).join('')}</div></div>
     <div class="notice">This depends on the mint still running when the date comes, so use a mint you trust for the long term. Your heir needs NUTCADE with Nostr turned on to receive their copy, or you can hand it to them yourself.</div>
     <button class="btn solid gold block" data-act="extraStart">Lock it in</button><div id="sheetErr"></div>`,
@@ -359,8 +359,8 @@ function openReport(url) {
   const m = S.mints.find(x => x.url === url) || { name: host(url), url };
   const draw = (busy) => {
     const r = reportCard(url), l = mlog(url);
-    return `<div class="report"><div class="grade-big ${gradeCls(r.overall)}">${r.overall}</div><div><div class="h2 uname" data-noi18n>${esc(m.name)}</div><div class="tiny muted" data-noi18n>${esc(host(url))}</div>${l.info && l.info.version ? `<div class="tiny muted" data-noi18n>${esc(l.info.version)}</div>` : ''}</div></div>
-      <div class="report-rows">${r.rows.map(x => `<div class="rrow ${x.warn ? 'warn' : ''}"><span class="rg ${gradeCls(x.g)}${x.g.length > 1 ? ' word' : ''}">${x.g}</span><span><b>${x.k}</b><span class="tiny muted">${x.d.map(p => `<span>${p}</span>`).join(' · ')}</span></span></div>`).join('')}</div>
+    return `<div class="report"><div class="grade-big ${gradeCls(r.overall)}"${r.overall.length > 1 ? '' : ' data-noi18n'}>${r.overall}</div><div><div class="h2 uname" data-noi18n>${esc(m.name)}</div><div class="tiny muted" data-noi18n>${esc(host(url))}</div>${l.info && l.info.version ? `<div class="tiny muted" data-noi18n>${esc(l.info.version)}</div>` : ''}</div></div>
+      <div class="report-rows">${r.rows.map(x => `<div class="rrow ${x.warn ? 'warn' : ''}"><span class="rg ${gradeCls(x.g)}${x.g.length > 1 ? ' word' : ''}"${x.g.length > 1 ? '' : ' data-noi18n'}>${x.g}</span><span><b>${x.k}</b><span class="tiny muted">${x.d.map(p => `<span>${p}</span>`).join(' · ')}</span></span></div>`).join('')}</div>
       ${l.info && l.info.motd ? `<div class="notice">Message from the mint: <span data-noi18n>${esc(l.info.motd)}</span></div>` : ''}
       <div class="tiny muted">Graded on this phone from health checks, your own payments with this mint, its keys and Nostr recommendations. A good grade isn't a guarantee: only keep what you can afford to lose at any one mint.</div>
       ${busy ? busyHTML('CHECKING THE MINT') : `<button class="btn sm" data-act="reportOpen" data-url="${esc(url)}" data-fresh="1">Check again</button>`}`;

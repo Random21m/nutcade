@@ -84,7 +84,7 @@
   function shell(el) {
     el.innerHTML = `<div class="panel pc">
       <div class="row between" style="align-items:flex-start;gap:8px">
-        <div style="min-width:0"><div class="row" style="gap:8px"><span class="h2">BTC / <span data-pc="cur">USD</span></span><span class="pc-live" data-pc="live"></span></div>
+        <div style="min-width:0"><div class="row" style="gap:8px"><span class="h2" data-noi18n>BTC / <span data-pc="cur">USD</span></span><span class="pc-live" data-pc="live"></span></div>
           <div class="pc-price" data-pc="price" aria-live="polite">—</div>
           <div class="pc-chg" data-pc="chg"></div></div>
       </div>

@@ -111,7 +111,7 @@ const starSwarm = {
     ctx.fillStyle = C.red; s.bombs.forEach(b => { ctx.fillRect(b.x, b.y, 2, 4); });
     drawFx(ctx, s.fx);
     G.hud(s.lives, 'WAVE ' + s.wave);
-    if (s.delay > 30) text(ctx, 'WAVE ' + s.wave, W / 2, 140, C.gold, 8, 'center');
+    if (s.delay > 30) text(ctx, T(`WAVE ${s.wave}`), W / 2, 140, C.gold, 8, 'center');
   },
   thumb(ctx, t) { ctx.fillStyle = C.bg; ctx.fillRect(0, 0, 112, 84); for (let i = 0; i < 4; i++) for (let r = 0; r < 3; r++) spr(ctx, ALIENS[r][(t >> 4) & 1], 16 + i * 22 + Math.sin(t / 30) * 6, 10 + r * 12, APAL); spr(ctx, SHIP, 50 + Math.sin(t / 20) * 30, 70, SPAL); ctx.fillStyle = '#fff'; ctx.fillRect(56 + Math.sin(t / 20) * 30, 60 - (t * 3) % 40, 1, 4); }
 };
@@ -251,7 +251,7 @@ const nutMaze = {
       spr(ctx, AUDITOR[(s.t >> 3) & 1], MOX + e.x, MOY + e.y, { r: col, w: C.white, k: e.eaten ? C.white : C.blue });
     }
     G.hud(s.lives, 'LV ' + s.level);
-    if (s.ready > 0) text(ctx, 'READY!', W / 2, MOY + 15 * TS, C.gold, 8, 'center');
+    if (s.ready > 0) text(ctx, T('READY!'), W / 2, MOY + 15 * TS, C.gold, 8, 'center');
   },
   thumb(ctx, t) {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, 112, 84); ctx.strokeStyle = C.violet; ctx.lineWidth = 2;
@@ -320,7 +320,7 @@ const brickBlitz = {
     const p = s.pad; ctx.fillStyle = C.cyan; ctx.fillRect(p.x, p.y, p.w, p.h); ctx.fillStyle = C.pink; ctx.fillRect(p.x, p.y, 4, p.h); ctx.fillRect(p.x + p.w - 4, p.y, 4, p.h); ctx.fillStyle = '#fff'; ctx.fillRect(p.x + 4, p.y, p.w - 8, 1);
     ctx.fillStyle = '#fff'; ctx.fillRect(s.ball.x - 2, s.ball.y - 2, 4, 4);
     drawFx(ctx, s.fx); G.hud(s.lives, 'LV ' + s.level);
-    if (s.ball.stuck) text(ctx, 'A / TAP TO LAUNCH', W / 2, 200, C.gold, 8, 'center');
+    if (s.ball.stuck) text(ctx, T('A / TAP TO LAUNCH'), W / 2, 200, C.gold, 8, 'center');
   },
   thumb(ctx, t) { ctx.fillStyle = '#120c2e'; ctx.fillRect(0, 0, 112, 84); for (let r = 0; r < 5; r++) for (let c = 0; c < 7; c++) if ((r * 7 + c + (t >> 5)) % 9) { ctx.fillStyle = BRICK_COLS[r]; ctx.fillRect(6 + c * 14.5, 8 + r * 7, 13, 5); } const bx = 56 + Math.sin(t / 17) * 44, by = 45 + Math.abs(Math.sin(t / 23)) * 28; ctx.fillStyle = '#fff'; ctx.fillRect(bx, by, 3, 3); ctx.fillStyle = C.cyan; ctx.fillRect(bx - 12, 76, 26, 3); }
 };
@@ -448,7 +448,7 @@ const hopLanes = {
     }
     if (!s.dead) { const lift = s.p.hop > 0 ? -2 : 0; spr(ctx, BUNNY, s.p.x + 4, HOY + s.p.row * HT + 4 + lift, { w: C.ink, p: C.pink, k: '#000' }); }
     drawFx(ctx, s.fx);
-    const tw = Math.max(0, s.time / (60 * 30)) * 120; ctx.fillStyle = tw < 30 ? C.red : C.lime; ctx.fillRect(W - 126, H - 14, tw, 6); text(ctx, 'TIME', W - 162, H - 15, C.gold);
+    const tw = Math.max(0, s.time / (60 * 30)) * 120; ctx.fillStyle = tw < 30 ? C.red : C.lime; ctx.fillRect(W - 126, H - 14, tw, 6); text(ctx, T('TIME'), W - 162, H - 15, C.gold);
     G.hud(s.lives, 'LV ' + s.level, true);
   },
   thumb(ctx, t) { ctx.fillStyle = '#16122a'; ctx.fillRect(0, 0, 112, 84); ctx.fillStyle = '#0b2a6b'; ctx.fillRect(0, 0, 112, 34); ctx.fillStyle = C.wood; ctx.fillRect((t * 0.6) % 150 - 40, 6, 40, 8); ctx.fillRect(112 - (t * 0.8) % 150, 20, 34, 8); ctx.fillStyle = '#3b2a6b'; ctx.fillRect(0, 34, 112, 10); spr(ctx, CAR[0], (t * 1.1) % 140 - 20, 50, { r: C.red, c: C.cyan, k: '#000' }); spr(ctx, CAR[1], 120 - (t * 0.9) % 140, 66, { y: C.gold, c: C.cyan, k: '#000' }, 1, true); spr(ctx, BUNNY, 52, 36 - ((t >> 5) & 1) * 2, { w: '#fff', p: C.pink, k: '#000' }); }
@@ -507,10 +507,10 @@ const skyShield = {
     for (const o of s.outs) { ctx.strokeStyle = 'rgba(45,226,255,.8)'; ctx.beginPath(); ctx.moveTo(o.sx, o.sy); ctx.lineTo(o.x, o.y); ctx.stroke(); ctx.fillStyle = C.cyan; ctx.fillRect(o.tx - 1, o.ty - 1, 3, 3); }
     for (const b of s.booms) { ctx.fillStyle = [C.white, C.gold, C.pink, C.cyan][(s.t >> 1) % 4]; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 6.29); ctx.fill(); }
     const c = s.cross; ctx.strokeStyle = C.lime; ctx.beginPath(); ctx.moveTo(c.x - 5, c.y); ctx.lineTo(c.x + 5, c.y); ctx.moveTo(c.x, c.y - 5); ctx.lineTo(c.x, c.y + 5); ctx.stroke();
-    text(ctx, 'AMMO ' + s.ammo, 8, 276, s.ammo < 5 ? C.red : C.ink);
+    text(ctx, T(`AMMO ${s.ammo}`), 8, 276, s.ammo < 5 ? C.red : C.ink);
     G.hud(null, 'WAVE ' + s.wave);
-    if (s.pause > 0) text(ctx, 'DEFEND THE CITIES', W / 2, 130, C.gold, 8, 'center');
-    if (s.bonusShown) { text(ctx, 'WAVE ' + s.wave + ' CLEAR', W / 2, 110, C.lime, 8, 'center'); text(ctx, 'BONUS ' + (s.bonus || 0), W / 2, 130, C.gold, 8, 'center'); }
+    if (s.pause > 0) text(ctx, T('DEFEND THE CITIES'), W / 2, 130, C.gold, 8, 'center');
+    if (s.bonusShown) { text(ctx, T(`WAVE ${s.wave} CLEAR`), W / 2, 110, C.lime, 8, 'center'); text(ctx, T(`BONUS ${s.bonus || 0}`), W / 2, 130, C.gold, 8, 'center'); }
   },
   thumb(ctx, t) { ctx.fillStyle = '#12061f'; ctx.fillRect(0, 0, 112, 84); ctx.fillStyle = '#5a2a14'; ctx.fillRect(0, 76, 112, 8); [8, 28, 70, 90].forEach(x => spr(ctx, CITY, x, 71, { c: C.cyan, w: C.gold })); ctx.strokeStyle = 'rgba(255,84,68,.8)'; ctx.beginPath(); const k = (t % 120) / 120; ctx.moveTo(10, 0); ctx.lineTo(10 + 25 * k, 70 * k); ctx.moveTo(100, 0); ctx.lineTo(100 - 30 * k, 70 * k); ctx.stroke(); const r = ((t + 60) % 120) / 120 * 12; ctx.fillStyle = C.gold; ctx.beginPath(); ctx.arc(70, 34, r, 0, 6.29); ctx.fill(); }
 };
@@ -544,8 +544,8 @@ const nibble = {
     if (s.bonus && (s.bonus.life > 60 || (s.t >> 2) & 1)) spr(ctx, ['.33.', '2222', '1111', '.11.'], s.bonus.x * NT + 2, NOY + s.bonus.y * NT + 2, { 1: C.gold, 2: C.brown, 3: '#5a3110' });
     s.body.forEach(([x, y], i) => { ctx.fillStyle = i === 0 ? C.lime : i % 2 ? '#3ad65c' : '#2fb84d'; ctx.fillRect(x * NT + 1, NOY + y * NT + 1, NT - 2, NT - 2); });
     const [hx, hy] = s.body[0]; ctx.fillStyle = '#000'; ctx.fillRect(hx * NT + 2, NOY + hy * NT + 2, 1, 1); ctx.fillRect(hx * NT + 5, NOY + hy * NT + 2, 1, 1);
-    text(ctx, 'LENGTH ' + s.body.length, 8, H - 14, C.dim);
-    G.hud(null, 'SPEED ' + (9 - s.every));
+    text(ctx, T(`LENGTH ${s.body.length}`), 8, H - 14, C.dim);
+    G.hud(null, T(`SPEED ${9 - s.every}`));
   },
   thumb(ctx, t) { ctx.fillStyle = '#0e0a24'; ctx.fillRect(0, 0, 112, 84); const n = 14; for (let i = 0; i < n; i++) { const k = (t / 4 - i) ; const x = 56 + Math.cos(k / 5) * 34, y = 42 + Math.sin(k / 3.3) * 26; ctx.fillStyle = i ? '#2fb84d' : C.lime; ctx.fillRect(x | 0, y | 0, 6, 6); } spr(ctx, ['.oo.', 'oyyo', 'oyyo', '.oo.'], 80, 20, { o: C.orange, y: C.gold }, 2); }
 };
@@ -673,11 +673,11 @@ const nutFlipper = {
     if (s.ready) { const py = 278 + s.power * 8; ctx.fillStyle = C.gold; ctx.fillRect(205, py, 8, 3); ctx.fillStyle = C.dim; ctx.fillRect(208, py + 3, 2, 8); }
     ctx.fillStyle = '#d8d8f0'; ctx.beginPath(); ctx.arc(s.b.x, s.b.y, PB.r, 0, 6.29); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(s.b.x - 2, s.b.y - 2, 1, 1);
     drawFx(ctx, s.fx);
-    G.hud(s.balls, 'BALL ' + s.ball);
+    G.hud(s.balls, T(`BALL ${s.ball}`));
     if (s.mult > 1) text(ctx, 'X' + s.mult, 104, 28, C.gold, 8, 'center');
-    if (s.msgT) text(ctx, s.msg, 104, 150, C.gold, 8, 'center');
-    else if (s.ready && s.ball === 1 && s.t < 600) text(ctx, 'HOLD A TO LAUNCH', 104, 150, C.ink, 8, 'center');
-    if (s.saveT > 0 && (s.t >> 3) & 1) text(ctx, 'SAVE', 104, 262, C.lime, 8, 'center');
+    if (s.msgT) text(ctx, T(s.msg), 104, 150, C.gold, 8, 'center');
+    else if (s.ready && s.ball === 1 && s.t < 600) text(ctx, T('HOLD A TO LAUNCH'), 104, 150, C.ink, 8, 'center');
+    if (s.saveT > 0 && (s.t >> 3) & 1) text(ctx, T('SAVE'), 104, 262, C.lime, 8, 'center');
   },
   thumb(ctx, t) {
     ctx.fillStyle = '#1a0b3a'; ctx.fillRect(0, 0, 112, 84);
@@ -790,9 +790,9 @@ function makeG() {
     hud(lives, label, bottomless) {
       ctx.fillStyle = '#05030c'; ctx.fillRect(0, 0, W, 22);
       text(ctx, '1UP', 8, 3, C.red); text(ctx, pad6(this.score), 8, 12, C.ink);
-      if (chal && ghost) { text(ctx, ghost.over ? 'GHOST OUT' : 'GHOST', W / 2, 3, C.violet, 8, 'center'); text(ctx, pad6(ghost.g.score), W / 2, 12, this.score > ghost.g.score ? C.lime : C.pink, 8, 'center'); }
-      else if (chal) { text(ctx, 'TARGET', W / 2, 3, C.pink, 8, 'center'); text(ctx, pad6(chal.target), W / 2, 12, this.score > chal.target ? C.lime : C.ink, 8, 'center'); }
-      else { text(ctx, 'HI-SCORE', W / 2, 3, C.red, 8, 'center'); text(ctx, pad6(Math.max(hiOf(cur.id), this.score)), W / 2, 12, C.ink, 8, 'center'); }
+      if (chal && ghost) { text(ctx, T(ghost.over ? 'GHOST OUT' : 'GHOST'), W / 2, 3, C.violet, 8, 'center'); text(ctx, pad6(ghost.g.score), W / 2, 12, this.score > ghost.g.score ? C.lime : C.pink, 8, 'center'); }
+      else if (chal) { text(ctx, T('TARGET'), W / 2, 3, C.pink, 8, 'center'); text(ctx, pad6(chal.target), W / 2, 12, this.score > chal.target ? C.lime : C.ink, 8, 'center'); }
+      else { text(ctx, T('HI-SCORE'), W / 2, 3, C.red, 8, 'center'); text(ctx, pad6(Math.max(hiOf(cur.id), this.score)), W / 2, 12, C.ink, 8, 'center'); }
       if (label) text(ctx, label, W - 8, 12, C.gold, 8, 'right');
       if (lives != null) for (let i = 0; i < lives - 1 && i < 5; i++) spr(ctx, ['.c.', 'ccc', 'c.c'], 8 + i * 6, bottomless ? H - 14 : H - 8, { c: C.lime }, 1);
     }
@@ -855,7 +855,7 @@ function openGame(id, opts) {
   view.innerHTML = `<div class="game-top"><button class="btn sm red" data-g="exit">Exit</button><div class="ttl">${cur.name}</div><button class="btn sm" data-g="mute" aria-label="Toggle sound">${(window.NutPrefs || {}).sound === false ? 'SND OFF' : 'SND ON'}</button></div>
     <div class="screen-frame"><canvas id="gameCanvas" width="${W}" height="${H}" aria-label="${T(cur.name + ' game screen')}"></canvas></div>
     <div class="pad touch-only"><div class="hint"><span>${cur.help}</span><button class="padswap" data-g="pad">${store.get('pad', 'stick') === 'stick' ? 'Use D-pad' : 'Use joystick'}</button></div>
-    <div class="pad-row">${padHTML()}<div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause">II</button><button class="abtn a" data-k="a" aria-label="A button">A</button></div></div></div>
+    <div class="pad-row">${padHTML()}<div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause"><span data-noi18n>II</span></button><button class="abtn a" data-k="a" aria-label="A button"><span data-noi18n>A</span></button></div></div></div>
     <div class="pad-keys"><span>${cur.keys}</span> · <span>Enter pause</span> · <span>Esc exit</span></div><div id="entry"></div>`;
   document.body.appendChild(view);
   document.body.style.overflow = 'hidden';
@@ -992,13 +992,13 @@ function drawTitle() {
   const tc = drawTitle.tc, thumb = tc.canvas; cur.thumb(tc, frame);
   ctx.drawImage(thumb, 56, 34); ctx.strokeStyle = C.violet; ctx.strokeRect(55.5, 33.5, 113, 85);
   text(ctx, cur.name, W / 2, 128, C.gold, 12, 'center');
-  if (chal) { text(ctx, 'CHALLENGE FROM ' + String(chal.name || chal.by).toUpperCase().slice(0, 12), W / 2, 144, C.pink, 8, 'center'); text(ctx, 'BEAT ' + pad6(chal.target), W / 2, 154, C.ink, 8, 'center'); }
+  if (chal) { text(ctx, T('CHALLENGE FROM') + ' ' + String(chal.name || chal.by).toUpperCase().slice(0, 12), W / 2, 144, C.pink, 8, 'center'); text(ctx, T('BEAT') + ' ' + pad6(chal.target), W / 2, 154, C.ink, 8, 'center'); }
   else text(ctx, '© NUTCADE ' + cur.year, W / 2, 146, C.dim, 8, 'center');
-  text(ctx, 'HIGH SCORES', W / 2, 166, C.cyan, 8, 'center');
+  text(ctx, T('HIGH SCORES'), W / 2, 166, C.cyan, 8, 'center');
   const sc = scoresOf(cur.id);
   for (let i = 0; i < 5; i++) { const r = sc[i]; const y = 182 + i * 12; text(ctx, `${i + 1}.`, 52, y, C.dim); text(ctx, r ? r.n : '---', 76, y, i === 0 ? C.gold : C.ink); text(ctx, r ? pad6(r.s) : '000000', 172, y, i === 0 ? C.gold : C.ink, 8, 'right'); }
   if ((frame >> 5) & 1) text(ctx, T(matchMedia('(pointer:fine)').matches ? 'PRESS SPACE TO START' : 'PRESS A OR TAP'), W / 2, 252, C.pink, 8, 'center');
-  text(ctx, 'CREDIT 99', W / 2, 270, C.dim, 8, 'center');
+  text(ctx, T('CREDIT 99'), W / 2, 270, C.dim, 8, 'center');
 }
 function drawGhost() { if (!ghost || ghost.over || !cur.ghost) return; ctx.save(); ctx.globalAlpha = 0.38; try { cur.ghost(ghost.state, ctx); } catch (e) {} ctx.restore(); }
 function loop() {
@@ -1019,7 +1019,7 @@ function loop() {
   } else if (mode === 'over' || mode === 'entry') {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx);
     ctx.fillStyle = 'rgba(5,3,12,.6)'; ctx.fillRect(0, 22, W, H - 22);
-    text(ctx, 'GAME OVER', W / 2, 130, C.red, 12, 'center');
+    text(ctx, T('GAME OVER'), W / 2, 130, C.red, 12, 'center');
   }
   pressed.clear(); tap = null; swipe = null;
 }
@@ -1030,8 +1030,8 @@ function mountList(el) {
   cancelAnimationFrame(lobbyRaf);
   el.innerHTML = `<div class="row between"><h2 class="h2">Arcade · ${GAMES.length} cabinets</h2><span class="tiny muted">Free play</span></div>
     <div class="cabinets">${GAMES.map(g => `<button class="cab" data-game="${g.id}" aria-label="Play ${g.name}"><canvas width="112" height="84" data-thumb="${g.id}"></canvas>
-      <span class="nm">${g.name}</span><span class="ds">${g.blurb}</span><span class="hs">HI ${hiOf(g.id) ? pad6(hiOf(g.id)) + ' ' + scoresOf(g.id)[0].n : '------'}</span></button>`).join('')}</div>
-    <div class="panel"><span class="h2">Hall of fame</span><div class="scores">${GAMES.map(g => { const s = scoresOf(g.id)[0]; return `<div><span style="color:var(--dim)">${g.name.split(' ')[0]}</span><span>${s ? s.n : '---'}</span><span>${s ? pad6(s.s) : '------'}</span>${s ? `<button class="sharebtn" data-card="${g.id}" aria-label="Share ${g.name} score card"><svg viewBox="0 0 8 8" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M5 0h3v3H7V2L4 5 3 4l3-3H5zM0 2h4v1H1v4h4V4h1v4H0z"/></svg></button>` : '<span></span>'}</div>`; }).join('')}</div></div>`;
+      <span class="nm" data-noi18n>${g.name}</span><span class="ds">${g.blurb}</span><span class="hs"><span>HI</span> <span data-noi18n>${hiOf(g.id) ? pad6(hiOf(g.id)) + ' ' + scoresOf(g.id)[0].n : '------'}</span></span></button>`).join('')}</div>
+    <div class="panel"><span class="h2">Hall of fame</span><div class="scores">${GAMES.map(g => { const s = scoresOf(g.id)[0]; return `<div><span style="color:var(--dim)" data-noi18n>${g.name.split(' ')[0]}</span><span data-noi18n>${s ? s.n : '---'}</span><span>${s ? pad6(s.s) : '------'}</span>${s ? `<button class="sharebtn" data-card="${g.id}" aria-label="Share ${g.name} score card"><svg viewBox="0 0 8 8" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M5 0h3v3H7V2L4 5 3 4l3-3H5zM0 2h4v1H1v4h4V4h1v4H0z"/></svg></button>` : '<span></span>'}</div>`; }).join('')}</div></div>`;
   el.querySelectorAll('[data-game]').forEach(b => b.onclick = () => { A().sfx('select'); openGame(b.dataset.game); });
   el.querySelectorAll('[data-card]').forEach(b => b.onclick = () => { const g = GAMES.find(x => x.id === b.dataset.card); const s = scoresOf(g.id)[0]; A().sfx('select'); if (window.Trophies && s) window.Trophies.openCard({ kind: 'score', game: g, score: s.s, initials: s.n, at: s.t }); });
   const thumbs = [...el.querySelectorAll('[data-thumb]')].map(c => ({ c, x: c.getContext('2d'), g: GAMES.find(g => g.id === c.dataset.thumb) }));

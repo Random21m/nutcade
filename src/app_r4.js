@@ -405,7 +405,7 @@ function cashierRender() {
   } else if (cash.mode === 'charge') {
     const amtNow = cash.tx ? cash.tx.amount : cash.req.amount;
     const code = cash.tx ? 'lightning:' + cash.tx.request.toUpperCase() : cash.req.encoded;
-    body = `<div class="cash-pay"><div class="label" style="text-align:center">${cash.label ? esc(cash.label) : 'Scan to pay'}</div>
+    body = `<div class="cash-pay"><div class="label" style="text-align:center">${cash.label ? `<span data-noi18n>${esc(cash.label)}</span>` : 'Scan to pay'}</div>
       <div class="cash-amt" style="font-size:clamp(28px,9vw,44px)" data-noi18n>${fmt(amtNow)}<small>SAT</small></div>${fiatOf(amtNow) ? `<div class="tiny muted" style="text-align:center">≈ ${fiatOf(amtNow)}</div>` : ''}
       ${qrBlock(code, cash.tx ? 'Lightning invoice QR' : 'Ecash payment request QR')}
       <div class="tiny muted" style="text-align:center">${cash.tx ? 'Any Lightning wallet' : 'Any Cashu wallet, ecash from your mints only'}</div>
