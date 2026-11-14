@@ -6,7 +6,7 @@ A Cashu ecash wallet with a 1980s arcade built in.
 
 **Open it:** https://random21m.github.io/nutcade/
 
-**Watch the demo:** [2-minute video of every feature on X](https://x.com/Random21m/status/2120760385179619678)
+**Watch it:** [the v1.11.0 video (1 minute) on X](https://x.com/Random21m/status/2121716082323165262), or the [2-minute tour of every feature](https://x.com/Random21m/status/2120760385179619678)
 
 **Timestamped in Bitcoin:** NUTCADE v1.8.1, including the send-by-sound chiptune modem, is anchored in [block 975,501](https://mempool.space/block/00000000000000000000c8328fa2baa44180bc59c74d739bfb317dd984ade480), mined 11 November 2026. The proof covers the release checksums, and the checksum for `index.html` covers the sound code inside it. The proof, `SHA256SUMS.txt.ots`, is attached to the [v1.8.1 release](https://github.com/Random21m/nutcade/releases/tag/v1.8.1); check it at [opentimestamps.org](https://opentimestamps.org).
 
@@ -15,6 +15,15 @@ A Cashu ecash wallet with a 1980s arcade built in.
 > **Moved from GitLab.** NUTCADE now lives on GitHub. The old address (nutcade-2c150c.gitlab.io) is no longer updated. Each address keeps its own wallet in your browser, so to move: write down your 12 words (Settings → Backup → Show recovery phrase), open the new address, and tap **Restore from recovery phrase**.
 
 NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a text message. It works in any modern browser on phone or desktop, with nothing to install, and keeps your wallet protected by a standard 12-word recovery phrase.
+
+<p align="center"><a href="https://x.com/Random21m/status/2121716082323165262"><img src="docs/screens/video-poster.jpg" alt="Watch the NUTCADE v1.11.0 video on X" width="720"></a><br><sub>▶ Click to watch the v1.11.0 video (1 minute, sound on)</sub></p>
+
+<table>
+<tr><td><img src="docs/screens/01-lightning.jpg" alt="Loading sats over Lightning: a 1UP and a coin shower"></td><td><img src="docs/screens/02-arcade.jpg" alt="Star Swarm, one of the 8 original arcade games"></td></tr>
+<tr><td><img src="docs/screens/03-trophies.jpg" alt="The trophy room"></td><td><img src="docs/screens/04-send.jpg" alt="Sending sats to a friend: SENT! on one phone, 1UP! on the other"></td></tr>
+<tr><td><img src="docs/screens/05-sound.jpg" alt="Send by sound: one phone plays the coins, the other listens and receives them"></td><td><img src="docs/screens/06-cashier.jpg" alt="Cashier mode: a paid sale of 5,000 sats"></td></tr>
+<tr><td><img src="docs/screens/07-languages.jpg" alt="The wallet in English, Spanish, Portuguese, German and French"></td><td><img src="docs/screens/08-pin.jpg" alt="The PIN lock"></td></tr>
+</table>
 
 ## Features
 
