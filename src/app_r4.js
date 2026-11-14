@@ -377,6 +377,8 @@ function openCashier() {
   cash.method = supports(m, 'mint', 'bolt11') ? 'ln' : 'ecash';
   cash.mode = 'keys'; cash.amount = ''; cash.label = ''; cash.unitBack = null; cash.unit = S.prefs.amtFiat && canFiat() ? 'fiat' : 'sat';
   cashierRender();
+  // keyboard focus moves into the till, so Enter charges instead of pressing the CASHIER MODE button behind it
+  cash.el.tabIndex = -1; cash.el.focus({ preventScroll: true });
 }
 function cashierTop() {
   const s = todaysSales(), tot = s.reduce((t, x) => t + num(x.amount), 0);
@@ -411,6 +413,9 @@ function cashierRender() {
   } else if (cash.mode === 'paid') {
     body = `<div class="cash-paid"><div class="cash-big">PAID!</div><div class="cash-amt" data-noi18n>+${fmt(cash.paidAmt)}<small>SAT</small></div><div class="tiny muted">${cash.label ? esc(cash.label) : 'Sale complete'}</div><button class="btn solid gold block" data-ck="next">Next customer</button></div>`;
   }
+  const had = cash.el.contains(document.activeElement) ? document.activeElement : null;
+  let kb = false; try { kb = !!had && had.matches(':focus-visible'); } catch (e) {}
+  const hadCk = kb && had.dataset && had.dataset.ck;   // a key reached with Tab keeps focus; a clicked one doesn't, so Enter then charges
   cash.el.innerHTML = `${cashierTop()}<div class="cash-body">${body}</div>`;
   const ex = cash.el.querySelector('#cashExit');
   const startHold = e => { e.preventDefault(); ex.classList.add('holding'); cash.holdT = setTimeout(() => closeCashier(), 900); };
@@ -420,6 +425,8 @@ function cashierRender() {
   const lab = cash.el.querySelector('#cashLabel'); if (lab) lab.addEventListener('input', () => { cash.label = lab.value; });
   if (window.Nutcade && LANG !== 'en') trNode(cash.el);
   fitNums(cash.el);
+  // redrawing keeps focus in the till: on the same key if you got there with Tab, else on the till itself
+  if (had) { const same = hadCk && cash.el.querySelector(`[data-ck="${hadCk}"]:not([disabled])`); (same || cash.el).focus({ preventScroll: true }); }
 }
 // the amount as typed on the till, shown the way your language writes it: 123.456,78 in German.
 // cash.amount itself stays plain digits with a '.' decimal point.
@@ -428,7 +435,8 @@ function fiatTyped(v) { const [w, f] = String(v).split('.'); return fmt(w || 0) 
 document.addEventListener('keydown', e => {
   if (!cash.el || cash.mode !== 'keys' || e.ctrlKey || e.metaKey || e.altKey || (e.target.matches && e.target.matches('input,textarea,select'))) return;
   const k = /^[0-9]$/.test(e.key) ? e.key : e.key === 'Backspace' ? 'del' : (e.key === '.' || e.key === ',') ? '.' : e.key === 'Enter' ? 'charge' : null;
-  if (!k || (k === 'charge' && e.target.closest && e.target.closest('button'))) return;   // Enter on a focused button presses that button
+  // Enter on a focused button inside the till presses that button (once, natively); anywhere else it charges
+  if (!k || (k === 'charge' && e.target.closest && e.target.closest('button') && cash.el.contains(e.target))) return;
   const b = cash.el.querySelector(`[data-ck="${k}"]`); if (!b || b.disabled) return;
   e.preventDefault(); b.click();
 });

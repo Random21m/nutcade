@@ -3078,9 +3078,9 @@ document.addEventListener('input', e => {
   }
 });
 document.addEventListener('keydown', e => {
-  const sheet = $('#layer .sheet');
-  if (sheet && e.key === 'Tab') {   // keep keyboard focus inside the open sheet
-    const f = [...sheet.querySelectorAll(FOCUSABLE)].filter(x => x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden');
+  const sheet = $('#layer .sheet'), trap = sheet || cash.el;
+  if (trap && e.key === 'Tab') {   // keep keyboard focus inside the open sheet, or the till
+    const f = [...trap.querySelectorAll(FOCUSABLE)].filter(x => x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden');
     if (f.length) {
       const i = f.indexOf(document.activeElement);
       if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); return; }

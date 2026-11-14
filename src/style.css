@@ -371,6 +371,7 @@ body.theme-amber,body.theme-phosphor{background-image:linear-gradient(rgba(255,2
 .health.slow .dot{background:var(--gold);box-shadow:0 0 8px var(--gold)}
 .health.wait .dot{background:var(--dim);box-shadow:none}
 /* cashier mode */
+.cashier:focus{outline:none}
 .cashier{position:fixed;inset:0;z-index:120;background:var(--void);display:flex;flex-direction:column;align-items:center;overflow:auto;
   padding:calc(10px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
 .cash-top{width:100%;max-width:480px;display:flex;justify-content:space-between;align-items:center;gap:10px}
