@@ -14,7 +14,7 @@ Object.assign(A, {
     if (!(people >= 2 && people <= 30)) throw new Error('Choose 2 to 30 people, including you.');
     const share = Math.ceil(total / people);
     if (share < 1) throw new Error('That bill is too small to split.');
-    const r = newRequest(share, val('memoIn').trim() || 'Split the bill', !!($('#onlyMine') || {}).checked);
+    const r = newRequest(share, val('memoIn').trim() || tr('Split the bill'), !!($('#onlyMine') || {}).checked);
     r.split = { total, people, share, need: share * (people - 1) }; store.set('requests', S.requests);
     sfx('levelup'); showSplit(r); refresh();
   }),

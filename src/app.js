@@ -1237,7 +1237,9 @@ function viewWallet() {
 
 function viewHistory() {
   const q = histQuery.toLowerCase();
-  const list = S.txs.filter(t => (histFilter === 'all' || t.type === histFilter) && (!histTag || tagsOf(t.note).includes(histTag)) && (!q || (t.note || '').toLowerCase().includes(q) || String(t.amount).includes(q)));
+  // an amount typed the way the language writes it (25.000, 25 000, 25,000) matches 25000
+  const qAmt = /^[\d\s.,\u00a0\u202f'’]+$/.test(q) ? q.replace(/[^\d]/g, '') : q;
+  const list = S.txs.filter(t => (histFilter === 'all' || t.type === histFilter) && (!histTag || tagsOf(t.note).includes(histTag)) && (!q || (t.note || '').toLowerCase().includes(q) || (noteText(t.note) || '').toLowerCase().includes(q) || (qAmt && String(t.amount).includes(qAmt))));
   const noted = S.txs.filter(t => t.note).length;
   const counts = {}; S.txs.forEach(t => tagsOf(t.note).forEach(g => { counts[g] = (counts[g] || 0) + 1; }));
   const tags = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 14);
