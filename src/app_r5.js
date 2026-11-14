@@ -151,7 +151,7 @@ async function continueExtra(quiet) {
 }
 async function cashOutExtra() {
   const x = S.extra; if (!x) return;
-  const tx = await receiveToken(extraToken(), `Extra Life cashed out (was for ${x.heir.name})`);
+  const tx = await receiveToken(extraToken(), `Extra Life cashed out (was for ${x.heir.name})`, { own: true });
   S.extra = null; saveExtra();
   const k = S.contacts.find(c => c.pubkey === x.heir.pubkey);
   const wrap = L.nip17.wrapEvent(nostrKey(), { publicKey: x.heir.pubkey }, JSON.stringify({ t: 'nutcade-extralife-end', v: 1 }));

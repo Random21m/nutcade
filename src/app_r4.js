@@ -157,7 +157,7 @@ async function takeBackGift(t) {
   if (t.lockUntil && Date.now() < t.lockUntil) throw new Error(`This gift is locked to ${t.giftTo || 'them'} until ${fmtDay(t.lockUntil)}. After that you can take it back.`);
   if (await checkClaim(t).catch(() => false)) return 'claimed';
   reclaiming.add(t.id);
-  try { await receiveToken(t.token, `Gift came back${t.giftTo ? ' from ' + t.giftTo : ''}`); }
+  try { await receiveToken(t.token, `Gift came back${t.giftTo ? ' from ' + t.giftTo : ''}`, { own: true }); }
   catch (e) { if (/already spent|spent/i.test(e.message || '')) { updTx(t.id, { status: 'claimed' }); return 'claimed'; } throw e; }
   finally { setTimeout(() => reclaiming.delete(t.id), 5000); }
   updTx(t.id, { status: 'reclaimed' });
@@ -307,7 +307,7 @@ function mintHealthLine(m) {
 }
 function openMove(from, to, amount) {
   const src = S.mints.filter(m => balanceOf(m.url) > 0 && supports(m, 'melt', 'bolt11'));
-  const dst = S.mints.filter(m => supports(m, 'mint', 'bolt11'));
+  const dst = S.mints.filter(m => supports(m, 'mint', 'bolt11') && !isBlocked(m.url));   // nothing moves into a blocked mint
   if (!src.length || dst.length < 2) { toast('Moving sats needs two mints that both handle Lightning.', 'gold'); return; }
   from = from || src.slice().sort((a, b) => balanceOf(b.url) - balanceOf(a.url))[0].url;
   to = to || (dst.find(m => m.url !== from) || {}).url;
