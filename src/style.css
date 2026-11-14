@@ -150,7 +150,7 @@ textarea.inp{min-height:84px;resize:vertical;font-size:21px;line-height:1.1}
 .sheet{width:100%;max-width:480px;max-height:calc(100% - 68px - env(safe-area-inset-top,0px));overflow:auto;background:var(--panel);border:3px solid var(--cyan);border-bottom:0;border-radius:8px 8px 0 0;
   padding:16px max(16px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:grid;gap:14px;box-shadow:0 -10px 40px var(--cyan);box-shadow:0 -10px 40px color-mix(in srgb,var(--cyan) 25%,transparent)}
 .sheet-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
-.sheet-head h3{margin:0;font-family:var(--f-display);font-size:13px;letter-spacing:2px;color:var(--gold);min-width:0;overflow-wrap:anywhere;hyphens:auto;line-height:1.5}
+.sheet-head h3{margin:0;font-family:var(--f-display);font-size:13px;letter-spacing:2px;color:var(--gold);min-width:0;overflow-wrap:break-word;hyphens:manual;line-height:1.5}
 .x{flex:none;width:44px;height:44px;border:2px solid var(--grid);border-radius:var(--r);background:none;color:var(--ink);font-family:var(--f-display);font-size:12px}
 
 /* Toast */
@@ -208,7 +208,7 @@ body:has(#layer .scrim) .toast{bottom:auto;top:calc(4px + env(safe-area-inset-to
 .trophy.on{border-color:var(--gold);color:var(--ink);box-shadow:inset 0 0 0 2px var(--gold);box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--gold) 15%,transparent)}
 .trophy:hover,.trophy:focus-visible{border-color:var(--cyan)}
 /* translated text: long words (German) wrap instead of widening the page */
-.notice,.gate-list li,.ack span{overflow-wrap:anywhere;hyphens:auto}
+.notice,.gate-list li,.ack span{overflow-wrap:anywhere;hyphens:manual}
 .gate-h,.h2,.label,.tl,.th,.sub,.tag,.chip,.field label{overflow-wrap:break-word;hyphens:manual}
 /* buttons wrap between words only: a label never splits as AD/D or SCAN-NEN; the text beside a button wraps instead */
 .btn{overflow-wrap:break-word;hyphens:manual}
@@ -364,7 +364,7 @@ body.theme-amber,body.theme-phosphor{background-image:linear-gradient(rgba(255,2
 .legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:17px;color:var(--dim)}
 .legend span{display:inline-flex;align-items:center;gap:6px;overflow-wrap:anywhere}
 .legend i{width:10px;height:10px;flex:none}
-.health{display:flex;align-items:center;gap:8px;font-family:var(--f-display);font-size:9px;letter-spacing:1px;line-height:1.5}
+.health{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-family:var(--f-display);font-size:9px;letter-spacing:1px;line-height:1.5}
 .health.good{color:var(--lime)}.health.slow{color:var(--gold)}.health.bad{color:var(--red)}.health.wait{color:var(--dim)}
 .health.slow .dot{background:var(--gold);box-shadow:0 0 8px var(--gold)}
 .health.wait .dot{background:var(--dim);box-shadow:none}
@@ -411,7 +411,7 @@ body.theme-amber,body.theme-phosphor{background-image:linear-gradient(rgba(255,2
 .split-share{display:flex;justify-content:center;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:20px}
 .split-share b{font-family:var(--f-display);font-weight:normal;font-size:14px;color:var(--gold)}
 .hits li{display:flex;justify-content:center;gap:8px}
-.health .muted{margin-left:auto}
+.health .muted{margin-left:auto;white-space:nowrap}
 /* Round 5 */
 .chip.gift{color:var(--pink)}
 .qr-anim canvas{image-rendering:pixelated}
@@ -530,8 +530,10 @@ ol.steps{margin:0;padding-left:24px;display:grid;gap:8px;font-size:19px;line-hei
 }
 /* Anything people type (mint names and addresses, contact names, notes, memos) may be one long unbroken string.
    Body text may break anywhere when it has to; buttons and pixel-font labels still only break between words. */
-body{overflow-wrap:anywhere}
-.btn,.seg button,.tab,.label,.h2,.sub,.tl,.chip,.field label,.flabel,.cab .nm,.pin-title,.gate-h,.cash-title,.unitbtn,.linkbtn,.pin-k,.ck{overflow-wrap:break-word}
+body{overflow-wrap:break-word;hyphens:manual}
+/* only text people type, and codes, URLs and addresses, may break anywhere: a short label never splits mid-word */
+.tag,.note,.meta,.kv dd,.boss-memo,.hc-note,.mid b,.tiny b,p b,.addr,.code,textarea,.notice b,.th b,.tl b{overflow-wrap:anywhere}
+.btn,.seg button,.tab,.label,.h2,.sub,.tl,.chip,.field label,.flabel,.cab .nm,.pin-title,.gate-h,.cash-title,.cash-today,.unitbtn,.linkbtn,.pin-k,.ck,.health,.health span{overflow-wrap:break-word}
 .uname{overflow-wrap:anywhere;min-width:0;max-width:100%}
 .toast{overflow-wrap:anywhere}
 .boss > *{max-width:100%;min-width:0}
