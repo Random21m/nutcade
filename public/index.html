@@ -3980,6 +3980,12 @@ function nextToast() {   // held toasts, once the game is closed
   if (toastHeld()) { toastT = setTimeout(nextToast, 1000); return; }
   const t = toastQ.shift(); if (t) showToast(t.msg, t.c);
 }
+// a game opening puts the toast on screen back in line until the game closes
+function holdToasts() {
+  const el = $('#toast'); if (!el || el.hidden) return;
+  if (!toastQ.some(t => t.msg === el.textContent)) toastQ.unshift({ msg: el.textContent, c: (el.style.getPropertyValue('--c').match(/--(\w+)/) || [, 'lime'])[1] });
+  el.hidden = true; clearTimeout(toastT); toastT = setTimeout(nextToast, 1000);
+}
 function clearToasts() { toastQ.length = 0; clearTimeout(toastT); toastT = 0; const el = $('#toast'); if (el) el.hidden = true; }
 async function copy(text, el) {
   try { await navigator.clipboard.writeText(text); toast('Copied', 'cyan'); sfx('blip'); }
@@ -7347,7 +7353,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, tr, fmtDate, logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved };
+window.Nutcade = { loadCard, render, refresh, S, toast, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}
@@ -8726,6 +8732,7 @@ function openGame(id, opts) {
     <div class="pad-keys"><span>${cur.keys}</span> · <span>Enter pause</span> · <span>Esc exit</span></div><div id="entry"></div>`;
   document.body.appendChild(view);
   document.body.style.overflow = 'hidden';
+  if (window.Nutcade && window.Nutcade.holdToasts) window.Nutcade.holdToasts();   // nothing lands on the controls
   ctx = view.querySelector('#gameCanvas').getContext('2d'); ctx.imageSmoothingEnabled = false;
   bindStick(view);
   view.querySelector('[data-g="pad"]').onclick = e => {   // switch between the joystick and the D-pad, remembered for next time

@@ -858,6 +858,7 @@ function openGame(id, opts) {
     <div class="pad-keys"><span>${cur.keys}</span> · <span>Enter pause</span> · <span>Esc exit</span></div><div id="entry"></div>`;
   document.body.appendChild(view);
   document.body.style.overflow = 'hidden';
+  if (window.Nutcade && window.Nutcade.holdToasts) window.Nutcade.holdToasts();   // nothing lands on the controls
   ctx = view.querySelector('#gameCanvas').getContext('2d'); ctx.imageSmoothingEnabled = false;
   bindStick(view);
   view.querySelector('[data-g="pad"]').onclick = e => {   // switch between the joystick and the D-pad, remembered for next time
