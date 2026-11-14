@@ -1097,6 +1097,8 @@ function parseFiatText(v) {
   const whole = point >= 0 ? s.slice(0, point) : s, frac = point >= 0 ? s.slice(point + 1) : '';
   if (point >= 0 && s.indexOf(s[point]) !== point) throw fiatUnreadable();   // two decimal marks
   if (!/^\d*$/.test(frac) || (whole && !groupsOk(whole))) throw fiatUnreadable();
+  // "01.000": a leading zero, then a mark and three digits, could be a mistyped 1.000 (a thousand) or 1.0: refused
+  if (point >= 0 && /^0\d/.test(whole) && frac.length === 3) throw fiatUnreadable();
   return (whole.replace(SEPS, '') || '0') + '.' + (frac || '0');
 }
 function parseSat(v) {
