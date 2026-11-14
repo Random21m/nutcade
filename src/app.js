@@ -423,17 +423,42 @@ async function receiveToken(token, note) {
 }
 
 /* ---------- SEND ---------- */
+/* On a mint that charges a fee to spend ecash (NUT-02 input fees), sending the whole balance can't work: the fee
+   has to come from somewhere. These turn the library's "Not enough funds available" into a sentence that says so,
+   and for ecash, offers the most that can be sent after the fee. */
+function maxSendable(w, have) {
+  const total = sum(have); if (!total || !have[0].id) return 0;
+  const fee = n => { try { return num(w.getFeesForKeyset(n, have[0].id)); } catch (e) { return 0; } };
+  const coins = a => { let c = 0; for (let x = a; x > 0; x = Math.floor(x / 2)) c += x % 2; return c; };   // a token of a SAT uses one coin per 1-bit
+  const inFee = fee(have.length);   // as if every coin is spent: the most the swap can cost
+  for (let a = total - inFee, i = 0; a > 0 && i < 500; a--, i++) {
+    let r = 0; for (let j = 0; j < 4; j++) r = fee(coins(a + r));   // the token carries its receiver's fee too
+    if (a + r + inFee <= total) return a;
+  }
+  return 0;
+}
+function shortOf(e, w, url, want, melt) {
+  if (!/not enough (funds|proofs)/i.test(String(e && e.message || ''))) return e;
+  const have = S.proofs[url] || [], total = sum(have);
+  if (melt) return new Error(`This payment needs ${money(want)} plus the mint's fee to spend ecash, and this mint holds ${money(total)}.`);
+  const max = maxSendable(w, have);
+  const f = new Error(max > 0 ? `${money(want)} plus the mint's fee is more than this mint holds. The most you can send is ${money(max)}.` : `This mint's fee is more than its balance of ${money(total)}, so nothing can be sent from it.`);
+  if (max > 0) f.fix = { act: 'sendMax', a: max, label: $('#layer [data-act=doSendEcash]') ? `Send ${money(max)}` : `Use ${money(max)}` };
+  return f;
+}
 async function sendEcash(amount, note, lockTo, url = S.active, opts = {}) {
   piggyGuard(amount);
   const w = await getWallet(url);
   const have = S.proofs[url] || [];
   if (sum(have) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(have))}.`);
   const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}) }, keep: w.defaultOutputType() } : undefined;
-  const { keep, send } = await withRepair(url, () => w.send(amount, have, { includeFees: true }, outCfg));
+  const { keep, send } = await withRepair(url, () => w.send(amount, have, { includeFees: true }, outCfg)).catch(e => { throw shortOf(e, w, url, amount, false); });
   S.proofs[url] = plain(keep);
   const token = L.getEncodedToken({ mint: url, proofs: send, unit: 'sat' });
   save();
-  return addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(send) - amount), mint: url, note, status: 'pending', token, sent: plain(send), locked: lockTo || null });
+  // the fee is everything the balance dropped by beyond the amount: the mint's fee for this swap (NUT-02) plus the
+  // fee the token carries so the receiver gets the full amount
+  return addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(have) - sum(keep) - amount), mint: url, note, status: 'pending', token, sent: plain(send), locked: lockTo || null });
 }
 async function meltQuote(kind, dest, amount) {
   const w = await getWallet(S.active);
@@ -448,8 +473,9 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active) {
   const have = S.proofs[url] || [];
   if (sum(have) < need) throw new Error(`Not enough funds. Need ${money(need)} including fees; this mint holds ${money(sum(have))}.`);
   piggyGuard(need);
-  const { keep, send } = await withRepair(url, () => w.send(need, have, { includeFees: true }));
-  const tx = addTx({ type: 'out', method: kind, amount, mint: url, note, status: 'pending', request: dest, quote: mq.quote });
+  const { keep, send } = await withRepair(url, () => w.send(need, have, { includeFees: true })).catch(e => { throw shortOf(e, w, url, need, true); });
+  const spent = sum(have) - sum(keep);   // what left the balance: the amount, the fee reserve and any swap fee
+  const tx = addTx({ type: 'out', method: kind, amount, fee: Math.max(0, spent - amount), mint: url, note, status: 'pending', request: dest, quote: mq.quote });
   const pend = { id: uid(), mint: url, proofs: plain(send), quote: mq.quote, kind, txId: tx.id };
   S.proofs[url] = plain(keep); S.pending.push(pend); save();
   try {
@@ -459,9 +485,9 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active) {
     const st = res.quote && res.quote.state;
     if (st === 'PAID') {
       S.pending = S.pending.filter(p => p.id !== pend.id);
-      updTx(tx.id, { status: 'done', fee: Math.max(0, sum(send) - amount - sum(change)), outpoint: res.quote.outpoint || null, preimage: res.quote.payment_preimage || null });
+      updTx(tx.id, { status: 'done', fee: Math.max(0, spent - amount - sum(change)), outpoint: res.quote.outpoint || null, preimage: res.quote.payment_preimage || null });
     } else {
-      updTx(tx.id, { status: 'pending', fee: reserve });
+      updTx(tx.id, { status: 'pending', fee: Math.max(0, spent - amount) });   // at most this; change may still come back
     }
     save();
     return txById(tx.id);
@@ -1173,7 +1199,7 @@ function closeSheet() {
 const FOCUSABLE = 'button:not([disabled]),[href],input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 function setBody(html, onOpen) { const b = $('#layer .sheet-body'); if (!b) return; if (typeof sheetCleanup === 'function') sheetCleanup(); b.innerHTML = html; enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; fitNums(b); }
 const busyHTML = msg => `<div class="row" style="justify-content:center;padding:24px 0"><span class="spinner">${esc(msg)}</span></div>`;
-const errHTML = e => `<div class="notice red">${esc(e && e.message || e)}${e && e.raw ? `<div class="tiny muted raw" data-noi18n>${esc(e.raw)}</div>` : ''}</div>`;
+const errHTML = e => `<div class="notice red"${e && e.amount ? ' data-amount' : ''}>${esc(e && e.message || e)}${e && e.raw ? `<div class="tiny muted raw" data-noi18n>${esc(e.raw)}</div>` : ''}${e && e.fix ? `<button class="btn sm gold" style="margin-top:8px" data-act="${esc(e.fix.act)}"${e.fix.a != null ? ` data-a="${esc(e.fix.a)}"` : ''}${e.fix.id ? ` data-id="${esc(e.fix.id)}"` : ''}>${esc(e.fix.label)}</button>` : ''}</div>`;
 
 /* ---------- views ---------- */
 let tab = 'wallet';
@@ -2941,6 +2967,7 @@ const A = {
     setBody(`<div style="text-align:center;display:grid;gap:12px"><div style="font-family:var(--f-display);font-size:16px;color:var(--lime)">SWAPPED!</div><div class="credit-num" style="font-size:28px">+${fmt(r.amt)}<small>${unitTag()}</small></div>
       <p style="margin:0">Claimed at ${esc(host(r.from))} and moved into ${esc((S.mints.find(m => m.url === r.to) || {}).name || host(r.to))} over Lightning.</p><button class="btn solid gold block" data-act="close">Continue</button></div>`);
   }),
+  sendMax: b => { const i = $('#amtIn'); if (i) setSats(i, b.dataset.a); const er = $('#sheetErr'); if (er) er.innerHTML = ''; const go = $('#layer [data-act=doSendEcash]'); if (go) go.click(); },
   tipPreset: b => { const i = $('#tipAmt'); if (i) setSats(i, b.dataset.a); b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); sfx('blip'); },
   tipQuote: b => run(b, 'ASKING', async () => {
     const sats = satsOf('tipAmt');

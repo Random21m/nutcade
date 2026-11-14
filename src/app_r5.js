@@ -123,9 +123,10 @@ async function startExtra(amount, heir, days, auto) {
   const until = Date.now() + days * 86400e3;
   internalMove = true;
   try {
+    const before = sum(S.proofs[S.active] || []);
     const proofs = await lockExtra(S.active, amount, heir.pubkey, until);
     S.extra = { mint: S.active, amount, proofs, heir, until, days, auto: auto !== false, created: Date.now(), renewed: Date.now() }; saveExtra();
-    addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(proofs) - amount), mint: S.active, note: `Extra Life for ${heir.name}`, status: 'done', extraLife: true });
+    addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, before - sum(S.proofs[S.active] || []) - amount), mint: S.active, note: `Extra Life for ${heir.name}`, status: 'done', extraLife: true });
   } finally { internalMove = false; }
   await sendHeirCopy().catch(() => false);
   return S.extra;
