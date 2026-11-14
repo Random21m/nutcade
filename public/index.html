@@ -7683,6 +7683,13 @@ async function backgroundTick(startup) {
 }
 let tickCount = 0;
 setInterval(() => { if (document.hidden || tabLocked || $('#layer .sheet')) return; tickCount++; backgroundTick().then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }); }, 30000);
+// A Lightning invoice made in the last half hour is checked every 8 s while NUTCADE is open, in case the mint's
+// live update was missed (for example while the connection dropped), so a paid invoice never waits for the 30 s tick.
+setInterval(() => {
+  if (document.hidden || tabLocked || (vault.on && !vault.open) || !S.seed) return;
+  const fresh = S.quotes.filter(q => q.kind === 'bolt11' && Date.now() - (txById(q.txId)?.ts || 0) < 30 * 60e3);
+  for (const q of fresh) checkQuote(q).then(r => { if (r === 'paid' && !$('#layer .sheet') && tab !== 'arcade') refresh(); }).catch(() => {});
+}, 8000);
 
 function livePrice(v, cur) {
   if (cur !== S.prefs.currency) return;
