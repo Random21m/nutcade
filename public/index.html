@@ -3983,7 +3983,7 @@ function toast(msg, c = 'lime') {
   msg = tr(String(msg ?? ''));
   if (document.querySelector('.cashier') && c !== 'red') return;   // the till shows its own PAID! screen
   if (toastHeld()) {
-    if (!toastQ.some(t => t.msg === msg)) { toastQ.push({ msg, c }); if (toastQ.length > 3) toastQ.splice(0, toastQ.length - 3); }
+    if (!toastQ.some(t => t.msg === msg)) { toastQ.push({ msg, c }); while (toastQ.filter(t => t.c !== 'red').length > 3) toastQ.splice(toastQ.findIndex(t => t.c !== 'red'), 1); }   // errors are never dropped; at most three others wait
     if (!toastT) toastT = setTimeout(nextToast, 1000); return;
   }
   showToast(msg, c);
@@ -3997,7 +3997,7 @@ function showToast(msg, c) {
 function nextToast() {   // held toasts, once the game is closed
   toastT = 0;
   if (toastHeld()) { toastT = setTimeout(nextToast, 1000); return; }
-  const t = toastQ.shift(); if (t) showToast(t.msg, t.c);
+  const i = toastQ.findIndex(x => x.c === 'red'); const t = toastQ.splice(i >= 0 ? i : 0, 1)[0]; if (t) showToast(t.msg, t.c);   // errors first
 }
 // a game opening puts the toast on screen back in line until the game closes
 function holdToasts() {
@@ -4005,7 +4005,7 @@ function holdToasts() {
   if (!toastQ.some(t => t.msg === el.textContent)) toastQ.unshift({ msg: el.textContent, c: (el.style.getPropertyValue('--c').match(/--(\w+)/) || [, 'lime'])[1] });
   el.hidden = true; clearTimeout(toastT); toastT = setTimeout(nextToast, 1000);
 }
-function clearToasts() { toastQ.length = 0; clearTimeout(toastT); toastT = 0; const el = $('#toast'); if (el) el.hidden = true; }
+function clearToasts() { for (let i = toastQ.length - 1; i >= 0; i--) if (toastQ[i].c !== 'red') toastQ.splice(i, 1); clearTimeout(toastT); toastT = 0; const el = $('#toast'); if (el && !(el.style.getPropertyValue('--c') || '').includes('red')) el.hidden = true; if (toastQ.length) toastT = setTimeout(nextToast, 300); }
 async function copy(text, el) {
   try { await navigator.clipboard.writeText(text); toast('Copied', 'cyan'); sfx('blip'); }
   catch (e) {
