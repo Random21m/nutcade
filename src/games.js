@@ -799,6 +799,7 @@ function makeG() {
   };
   return g;
 }
+let fitObs = null;
 function fit() {
   if (!view) return; const frameEl = view.querySelector('.screen-frame'); const c = view.querySelector('#gameCanvas');
   // the canvas shrinks below 1:1 in a short window, so the key hints under it never overlap it
@@ -867,7 +868,6 @@ function openGame(id, opts) {
     const old = view.querySelector('.stick, .dpad'); old.insertAdjacentHTML('afterend', padHTML()); old.remove();
     e.currentTarget.textContent = next === 'stick' ? 'Use D-pad' : 'Use joystick';
     bindStick(view); bindKeys(view.querySelector('.dpad')); A().sfx('blip');
-    fit();   // the D-pad is a little taller than the joystick: the screen re-fits so the hint never sits on it
   };
   bindKeys(view);
   function bindKeys(root) { if (!root) return; root.querySelectorAll('[data-k]').forEach(b => {
@@ -890,6 +890,9 @@ function openGame(id, opts) {
   };
   cv.addEventListener('pointerup', upH); cv.addEventListener('pointercancel', () => { ptr.down = false; });
   window.addEventListener('resize', fit); fit(); setTimeout(fit, 50);
+  // the screen re-fits whenever the space for it changes: switching to the slightly taller D-pad, or the hint
+  // wrapping to two lines once it's translated, so the hint never sits on the game
+  if (window.ResizeObserver) { fitObs = new ResizeObserver(() => fit()); fitObs.observe(view.querySelector('.screen-frame')); }
   G = makeG(); mode = 'title'; frame = 0; st = null;
   A().music('title');
   if (window.Nutcade) window.Nutcade.closeSheet();
@@ -897,6 +900,7 @@ function openGame(id, opts) {
 }
 function closeGame(silent) {
   cancelAnimationFrame(raf); raf = 0; RNG = Math.random; ghost = null; rec = null;
+  if (fitObs) { fitObs.disconnect(); fitObs = null; }
   if (view) { view.remove(); view = null; window.removeEventListener('resize', fit); document.body.style.overflow = ''; }
   for (const k in keys) keys[k] = false;
   if (!silent) { mode = 'title'; A().music('title'); if (window.Nutcade) window.Nutcade.refresh(); }

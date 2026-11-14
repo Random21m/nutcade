@@ -1150,7 +1150,7 @@ function enhanceAmounts(root) {
   });
 }
 // your currency, with enough decimals to show a small amount: 0.68 or 0.0068, never 0.00
-const fiatField = x => fmtFiatPlain(x, x >= 0.01 || !(x > 0) ? 2 : Math.min(8, Math.ceil(-Math.log10(x)) + 1));
+const fiatField = x => x >= 0.01 || !(x > 0) ? fmtFiatPlain(x) : Number(x).toLocaleString(numLocale(), { minimumFractionDigits: 2, maximumFractionDigits: Math.min(8, Math.ceil(-Math.log10(x)) + 1), useGrouping: false });
 /* SAT ⇄ your currency. Switching back without editing restores exactly what you typed (7 SAT stays 7, not the
    10 that $0.01 would make). An amount that can't be read stays as it is, with the reason, and doesn't switch. */
 function toggleUnit(el) {
