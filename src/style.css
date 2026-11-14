@@ -108,6 +108,7 @@ button{cursor:pointer}
 .tx .note.empty{color:var(--faint);font-style:italic}
 .tx .meta{font-size:17px;align-items:center;color:var(--dim);display:flex;gap:8px;flex-wrap:wrap}
 .tx .amt{font-family:var(--f-display);font-size:12px;font-variant-numeric:tabular-nums;text-align:right}
+.tx .amt.void,.credit-num.void{text-decoration:line-through;opacity:.6}   /* a failed or expired payment: nothing moved */
 .tx.in .amt{color:var(--lime)} .tx.out .amt{color:var(--pink)}
 .chip{display:inline-block;padding:0 6px;border:1px solid currentColor;border-radius:3px;font-size:16px;line-height:20px;letter-spacing:1px}
 .chip.ln{color:var(--gold)} .chip.ecash{color:var(--cyan)} .chip.pending{color:var(--violet)} .chip.failed{color:var(--red)} .chip.claimed{color:var(--dim)}

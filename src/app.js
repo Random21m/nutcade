@@ -476,16 +476,16 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active) {
   const { keep, send } = await withRepair(url, () => w.send(need, have, { includeFees: true })).catch(e => { throw shortOf(e, w, url, need, true); });
   const spent = sum(have) - sum(keep);   // what left the balance: the amount, the fee reserve and any swap fee
   const tx = addTx({ type: 'out', method: kind, amount, fee: Math.max(0, spent - amount), mint: url, note, status: 'pending', request: dest, quote: mq.quote });
-  const pend = { id: uid(), mint: url, proofs: plain(send), quote: mq.quote, kind, txId: tx.id };
+  const pend = { id: uid(), mint: url, proofs: plain(send), quote: mq.quote, kind, txId: tx.id, spent, amount, change: 0 };
   S.proofs[url] = plain(keep); S.pending.push(pend); save();
   try {
     const res = await withRepair(url, () => kind === 'ln' ? w.meltProofsBolt11(mq, send) : w.meltProofsOnchain(mq, send, feeIndex));
     const change = plain(res.change || []);
-    if (change.length) addProofs(url, change);
+    if (change.length) { addProofs(url, change); pend.change = sum(change); }
     const st = res.quote && res.quote.state;
     if (st === 'PAID') {
       S.pending = S.pending.filter(p => p.id !== pend.id);
-      updTx(tx.id, { status: 'done', fee: Math.max(0, spent - amount - sum(change)), outpoint: res.quote.outpoint || null, preimage: res.quote.payment_preimage || null });
+      settleMelt(pend, 'done', 0); updTx(tx.id, { outpoint: res.quote.outpoint || null, preimage: res.quote.payment_preimage || null });
     } else {
       updTx(tx.id, { status: 'pending', fee: Math.max(0, spent - amount) });   // at most this; change may still come back
     }
@@ -493,7 +493,9 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active) {
     return txById(tx.id);
   } catch (e) {
     await reconcile(pend).catch(() => {});
-    throw friendly(e, url);
+    const f = friendly(e, url), t = txById(tx.id);
+    if (t && t.status === 'failed') f.also = t.cost ? `The ecash came back, except ${money(t.cost)} the mint kept as its fee.` : 'Nothing left your wallet.';
+    throw f;
   }
 }
 async function reconcile(pend) {
@@ -502,7 +504,8 @@ async function reconcile(pend) {
   try { qs = pend.kind === 'ln' ? await w.checkMeltQuoteBolt11(pend.quote) : await w.checkMeltQuoteOnchain(pend.quote); } catch (e) {}
   if (qs && qs.state === 'PAID') {
     S.pending = S.pending.filter(p => p.id !== pend.id);
-    updTx(pend.txId, { status: 'done', outpoint: qs.outpoint || null });
+    settleMelt(pend, 'done', 0);
+    updTx(pend.txId, { outpoint: qs.outpoint || null });
     return 'paid';
   }
   const states = await w.checkProofsStates(pend.proofs);
@@ -512,11 +515,27 @@ async function reconcile(pend) {
     if (unspent.length) addProofs(pend.mint, unspent);
     S.pending = S.pending.filter(p => p.id !== pend.id);
     const allSpent = unspent.length === 0;
-    updTx(pend.txId, { status: allSpent ? 'done' : 'failed' });
+    settleMelt(pend, allSpent ? 'done' : 'failed', sum(unspent));
     save();
     return allSpent ? 'paid' : 'returned';
   }
   return 'pending';
+}
+/* The history always adds up to the balance. A payment that went through records fee = what left the balance -
+   amount - change. One that failed moved nothing, so it records no amount moved and no fee; but if getting the
+   ecash ready cost a mint fee (a NUT-02 swap fee) that didn't come back, that cost is its own "Mint fee" line,
+   linked to the failed payment, which says so. Older pending payments without these numbers keep what they had. */
+function settleMelt(pend, status, returned) {
+  const t = txById(pend.txId); if (!t) return;
+  if (pend.spent == null) { updTx(t.id, { status }); return; }
+  const out = pend.spent - returned - (pend.change || 0);   // what this attempt took from the balance in the end
+  if (status === 'done') { updTx(t.id, { status, fee: Math.max(0, out - t.amount) }); return; }
+  updTx(t.id, { status, fee: 0 });
+  if (t.roundup && S.piggy) { S.piggy.saved = Math.max(0, num(S.piggy.saved) - t.roundup); store.set('piggy', S.piggy); updTx(t.id, { roundup: 0 }); }   // nothing was paid, so nothing to round up
+  if (out > 0 && !t.costTx) {
+    const f = addTx({ type: 'out', method: 'fee', amount: 0, fee: out, mint: pend.mint, note: 'Mint fee for a failed payment', status: 'done', feeFor: t.id });
+    updTx(t.id, { costTx: f.id, cost: out });
+  }
 }
 async function checkClaim(tx) {
   const w = await getWallet(tx.mint);
@@ -1200,7 +1219,7 @@ function closeSheet() {
 const FOCUSABLE = 'button:not([disabled]),[href],input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 function setBody(html, onOpen) { const b = $('#layer .sheet-body'); if (!b) return; if (typeof sheetCleanup === 'function') sheetCleanup(); b.innerHTML = html; enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; fitNums(b); }
 const busyHTML = msg => `<div class="row" style="justify-content:center;padding:24px 0"><span class="spinner">${esc(msg)}</span></div>`;
-const errHTML = e => `<div class="notice red"${e && e.amount ? ' data-amount' : ''}>${esc(e && e.message || e)}${e && e.raw ? `<div class="tiny muted raw" data-noi18n>${esc(e.raw)}</div>` : ''}${e && e.fix ? `<button class="btn sm gold" style="margin-top:8px" data-act="${esc(e.fix.act)}"${e.fix.a != null ? ` data-a="${esc(e.fix.a)}"` : ''}${e.fix.id ? ` data-id="${esc(e.fix.id)}"` : ''}>${esc(e.fix.label)}</button>` : ''}</div>`;
+const errHTML = e => `<div class="notice red"${e && e.amount ? ' data-amount' : ''}>${esc(e && e.message || e)}${e && e.also ? `<div>${esc(e.also)}</div>` : ''}${e && e.raw ? `<div class="tiny muted raw" data-noi18n>${esc(e.raw)}</div>` : ''}${e && e.fix ? `<button class="btn sm gold" style="margin-top:8px" data-act="${esc(e.fix.act)}"${e.fix.a != null ? ` data-a="${esc(e.fix.a)}"` : ''}${e.fix.id ? ` data-id="${esc(e.fix.id)}"` : ''}>${esc(e.fix.label)}</button>` : ''}</div>`;
 
 /* ---------- views ---------- */
 let tab = 'wallet';
@@ -1280,14 +1299,15 @@ function refresh() { if ($('#layer .sheet')) { /* keep sheet */ } const y = wind
 
 function txRow(t) {
   const sign = t.type === 'in' ? '+' : '-';   // the pixel font's hyphen sits mid-height; its − glyph falls back to the baseline
-  const method = { ln: 'LN', ecash: 'ECASH', onchain: 'ON-CHAIN' }[t.method];
+  const method = { ln: 'LN', ecash: 'ECASH', onchain: 'ON-CHAIN', fee: 'FEE' }[t.method];
+  const moved = !(t.status === 'failed' || t.status === 'expired');   // a failed or expired payment moved nothing: its amount is struck through
   const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '');
-  const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : sign + fmt(t.amount);
+  const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : t.method === 'fee' ? '-' + fmt(t.fee) : (moved ? sign : '') + fmt(t.amount);
   const wide = amt.length > 11;   // a huge amount gets its own line under the note instead of squeezing the chips
   return `<button class="tx ${t.type}" data-act="tx" data-id="${t.id}"><span class="ico" aria-hidden="true">${t.type === 'in' ? '↓' : '↑'}</span>
     <span class="mid"><div class="note ${t.note ? '' : 'empty'}">${esc(noteText(t.note) || 'Add a note…')}</div>
     <div class="meta"><span class="chip ${t.method === 'ecash' ? 'ecash' : 'ln'}">${method}</span>${stat}<span>${timeAgo(t.ts)}</span></div></span>
-    <span class="amt${wide ? ' wide' : ''}">${amt}</span></button>`;
+    <span class="amt${wide ? ' wide' : ''}${moved ? '' : ' void'}">${amt}</span></button>`;
 }
 function timeAgo(ts) {
   const d = (Date.now() - ts) / 1000;
@@ -1988,7 +2008,10 @@ function openMultinut(invoice, amount, dest, note) {
           refresh();
           if (st.every(s => s === 'done')) return showDone('out', amount, `Lightning · ${n} mints`);
           if (st.some(s => s === 'pending')) setBody(`<div class="notice">The payment is in flight. NUTCADE will settle each part when the mints confirm. Check the parts in your notes.</div><button class="btn block gold" data-act="close">OK</button>`);
-          else setBody(`<div class="notice red">The payment didn't go through, so the parts that were sent came back to your wallet.</div><button class="btn block gold" data-act="close">OK</button>`);
+          else {
+            const kept = parts.reduce((t, p) => t + num((S.txs.find(x => x.quote === p.mq.quote) || {}).cost), 0);   // swap fees that didn't come back
+            setBody(`<div class="notice red">${kept ? `The payment didn't go through. The parts that were sent came back to your wallet, except ${money(kept)} the mints kept as fees.` : "The payment didn't go through, so the parts that were sent came back to your wallet."}</div><button class="btn block gold" data-act="close">OK</button>`);
+          }
         });
         return null;
       });
@@ -2569,21 +2592,24 @@ function showMeltQuote(kind, mq, dest, note) {
 
 function openTx(id) {
   const t = txById(id); if (!t) return;
-  const method = { ln: 'Lightning', ecash: 'Ecash', onchain: 'On-chain' }[t.method];
+  const method = { ln: 'Lightning', ecash: 'Ecash', onchain: 'On-chain', fee: 'Mint fee' }[t.method];
   const mint = S.mints.find(m => m.url === t.mint);
+  const moved = !(t.status === 'failed' || t.status === 'expired'), head = t.method === 'fee' ? t.fee : t.amount;
   let extra = '';
-  if (t.status === 'pending' && t.incoming && t.offline) extra = `<div class="notice">Saved while offline. NUTCADE claims it automatically when the mint can be reached.</div><button class="btn block lime" data-act="claimIncoming" data-id="${t.id}">Claim now</button>`;
+  if (t.status === 'failed' && t.type === 'out') extra = `<div class="notice">${t.cost ? `This payment didn't go through. The ecash came back, except ${money(t.cost)} the mint kept as its fee for getting it ready.` : "This payment didn't go through. Nothing left your wallet."}</div>`;
+  else if (t.method === 'fee') extra = `<div class="notice">The mint kept this fee when a payment didn't go through. The rest of the ecash came back to your wallet.</div>`;
+  else if (t.status === 'pending' && t.incoming && t.offline) extra = `<div class="notice">Saved while offline. NUTCADE claims it automatically when the mint can be reached.</div><button class="btn block lime" data-act="claimIncoming" data-id="${t.id}">Claim now</button>`;
   else if (t.status === 'pending' && t.incoming) extra = `<div class="notice">This ecash came from <b>${esc(host(t.mint))}</b>, a mint you don't use yet. Claiming adds that mint and trusts it with ${money(t.amount)}.</div><button class="btn block lime" data-act="claimIncoming" data-id="${t.id}">Trust mint &amp; claim</button>`;
   else if (t.status === 'pending' && t.method === 'ecash' && t.token) extra = `${t.lockUntil ? `<div class="notice cyan">Locked to ${esc(t.giftTo || 'one person')}. ${Date.now() < t.lockUntil ? `If they haven't claimed it by ${fmtDay(t.lockUntil)}, it comes back to you automatically.` : 'The lock has run out, so you can take it back.'}</div>` : ''}${qrBlock(t.token, 'Ecash token QR')}<div class="code">${esc(t.token)}</div>
     <div class="row" style="flex-wrap:wrap"><button class="btn sm pink" data-act="copy" data-text="${esc(t.token)}">Copy token</button>${nfcOK() ? `<button class="btn sm violet" data-act="nfcWrite" data-text="${esc(t.token)}">Write to NFC</button>` : ''}${ctBtn(t.token)}<button class="btn sm" data-act="checkClaim" data-id="${t.id}">Check claimed</button>${t.lockUntil ? (Date.now() < t.lockUntil ? `<button class="btn sm" disabled>Back on ${fmtDay(t.lockUntil)}</button>` : `<button class="btn sm gold" data-act="giftTake" data-id="${t.id}">Take it back</button>`) : `<button class="btn sm gold" data-act="reclaim" data-id="${t.id}">Reclaim</button>`}</div>`;
   else if (t.status === 'pending' && t.type === 'in' && t.method === 'ln') extra = `<button class="btn block lime" data-act="resumeInvoice" data-id="${t.id}">Show invoice</button>`;
   else if (t.status === 'pending' && t.type === 'in' && t.method === 'onchain') extra = `<div class="row" style="flex-wrap:wrap"><button class="btn sm lime" data-act="resumeAddr" data-id="${t.id}">Show address</button><button class="btn sm red" data-act="stopWatch" data-id="${t.id}">Stop watching</button></div>`;
   else if (t.status === 'pending' && t.type === 'out') extra = `<button class="btn block violet" data-act="reconcileTx" data-id="${t.id}">Check payment</button>`;
-  openSheet(t.type === 'in' ? 'Received' : 'Sent', `
-    <div class="credit-num" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${t.type === 'in' ? '+' : '-'}${t.amount ? fmt(t.amount) : '…'}<small>${unitTag()}</small></div>
+  openSheet(t.method === 'fee' ? 'Mint fee' : t.type === 'in' ? 'Received' : 'Sent', `
+    <div class="credit-num${moved ? '' : ' void'}" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${moved ? (t.type === 'in' ? '+' : '-') : ''}${head ? fmt(head) : '…'}<small>${unitTag()}</small></div>
     <div class="field"><label for="noteEdit">Note</label><textarea id="noteEdit" class="inp" maxlength="500" placeholder="What was this for?">${esc(noteText(t.note))}</textarea></div>
     <button class="btn solid gold block" data-act="saveNote" data-id="${t.id}">Save note</button>
-    <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(TX_STATUS[t.status] || t.status)}</dd>${t.fee ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
+    <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(TX_STATUS[t.status] || t.status)}</dd>${t.fee && t.method !== 'fee' ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
     <dt>Mint</dt><dd>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd>${fmtDate(t.ts, true)}</dd>
     ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
     ${extra}<div id="sheetErr"></div>`);
