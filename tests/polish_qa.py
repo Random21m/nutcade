@@ -5,6 +5,7 @@ import os, sys, asyncio, json, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wallet_qa import W, check, results, A, B, URL
 from playwright.async_api import async_playwright
+from r7_qa import forward, mock as r7mock, nwc as r7nwc, make_nwc as r7make_nwc
 
 OUT = os.environ.get('QA_OUT', '/tmp/qa-out') + '/'
 LANGS = ['en', 'es', 'pt', 'de', 'fr']
@@ -14,6 +15,7 @@ async def wallet(b, vw=375, vh=667, lang='en', mobile=True, pin=False):
     ctx = await b.new_context(viewport={'width': vw, 'height': vh}, device_scale_factor=1, is_mobile=mobile, has_touch=mobile)
     prefs = {'sound': False, 'music': False, 'crt': True, 'lang': lang, 'relays': ['ws://127.0.0.1:3350/relay'], 'npcHost': 'http://127.0.0.1:3350'}
     await ctx.add_init_script("window.__i18nMiss=new Set(); if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs'," + json.dumps(json.dumps(prefs)) + ")")
+    await ctx.route('https://lnurl.test/**', forward)   # LNURL vouchers and zap endpoints (mock_nostr.py)
     pg = await ctx.new_page(); w = W(pg, 'polish')
     pg.on('pageerror', lambda e: w.errs.append('PAGEERROR ' + str(e)))
     await pg.goto(URL); await pg.wait_for_timeout(700)
@@ -600,6 +602,10 @@ async def main():
         mw = await wallet(b, 375, 667, 'en')
         await mw.create(); await mw.add_mint(B); await mw.add_mint(A); await mw.add_mint(FM)
         broken = []
+        # 1.12: LNURL vouchers, zaps and Wallet Connect are money paths too
+        zp = {}   # a zap from each mint pays an invoice at the other one (a test mint counts its own invoices as paid already)
+        for M, O, nm in ((A, B, 'zeda'), (B, A, 'zedb')): r7mock('/test/lnurlp', {'name': nm, 'zap': True, 'mint': O}); zp[M] = r7mock('/test/profile', {'name': nm, 'lud16': nm + '@lnurl.test'})
+        nwc_uri = await r7make_nwc(mw, 'Ledger app'); await mw.ev("Nutcade.closeSheet()")
         async def books(step):
             for u in (A, B, FM):
                 l, p = await mw.ev(LEDGER + f"({json.dumps(u)})")
@@ -614,12 +620,23 @@ async def main():
             await mw.home(); await mw.click('[data-act=cashier]'); await mw.wait(300)
             for k in '150': await mw.click(f'[data-ck="{k}"]')
             await mw.click('[data-ck=charge]'); await mw.until("!!document.querySelector('.cash-paid')", 15000); await mw.ev("document.querySelector('#cashExit').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'}))"); await mw.wait(300); await books('till sale ' + M[-4:])
+            vid = 'ledger' + M[-4:]; r7mock('/test/lnurlw', {'id': vid, 'min': 1, 'max': 900, 'desc': 'Ledger voucher'}); have = await mw.bal(M)
+            await mw.ev(f"Nutcade.handleScan('lnurlw://lnurl.test/lnurlw/{vid}')"); await mw.until("!!document.querySelector('[data-act=lnurlwGo]')", 8000)
+            await mw.ev(f"document.querySelector('#wdMint').value={json.dumps(M)}"); await mw.click('[data-act=lnurlwGo]'); await mw.until(f"(Nutcade.S.proofs[{json.dumps(M)}]||[]).reduce((t,p)=>t+p.amount,0) >= {have + 900}", 20000); await mw.wait(300); await mw.ev("Nutcade.closeSheet()"); await books('LNURL voucher ' + M[-4:])
+            await mw.home(); await mw.click('[data-act=send]'); await mw.wait(150); await mw.click('[data-act=sendMethod][data-m=ln]'); await mw.wait(100); await mw.fill('#destIn', zp[M]['npub']); await mw.click('[data-act=doMeltQuote]')
+            await mw.until("!!document.querySelector('[data-act=zapQuote]')", 10000); await mw.fill('#amtIn', '210'); await mw.click('[data-act=zapQuote]'); await mw.until("!!document.querySelector('#payBtn')", 10000); await mw.click('#payBtn'); await mw.until("!document.querySelector('#payBtn')", 15000); await mw.wait(300); await mw.ev("Nutcade.closeSheet()"); await books('zap ' + M[-4:])
+            await r7nwc(mw, nwc_uri, 'pay_invoice', {'invoice': qinv(333, O)}); await books('Wallet Connect payment ' + M[-4:])
+            r = await r7nwc(mw, nwc_uri, 'make_invoice', {'amount': 444000}); inv = ((r.get('answer') or {}).get('result') or {}).get('invoice')
+            await mw.until(f"(Nutcade.S.txs.find(t=>t.request==={json.dumps(inv)})||{{}}).status==='done'", 20000); await books('Wallet Connect invoice ' + M[-4:])
+            await mw.ev("window.__nutcadeTest={lnurlMs:800}"); r7mock('/test/lnurlw', {'id': vid + 'x', 'min': 1, 'max': 90, 'mode': 'error'}); await mw.ev(f"Nutcade.handleScan('lnurlw://lnurl.test/lnurlw/{vid}x')"); await mw.until("!!document.querySelector('[data-act=lnurlwGo]')", 8000)
+            await mw.click('[data-act=lnurlwGo]'); await mw.wait(1500); await mw.ev("window.__nutcadeTest={}; Nutcade.closeSheet()"); await books('refused voucher ' + M[-4:])
         fee_rows = await mw.ev(f"Nutcade.S.txs.filter(t=>t.method==='fee').map(t=>[t.mint.slice(-4),t.fee,t.status,!!(Nutcade.S.txs.find(x=>x.id===t.feeFor)||{{}}).cost])")
         failed = await mw.ev("Nutcade.S.txs.filter(t=>t.status==='failed'&&t.type==='out').map(t=>[t.mint.slice(-4),t.amount,t.fee||0,t.cost||0])")
         # the always-fail mint (no input fees): a failed payment costs nothing and records no fee
         await mw.use(FM); await mw.receive_ln(3000); e, q = await mw.pay_ln(qinv(400, B)); await books('failed payment, no-fee mint')
         f0 = await mw.ev(f"(t=>[t.status,t.fee||0,t.cost||0])(Nutcade.S.txs.find(t=>t.mint==={json.dumps(FM)}&&t.type==='out'))")
-        check('round 5 money: after every path on the fee mint and the no-fee mint (receive, send, reclaim, pay, failed payment, hunt, till) the history adds up to the balance', not broken, broken)
+        await mw.use(FM); r = await r7nwc(mw, nwc_uri, 'pay_invoice', {'invoice': qinv(150, B)}, wait=25); await books('failed Wallet Connect payment, no-fee mint')
+        check('round 5 money: after every path on the fee mint and the no-fee mint (receive, send, reclaim, pay, failed payment, hunt, till, LNURL voucher, refused voucher, zap, Wallet Connect payment and invoice, failed Wallet Connect payment) the history adds up to the balance', not broken, broken)
         check('round 5 money: a failed payment that cost a swap fee records no fee itself and one linked "Mint fee" line with the real cost', all(f[2] == 0 for f in failed) and any(r[0] == A[-4:] and r[1] >= 1 and r[3] for r in fee_rows) and not any(r[0] == B[-4:] for r in fee_rows), (failed, fee_rows))
         check('round 5 money: a failed payment that cost nothing records no fee and no fee line', f0[0] == 'failed' and f0[1] == 0 and f0[2] == 0, f0)
         # the failed payment says what it cost, and its detail and history row show nothing moved
@@ -668,7 +685,7 @@ async def main():
         ALLOW = re.compile(r'^(NUTCADE|SAT|BTC|LN|NOSTR|[A-Z]{3}|(STAR SWARM|NUT MAZE|BRICK BLITZ|VOID ROCKS|HOP LANES|SKY SHIELD|NIBBLE|NUT FLIPPER))$')
         SHEETS = [('wallet', 'receive'), ('wallet', 'send'), ('wallet', 'scan'), ('wallet', 'splitOpen'), ('wallet', 'huntNew'), ('wallet', 'extraOpen'), ('wallet', 'pickMint'), ('wallet', 'ctListen'),
                   ('settings', 'seedShow'), ('settings', 'seedRestore'), ('settings', 'restore'), ('settings', 'resetAsk'), ('settings', 'lnAddr'), ('settings', 'support'), ('settings', 'contactsOpen'),
-                  ('settings', 'moveOpen'), ('settings', 'tillOpen'), ('settings', 'pinSet'), ('settings', 'findLost'), ('mints', 'reportOpen')]
+                  ('settings', 'moveOpen'), ('settings', 'tillOpen'), ('settings', 'pinSet'), ('settings', 'findLost'), ('mints', 'reportOpen'), ('settings', 'nwcNew'), ('mints', 'blockMint')]
         for lang in ('de', 'fr', 'es', 'pt'):
             h = await wallet(b, 375, 667, lang)
             await h.pg.add_init_script("(()=>{const s=window.__i18nMiss;const a=s.add.bind(s);s.add=v=>{try{const k='qa:miss5';const c=JSON.parse(localStorage.getItem(k)||'[]');if(!c.includes(v)){c.push(v);localStorage.setItem(k,JSON.stringify(c))}}catch(e){}return a(v)}})()")
