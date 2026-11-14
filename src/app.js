@@ -520,8 +520,9 @@ function tr(s) {
     const asSat = core.replace(/₿(\d[\d,.\u00a0\u202f]*\d|\d)/g, '$1 SAT'); let t = asSat; if (asSat !== core) { const miss = window.__i18nMiss; window.__i18nMiss = null; try { t = tr(asSat); } finally { window.__i18nMiss = miss; } }
     if (t !== asSat) out = t.replace(/(\d[\d,.\u00a0\u202f]*\d|\d) SAT/g, '₿$1');
   }
-  if (out === undefined) { if (window.__i18nMiss) { if (!d.vals) d.vals = new Set(Object.values(d.t)); if (!d.vals.has(core) && !d.done.has(core)) window.__i18nMiss.add(core); } return s; }
-  if (d.done) d.done.add(out.replace(/\s+/g, ' ').trim());
+  // an amount like "0,15 $US" or "12 CHF" has nothing to translate, so it isn't reported as missing
+  if (out === undefined) { if (window.__i18nMiss && !(/\d/.test(core) && core.replace(/[^A-Za-z]/g, '').length <= 3)) { if (!d.vals) d.vals = new Set(Object.values(d.t)); if (!d.vals.has(core) && !d.done.has(core)) window.__i18nMiss.add(core); } return s; }
+  if (d.done) d.done.add(out.replace(/[ \t\r\n]+/g, ' ').trim());
   return m[1] + out + m[3];
 }
 const NOI18N = '.code,.words,textarea,script,style,canvas,.credit-num,.qr,.share-card,[data-noi18n],.tx .note:not(.empty),.mint-pill,.kv dd.tiny';
