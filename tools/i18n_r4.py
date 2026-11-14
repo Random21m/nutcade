@@ -497,6 +497,7 @@ ROWS = [
 ("Send {#} SAT", "Enviar {#} SAT", "Enviar {#} SAT", "{#} SAT senden", "Envoyer {#} SAT"),
 ("Use {#} SAT", "Usar {#} SAT", "Usar {#} SAT", "{#} SAT nehmen", "Utiliser {#} SAT"),
 ("Leave the amount empty to accept any amount, or type more than {#}.", "Deja la cantidad vacía para aceptar cualquier cantidad, o escribe más de {#}.", "Deixe o valor vazio para aceitar qualquer valor, ou digite mais de {#}.", "Lass den Betrag leer, um jeden Betrag anzunehmen, oder gib mehr als {#} ein.", "Laissez le montant vide pour accepter n'importe quel montant, ou saisissez plus de {#}."),
+("This replaces your current wallet with the one from these {#} words. Write down your current words first if you might want this wallet back.", "Esto reemplaza tu billetera actual por la de estas {#} palabras. Anota primero tus palabras actuales si quizá quieras recuperar esta billetera.", "Isto substitui sua carteira atual pela destas {#} palavras. Anote antes suas palavras atuais se talvez quiser esta carteira de volta.", "Das ersetzt deine aktuelle Wallet durch die aus diesen {#} Wörtern. Schreib zuerst deine aktuellen Wörter auf, falls du diese Wallet zurückhaben möchtest.", "Cela remplace votre portefeuille actuel par celui de ces {#} mots. Notez d'abord vos mots actuels si vous pourriez vouloir récupérer ce portefeuille."),
 ("Edit that contact", "Editar ese contacto", "Editar esse contato", "Diesen Kontakt bearbeiten", "Modifier ce contact"),
 ]
 
