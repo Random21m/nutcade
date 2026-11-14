@@ -1,5 +1,11 @@
 /* Round 7 actions: LNURL-withdraw, blocked mints, Wallet Connect, zaps */
 Object.assign(A, {
+  lnurlwGo: b => run(b, 'ASKING MINT', async () => {
+    const v = curWd; if (!v) return;
+    const sats = amt(), url = val('wdMint');
+    const res = await withdrawVoucher(v, sats, url);
+    sfx('blip'); refresh(); showWithdrawWait(res);
+  }),
   blockMint: b => openBlock(b.dataset.url),
   blockMintGo: b => {
     const u = b.dataset.url, bal = balanceOf(u), n = mintName(u);

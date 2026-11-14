@@ -347,8 +347,9 @@ function addProofs(url, ps) {
 }
 
 /* ---------- RECEIVE ---------- */
-async function lnMintQuote(amount, note) {
-  const url = S.active; const w = await getWallet(url);
+async function lnMintQuote(amount, note, url = S.active) {
+  if (isBlocked(url)) throw blockedErr(url, 'ln');
+  const w = await getWallet(url);
   const q = await w.createMintQuoteBolt11(amount);
   const tx = addTx({ type: 'in', method: 'ln', amount, mint: url, note, status: 'pending', request: q.request, quote: q.quote });
   S.quotes.push({ kind: 'bolt11', quote: q.quote, request: q.request, amount, mint: url, txId: tx.id, expiry: q.expiry || null });
@@ -875,6 +876,8 @@ function classify(raw) {
   t = t.replace(/^lightning:/i, '');
   if (/^ln(bc|tb|bcrt|tbs)[0-9a-z]{50,}$/i.test(t)) return { kind: 'invoice', value: t.toLowerCase() };
   if (/^lnurl1[0-9a-z]+$/i.test(t)) return { kind: 'lnurl', value: t.toLowerCase() };
+  if (/^lnurl[pwc]:\/\/[^\s]+$/i.test(t)) return { kind: 'lnurl', value: t };   // LUD-17
+  if (/^https?:\/\/[^\s]+[?&]lightning=lnurl1[0-9a-z]+/i.test(t)) return { kind: 'lnurl', value: t };
   if (/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(t)) return { kind: 'lnaddress', value: t.toLowerCase() };
   if (btcAddr(t)) return { kind: 'btc', value: /^(bc|tb|bcrt)1/i.test(t) ? t.toLowerCase() : t, amount: null };
   if (/^https?:\/\/[^\s]+$/i.test(t)) return { kind: 'mint', value: normUrl(t) };
@@ -897,6 +900,7 @@ function handleScan(text) {
   if (c.kind === 'unknown') { closeSheet(); sfx('err'); toast("That QR code isn't something NUTCADE can use.", 'gold'); return; }
   if (c.kind === 'request') { if (needSeed()) return; return openPayRequest(c.value); }
   if (c.kind === 'nostr') { if (needSeed()) return; const k = S.contacts.find(x => x.pubkey === parseNostrAddr(c.value).pubkey); return k ? openPayContact(k.id) : openContactEdit(null, { nostr: c.value }); }
+  if (c.kind === 'lnurl') { if (needMint()) return; return openLnurl(c.value); }
   if (needMint()) return;
   if (c.kind === 'invoice') { openSend('ln'); const d = $('#destIn'); if (d) { d.value = c.value; const b = $('[data-act="doMeltQuote"]'); if (b) b.click(); } return; }
   if (c.kind === 'btc') {
@@ -904,10 +908,11 @@ function handleScan(text) {
     if (c.badAmount != null) showErr(amtErr("This Bitcoin link's amount can't be read, so it was left out. Type the amount yourself.", 'bip21'));
     return;
   }
-  if (c.kind === 'lnaddress' || c.kind === 'lnurl') return openPayLnurl(c.value);
+  if (c.kind === 'lnaddress') return openPayLnurl(c.value);
   if (c.kind === 'mint') { openMintPicker(); const u = $('#mintUrl'); if (u) { u.value = c.value; u.focus(); } toast('Check the address, then tap Add', 'cyan'); }
 }
 function lnurlToUrl(v) {
+  if (/^(lnurl[pwc]:\/\/|https?:\/\/)/i.test(v)) return lnurlHttp(v);   // LUD-17 schemes and ?lightning= links
   if (v.includes('@')) { const [user, domain] = v.split('@'); return `https://${domain}/.well-known/lnurlp/${encodeURIComponent(user)}`; }
   const d = L.bech32.decode(v, 2000); return new TextDecoder().decode(L.bech32.fromWords(d.words));
 }
