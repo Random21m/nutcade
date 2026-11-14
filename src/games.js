@@ -1008,7 +1008,7 @@ function loop() {
   } else if (mode === 'pause') {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx);
     ctx.fillStyle = 'rgba(5,3,12,.7)'; ctx.fillRect(0, 22, W, H - 22);
-    text(ctx, 'PAUSED', W / 2, 130, C.gold, 12, 'center'); text(ctx, 'A OR TAP TO RESUME', W / 2, 152, C.ink, 8, 'center');
+    text(ctx, T('PAUSED'), W / 2, 130, C.gold, 12, 'center'); text(ctx, T(matchMedia('(pointer:fine)').matches ? 'ENTER TO RESUME' : 'A OR TAP TO RESUME'), W / 2, 152, C.ink, 8, 'center');
     if (pressed.has('a') || pressed.has('b') || tap) { mode = 'play'; A().sfx('blip'); }
   } else if (mode === 'over' || mode === 'entry') {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx);

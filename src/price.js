@@ -10,12 +10,13 @@
     '1Y': { g: 86400, span: 365 * 86400 }
   };
   const prefs = () => window.NutPrefs || {};
+  const LOC = () => (window.Nutcade && window.Nutcade.locale ? window.Nutcade.locale() : undefined);   // the app's language, like every other date and number
   const store = window.NutStore || { get: (k, d) => d, set() {} };
   const st = { range: store.get('priceRange', '1D'), pts: [], cur: null, key: '', loading: false, err: null, live: false, last: null, at: 0, hover: null, el: null };
   const cache = {};
   let ws = null, wsCur = null, wsRetry = 0, drawQueued = false, refreshTimer = null;
 
-  const fmtMoney = (v, cur, dp) => v == null ? '—' : v.toLocaleString(undefined, { style: 'currency', currency: cur, maximumFractionDigits: dp ?? (v >= 1000 ? 0 : 2), minimumFractionDigits: dp ?? 0 });
+  const fmtMoney = (v, cur, dp) => v == null ? '—' : v.toLocaleString(LOC(), { style: 'currency', currency: cur, maximumFractionDigits: dp ?? (v >= 1000 ? 0 : 2), minimumFractionDigits: dp ?? 0 });
   const tok = n => getComputedStyle(document.body).getPropertyValue('--' + n).trim() || '#fff';
   const pairFor = () => (prefs().currency || 'USD').toUpperCase();
 
@@ -117,9 +118,9 @@
 
   function timeLabel(t, range) {
     const d = new Date(t * 1000);
-    if (range === '1H' || range === '1D') return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-    if (range === '1W') return d.toLocaleString(undefined, { weekday: 'short', hour: 'numeric' });
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: range === '1Y' ? '2-digit' : undefined });
+    if (range === '1H' || range === '1D') return d.toLocaleTimeString(LOC(), { hour: 'numeric', minute: '2-digit' });
+    if (range === '1W') return d.toLocaleString(LOC(), { weekday: 'short', hour: 'numeric' });
+    return d.toLocaleDateString(LOC(), { month: 'short', day: 'numeric', year: range === '1Y' ? '2-digit' : undefined });
   }
 
   function paint() {

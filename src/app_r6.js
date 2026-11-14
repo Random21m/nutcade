@@ -167,7 +167,7 @@ function huntsPanel() {
   if (!mine.length && !found.length) return '';
   const st = h => { const t = txById(h.txId); return !t ? '' : t.status === 'claimed' ? '<span class="chip ecash">OPENED</span>' : t.status === 'reclaimed' ? '<span class="chip claimed">CAME BACK</span>' : `<span class="chip pending">${h.k} OF ${h.n}</span>`; };
   return `<div class="panel"><span class="h2">Treasure hunts</span><div class="txs">
-    ${mine.map(h => `<button class="tx out" data-act="huntCards" data-pub="${h.pub}"><span class="ico" aria-hidden="true">✦</span><span class="mid"><div class="note">Your hunt</div><div class="meta">${st(h)}</div></span><span class="amt">${fmt(h.amount)}</span></button>`).join('')}
+    ${mine.map(h => `<button class="tx out" data-act="huntCards" data-pub="${h.pub}"><span class="ico" aria-hidden="true">✦</span><span class="mid"><div class="note">${esc(tr('Your hunt'))}</div><div class="meta">${st(h)}</div></span><span class="amt">${fmt(h.amount)}</span></button>`).join('')}
     ${found.map(([pub, f]) => `<button class="tx in" data-act="huntShow" data-pub="${pub}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note">Hunting</div><div class="meta"><span class="chip ln">CLUE ${Object.keys(f.shares).length}/${f.k}</span></div></span><span class="amt">${f.amount ? fmt(f.amount) : '???'}</span></button>`).join('')}
   </div></div>`;
 }

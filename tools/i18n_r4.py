@@ -449,6 +449,28 @@ ROWS = [
 ("Turn on Show Bitcoin price in Settings to enter amounts in your currency.", "Activa Mostrar precio de Bitcoin en Ajustes para escribir cantidades en tu moneda.", "Ative Mostrar preço do Bitcoin em Ajustes para digitar valores na sua moeda.", "Schalte in den Optionen „Bitcoin-Preis anzeigen“ ein, um Beträge in deiner Währung einzugeben.", "Activez Afficher le prix du Bitcoin dans Réglages pour saisir des montants dans votre devise."),
 ("Receiving ecash over Nostr is off in Settings → Privacy.", "Recibir ecash por Nostr está desactivado en Ajustes → Privacidad.", "Receber ecash pelo Nostr está desativado em Ajustes → Privacidade.", "Ecash-Empfang über Nostr ist in Optionen → Datenschutz ausgeschaltet.", "La réception d'ecash par Nostr est désactivée dans Réglages → Confidentialité."),
 ("Mint settings, backup and privacy live in the Settings tab.", "Los ajustes de mints, el respaldo y la privacidad están en Ajustes.", "Configurações de mints, backup e privacidade ficam em Ajustes.", "Mint-Einstellungen, Backup und Datenschutz findest du im Tab Optionen.", "Les réglages des mints, la sauvegarde et la confidentialité sont dans Réglages."),
+# ===== 1.11 polish, round 2 =====
+("WALLET LOCKED DOWN!", "¡BILLETERA BLINDADA!", "CARTEIRA BLINDADA!", "WALLET GESICHERT!", "PORTEFEUILLE VERROUILLÉ !"),
+("Your phrase, ecash and notes are now encrypted on this device. You'll enter your PIN when NUTCADE opens.", "Tu frase, tu ecash y tus notas ahora están cifrados en este dispositivo. Pondrás tu PIN al abrir NUTCADE.", "Sua frase, seu ecash e suas notas agora estão criptografados neste dispositivo. Você vai digitar seu PIN ao abrir o NUTCADE.", "Deine Phrase, dein Ecash und deine Notizen sind jetzt auf diesem Gerät verschlüsselt. Beim Öffnen von NUTCADE gibst du deine PIN ein.", "Votre phrase, votre ecash et vos notes sont maintenant chiffrés sur cet appareil. Vous saisirez votre code PIN à l'ouverture de NUTCADE."),
+("Also unlock with Face ID / fingerprint", "Desbloquear también con Face ID / huella", "Desbloquear também com Face ID / digital", "Auch mit Face ID / Fingerabdruck entsperren", "Déverrouiller aussi avec Face ID / empreinte"),
+("Enter it again.", "Escríbelo otra vez.", "Digite de novo.", "Gib sie noch einmal ein.", "Saisissez-le à nouveau."),
+("Choose a new PIN ({#} to {#} digits).", "Elige un PIN nuevo (de {#} a {#} dígitos).", "Escolha um PIN novo (de {#} a {#} dígitos).", "Wähle eine neue PIN ({#} bis {#} Ziffern).", "Choisissez un nouveau code PIN ({#} à {#} chiffres)."),
+("Those didn't match. Start again.", "No coinciden. Empieza de nuevo.", "Não conferem. Comece de novo.", "Die stimmen nicht überein. Fang neu an.", "Ils ne correspondent pas. Recommencez."),
+("CONFIRM NEW PIN", "CONFIRMA EL PIN NUEVO", "CONFIRME O PIN NOVO", "NEUE PIN BESTÄTIGEN", "CONFIRMER LE NOUVEAU PIN"),
+("PAUSED", "PAUSA", "PAUSADO", "PAUSE", "PAUSE"),
+("A OR TAP TO RESUME", "A O TOCA PARA SEGUIR", "A OU TOQUE P/ CONTINUAR", "A ODER TIPPEN: WEITER", "A OU TOUCHEZ : REPRENDRE"),
+("ENTER TO RESUME", "INTRO PARA SEGUIR", "ENTER PARA CONTINUAR", "ENTER: WEITER", "ENTRÉE : REPRENDRE"),
+("Lightning invoice", "Factura Lightning", "Fatura Lightning", "Lightning-Rechnung", "Facture Lightning"),
+("Ecash address", "Dirección de ecash", "Endereço de ecash", "Ecash-Adresse", "Adresse ecash"),
+("Ecash payment request", "Solicitud de pago en ecash", "Solicitação de pagamento em ecash", "Ecash-Zahlungsanforderung", "Demande de paiement en ecash"),
+("P2PK public key", "Clave pública P2PK", "Chave pública P2PK", "Öffentlicher P2PK-Schlüssel", "Clé publique P2PK"),
+("Challenge link", "Enlace del desafío", "Link do desafio", "Link zur Herausforderung", "Lien du défi"),
+("QR code", "Código QR", "QR code", "QR-Code", "QR code"),
+("Bitcoin price chart", "Gráfico del precio de Bitcoin", "Gráfico do preço do Bitcoin", "Bitcoin-Preisdiagramm", "Graphique du prix du Bitcoin"),
+("Bitcoin price chart, no data yet", "Gráfico del precio de Bitcoin, aún sin datos", "Gráfico do preço do Bitcoin, ainda sem dados", "Bitcoin-Preisdiagramm, noch keine Daten", "Graphique du prix du Bitcoin, pas encore de données"),
+("Fee reserve {#} SAT", "Reserva para comisión {#} SAT", "Reserva de taxa {#} SAT", "Gebührenreserve {#} SAT", "Réserve de frais {#} SAT"),
+("Holds {#} SAT", "Tiene {#} SAT", "Tem {#} SAT", "Hält {#} SAT", "Détient {#} SAT"),
+("Clue card {#}", "Tarjeta de pista {#}", "Cartão de pista {#}", "Hinweiskarte {#}", "Carte indice {#}"),
 ]
 
 # Patterns for sentences that carry names or dates. $1, $2… are filled in (and translated again if they're known words).
@@ -530,6 +552,12 @@ RE = [
 (r"^Moved to (.+)$", "Movido a $1", "Movido para $1", "Verschoben zu $1", "Déplacé vers $1"),
 (r"^Sale: (.+) #cashier$", "Venta: $1 #cashier", "Venda: $1 #cashier", "Verkauf: $1 #cashier", "Vente : $1 #cashier"),
 (r"^Gift came back from (.+)$", "El regalo volvió de $1", "O presente voltou de $1", "Geschenk von $1 ist zurückgekommen", "Le cadeau est revenu de $1"),
+# ===== 1.11 polish, round 2 =====
+(r"^(.+) QR$", "Código QR: $1", "QR code: $1", "QR-Code: $1", "QR code : $1"),
+(r"^(.+) QR, animated$", "Código QR animado: $1", "QR code animado: $1", "Animierter QR-Code: $1", "QR code animé : $1"),
+(r"^(.+) game screen$", "Pantalla del juego $1", "Tela do jogo $1", "Spielbildschirm $1", "Écran du jeu $1"),
+(r"^QR code for the Lightning address (.+)$", "Código QR de la dirección Lightning $1", "QR code do endereço Lightning $1", "QR-Code der Lightning-Adresse $1", "QR code de l'adresse Lightning $1"),
+(r"^Bitcoin price in ([A-Z]{3}) over (\w+): now (.+), high (.+), low (.+)\. Use left and right arrow keys to read values\.$", "Precio de Bitcoin en $1 en $2: ahora $3, máximo $4, mínimo $5. Usa las flechas izquierda y derecha para leer los valores.", "Preço do Bitcoin em $1 em $2: agora $3, máxima $4, mínima $5. Use as setas esquerda e direita para ler os valores.", "Bitcoin-Preis in $1 über $2: jetzt $3, Hoch $4, Tief $5. Mit den Pfeiltasten links und rechts liest du die Werte.", "Prix du Bitcoin en $1 sur $2 : maintenant $3, haut $4, bas $5. Utilisez les flèches gauche et droite pour lire les valeurs."),
 ]
 
 LANGS = ['es', 'pt', 'de', 'fr']

@@ -247,7 +247,7 @@ async function renderCard(o) {
       for (let r = 0; r < m; r++) for (let k = 0; k < m; k++) if (qr.isDark(r, k)) ctx.fillRect(qx + (k + 2) * cell, qy + (r + 2) * cell, cell, cell);
       ctx.fillStyle = 'rgba(5,3,12,.88)'; ctx.fillRect(bx, by, bw, 66);
       txt(ctx, 'INSERT COIN: SCAN TO WIN', bx + bw / 2, by + 8, 18, '#ffcf3a', 'center');
-      txt(ctx, `${N().fmt(o.loaded.amount)} SAT · FIRST SCAN TAKES IT`, bx + bw / 2, by + 38, 16, '#9dff3a', 'center');
+      txt(ctx, `${N().fmtEn(o.loaded.amount)} SAT · FIRST SCAN TAKES IT`, bx + bw / 2, by + 38, 16, '#9dff3a', 'center');
     }
   }
   txt(ctx, 'A BITCOIN WALLET WITH AN ARCADE INSIDE', CW / 2, 548, 18, '#ffffff', 'center');
@@ -256,9 +256,9 @@ async function renderCard(o) {
 }
 
 function shareText(o) {
-  if (o.loaded) return `${o.kind === 'score' ? `I scored ${N().fmt(o.score)} on ${o.game.name}` : `Trophy unlocked: ${o.d.name}`} in NUTCADE, and this card holds ${N().fmt(o.loaded.amount)} SAT. First to scan it wins them.`;
+  if (o.loaded) return `${o.kind === 'score' ? `I scored ${N().fmtEn(o.score)} on ${o.game.name}` : `Trophy unlocked: ${o.d.name}`} in NUTCADE, and this card holds ${N().fmtEn(o.loaded.amount)} SAT. First to scan it wins them.`;
   return o.kind === 'score'
-    ? `I scored ${N().fmt(o.score)} on ${o.game.name} in NUTCADE, a Bitcoin wallet with an arcade inside.`
+    ? `I scored ${N().fmtEn(o.score)} on ${o.game.name} in NUTCADE, a Bitcoin wallet with an arcade inside.`
     : `Trophy unlocked in NUTCADE: ${o.d.name}.`;
 }
 async function openCard(o) {

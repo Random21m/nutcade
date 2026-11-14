@@ -6,7 +6,11 @@ const $ = (s, r=document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num = a => a == null ? 0 : (typeof a === 'object' && typeof a.toNumber === 'function') ? a.toNumber() : Number(a) || 0;
 const sum = ps => (ps || []).reduce((t, p) => t + num(p.amount), 0);
-const fmt = n => Math.round(num(n)).toLocaleString('en-US');
+// Amounts group digits the way the app's language does: 30,000 (English), 30.000 (es, pt, de), 30 000 (fr).
+// Only for showing numbers; amounts are always stored, sent and parsed as plain integers.
+const numLocale = () => { try { return ({ en: 'en-US', es: 'es-ES', pt: 'pt-BR', de: 'de-DE', fr: 'fr-FR' })[LANG] || 'en-US'; } catch (e) { return 'en-US'; } };
+const fmt = n => Math.round(num(n)).toLocaleString(numLocale(), { useGrouping: 'always' });
+const fmtEn = n => Math.round(num(n)).toLocaleString('en-US');   // share cards and share text, which are in English
 const unitTag = () => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '' : 'SAT';
 const money = n => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '₿' + fmt(n) : fmt(n) + ' SAT';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -504,7 +508,7 @@ function pickLang() {
   for (const x of nav) { if (x === 'en') return 'en'; if (I18N[x]) return x; }
   return 'en';
 }
-const NUMRE = /\d[\d,.]*/g;
+const NUMRE = /\d[\d,.\u00a0\u202f]*/g;
 function tr(s) {
   if (LANG === 'en' || !s) return s;
   const d = I18N[LANG]; if (!d) return s; if (!d.done) d.done = new Set();
@@ -512,6 +516,10 @@ function tr(s) {
   let out = d.t[core];
   if (out === undefined) { const nums = []; const key = core.replace(NUMRE, x => { nums.push(x); return '{#}'; }); if (nums.length && d.t[key] !== undefined) { let i = 0; out = d.t[key].replace(/\{#\}/g, () => nums[i++] ?? ''); } }
   if (out === undefined && d.re) for (const [re, rep_] of d.re) { const mm = re.exec(core); if (mm) { out = rep_.replace(/\$(\d)/g, (_, k) => tr(mm[+k] || '')); break; } }
+  if (out === undefined && core.includes('₿')) {   // "₿67 in your piggy bank" uses the "67 SAT in your piggy bank" translation
+    const asSat = core.replace(/₿(\d[\d,.\u00a0\u202f]*\d|\d)/g, '$1 SAT'); const t = asSat === core ? asSat : tr(asSat);
+    if (t !== asSat) out = t.replace(/(\d[\d,.\u00a0\u202f]*\d|\d) SAT/g, '₿$1');
+  }
   if (out === undefined) { if (window.__i18nMiss) { if (!d.vals) d.vals = new Set(Object.values(d.t)); if (!d.vals.has(core) && !d.done.has(core)) window.__i18nMiss.add(core); } return s; }
   if (d.done) d.done.add(out.replace(/\s+/g, ' ').trim());
   return m[1] + out + m[3];
@@ -838,7 +846,7 @@ function qrBlock(text, label) {
     let t = text;
     if (/^cashuB/.test(text) && text.length > QR_STATIC_MAX) { try { t = slimToken(text); } catch (e) {} }
     const c = t.length <= QR_STATIC_MAX ? qrCanvas(t) : null;
-    if (c) { c.setAttribute('aria-label', label || 'QR code'); el.appendChild(c); return; }
+    if (c) { c.setAttribute('aria-label', tr(label || 'QR code')); el.appendChild(c); return; }
     animatedQR(el, t, label);
   }, 0);
   return `<div class="qr" id="${id}"></div>`;
@@ -848,7 +856,7 @@ function qrBlock(text, label) {
 function animatedQR(el, text, label) {
   if (!window.NutUR) { el.outerHTML = '<div class="notice cyan">Too long for one QR code. Use Copy or Play as sound instead.</div>'; return; }
   const enc = NutUR.encoder(text, 150); let n = 0;
-  el.classList.add('qr-anim'); el.setAttribute('role', 'img'); el.setAttribute('aria-label', (label || 'QR code') + ', animated');
+  el.classList.add('qr-anim'); el.setAttribute('role', 'img'); el.setAttribute('aria-label', tr((label || 'QR code') + ', animated'));
   el.insertAdjacentHTML('afterend', `<div class="tiny muted qr-anim-note" style="text-align:center">Animated QR · ${enc.count} parts · scan with NUTCADE or cashu.me</div>`);
   const step = async () => {
     if (!el.isConnected) return;
@@ -1082,7 +1090,7 @@ function fmtDate(ms, withTime) {
   catch (e) { return d.toDateString(); }
 }
 // Notes NUTCADE writes itself (not ones you typed) are shown in your language.
-const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt: |Loaded score card)|\((part \d+ of \d+|cancelled at the till)\)$/;
+const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt(: |$)|Loaded score card)|\((part \d+ of \d+|cancelled at the till)\)$/;
 function noteText(n) {
   if (!n || !AUTO_NOTE.test(n)) return n;
   const m = /^(.*) \((part \d+ of \d+|cancelled at the till)\)$/.exec(n);   // your own words before the suffix stay as you typed them
@@ -1144,7 +1152,7 @@ function viewGate() {
     </div></section>`;
 }
 function phraseGrid(words) {
-  return `<ol class="words" aria-label="Recovery phrase">${words.map((w, i) => `<li><span>${i + 1}</span>${esc(w)}</li>`).join('')}</ol>`;
+  return `<ol class="words" aria-label="${tr('Recovery phrase')}">${words.map((w, i) => `<li><span>${i + 1}</span>${esc(w)}</li>`).join('')}</ol>`;
 }
 function openShowPhrase(fresh) {
   const words = S.seed.mnemonic.split(' ');
@@ -1198,7 +1206,7 @@ function viewWallet() {
       <div class="credit-num" aria-live="polite">${S.prefs.btcSymbol ? '₿' : ''}${fmt(bal)}<small>${unitTag()}</small></div>
       ${fiatOf(bal) ? `<div class="tiny muted fiat" data-sats="${bal}">≈ ${fiatOf(bal)}</div>` : ''}
       ${piggySaved() ? `<div class="tiny piggy-line">${pigSVG('tiny')}<span>${money(piggySaved())} in your piggy bank · ${money(Math.max(0, tot - piggySaved()))} to spend</span></div>` : ''}
-      <button class="mint-pill" data-act="pickMint" aria-label="Change mint"><span class="dot"></span><span>${esc(m.name)}</span><span class="muted">▾</span></button>
+      <button class="mint-pill" data-act="pickMint" aria-label="${tr('Change mint')}"><span class="dot"></span><span>${esc(m.name)}</span><span class="muted">▾</span></button>
       ${po ? `<div class="tiny" style="color:var(--violet)">${money(po)} in flight. <button class="linkbtn" data-act="reconcileAll">Check now</button></div>` : ''}
     </div>
     <div class="pushes">
@@ -1267,7 +1275,7 @@ function padHTML(title, sub, opts = {}) {
   const n = pinUI.value.length;
   return `<div class="pinpad" data-pinpad="${pinUI.mode}">
     <div class="pin-title">${esc(title)}</div>${sub ? `<div class="th" style="text-align:center">${esc(sub)}</div>` : ''}
-    <div class="pin-dots" aria-label="${n} digits entered">${pinDots(n)}</div>
+    <div class="pin-dots" aria-label="${esc(tr(`${n} digits entered`))}">${pinDots(n)}</div>
     <div id="pinErr" class="pin-err" role="alert"></div>
     <div class="pin-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'].map(k => `<button type="button" class="pin-k ${k === 'ok' ? 'ok' : ''}" data-act="pinKey" data-k="${k}" aria-label="${k === 'del' ? 'Delete' : k === 'ok' ? 'Enter' : k}">${k === 'del' ? DEL_ICON : k === 'ok' ? 'OK' : k}</button>`).join('')}</div>
     ${opts.extra || ''}</div>`;
@@ -1289,7 +1297,7 @@ function refreshPad() {
   const pad = document.querySelector('[data-pinpad]'); if (!pad) return;
   const n = pinUI.value.length;
   pad.querySelector('.pin-dots').innerHTML = pinDots(n);
-  pad.querySelector('.pin-dots').setAttribute('aria-label', `${n} digits entered`);
+  pad.querySelector('.pin-dots').setAttribute('aria-label', tr(`${n} digits entered`));
 }
 function pinError(msg) { sfx('err'); const e = $('#pinErr'); if (e) { e.textContent = msg; } const d = document.querySelector('.pin-dots'); if (d) { d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake'); } pinUI.value = ''; refreshPad(); }
 const nextPad = mode => { pinUI.mode = mode; pinUI.value = ''; };
@@ -1307,7 +1315,7 @@ async function pinSubmit() {
       setTimeout(() => backgroundTick(true).then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 300);
       return;
     }
-    if (m === 'set') { pinUI.first = v; nextPad('setConfirm'); setBody(padHTML('CONFIRM PIN', 'Enter the same PIN again.') + '<div id="sheetErr"></div>'); return; }
+    if (m === 'set') { pinUI.first = v; nextPad('setConfirm'); setBody(padHTML('CONFIRM PIN', 'Type the same PIN again.') + '<div id="sheetErr"></div>'); return; }
     if (m === 'setConfirm') {
       if (v !== pinUI.first) { nextPad('set'); setBody(padHTML('CHOOSE A PIN', "Those didn't match. Start again.") + '<div id="sheetErr"></div>'); return; }
       busy('ENCRYPTING…'); await createVault(v); pinUI.first = '';
@@ -1477,7 +1485,7 @@ async function fetchPrice(force) {
     if (rate > 0) { price = { rate, at: Date.now(), cur: S.prefs.currency }; if (!$('#layer .sheet') && tab === 'wallet') refresh(); }
   } catch (e) {}
 }
-const fiatOf = sats => (S.prefs.fiat && price.rate && price.cur === S.prefs.currency) ? (sats / 1e8 * price.rate).toLocaleString(undefined, { style: 'currency', currency: S.prefs.currency }) : null;
+const fiatOf = sats => (S.prefs.fiat && price.rate && price.cur === S.prefs.currency) ? (sats / 1e8 * price.rate).toLocaleString(numLocale(), { style: 'currency', currency: S.prefs.currency }) : null;
 
 /* P2PK keys */
 function newP2PK() {
@@ -2352,11 +2360,11 @@ function openTx(id) {
   else if (t.status === 'pending' && t.type === 'out') extra = `<button class="btn block violet" data-act="reconcileTx" data-id="${t.id}">Check payment</button>`;
   openSheet(t.type === 'in' ? 'Received' : 'Sent', `
     <div class="credit-num" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${t.type === 'in' ? '+' : '-'}${t.amount ? fmt(t.amount) : '…'}<small>${unitTag()}</small></div>
-    <div class="field"><label for="noteEdit">Note</label><textarea id="noteEdit" class="inp" maxlength="500" placeholder="What was this for?">${esc(t.note)}</textarea></div>
+    <div class="field"><label for="noteEdit">Note</label><textarea id="noteEdit" class="inp" maxlength="500" placeholder="What was this for?">${esc(noteText(t.note))}</textarea></div>
     <button class="btn solid gold block" data-act="saveNote" data-id="${t.id}">Save note</button>
     <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(TX_STATUS[t.status] || t.status)}</dd>${t.fee ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
     <dt>Mint</dt><dd>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd>${fmtDate(t.ts, true)}</dd>
-    ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
+    ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
     ${extra}<div id="sheetErr"></div>`);
 }
 
