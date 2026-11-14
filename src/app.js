@@ -115,23 +115,43 @@ S.seed = store.get('seed', null);        // {mnemonic, backedUp, created}
 S.counters = store.get('counters', {});  // keysetId -> next counter (NUT-13)
 /* Older versions kept a mint's URL as typed, so HTTP://Mint.example and http://mint.example could be saved as two
    mints. On load every saved URL is respelled with normUrl and such twins are merged into one: their ecash is
-   combined (each coin once), and history, pending payments and quotes point at the merged mint. Nothing is lost. */
+   combined (each coin once), and every stored record that names a mint points at the merged one: history,
+   pending payments, quotes, payment requests, Extra Life, heirlooms, challenges and bounties, treasure hunts and
+   the mint report log. Nothing is lost. It runs once everything is loaded (and again when the PIN vault opens). */
 function mergeMintSpellings() {
-  let changed = false; const seen = new Map(), fix = u => { const n = u ? normUrl(u) : u; if (n !== u) changed = true; return n; };
+  let changed = false; const seen = new Map(), fix = u => { if (typeof u !== 'string' || !u) return u; const n = normUrl(u); if (n !== u) changed = true; return n; };
   for (const m of S.mints) { const u = fix(m.url); if (seen.has(u)) { changed = true; continue; } seen.set(u, Object.assign(m, { url: u })); }
   S.mints = [...seen.values()];
   const proofs = {};
   for (const [u, ps] of Object.entries(S.proofs || {})) { const k = fix(u), have = proofs[k] || (proofs[k] = []), ids = new Set(have.map(p => p.secret)); for (const p of ps || []) if (!ids.has(p.secret)) { have.push(p); ids.add(p.secret); } }
   if (changed) S.proofs = proofs;
   S.active = fix(S.active);
-  for (const list of [S.pending, S.quotes, S.txs]) for (const t of list || []) if (t.mint) t.mint = fix(t.mint);
-  if (changed) save();
+  // any record, at any depth, with a "mint" field or a "mints" list
+  const walk = (o, d) => {
+    if (!o || typeof o !== 'object' || d > 5) return;
+    if (Array.isArray(o)) { for (const x of o) walk(x, d + 1); return; }
+    for (const k of Object.keys(o)) {
+      if (k === 'mint' && typeof o[k] === 'string' && /^https?:/i.test(o[k])) o[k] = fix(o[k]);
+      else if (k === 'mints' && Array.isArray(o[k]) && o[k].every(x => typeof x === 'string')) { const n = [...new Set(o[k].map(fix))]; if (n.length !== o[k].length) changed = true; o[k] = n; }
+      else if (k !== 'proofs' && k !== 'sent' && o[k] && typeof o[k] === 'object') walk(o[k], d + 1);
+    }
+  };
+  const stores = { pending: S.pending, quotes: S.quotes, txs: S.txs, requests: S.requests, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found };
+  for (const v of Object.values(stores)) walk(v, 0);
+  if (S.mintlog) for (const u of Object.keys(S.mintlog)) {   // the mint report's log is keyed by URL: twins' logs are combined
+    const n = fix(u); if (n === u) continue;
+    const a = S.mintlog[n], b = S.mintlog[u];
+    S.mintlog[n] = !a ? b : Object.assign(a, { first: Math.min(a.first || Infinity, b.first || Infinity), ms: (a.ms || []).concat(b.ms || []).slice(-50), ops: [(a.ops || [0, 0])[0] + (b.ops || [0, 0])[0], (a.ops || [0, 0])[1] + (b.ops || [0, 0])[1]], keysets: Object.assign({}, b.keysets, a.keysets), changes: (b.changes || []).concat(a.changes || []) });
+    delete S.mintlog[u];
+  }
+  if (!changed) return;
+  save();
+  for (const k of ['requests', 'extra', 'heirlooms', 'challenges', 'hunts', 'found', 'mintlog']) if (S[k] !== undefined) store.set(k, S[k]);
 }
 let storageOk = store.set('probe', 1);
 function save() {
   for (const k of ['mints', 'active', 'proofs', 'pending', 'txs', 'quotes', 'prefs']) storageOk = store.set(k, S[k]) && storageOk;
 }
-if (!vault.on) mergeMintSpellings();   // with a PIN, this runs when the vault opens (hydrateFromVault)
 
 /* ---------- recovery phrase (NUT-13 deterministic secrets) ---------- */
 let seedBytes = null;
@@ -3196,6 +3216,7 @@ window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, par
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}
+if (!vault.on) mergeMintSpellings();   // with a PIN, this runs when the vault opens (hydrateFromVault)
 render();
 if (S.mints.length && !(vault.on && !vault.open)) setTimeout(() => backgroundTick(true).then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 1200);
 })();
