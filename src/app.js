@@ -1281,7 +1281,7 @@ const pinDots = n => Array.from({ length: Math.max(PIN_MIN, Math.min(PIN_MAX, n 
 function padHTML(title, sub, opts = {}) {
   const n = pinUI.value.length;
   return `<div class="pinpad" data-pinpad="${pinUI.mode}">
-    <div class="pin-title">${esc(title)}</div>${sub ? `<div class="th" style="text-align:center">${esc(sub)}</div>` : ''}
+    <div class="pin-title">${esc(title)}</div>${sub ? `<div class="th${opts.warn ? ' warn' : ''}" style="text-align:center">${esc(sub)}</div>` : ''}
     <div class="pin-dots" aria-label="${esc(tr(`${n} digits entered`))}">${pinDots(n)}</div>
     <div id="pinErr" class="pin-err" role="alert"></div>
     <div class="pin-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'].map(k => `<button type="button" class="pin-k ${k === 'ok' ? 'ok' : ''}" data-act="pinKey" data-k="${k}" aria-label="${k === 'del' ? 'Delete' : k === 'ok' ? 'Enter' : k}">${k === 'del' ? DEL_ICON : k === 'ok' ? 'OK' : k}</button>`).join('')}</div>
@@ -1291,7 +1291,7 @@ function viewLock() {
   const rec = raw.get('vault', {}); const f = pinFails(); const wait = Math.max(0, Math.ceil((f.until - Date.now()) / 1000));
   if (pinUI.mode !== 'unlock') { pinUI.mode = 'unlock'; pinUI.value = ''; }
   return `<section class="screen"><div class="panel hot gate" style="justify-items:center">
-    ${padHTML('ENTER PIN', wait ? `Too many wrong tries. Wait ${wait}s.` : 'Your wallet is locked.', { extra:
+    ${padHTML('ENTER PIN', wait ? `Too many wrong tries. Wait ${wait}s.` : 'Your wallet is locked.', { warn: !!wait, extra:
       `${rec.bio ? `<button class="btn block violet" data-act="bioUnlock">Unlock with Face ID / fingerprint</button>` : ''}
        <button class="linkbtn" data-act="forgotPin" style="justify-self:center">Forgot PIN?</button>` })}
   </div></section>`;

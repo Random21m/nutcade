@@ -545,3 +545,11 @@ body.offline .wrap{padding-top:calc(14px + var(--netb,40px))}
 body.offline .game-view,body.offline .cashier{padding-top:calc(10px + var(--netb,40px))}
 /* in cashier mode an error sits over the top of the amount display, clear of the keys and buttons */
 body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:auto}
+/* very short phones (320x568): the same slimmer lock screen, with or without Face ID */
+@media (max-height:600px){
+  .lockwrap{padding-top:8px}
+  .lockwrap .marquee.mini{padding:8px 8px 6px}.lockwrap .marquee.mini .logo svg{height:30px}
+  .lockwrap .screen{margin-top:8px}
+  .lockwrap .pin-k,.lockwrap.bio .pin-k{height:44px}.lockwrap .pin-keys,.lockwrap.bio .pin-keys{gap:8px}.lockwrap .pinpad,.lockwrap.bio .pinpad{gap:6px}.lockwrap .gate{padding:12px}
+  .lockwrap .pinpad > .th:not(.warn){display:none}
+}
