@@ -4083,10 +4083,11 @@ function openSheet(title, html, onOpen) {
   return body;
 }
 function fitNums(root) {
-  (root || document).querySelectorAll('.credit-num,.cash-amt').forEach(el => {
+  (root || document).querySelectorAll('.credit-num,.cash-amt,.cash-charge').forEach(el => {
     if (el.dataset.fs === undefined) el.dataset.fs = el.style.fontSize || '';
+    const min = el.classList.contains('cash-charge') ? 9 : 14;   // the CHARGE label stays one readable line
     let fs = parseFloat(getComputedStyle(el).fontSize), i = 0;
-    while (el.scrollWidth > el.clientWidth + 1 && fs > 14 && i++ < 30) { fs -= 1.5; el.style.fontSize = fs + 'px'; }
+    while (el.scrollWidth > el.clientWidth + 1 && fs > min && i++ < 30) { fs = Math.max(min, fs - (min < 14 ? 0.5 : 1.5)); el.style.fontSize = fs + 'px'; }
   });
 }
 function closeSheet() {
@@ -4171,7 +4172,7 @@ function render() {
   if (window.PriceChart) { if (tab === 'wallet') window.PriceChart.mount($('#priceMount')); else window.PriceChart.disconnect(); }
   fitNums(app);
 }
-window.addEventListener('resize', () => { clearTimeout(fitNums.t); fitNums.t = setTimeout(() => { document.querySelectorAll('.credit-num,.cash-amt').forEach(el => { el.style.fontSize = el.dataset.fs || ''; }); fitNums(); }, 150); });
+window.addEventListener('resize', () => { clearTimeout(fitNums.t); fitNums.t = setTimeout(() => { document.querySelectorAll('.credit-num,.cash-amt,.cash-charge').forEach(el => { el.style.fontSize = el.dataset.fs || ''; }); fitNums(); }, 150); });
 function refresh() { if ($('#layer .sheet')) { /* keep sheet */ } const y = window.scrollY; render(); window.scrollTo(0, y); }
 
 function txRow(t) {
