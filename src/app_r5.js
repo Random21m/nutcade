@@ -224,7 +224,7 @@ function openExtra() {
     const left = daysLeft(extraLeft());
     openSheet('Extra Life', `
       <div class="continue-box"><div class="cont-q">CONTINUE?</div><div class="cont-n">${left}</div><div class="tiny muted">days until ${esc(x.heir.name)} can claim it</div></div>
-      <dl class="kv"><dt>Locked</dt><dd>${money(x.amount)}</dd><dt>Heir</dt><dd data-noi18n>${esc(x.heir.name)}</dd><dt>Opens for them</dt><dd>${fmtDay(x.until)}</dd><dt>Mint</dt><dd data-noi18n>${esc(host(x.mint))}</dd><dt>Their copy</dt><dd>${x.delivered ? 'Delivered over Nostr' : 'Not delivered yet'}</dd></dl>
+      <dl class="kv"><dt>Locked</dt><dd>${money(x.amount)}</dd><dt>Heir</dt><dd data-noi18n>${esc(x.heir.name)}</dd><dt>Opens for them</dt><dd data-noi18n>${fmtDay(x.until)}</dd><dt>Mint</dt><dd data-noi18n>${esc(host(x.mint))}</dd><dt>Their copy</dt><dd>${x.delivered ? 'Delivered over Nostr' : 'Not delivered yet'}</dd></dl>
       <label class="toggle set" for="xlAuto"><span><span class="tl">Continue when I open NUTCADE</span><span class="th">Once half the time has passed, opening NUTCADE counts as CONTINUE. Turn this off to press it yourself.</span></span><input id="xlAuto" type="checkbox" ${x.auto ? 'checked' : ''}></label>
       <button class="btn solid gold block" data-act="extraContinue">CONTINUE</button>
       <div class="row wrap"><button class="btn sm violet" data-act="extraCopy">Heir's copy</button><button class="btn sm red" data-act="extraCash">Cash out</button></div>

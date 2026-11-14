@@ -530,7 +530,7 @@ ROWS = [
 ("CAMERA BLOCKED. ALLOW IT IN YOUR BROWSER, OR SCAN A PHOTO.", "CÁMARA BLOQUEADA. PERMÍTELA EN TU NAVEGADOR O ESCANEA UNA FOTO.", "CÂMERA BLOQUEADA. PERMITA NO NAVEGADOR OU ESCANEIE UMA FOTO.", "KAMERA GESPERRT. ERLAUBE SIE IM BROWSER ODER SCANNE EIN FOTO.", "CAMÉRA BLOQUÉE. AUTORISEZ-LA DANS LE NAVIGATEUR OU SCANNEZ UNE PHOTO."),
 ("COULDN'T READ THAT TAG. HOLD IT STILL.", "NO SE PUDO LEER LA ETIQUETA. MANTENLA QUIETA.", "NÃO DEU PARA LER A ETIQUETA. SEGURE PARADO.", "TAG NICHT LESBAR. HALT IHN STILL.", "TAG ILLISIBLE. TENEZ-LE IMMOBILE."),
 ("CREDIT {#}", "CRÉDITO {#}", "CRÉDITO {#}", "KREDIT {#}", "CRÉDIT {#}"),
-("CHALLENGE FROM", "RETO DE", "DESAFIO DE", "HERAUSFORDERUNG VON", "DÉFI DE"),
+("CHALLENGE FROM", "RETO DE", "DESAFIO DE", "DUELL VON", "DÉFI DE"),
 ("Copy backup", "Copiar respaldo", "Copiar backup", "Backup kopieren", "Copier la sauvegarde"),
 ("Copy key", "Copiar clave", "Copiar chave", "Schlüssel kopieren", "Copier la clé"),
 ("Couldn't fit the swap fees into this token. Claim it at its own mint instead.", "Las comisiones del intercambio no caben en este token. Reclámalo en su propio mint.", "As taxas da troca não cabem neste token. Resgate-o no próprio mint dele.", "Die Tauschgebühren passen nicht in diesen Token. Löse ihn stattdessen bei seinem eigenen Mint ein.", "Les frais d'échange ne tiennent pas dans ce jeton. Réclamez-le plutôt sur son propre mint."),
@@ -704,6 +704,7 @@ ROWS = [
 ("NGN", "NGN", "NGN", "NGN", "NGN"),
 ("ARS", "ARS", "ARS", "ARS", "ARS"),
 ("SEK", "SEK", "SEK", "SEK", "SEK"),
+("Gift", "Regalo", "Presente", "Geschenk", "Cadeau"),
 ]
 
 # Patterns for sentences that carry names or dates. $1, $2… are filled in (and translated again if they're known words).

@@ -35,7 +35,7 @@ const ICON = {
   vs: ['#.....#.', '#.....#.', '.#...#..', '.#...#..', '..#.#.##', '..#.##..', '...#..##', '......##']
 };
 
-const done = t => ['done', 'claimed', 'reclaimed'].includes(t.status);
+const done = t => t.method !== 'fee' && ['done', 'claimed', 'reclaimed'].includes(t.status);   // a mint's fee line isn't a payment you made
 const DEFS = [
   { id: 'first-in', name: 'FIRST COIN', how: 'Receive your first sats.', icon: 'coin', col: '#ffcf3a', w: s => s.txs.some(t => t.type === 'in' && done(t) && t.amount > 0) },
   { id: 'first-out', name: 'PLAYER 2 JOINS', how: 'Send sats to someone.', icon: 'up', col: '#ff3d8b', w: s => s.txs.some(t => t.type === 'out' && done(t)) },
