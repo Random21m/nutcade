@@ -4368,6 +4368,10 @@ function render() {
   else if (tab === 'history') body = viewHistory();
   else if (tab === 'mints') body = viewMints();
   else body = viewSettings();
+  // a redraw replaces every button: the one with keyboard focus gets it back afterwards, or focus would fall to
+  // the page (a background refresh just after a sheet closed used to drop focus that had just been returned)
+  const fa = document.activeElement, fsel = fa && fa !== document.body && app.contains(fa) && fa.dataset && fa.dataset.act
+    ? ['act', 'id', 'tab', 'm', 'url', 'game'].filter(k => fa.dataset[k] != null).map(k => `[data-${k}="${CSS.escape(fa.dataset[k])}"]`).join('') : null;
   app.innerHTML = `<div class="wrap">
     ${marqueeHTML(false)}
     ${storageOk ? '' : '<div class="notice red" style="margin-top:14px">This browser is blocking storage, so ecash you receive here would vanish on reload. Open NUTCADE in a normal browser tab before adding funds.</div>'}
@@ -4386,6 +4390,7 @@ function render() {
   if (tab === 'wallet' && window.Arcade) { const el = $('#topScore'); if (el) el.innerHTML = window.Arcade.topLine(); }
   if (window.PriceChart) { if (tab === 'wallet') window.PriceChart.mount($('#priceMount')); else window.PriceChart.disconnect(); }
   fitNums(app);
+  if (fsel && (document.activeElement === document.body || !document.activeElement)) { const el = app.querySelector(fsel); if (el) el.focus({ preventScroll: true }); }
 }
 window.addEventListener('resize', () => { clearTimeout(fitNums.t); fitNums.t = setTimeout(() => { document.querySelectorAll('.credit-num,.cash-amt,.cash-charge').forEach(el => { el.style.fontSize = el.dataset.fs || ''; }); fitNums(); }, 150); });
 function refresh() { if ($('#layer .sheet')) { /* keep sheet */ } const y = window.scrollY; render(); window.scrollTo(0, y); }
