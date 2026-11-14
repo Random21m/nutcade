@@ -717,6 +717,50 @@ async function scanPhoto(file) {
     stopScan(); handleScan(one || text);
   } catch (e) { showErr(e); }
 }
+/* Bitcoin addresses are checked, not just pattern-matched: bech32 (BIP173) for SegWit v0 and bech32m (BIP350)
+   for v1 and later, base58check for legacy and P2SH, so one wrong or extra letter is caught. Returns the network
+   ('main', 'test' or 'regtest') or null. */
+const B32 = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+function b32polymod(v) { const G = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]; let c = 1; for (const x of v) { const b = c >>> 25; c = ((c & 0x1ffffff) << 5) ^ x; for (let i = 0; i < 5; i++) if ((b >>> i) & 1) c ^= G[i]; } return c >>> 0; }
+function segwitNet(a) {
+  if (a !== a.toLowerCase() && a !== a.toUpperCase()) return null;
+  a = a.toLowerCase(); const at = a.lastIndexOf('1'); if (at < 1 || a.length > 90 || a.length - at < 7) return null;
+  const hrp = a.slice(0, at), d = [...a.slice(at + 1)].map(c => B32.indexOf(c)); if (d.some(x => x < 0)) return null;
+  const net = { bc: 'main', tb: 'test', bcrt: 'regtest' }[hrp]; if (!net) return null;
+  const pm = b32polymod([...[...hrp].map(c => c.charCodeAt(0) >> 5), 0, ...[...hrp].map(c => c.charCodeAt(0) & 31), ...d]);
+  const ver = d[0]; if (ver > 16 || pm !== (ver === 0 ? 1 : 0x2bc830a3)) return null;
+  let acc = 0, bits = 0; const prog = [];
+  for (const x of d.slice(1, -6)) { acc = (acc << 5) | x; bits += 5; while (bits >= 8) { bits -= 8; prog.push((acc >> bits) & 255); } }
+  if (bits >= 5 || (acc & ((1 << bits) - 1))) return null;
+  if (prog.length < 2 || prog.length > 40 || (ver === 0 && prog.length !== 20 && prog.length !== 32)) return null;
+  return net;
+}
+function base58Net(a) {
+  const AB = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'; let n = 0n;
+  for (const c of a) { const i = AB.indexOf(c); if (i < 0) return null; n = n * 58n + BigInt(i); }
+  const bytes = []; while (n > 0n) { bytes.unshift(Number(n & 255n)); n >>= 8n; }
+  for (const c of a) { if (c !== '1') break; bytes.unshift(0); }
+  if (bytes.length !== 25) return null;
+  const body = Uint8Array.from(bytes.slice(0, 21)), sum = L.sha256(L.sha256(body));
+  if (bytes.slice(21).some((x, i) => x !== sum[i])) return null;
+  return { 0x00: 'main', 0x05: 'main', 0x6f: 'test', 0xc4: 'test' }[bytes[0]] || null;
+}
+const btcAddr = a => { a = String(a || '').trim(); return /^(bc|tb|bcrt)1/i.test(a) ? segwitNet(a) : /^[123mn][1-9A-HJ-NP-Za-km-z]{24,40}$/.test(a) ? base58Net(a) : null; };
+// the network a mint's Lightning invoices are on, when NUTCADE has seen one: lnbc main, lntb test, lnbcrt regtest
+function mintNet(url) {
+  const r = [...S.txs, ...S.quotes].filter(t => t.mint === url && /^ln(bcrt|tbs?|bc)\d*/i.test(t.request || '')).map(t => t.request.toLowerCase())[0];
+  return !r ? null : r.startsWith('lnbcrt') ? 'regtest' : r.startsWith('lntb') ? 'test' : 'main';
+}
+// throws a reason when the address can't be paid from this mint
+function checkBtcAddr(a, url) {
+  const net = btcAddr(a);
+  if (!net) throw new Error('That Bitcoin address looks wrong. Check it and paste again.');
+  const want = mintNet(url);
+  // testnet and regtest share the legacy prefixes m, n and 2, so only bech32 tells them apart
+  if (want && want !== net && !(want === 'regtest' && net === 'test' && !/^tb1/i.test(a))) throw new Error(want === 'main' ? "That's a test-network address. This mint pays out on the real Bitcoin network."
+    : net === 'main' ? "That's a real Bitcoin address, but this mint pays out on a test network." : "That address is for a different test network than this mint's.");
+  return net;
+}
 /* Figure out what a scanned or pasted string is and open the right screen for it. */
 function classify(raw) {
   let t = String(raw || '').trim();
@@ -725,15 +769,19 @@ function classify(raw) {
   { const m = t.match(/^(?:nostr:)?((?:npub1|nprofile1)[02-9ac-hj-np-z]+)$/i); if (m && parseNostrAddr(m[1])) return { kind: 'nostr', value: m[1].toLowerCase() }; }
   const low = t.toLowerCase();
   if (low.startsWith('bitcoin:')) {
-    const [addr, q] = t.slice(8).split('?'); const p = new URLSearchParams(q || '');
-    const ln = p.get('lightning'); if (ln && /^ln(bc|tb|bcrt)/i.test(ln)) return { kind: 'invoice', value: ln.toLowerCase() };
-    const btc = parseFloat(p.get('amount') || ''); return { kind: 'btc', value: addr, amount: btc > 0 ? Math.round(btc * 1e8) : null };
+    const [addr, q] = t.slice(8).split('?');
+    const ps = [...new URLSearchParams(q || '')], get = k => ps.filter(x => x[0].toLowerCase() === k).map(x => x[1]);   // QR codes may be all caps
+    const ln = get('lightning')[0]; if (ln && /^ln(bc|tb|bcrt)/i.test(ln)) return { kind: 'invoice', value: ln.toLowerCase() };
+    if (!btcAddr(addr)) return { kind: 'unknown' };
+    // BIP21 amounts are BTC with a decimal point (see parseBtc). One that can't be read, or two amounts, is left out, never guessed.
+    const am = get('amount'), sats = am.length === 1 ? parseBtc(am[0]) : null;
+    return { kind: 'btc', value: /^(bc|tb|bcrt)1/i.test(addr) ? addr.toLowerCase() : addr, amount: sats, badAmount: am.length && sats == null ? am.join(' ') : null };
   }
   t = t.replace(/^lightning:/i, '');
   if (/^ln(bc|tb|bcrt|tbs)[0-9a-z]{50,}$/i.test(t)) return { kind: 'invoice', value: t.toLowerCase() };
   if (/^lnurl1[0-9a-z]+$/i.test(t)) return { kind: 'lnurl', value: t.toLowerCase() };
   if (/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(t)) return { kind: 'lnaddress', value: t.toLowerCase() };
-  if (/^(bc1|tb1|bcrt1)[a-z0-9]{20,90}$/i.test(t) || /^[13mn2][a-km-zA-HJ-NP-Z1-9]{25,39}$/.test(t)) return { kind: 'btc', value: t, amount: null };
+  if (btcAddr(t)) return { kind: 'btc', value: /^(bc|tb|bcrt)1/i.test(t) ? t.toLowerCase() : t, amount: null };
   if (/^https?:\/\/[^\s]+$/i.test(t)) return { kind: 'mint', value: normUrl(t) };
   return { kind: 'unknown' };
 }
@@ -756,7 +804,11 @@ function handleScan(text) {
   if (c.kind === 'nostr') { if (needSeed()) return; const k = S.contacts.find(x => x.pubkey === parseNostrAddr(c.value).pubkey); return k ? openPayContact(k.id) : openContactEdit(null, { nostr: c.value }); }
   if (needMint()) return;
   if (c.kind === 'invoice') { openSend('ln'); const d = $('#destIn'); if (d) { d.value = c.value; const b = $('[data-act="doMeltQuote"]'); if (b) b.click(); } return; }
-  if (c.kind === 'btc') { openSend('onchain'); const d = $('#destIn'); if (d) d.value = c.value; if (c.amount && $('#amtIn')) setSats($('#amtIn'), c.amount); return; }
+  if (c.kind === 'btc') {
+    openSend('onchain'); const d = $('#destIn'); if (d) d.value = c.value; if (c.amount && $('#amtIn')) setSats($('#amtIn'), c.amount);
+    if (c.badAmount != null) showErr(amtErr("This Bitcoin link's amount can't be read, so it was left out. Type the amount yourself.", 'bip21'));
+    return;
+  }
   if (c.kind === 'lnaddress' || c.kind === 'lnurl') return openPayLnurl(c.value);
   if (c.kind === 'mint') { openMintPicker(); const u = $('#mintUrl'); if (u) { u.value = c.value; u.focus(); } toast('Check the address, then tap Add', 'cyan'); }
 }
@@ -916,43 +968,108 @@ async function copy(text, el) {
 let sheetCleanup = null;
 /* Amount fields: type sats, or flip to your currency (uses the live price, when Show Bitcoin price is on). */
 const canFiat = () => !!(S.prefs.fiat && price.rate && price.cur === S.prefs.currency);
-/* Typed amounts in your currency, read the way your language writes them. German, Spanish, Portuguese and
-   French use a decimal comma and group with dots or spaces; English uses a decimal point and groups with commas.
-   When both marks appear, the last one is the decimal mark (1.234,56 and 1,234.56 both mean 1234.56). A lone
-   mark of the other kind followed by exactly three digits is grouping (1.000 in German is a thousand); with one
-   or two digits after it, it's a decimal mark (1234.56 and 0,5 read as typed). Amounts are never read 1000x off. */
+/* ---------- typed amounts ----------
+   Every amount or count a person types is read by one of four parsers: parseSat (whole SAT), parseFiat (your
+   currency), parseBtc (the amount in a bitcoin: link) and parseCount (people, coins, keys). Each returns the
+   exact value or throws a message in your language that says what it couldn't read and shows an example.
+   Nothing is guessed and nothing is dropped: a letter, a minus sign, a second decimal mark or a digit group
+   that isn't three digits long makes the whole amount unreadable.
+   Digit groups: a mark (or a space, or ') counts as grouping only when the first group is 1 to 3 digits and
+   doesn't start with 0, and every later group is exactly 3 digits. Anything else with marks in it is refused.
+   Your currency: German, Spanish, Portuguese and French use a decimal comma; English uses a decimal point.
+   When both marks appear, the last one is the decimal mark and may appear only once (1.234,56 and 1,234.56
+   both mean 1234.56). A lone decimal mark of your language is always the decimal mark (1.000 is one in
+   English). A lone mark of the other kind is grouping when it fits the grouping rule (1.000 is a thousand in
+   German) and otherwise the decimal mark (0.500 in German is a half, 1234.5 in German is 1234.5). */
+const MAX_SAT = 2100000000000000;   // 21 million BTC: no amount can be larger than every bitcoin there will ever be
+const GAP = /[\s'’   ]/;   // spaces and apostrophes only ever group digits
+const SEPS = /[.,\s'’   ]/g;
+const AMT_CHARS = /^[0-9.,\s'’   ]+$/;
 const decMark = () => (1.5).toLocaleString(numLocale()).replace(/\d/g, '') || '.';
-function parseFiat(v) {
-  let t = String(v || '').replace(/[\s\u00a0\u202f'’]/g, '');
-  if (!t) return 0;
-  if (!/^[0-9.,]+$/.test(t)) return NaN;
-  const dec = decMark(), other = dec === ',' ? '.' : ',';
-  const lastDot = t.lastIndexOf('.'), lastComma = t.lastIndexOf(',');
+const grpMark = () => { const g = (1234).toLocaleString(numLocale(), { useGrouping: 'always' }).replace(/\d/g, ''); return /^[.,]$/.test(g) ? g : ' '; };
+// 1.234.567 or 1 234 567 or 1234567; never 1.23.456, 12..50 or 0.500
+const groupsOk = s => { const g = s.split(/[.,\s'’   ]/); return g.length === 1 ? /^\d+$/.test(g[0]) : /^[1-9]\d{0,2}$/.test(g[0]) && g.slice(1).every(x => /^\d{3}$/.test(x)); };
+const amtErr = (msg, why) => { const e = new Error(msg); e.amount = why; return e; };
+const fiatUnreadable = () => amtErr("That amount can't be read. Type it like this: " + fmtFiatPlain(1234.56), 'unreadable');
+const satUnreadable = () => amtErr("That amount can't be read. Type whole SAT, like this: " + fmt(1500), 'unreadable');
+const satWhole = () => amtErr('SAT are whole numbers, with no decimals. Type it like this: ' + fmt(1500), 'decimal');
+const tooLarge = () => amtErr("That's more than 21 million BTC, more bitcoin than will ever exist. Type a smaller amount.", 'large');
+const parseFiat = v => Number(parseFiatText(v));
+// the amount as a plain decimal string ("1234.56"), so converting it to SAT can be exact
+function parseFiatText(v) {
+  const s = String(v ?? '').trim(); if (!s) return '0';
+  if (!AMT_CHARS.test(s)) throw fiatUnreadable();
+  const dec = decMark(), dot = s.lastIndexOf('.'), comma = s.lastIndexOf(',');
   let point = -1;
-  if (lastDot >= 0 && lastComma >= 0) point = Math.max(lastDot, lastComma);
-  else if (lastDot >= 0 || lastComma >= 0) {
-    const mark = lastDot >= 0 ? '.' : ',', at = Math.max(lastDot, lastComma), count = t.split(mark).length - 1, after = t.length - at - 1;
-    if (count > 1) point = -1;                                   // 1.234.567: grouping
-    else if (mark === dec) point = at;                           // the language's own decimal mark
-    else point = after === 3 ? -1 : at;                          // 1.000 in German is grouping; 1234.56 and 0,5 are decimals
+  if (dot >= 0 && comma >= 0) point = Math.max(dot, comma);
+  else if (dot >= 0 || comma >= 0) {
+    const at = Math.max(dot, comma), mark = s[at];
+    if (s.indexOf(mark) !== at) point = -1;                       // the same mark twice: grouping (1.234.567)
+    else if (mark === dec) point = at;                            // your language's decimal mark
+    else point = groupsOk(s) && /^\d{3}$/.test(s.slice(at + 1)) ? -1 : at;   // 1.000 in German is a thousand; 0.500 and 1234.5 are decimals
   }
-  const whole = (point >= 0 ? t.slice(0, point) : t).replace(/[.,]/g, ''), frac = point >= 0 ? t.slice(point + 1) : '';
-  if (/[.,]/.test(frac)) return NaN;
-  const n = parseFloat((whole || '0') + (frac ? '.' + frac : ''));
-  return isFinite(n) ? n : NaN;
+  const whole = point >= 0 ? s.slice(0, point) : s, frac = point >= 0 ? s.slice(point + 1) : '';
+  if (point >= 0 && s.indexOf(s[point]) !== point) throw fiatUnreadable();   // two decimal marks
+  if (!/^\d*$/.test(frac) || (whole && !groupsOk(whole))) throw fiatUnreadable();
+  return (whole.replace(SEPS, '') || '0') + '.' + (frac || '0');
+}
+function parseSat(v) {
+  const s = String(v ?? '').trim(); if (!s) return 0;
+  if (!AMT_CHARS.test(s)) throw satUnreadable();
+  const punct = s.replace(/[^.,]/g, ''), single = punct.length === 1 && !GAP.test(s);
+  // grouping uses spaces or your language's own mark (1,500 in English, 1.500 in German, 1 500 in French);
+  // any other mark, or a group that isn't 3 digits, reads as a decimal (1.5, 1,5) or isn't an amount at all
+  if ([...punct].some(c => c !== grpMark()) || !groupsOk(s)) throw single ? satWhole() : satUnreadable();
+  const n = Number(s.replace(SEPS, ''));
+  if (!Number.isSafeInteger(n) || n > MAX_SAT) throw tooLarge();
+  return n;
+}
+// whole-number counts: people at the table, coins in a hunt. msg is the sentence to show when it isn't one.
+function parseCount(v, msg) {
+  const s = String(v ?? '').trim();
+  if (!/^\d{1,9}$/.test(s)) throw amtErr(msg || 'Use a whole number, like 4.', 'count');
+  return Number(s);
+}
+/* bitcoin: links (BIP21) write the amount in BTC with a decimal point: amount = *digit [ "." *digit ]. NUTCADE
+   reads digits with an optional point and at most 8 decimals (1 SAT), using string math so nothing is rounded.
+   Exponents (1e-3), commas, signs and anything after the digits are not BIP21, so they return null, and so does
+   an amount of 0 or above 21 million BTC. The caller then leaves the amount out and says so. */
+function parseBtc(v) {
+  const m = /^(\d*)(?:\.(\d*))?$/.exec(String(v ?? ''));
+  if (!m || !(m[1] || m[2]) || (m[2] || '').length > 8) return null;
+  const w = (m[1] || '0').replace(/^0+(?=\d)/, ''); if (w.length > 8) return null;
+  const n = Number(w) * 1e8 + Number((m[2] || '').padEnd(8, '0'));
+  return n > 0 && n <= MAX_SAT ? n : null;
 }
 // your currency without grouping, with the language's decimal mark: 12,50 in German, 12.50 in English
 const fmtFiatPlain = (x, dp = 2) => Number(x).toLocaleString(numLocale(), { minimumFractionDigits: dp, maximumFractionDigits: dp, useGrouping: false });
+/* SAT, from an amount in your currency ("1234.56") at the live rate, in exact decimal arithmetic and rounded half
+   up, so a large amount is never a SAT off from floating point. One that rounds to nothing, or is more than
+   21 million BTC, is refused. */
+function fiatToSats(t, rate = price.rate) {
+  const m = /^(\d*)\.?(\d*)$/.exec(String(t)), r = /^(\d+)\.?(\d*)$/.exec(String(rate));
+  if (!m || !(rate > 0)) return 0;
+  let n;
+  if (r) {
+    const num = BigInt((m[1] + m[2]) || '0') * 10n ** BigInt(r[2].length + 8), den = BigInt(r[1] + r[2]) * 10n ** BigInt(m[2].length);
+    if (num === 0n) return 0;
+    const q = (2n * num + den) / (2n * den);
+    if (q > BigInt(MAX_SAT)) throw tooLarge();
+    n = Number(q);
+  } else n = Math.round(Number(t) / rate * 1e8);   // a rate written with an exponent: never seen, but still sane
+  if (!(Number(t) > 0)) return 0;
+  if (n < 1) throw amtErr("That's less than 1 SAT. Type a larger amount.", 'small');
+  if (!Number.isSafeInteger(n) || n > MAX_SAT) throw tooLarge();
+  return n;
+}
 function satsOf(id) {
   const el = typeof id === 'string' ? $('#' + id) : id; if (!el) return 0;
   const v = String(el.value || '').trim(); if (!v) return 0;
   if (el.dataset.cur === 'fiat') {
     if (!canFiat()) throw new Error('The exchange rate is not available right now. Switch the amount to SAT.');
-    const f = parseFiat(v);
-    if (isNaN(f)) throw new Error("That amount can't be read. Type it like this: " + fmtFiatPlain(1234.56));
-    return f > 0 ? Math.round(f / price.rate * 1e8) : 0;
+    return fiatToSats(parseFiatText(v));
   }
-  return parseInt(v.replace(/[^0-9]/g, ''), 10) || 0;
+  return parseSat(v);
 }
 function setSats(el, n) { if (!el) return; el.dataset.cur = 'sat'; el.value = n; const w = el.closest('.amtwrap'); if (w) { const b = w.querySelector('.unitbtn'); if (b) b.textContent = 'SAT'; el.setAttribute('inputmode', 'numeric'); } unitLabel(el); amtConv(el); }
 // "Amount (SAT)" becomes "Amount (USD)" when you type in your currency
@@ -962,15 +1079,15 @@ function unitLabel(el) {
   lab.textContent = tr(lab.dataset.en.replace('(SAT', '(' + (el.dataset.cur === 'fiat' ? S.prefs.currency : 'SAT')));
 }
 function amtConv(el) {
-  const out = el.parentElement && el.parentElement.parentElement && el.parentElement.parentElement.querySelector('.amtconv'); if (!out) return;
-  let t = '';
+  const out = el.parentElement && el.parentElement.parentElement && el.parentElement.parentElement.querySelector('.amtconv');
+  let t = '', bad = false;
   try {
-    if (el.value && canFiat()) {
-      if (el.dataset.cur === 'fiat') { const n = satsOf(el); t = n ? `≈ ${money(n)}` : ''; }
-      else { const n = satsOf(el); t = n ? `≈ ${fiatOf(n)}` : ''; }
-    }
-  } catch (e) {}
-  out.textContent = t;
+    const n = satsOf(el);   // throws when the amount can't be read: the field is marked and the hint stays empty
+    if (n && canFiat()) t = el.dataset.cur === 'fiat' ? `≈ ${money(n)}` : `≈ ${fiatOf(n)}`;
+  } catch (e) { bad = !!e.amount; }
+  if (bad) el.setAttribute('aria-invalid', 'true');
+  else { el.removeAttribute('aria-invalid'); const er = $('#sheetErr [data-amount]'); if (er) er.remove(); }   // fixed: the old reason goes
+  if (out) out.textContent = t;
 }
 function enhanceAmounts(root) {
   if (!root || !S.prefs.fiat) return;
@@ -2587,7 +2704,7 @@ const A = {
     const note = val('noteIn').trim();
     if (k === 'ln') { const c = classify(dest); if (c.kind === 'lnaddress' || c.kind === 'lnurl') { const n = val('noteIn').trim(); openPayLnurl(c.value); if (n && $('#noteIn')) $('#noteIn').value = n; return; }
       if (!/^ln(bc|tb|bcrt|tbs)[0-9a-z]{50,}$/i.test(dest)) throw new Error("That isn't a complete Lightning invoice. Copy the whole invoice (it starts with lnbc) and paste again."); dest = dest.toLowerCase(); let mq; try { mq = await meltQuote('ln', dest); } catch (e) { if (/bech32|checksum|decode|invalid invoice|parse/i.test(e.message)) throw new Error("That Lightning invoice isn't valid. Check you copied all of it."); throw e; } showMeltQuote('ln', mq, dest, note); }
-    else { if (!/^(bc1|tb1|bcrt1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,90}$/.test(dest)) throw new Error('That Bitcoin address looks wrong. Check it and paste again.'); const a = amt(); const mq = await meltQuote('onchain', dest, a); showMeltQuote('onchain', mq, dest, note); }
+    else { checkBtcAddr(dest, S.active); const a = amt(); const mq = await meltQuote('onchain', dest, a); showMeltQuote('onchain', mq, dest, note); }
   }),
   saveNote: b => { updTx(b.dataset.id, { note: val('noteEdit').trim() }); sfx('coin'); toast('Note saved', 'gold'); closeSheet(); refresh(); },
   checkClaim: b => run(b, '…', async () => { const t = txById(b.dataset.id); const c = await checkClaim(t); toast(c ? 'Claimed by the receiver' : 'Not claimed yet', c ? 'lime' : 'gold'); if (c) { closeSheet(); refresh(); } }),
@@ -2985,7 +3102,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved };
+window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}

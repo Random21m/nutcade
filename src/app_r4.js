@@ -361,8 +361,9 @@ const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateStrin
 const todaysSales = () => S.txs.filter(t => t.cashier && t.status === 'done' && sameDay(t.ts, Date.now()));
 function cashSats() {
   const v = cash.amount; if (!v) return 0;
-  if (cash.unit === 'fiat') { if (!canFiat()) return 0; return Math.round(parseFloat(v) / price.rate * 1e8) || 0; }
-  return parseInt(v, 10) || 0;
+  // the till's keys only ever make plain digits with one '.', so these are exact
+  if (cash.unit === 'fiat') { if (!canFiat()) return 0; try { return fiatToSats(v); } catch (e) { return 0; } }
+  return Number(v) || 0;
 }
 function openCashier() {
   if (needMint()) return;

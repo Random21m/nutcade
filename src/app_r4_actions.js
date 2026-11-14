@@ -10,10 +10,10 @@ Object.assign(A, {
   }),
   splitOpen: () => { sfx('select'); openSplit(); },
   splitCreate: b => run(b, 'SUMMONING', async () => {
-    const total = amt(); const people = Math.round(+val('splitN'));
+    const total = amt(); const people = parseCount(val('splitN'), 'Choose 2 to 30 people, including you.');
     if (!(people >= 2 && people <= 30)) throw new Error('Choose 2 to 30 people, including you.');
+    if (total < people) throw amtErr(`${money(total)} can't be split ${people} ways. Each share needs at least 1 SAT.`, 'split');
     const share = Math.ceil(total / people);
-    if (share < 1) throw new Error('That bill is too small to split.');
     const r = newRequest(share, val('memoIn').trim() || tr('Split the bill'), !!($('#onlyMine') || {}).checked);
     r.split = { total, people, share, need: share * (people - 1) }; store.set('requests', S.requests);
     sfx('levelup'); showSplit(r); refresh();
@@ -55,7 +55,7 @@ Object.assign(A, {
   chalSend: b => run(b, 'SENDING', async () => {
     const c = S.challenges.find(x => x.id === b.dataset.id && x.dir === 'out'); const k = contactById(b.dataset.c);
     if (!c || !k) return;
-    const bAmt = Math.floor(num(val('bountyAmt').replace(/[^0-9]/g, '')));
+    const bAmt = parseSat(val('bountyAmt'));
     let bounty = null, bo = null;
     if (bAmt > 0) { bo = await createBounty(c, k, bAmt); bounty = { token: bo.tx.token, amount: bAmt, until: bo.b.until }; }
     // with a bounty the message is sealed with our own key, so Robin's NUTCADE can tell the sats really come from the challenger

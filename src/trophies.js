@@ -280,8 +280,8 @@ async function openCard(o) {
   if (s) s.onclick = async () => { try { await navigator.share({ files: [file], text: shareText(o) + ' https://' + SITE }); } catch (e) { if (e.name !== 'AbortError') n.toast("Couldn't open sharing. Save the image instead.", 'gold'); } };
   const lb = document.getElementById('cardLoad');
   if (lb) lb.onclick = async () => {
-    const amt = Math.floor(Number((document.getElementById('loadAmt').value || '').replace(/[^0-9]/g, '')));
     const err = document.getElementById('sheetErr');
+    let amt = 0; try { amt = n.parseSat(document.getElementById('loadAmt').value); } catch (e) { err.innerHTML = `<div class="notice red">${n.esc(e.message)}</div>`; return; }
     if (!(amt > 0)) { err.innerHTML = '<div class="notice red">Enter how many sats to put in the card.</div>'; return; }
     lb.disabled = true; lb.textContent = 'LOADING…';
     try { const ld = await n.loadCard(amt); n.sfx('coin'); openCard(Object.assign({}, o, { loaded: ld })); }

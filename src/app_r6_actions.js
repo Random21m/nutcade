@@ -2,7 +2,7 @@
 Object.assign(A, {
   huntNew: () => { sfx('select'); openHuntNew(); },
   huntCreate: b => run(b, 'HIDING', async () => {
-    const a = amt(), n = Math.round(+val('huntN')), k = Math.round(+val('huntK'));
+    const a = amt(), n = parseCount(val('huntN'), 'Use 2 to 12 clue cards.'), k = parseCount(val('huntK'), `The number needed has to be between 1 and ${n}.`);
     if (!(n >= 2 && n <= 12)) throw new Error('Use 2 to 12 clue cards.');
     if (!(k >= 1 && k <= n)) throw new Error(`The number needed has to be between 1 and ${n}.`);
     const days = +(($('#layer [data-act=giftDays][aria-pressed=true]') || {}).dataset || {}).days || 7;
