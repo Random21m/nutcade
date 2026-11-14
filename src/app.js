@@ -512,12 +512,12 @@ const NUMRE = /\d[\d,.\u00a0\u202f]*/g;
 function tr(s) {
   if (LANG === 'en' || !s) return s;
   const d = I18N[LANG]; if (!d) return s; if (!d.done) d.done = new Set();
-  const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(s); const core = m[2].replace(/\s+/g, ' '); if (!core || !/[A-Za-z]/.test(core)) return s;
+  const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(s); const core = m[2].replace(/[ \t\r\n]+/g, ' '); if (!core || !/[A-Za-z]/.test(core)) return s;   // (the narrow no-break space French puts inside numbers is kept)
   let out = d.t[core];
   if (out === undefined) { const nums = []; const key = core.replace(NUMRE, x => { nums.push(x); return '{#}'; }); if (nums.length && d.t[key] !== undefined) { let i = 0; out = d.t[key].replace(/\{#\}/g, () => nums[i++] ?? ''); } }
   if (out === undefined && d.re) for (const [re, rep_] of d.re) { const mm = re.exec(core); if (mm) { out = rep_.replace(/\$(\d)/g, (_, k) => tr(mm[+k] || '')); break; } }
   if (out === undefined && core.includes('₿')) {   // "₿67 in your piggy bank" uses the "67 SAT in your piggy bank" translation
-    const asSat = core.replace(/₿(\d[\d,.\u00a0\u202f]*\d|\d)/g, '$1 SAT'); const t = asSat === core ? asSat : tr(asSat);
+    const asSat = core.replace(/₿(\d[\d,.\u00a0\u202f]*\d|\d)/g, '$1 SAT'); let t = asSat; if (asSat !== core) { const miss = window.__i18nMiss; window.__i18nMiss = null; try { t = tr(asSat); } finally { window.__i18nMiss = miss; } }
     if (t !== asSat) out = t.replace(/(\d[\d,.\u00a0\u202f]*\d|\d) SAT/g, '₿$1');
   }
   if (out === undefined) { if (window.__i18nMiss) { if (!d.vals) d.vals = new Set(Object.values(d.t)); if (!d.vals.has(core) && !d.done.has(core)) window.__i18nMiss.add(core); } return s; }

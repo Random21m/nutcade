@@ -553,9 +553,9 @@ RE = [
 (r"^Sale: (.+) #cashier$", "Venta: $1 #cashier", "Venda: $1 #cashier", "Verkauf: $1 #cashier", "Vente : $1 #cashier"),
 (r"^Gift came back from (.+)$", "El regalo volvió de $1", "O presente voltou de $1", "Geschenk von $1 ist zurückgekommen", "Le cadeau est revenu de $1"),
 # ===== 1.11 polish, round 2 =====
-(r"^(.+) QR$", "Código QR: $1", "QR code: $1", "QR-Code: $1", "QR code : $1"),
-(r"^(.+) QR, animated$", "Código QR animado: $1", "QR code animado: $1", "Animierter QR-Code: $1", "QR code animé : $1"),
-(r"^(.+) game screen$", "Pantalla del juego $1", "Tela do jogo $1", "Spielbildschirm $1", "Écran du jeu $1"),
+(r"^(Lightning invoice|Bitcoin address|Ecash token|Payment request|Lightning address|Ecash address|Ecash payment request|Heir's copy|P2PK public key|Challenge link|Ecash payment) QR$", "Código QR: $1", "QR code: $1", "QR-Code: $1", "QR code : $1"),
+(r"^(Lightning invoice|Bitcoin address|Ecash token|Payment request|Lightning address|Ecash address|Ecash payment request|Heir's copy|P2PK public key|Challenge link|Ecash payment) QR, animated$", "Código QR animado: $1", "QR code animado: $1", "Animierter QR-Code: $1", "QR code animé : $1"),
+(r"^(STAR SWARM|NUT MAZE|BRICK BLITZ|VOID ROCKS|HOP LANES|SKY SHIELD|NIBBLE|NUT FLIPPER) game screen$", "Pantalla del juego $1", "Tela do jogo $1", "Spielbildschirm $1", "Écran du jeu $1"),
 (r"^QR code for the Lightning address (.+)$", "Código QR de la dirección Lightning $1", "QR code do endereço Lightning $1", "QR-Code der Lightning-Adresse $1", "QR code de l'adresse Lightning $1"),
 (r"^Bitcoin price in ([A-Z]{3}) over (\w+): now (.+), high (.+), low (.+)\. Use left and right arrow keys to read values\.$", "Precio de Bitcoin en $1 en $2: ahora $3, máximo $4, mínimo $5. Usa las flechas izquierda y derecha para leer los valores.", "Preço do Bitcoin em $1 em $2: agora $3, máxima $4, mínima $5. Use as setas esquerda e direita para ler os valores.", "Bitcoin-Preis in $1 über $2: jetzt $3, Hoch $4, Tief $5. Mit den Pfeiltasten links und rechts liest du die Werte.", "Prix du Bitcoin en $1 sur $2 : maintenant $3, haut $4, bas $5. Utilisez les flèches gauche et droite pour lire les valeurs."),
 ]
