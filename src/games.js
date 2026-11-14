@@ -852,7 +852,7 @@ function openGame(id, opts) {
   chal = opts && opts.challenge ? opts.challenge : null;
   view = document.createElement('div'); view.className = 'game-view'; view.setAttribute('role', 'dialog'); view.setAttribute('aria-label', cur.name);
   view.innerHTML = `<div class="game-top"><button class="btn sm red" data-g="exit">Exit</button><div class="ttl">${cur.name}</div><button class="btn sm" data-g="mute" aria-label="Toggle sound">${(window.NutPrefs || {}).sound === false ? 'SND OFF' : 'SND ON'}</button></div>
-    <div class="screen-frame"><canvas id="gameCanvas" width="${W}" height="${H}" aria-label="${cur.name} game screen"></canvas></div>
+    <div class="screen-frame"><canvas id="gameCanvas" width="${W}" height="${H}" aria-label="${T(cur.name + ' game screen')}"></canvas></div>
     <div class="pad touch-only"><div class="hint"><span>${cur.help}</span><button class="padswap" data-g="pad">${store.get('pad', 'stick') === 'stick' ? 'Use D-pad' : 'Use joystick'}</button></div>
     <div class="pad-row">${padHTML()}<div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause">II</button><button class="abtn a" data-k="a" aria-label="A button">A</button></div></div></div>
     <div class="pad-keys"><span>${cur.keys}</span> · <span>Enter pause</span> · <span>Esc exit</span></div><div id="entry"></div>`;
