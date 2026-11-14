@@ -1103,13 +1103,20 @@ function enhanceAmounts(root) {
     amtConv(el);
   });
 }
+// your currency, with enough decimals to show a small amount: 0.68 or 0.0068, never 0.00
+const fiatField = x => fmtFiatPlain(x, x >= 0.01 || !(x > 0) ? 2 : Math.min(8, Math.ceil(-Math.log10(x)) + 1));
+/* SAT ⇄ your currency. Switching back without editing restores exactly what you typed (7 SAT stays 7, not the
+   10 that $0.01 would make). An amount that can't be read stays as it is, with the reason, and doesn't switch. */
 function toggleUnit(el) {
   if (!canFiat() && el.dataset.cur !== 'fiat') { toast('Turn on Show Bitcoin price in Settings to enter amounts in your currency.', 'gold'); return; }
-  let n = 0; try { n = satsOf(el); } catch (e) {}
-  const toFiat = el.dataset.cur !== 'fiat';
+  let n = 0; try { n = satsOf(el); } catch (e) { showErr(e); return; }
+  const toFiat = el.dataset.cur !== 'fiat', typed = el.value, back = el._unitBack;
+  let next = n ? (toFiat ? fiatField(n / 1e8 * price.rate) : String(n)) : '';
+  if (back && back.cur === (toFiat ? 'fiat' : 'sat') && back.shown === typed) next = back.typed;   // not edited since the last switch
+  el._unitBack = { cur: el.dataset.cur, typed, shown: next };
   el.dataset.cur = toFiat ? 'fiat' : 'sat';
   el.setAttribute('inputmode', toFiat ? 'decimal' : 'numeric');
-  el.value = n ? (toFiat ? fmtFiatPlain(n / 1e8 * price.rate) : String(n)) : '';
+  el.value = next;
   const b = el.parentElement.querySelector('.unitbtn'); if (b) b.textContent = toFiat ? S.prefs.currency : 'SAT';
   unitLabel(el); S.prefs.amtFiat = toFiat; save(); amtConv(el);
 }

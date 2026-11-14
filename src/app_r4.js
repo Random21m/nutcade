@@ -375,7 +375,7 @@ function openCashier() {
   netBanner();   // offline: re-measure the banner, which is one line over the till
   const m = activeMint();
   cash.method = supports(m, 'mint', 'bolt11') ? 'ln' : 'ecash';
-  cash.mode = 'keys'; cash.amount = ''; cash.label = ''; cash.unit = S.prefs.amtFiat && canFiat() ? 'fiat' : 'sat';
+  cash.mode = 'keys'; cash.amount = ''; cash.label = ''; cash.unitBack = null; cash.unit = S.prefs.amtFiat && canFiat() ? 'fiat' : 'sat';
   cashierRender();
 }
 function cashierTop() {
@@ -444,7 +444,15 @@ function cashierClick(e) {
   }
   if (k === 'del') { cash.amount = cash.amount.slice(0, -1); sfx('blip'); return cashierRender(); }
   if (k === 'clear') { cash.amount = ''; cash.label = ''; return cashierRender(); }
-  if (k === 'unit') { if (!canFiat()) return; const n = cashSats(); cash.unit = cash.unit === 'fiat' ? 'sat' : 'fiat'; cash.amount = n ? (cash.unit === 'fiat' ? (n / 1e8 * price.rate).toFixed(2) : String(n)) : ''; return cashierRender(); }
+  if (k === 'unit') {
+    if (!canFiat()) return;
+    const n = cashSats(), from = cash.unit, typed = cash.amount, bk = cash.unitBack;
+    cash.unit = from === 'fiat' ? 'sat' : 'fiat';
+    cash.amount = n ? (cash.unit === 'fiat' ? (n / 1e8 * price.rate).toFixed(2) : String(n)) : '';
+    if (bk && bk.unit === cash.unit && bk.shown === typed) cash.amount = bk.typed;   // switched back without editing: exactly what was typed
+    cash.unitBack = { unit: from, typed, shown: cash.amount };
+    return cashierRender();
+  }
   if (k === 'm-ln' || k === 'm-ecash') { cash.method = k.slice(2); sfx('select'); return cashierRender(); }
   if (k === 'charge') return cashierCharge(b);
   if (k === 'cancel') { cashierStopWatch(); if (cash.tx) updTx(cash.tx.id, { note: (cash.tx.note || '') + ' (cancelled at the till)' }); cash.mode = 'keys'; cash.tx = null; cash.req = null; return cashierRender(); }
