@@ -328,6 +328,105 @@ async def main():
         check('offline: the banner sits above the header, not on it', nb['b'] <= nb['m'], nb)
         await g.pg.context.set_offline(False); await g.pg.context.close()
 
+        # ---------- round 3 ----------
+        # no pixel-font label, button, tab or short status splits inside a word, in any language
+        SPLIT = """(()=>{const out=[];for(const e of document.querySelectorAll('#app *,#layer *,.cashier *')){const r=e.getBoundingClientRect();if(!r.width||e.closest('.code,.mono,.qr,canvas,svg,textarea,[data-noi18n],.uname,.note,.tag,.meta,.kv dd,.notice'))continue;
+          const s=getComputedStyle(e);const ps=/Press/.test(s.fontFamily);if(!ps&&!e.closest('button,.btn,label,.label,.tab,.health'))continue;
+          for(const n of e.childNodes){if(n.nodeType!==3||!n.nodeValue.trim())continue;const re=/[^\\s\\-\\/@.·:]+/g;let m;while((m=re.exec(n.nodeValue))){if(m[0].length<3)continue;const rg=document.createRange();rg.setStart(n,m.index);rg.setEnd(n,m.index+m[0].length);
+            if(new Set([...rg.getClientRects()].filter(q=>q.width>0).map(q=>Math.round(q.top))).size>1)out.push(m[0])}}}return [...new Set(out)].slice(0,8)})()"""
+        for vw, vh in [(320, 640), (375, 667)]:
+            for lang in LANGS:
+                z = await wallet(b, vw, vh, lang)
+                await z.create(); await z.add_mint(B); await z.receive_ln(2000)
+                found = {}
+                for name, js in [('wallet', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=wallet]').click()"), ('arcade', "document.querySelector('[data-act=tab][data-tab=arcade]').click()"),
+                                 ('history', "document.querySelector('[data-act=tab][data-tab=history]').click()"), ('mints', "document.querySelector('[data-act=tab][data-tab=mints]').click()"),
+                                 ('settings', "document.querySelector('[data-act=tab][data-tab=settings]').click()"), ('receive', "document.querySelector('[data-act=tab][data-tab=wallet]').click(); document.querySelector('[data-act=receive]').click()"),
+                                 ('send', "Nutcade.closeSheet(); document.querySelector('[data-act=send]').click()"), ('cashier', "Nutcade.closeSheet(); document.querySelector('[data-act=cashier]').click()")]:
+                    await z.ev(js); await z.wait(1500 if name == 'mints' else 300)
+                    sp = await z.ev(SPLIT)
+                    if sp: found[name] = sp
+                check(f'words {vw}x{vh} {lang}: no label, button or status splits inside a word', not found, found)
+                await z.pg.context.close()
+
+        # typed amounts in your currency are read the way your language writes them (never 1000x off)
+        CASES = {'en': [('1,234.56', 1234.56), ('1234.56', 1234.56), ('1.000', 1.0), ('0,5', 0.5), ('1,000', 1000)],
+                 'xx': [('1.234,56', 1234.56), ('1 234,56', 1234.56), ('1234,56', 1234.56), ('1234.56', 1234.56), ('1.000', 1000), ('0,5', 0.5), ('1,234.56', 1234.56), ('1\u202f234,56', 1234.56)]}
+        for lang in LANGS:
+            f = await wallet(b, 375, 667, lang)
+            await f.pg.route(re.compile(r'https://api(\.exchange)?\.coinbase\.com/.*'), lambda r: r.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': '*'}, body=json.dumps({'data': {'currency': 'BTC', 'rates': {'USD': '100000'}}})))
+            await f.create(); await f.add_mint(B); await f.receive_ln(25000, 'Rent #home'); await f.home(); await f.wait(900)
+            await f.click('[data-act=receive]'); await f.wait(150)
+            await f.fill('#amtIn', '2500'); await f.click('[data-act=amtUnit]'); await f.wait(100); await f.click('[data-act=amtUnit]'); await f.wait(100)
+            rt = await f.ev("document.querySelector('#amtIn').value")
+            await f.click('[data-act=amtUnit]'); await f.wait(100)
+            bad = [] if rt == '2500' else [('SAT -> USD -> SAT', rt)]
+            for typed, exp in CASES['en' if lang == 'en' else 'xx']:
+                await f.fill('#amtIn', typed); await f.wait(60)
+                hint = await f.ev("document.querySelector('.amtconv').innerText")
+                if int(re.sub(r'[^0-9]', '', hint) or 0) != round(exp / 100000 * 1e8): bad.append((typed, hint))
+            check(f'fiat {lang}: typed amounts are read in the language\'s format, and the ≈ SAT hint matches', not bad, bad)
+            await f.ev("Nutcade.closeSheet(); Nutcade.S.prefs.amtFiat=false")
+            # the till: whole part grouped, the language's decimal mark, and the SAT value right
+            await f.click('[data-act=cashier]'); await f.wait(200); await f.click('[data-ck=unit]'); await f.wait(100)
+            for k in '123456.78': await f.click(f'[data-ck="{k}"]')
+            disp = await f.ev("[document.querySelector('.cash-amt').innerText, document.querySelector('[data-ck=\".\"]').innerText, document.querySelector('.cash-conv').innerText]")
+            want = {'en': '123,456.78', 'de': '123.456,78', 'es': '123.456,78', 'pt': '123.456,78', 'fr': '123\u202f456,78'}[lang]
+            check(f'cashier {lang}: the amount in your currency is grouped with the language\'s decimal mark', disp[0].startswith(want) and disp[1] == want[-3] and re.sub(r'[^0-9]', '', disp[2]) == '123456780', disp)
+            await f.ev("document.querySelector('.cashier').remove(); document.body.style.overflow=''; Nutcade.refresh()"); await f.wait(150)
+            # history search: 25.000, 25 000 and 25000 all find the 25,000 SAT payment
+            await f.click('[data-act=tab][data-tab=history]'); await f.wait(150)
+            hits = []
+            for q in ['25.000', '25 000', '25,000', '25000']:
+                await f.fill('#hq', q); await f.wait(200); hits.append(await f.ev("document.querySelectorAll('#txList .tx').length"))
+            check(f'history {lang}: searching an amount works however it is grouped', all(h >= 1 for h in hits), hits)
+            if lang == 'de':
+                await f.click('[data-act=tab][data-tab=wallet]'); await f.click('[data-act=splitOpen]'); await f.wait(150)
+                await f.fill('#amtIn', '900'); await f.fill('#splitN', '3'); await f.click('[data-act=splitCreate]'); await f.wait(600)
+                check('split (de): the default memo is translated', await f.ev("Nutcade.S.requests[0].memo") == 'Rechnung teilen', await f.ev("Nutcade.S.requests[0].memo"))
+                await f.ev("Nutcade.closeSheet()")
+            await f.pg.context.close()
+
+        # error toasts are never dropped while a game holds the queue; the screen-reader digit count is singular for one
+        t = await wallet(b, 375, 667, 'en'); await t.create()
+        await t.click('[data-act=tab][data-tab=arcade]'); await t.wait(150); await t.ev("document.querySelector('[data-game=swarm]').click()"); await t.wait(300)
+        await t.ev("Nutcade.toast('A received');Nutcade.toast('B failed','red');Nutcade.toast('C three');Nutcade.toast('D four');Nutcade.toast('E five')"); await t.wait(200)
+        await t.ev("document.querySelector('[data-g=exit]').click()"); seen = []
+        for _ in range(60):
+            x = await t.toast()
+            if x and (not seen or seen[-1] != x): seen.append(x)
+            await t.wait(250)
+        check('toasts: an error raised during a game is shown after it, first', seen[:1] == ['B failed'], seen)
+        await t.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); document.querySelector('[data-act=pinSet]').click()"); await t.wait(200)
+        await t.click('[data-pinpad] [data-k="1"]'); one = await t.ev("document.querySelector('.pin-dots').getAttribute('aria-label')")
+        check('PIN pad: "1 digit entered", singular', one == '1 digit entered', one)
+        css = await t.ev("[...document.querySelectorAll('style')].map(s=>s.textContent).join('\\n')")
+        missing = []
+        for m in re.finditer(r'([{;]\s*)([a-z-]+)\s*:([^;{}]*color-mix\()', css):
+            prop = m.group(2); start = m.start(2); before = css[max(css.rfind('{', 0, start), css.rfind(';', 0, start - 1)) + 1:start]
+            prev = re.split(r';', css[css.rfind('{', 0, start) + 1:start])
+            prev = [d.strip() for d in prev if d.strip()]
+            if not prev or not prev[-1].startswith(prop + ':') or 'color-mix' in prev[-1]: missing.append(prop + ' @' + str(start))
+        check('older Safari: every color-mix() declaration has a plain fallback right before it', not missing and css.count('color-mix(') > 0, missing[:6])
+        hy = await t.ev("[getComputedStyle(document.body).hyphens, (()=>{const n=document.createElement('div');n.className='notice';document.body.appendChild(n);const h=getComputedStyle(n).hyphens;n.remove();return h})()]")
+        check('body text is not hyphenated', all(h == 'manual' for h in hy), hy)
+        await t.pg.context.close()
+
+        # desktop: the till's keypad works from the keyboard; offline, CHARGE fits a 320x640 phone in German
+        k = await wallet(b, 1440, 900, 'en', mobile=False)
+        await k.create(); await k.add_mint(B); await k.home(); await k.wait(300); await k.click('[data-act=cashier]'); await k.wait(200)
+        await k.pg.keyboard.type('1250'); await k.pg.keyboard.press('Backspace'); await k.wait(100)
+        typed = await k.ev("document.querySelector('.cash-amt').innerText")
+        await k.click('[data-ck=clear]'); await k.pg.keyboard.press('Enter'); await k.wait(300); empty_ok = await k.ev("!document.querySelector('.cash-pay,.cash-paid')")
+        await k.pg.keyboard.type('21'); await k.pg.keyboard.press('Enter'); ok = await k.until("!!document.querySelector('.cash-pay,.cash-paid')", 10000)
+        check('desktop cashier: digits, Backspace and Enter work; Enter does nothing on an empty amount', typed.startswith('125') and empty_ok and ok, (typed, empty_ok, ok))
+        await k.pg.context.close()
+        o = await wallet(b, 320, 640, 'de'); await o.create(); await o.add_mint(B); await o.home()
+        await o.pg.context.set_offline(True); await o.wait(500); await o.click('[data-act=cashier]'); await o.wait(400)
+        r = await o.ev(f"[({INVIEW})('.cash-charge'), ({INVIEW})('[data-ck=close]')]")
+        check('offline (de 320x640): CHARGE and Close the till fit under the banner', r == ['ok', 'ok'], r)
+        await o.pg.context.set_offline(False); await o.pg.context.close()
+
         # ---------- desktop: sheets are centered dialogs, the tool row is an even grid, keyboard wording ----------
         d = await wallet(b, 1440, 900, 'en', mobile=False)
         await d.create(); await d.add_mint(B); await d.receive_ln(2000)
@@ -352,6 +451,9 @@ async def main():
         check('desktop: Enter in the amount field presses the main button', await d.ev("Nutcade.S.txs[0].amount") == 21)
         await d.pg.keyboard.press('Escape'); await d.wait(200)
         check('desktop: closing a sheet puts focus back on the button that opened it', await d.ev("document.activeElement && document.activeElement.dataset.act") == 'send')
+        await d.click('[data-act=tab][data-tab=settings]'); await d.wait(150); await d.pg.locator('#app [data-act=seedRestore]').focus(); await d.pg.keyboard.press('Enter'); await d.wait(300); await d.pg.keyboard.press('Escape'); await d.wait(200)
+        check('desktop: closing Restore wallet puts focus back on its button', await d.ev("document.activeElement && document.activeElement.dataset.act") == 'seedRestore')
+        await d.click('[data-act=tab][data-tab=wallet]'); await d.wait(150)
         foc = {}
         for th in ['neon', 'amber', 'phosphor']:
             await d.ev(f"Nutcade.S.prefs.theme='{th}'; Nutcade.render()"); await d.click('[data-act=receive]'); await d.wait(200); await d.pg.focus('#amtIn')
