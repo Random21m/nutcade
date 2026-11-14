@@ -1077,10 +1077,11 @@ function txRow(t) {
   const method = { ln: 'LN', ecash: 'ECASH', onchain: 'ON-CHAIN' }[t.method];
   const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '');
   const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : sign + fmt(t.amount);
+  const wide = amt.length > 11;   // a huge amount gets its own line under the note instead of squeezing the chips
   return `<button class="tx ${t.type}" data-act="tx" data-id="${t.id}"><span class="ico" aria-hidden="true">${t.type === 'in' ? '↓' : '↑'}</span>
     <span class="mid"><div class="note ${t.note ? '' : 'empty'}">${esc(noteText(t.note) || 'Add a note…')}</div>
     <div class="meta"><span class="chip ${t.method === 'ecash' ? 'ecash' : 'ln'}">${method}</span>${stat}<span>${timeAgo(t.ts)}</span></div></span>
-    <span class="amt">${amt}</span></button>`;
+    <span class="amt${wide ? ' wide' : ''}">${amt}</span></button>`;
 }
 function timeAgo(ts) {
   const d = (Date.now() - ts) / 1000;
@@ -1763,7 +1764,7 @@ function openMultinut(invoice, amount, dest, note) {
       if (!alive) return;
       const fees = parts.reduce((t, p) => t + num(p.mq.fee_reserve), 0);
       setBody(`<p style="margin:0">NUTCADE will pay this ${money(amount)} invoice in ${parts.length} parts at once. The payment only completes if every part goes through; if one fails, all the sats come back.</p>
-        <div class="txs">${parts.map((p, i) => `<div class="tx out" data-part="${i}"><span class="ico" aria-hidden="true">${i + 1}</span><span class="mid"><div class="note">${esc(p.c.name)}</div><div class="meta">fee reserve ${fmt(p.mq.fee_reserve)} · holds ${fmt(p.c.bal)}</div></span><span class="amt">${fmt(p.mq.amount)}</span></div>`).join('')}</div>
+        <div class="txs">${parts.map((p, i) => `<div class="tx out" data-part="${i}"><span class="ico" aria-hidden="true">${i + 1}</span><span class="mid"><div class="note">${esc(p.c.name)}</div><div class="meta"><span>Fee reserve ${money(p.mq.fee_reserve)}</span><span>Holds ${money(p.c.bal)}</span></div></span><span class="amt">${fmt(p.mq.amount)}</span></div>`).join('')}</div>
         <dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd><dt>Fee reserve</dt><dd>${money(fees)}</dd><dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd></dl>
         <div class="tiny muted">Unused fee reserve comes back as change.</div>
         <button class="btn solid pink block" id="mppPay">Pay ${money(amount)}</button><div id="sheetErr"></div>`, b2 => {
@@ -2051,9 +2052,11 @@ async function claimSaved() {
 }
 function netBanner() {
   let b = document.getElementById('netBanner');
-  if (!isOffline()) { if (b) b.remove(); return; }
+  if (!isOffline()) { if (b) b.remove(); document.body.classList.remove('offline'); return; }
   if (!b) { b = document.createElement('div'); b.id = 'netBanner'; b.className = 'netbanner'; b.setAttribute('role', 'status'); document.body.appendChild(b); }
   b.textContent = "OFFLINE · You can still send exact amounts and save tokens to claim later";
+  // push the page down by the banner's height, so it never sits on the header
+  document.body.classList.add('offline'); requestAnimationFrame(() => { if (b.isConnected) document.body.style.setProperty('--netb', b.offsetHeight + 'px'); });
 }
 window.addEventListener('offline', () => { netBanner(); });
 window.addEventListener('online', () => { netBanner(); claimSaved().catch(() => {}); backgroundTick().then(() => refresh()).catch(() => {}); });

@@ -536,5 +536,12 @@ body{overflow-wrap:anywhere}
 .toast{overflow-wrap:anywhere}
 .boss > *{max-width:100%;min-width:0}
 .mid,.tx .meta > span{min-width:0}
+/* two-line pixel-font labels get room between their lines */
+.cab .nm,.sub,.cash-today,.hunt-big,.boss-name,.pb-h,.pin-title,.cont-q,.tape-win b,.hunt-card .hc-top b,.hunt-card .hc-prize,.chal-card span:last-child,.empty-state b,.health,.hp{line-height:1.5}
+.nowrap{white-space:nowrap}
+.tx .amt.wide{grid-column:2 / -1;justify-self:end;max-width:100%}
+.credit-num small{font-size:max(.38em,9px)}.cash-amt small{font-size:max(.32em,9px)}
+body.offline .wrap{padding-top:calc(14px + var(--netb,40px))}
+body.offline .game-view,body.offline .cashier{padding-top:calc(10px + var(--netb,40px))}
 /* in cashier mode an error sits over the top of the amount display, clear of the keys and buttons */
 body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:auto}

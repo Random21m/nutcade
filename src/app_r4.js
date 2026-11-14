@@ -303,7 +303,7 @@ function healthPanel() {
 }
 function mintHealthLine(m) {
   const h = healthOf(m.url);
-  return `<div class="tiny health ${h.cls}"><span class="dot ${h.cls === 'bad' ? 'off' : ''}"></span><span>${h.label}</span>${health[m.url] ? `<span class="muted">${timeAgo(health[m.url].at)}</span>` : ''}</div>`;
+  return `<div class="tiny health ${h.cls}"><span class="dot ${h.cls === 'bad' ? 'off' : ''}"></span><span class="nowrap">${h.label}</span>${health[m.url] ? `<span class="muted">${timeAgo(health[m.url].at)}</span>` : ''}</div>`;
 }
 function openMove(from, to, amount) {
   const src = S.mints.filter(m => balanceOf(m.url) > 0 && supports(m, 'melt', 'bolt11'));
