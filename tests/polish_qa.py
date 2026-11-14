@@ -644,7 +644,9 @@ async def main():
         await mw.click('[data-act=tab][data-tab=history]'); await mw.wait(200)
         rows = await mw.ev("[...document.querySelectorAll('#txList .tx')].slice(0,2).map(r=>r.innerText.replace(/\\s+/g,' ')+'|'+r.querySelector('.amt').className)")
         await mw.ev("[...document.querySelectorAll('#txList .tx')].find(r=>/FAILED/.test(r.innerText)).click()"); await mw.wait(250); det = await mw.sheet_text(); await mw.ev("Nutcade.closeSheet()")
-        check('round 5 money: the failed payment is struck through, says the mint kept 1 SAT, and the fee line shows -1', 'except 1 SAT the mint kept' in det and any('void' in r for r in rows) and any('FEE' in r and '-1' in r for r in rows), (rows, det[:200]))
+        # what the mint keeps depends on how many coins the swap spent (1 SAT here before the 1.12 paths ran, 2 now): the sentence and the fee line must agree
+        kept = re.search(r'except (\d+) SAT the mint kept', det); kept = kept and kept.group(1)
+        check('round 5 money: the failed payment is struck through, says what the mint kept, and the fee line shows the same amount', bool(kept) and int(kept) >= 1 and any('void' in r for r in rows) and any('FEE' in r and re.search(r'-' + kept + r'\|', r) for r in rows), (kept, rows, det[:200]))
         await mw.pg.context.close()
 
         # SAT typed, only the view switched to USD: the hint and the invoice are exactly the SAT typed
