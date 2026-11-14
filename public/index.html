@@ -3131,7 +3131,12 @@ const fmtEn = n => Math.round(num(n)).toLocaleString('en-US');   // share cards 
 const unitTag = () => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '' : 'SAT';
 const money = n => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '₿' + fmt(n) : fmt(n) + ' SAT';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-const normUrl = u => { u = String(u || '').trim(); if (!/^https?:\/\//i.test(u)) u = 'https://' + u; return u.replace(/\/+$/, ''); };
+// One spelling per mint: lowercase scheme and host, no default port (:443, :80), no trailing slash. The path keeps
+// its case, since servers may treat /Mint and /mint differently.
+const normUrl = u => {
+  u = String(u || '').trim(); if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  try { const x = new URL(u); return (x.protocol + '//' + x.host + x.pathname + x.search).replace(/\/+$/, ''); } catch (e) { return u.replace(/\/+$/, ''); }
+};
 const host = u => { try { const x = new URL(u); return x.host + (x.pathname === '/' ? '' : x.pathname); } catch (e) { return u; } };
 const plain = ps => (ps || []).map(p => { const o = {}; for (const k in p) o[k] = p[k]; o.amount = num(p.amount); return o; });
 const hex = b => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
@@ -3225,10 +3230,25 @@ const S = {
 };
 S.seed = store.get('seed', null);        // {mnemonic, backedUp, created}
 S.counters = store.get('counters', {});  // keysetId -> next counter (NUT-13)
+/* Older versions kept a mint's URL as typed, so HTTP://Mint.example and http://mint.example could be saved as two
+   mints. On load every saved URL is respelled with normUrl and such twins are merged into one: their ecash is
+   combined (each coin once), and history, pending payments and quotes point at the merged mint. Nothing is lost. */
+function mergeMintSpellings() {
+  let changed = false; const seen = new Map(), fix = u => { const n = u ? normUrl(u) : u; if (n !== u) changed = true; return n; };
+  for (const m of S.mints) { const u = fix(m.url); if (seen.has(u)) { changed = true; continue; } seen.set(u, Object.assign(m, { url: u })); }
+  S.mints = [...seen.values()];
+  const proofs = {};
+  for (const [u, ps] of Object.entries(S.proofs || {})) { const k = fix(u), have = proofs[k] || (proofs[k] = []), ids = new Set(have.map(p => p.secret)); for (const p of ps || []) if (!ids.has(p.secret)) { have.push(p); ids.add(p.secret); } }
+  if (changed) S.proofs = proofs;
+  S.active = fix(S.active);
+  for (const list of [S.pending, S.quotes, S.txs]) for (const t of list || []) if (t.mint) t.mint = fix(t.mint);
+  if (changed) save();
+}
 let storageOk = store.set('probe', 1);
 function save() {
   for (const k of ['mints', 'active', 'proofs', 'pending', 'txs', 'quotes', 'prefs']) storageOk = store.set(k, S[k]) && storageOk;
 }
+if (!vault.on) mergeMintSpellings();   // with a PIN, this runs when the vault opens (hydrateFromVault)
 
 /* ---------- recovery phrase (NUT-13 deterministic secrets) ---------- */
 let seedBytes = null;
@@ -4543,7 +4563,7 @@ const PIN_MIN = 6, PIN_MAX = 12;
 function hydrateFromVault() {
   const d = vault.data;
   S.seed = d.seed || null; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || [];
-  seedBytes = null; raw.del('pinfails'); requestPersist();
+  seedBytes = null; raw.del('pinfails'); requestPersist(); mergeMintSpellings();
 }
 const HEART = '<svg class="ico-heart" viewBox="0 0 7 6" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges"><path d="M1 0h2v1h1V0h2v1h1v2H6v1H5v1H4v1H3V5H2V4H1V3H0V1h1z"/></svg>';
 // A drawn backspace key: the pixel font has no ⌫, and the fallback glyph is tiny.
