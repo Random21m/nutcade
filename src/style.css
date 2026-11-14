@@ -569,5 +569,5 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .health .hl{display:inline-flex;align-items:center;gap:8px}   /* the dot stays with its status */
 /* a sheet's column never grows past the sheet: a long title (Pay <a long name>) or label wraps inside it */
 .sheet{grid-template-columns:minmax(0,1fr)}
-.sheet-head h3{overflow-wrap:anywhere}
+.sheet-head h3{overflow-wrap:break-word}   /* a long name still wraps (min-width:0), but a word only splits at its soft hyphens */
 .spinner,.game-top .ttl{line-height:1.5}   /* two-line pixel labels get room between their lines */

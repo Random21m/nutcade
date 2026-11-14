@@ -477,9 +477,9 @@ ROWS = [
 ("Clue card {#}", "Tarjeta de pista {#}", "Cartão de pista {#}", "Hinweiskarte {#}", "Carte indice {#}"),
 
 # German: soft hyphens let the longest compounds break at a syllable in sheet titles on small phones
-("Recovery phrase", "Frase de recuperación", "Frase de recuperação", "Wiederherstellungs­phrase", "Phrase de récupération"),
-("Restore wallet", "Restaurar billetera", "Restaurar carteira", "Wallet wieder­herstellen", "Restaurer le portefeuille"),
-("Your recovery phrase", "Tu frase de recuperación", "Sua frase de recuperação", "Deine Wiederherstellungs­phrase", "Votre phrase de récupération"),
+("Recovery phrase", "Frase de recuperación", "Frase de recuperação", "Wie­der­her­stel­lungs­phrase", "Phrase de récupération"),
+("Restore wallet", "Restaurar billetera", "Restaurar carteira", "Wallet wie­der­her­stel­len", "Restaurer le portefeuille"),
+("Your recovery phrase", "Tu frase de recuperación", "Sua frase de recuperação", "Deine Wie­der­her­stel­lungs­phrase", "Votre phrase de récupération"),
 # ===== 1.11 polish, round 4: typed amounts, fees, addresses =====
 ("That amount can't be read. Type whole SAT, like this: {#}", "No se puede leer esa cantidad. Escribe SAT enteros, así: {#}", "Não foi possível ler esse valor. Digite SAT inteiros, assim: {#}", "Dieser Betrag ist nicht lesbar. Schreib ganze SAT, so: {#}", "Ce montant est illisible. Saisissez des SAT entiers, comme ceci : {#}"),
 ("SAT are whole numbers, with no decimals. Type it like this: {#}", "Los SAT son números enteros, sin decimales. Escríbelo así: {#}", "SAT são números inteiros, sem casas decimais. Digite assim: {#}", "SAT sind ganze Zahlen, ohne Nachkommastellen. Schreib es so: {#}", "Les SAT sont des nombres entiers, sans décimales. Saisissez-le comme ceci : {#}"),
