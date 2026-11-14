@@ -568,3 +568,4 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 /* a sheet's column never grows past the sheet: a long title (Pay <a long name>) or label wraps inside it */
 .sheet{grid-template-columns:minmax(0,1fr)}
 .sheet-head h3{overflow-wrap:anywhere}
+.spinner,.game-top .ttl{line-height:1.5}   /* two-line pixel labels get room between their lines */

@@ -475,6 +475,11 @@ ROWS = [
 ("Decimal mark", "Separador decimal", "Separador decimal", "Dezimalzeichen", "Séparateur décimal"),
 ("That amount can't be read. Type it like this: {#}", "No se puede leer esa cantidad. Escríbela así: {#}", "Não foi possível ler esse valor. Digite assim: {#}", "Dieser Betrag ist nicht lesbar. Schreib ihn so: {#}", "Ce montant est illisible. Saisissez-le ainsi : {#}"),
 ("Clue card {#}", "Tarjeta de pista {#}", "Cartão de pista {#}", "Hinweiskarte {#}", "Carte indice {#}"),
+
+# German: soft hyphens let the longest compounds break at a syllable in sheet titles on small phones
+("Recovery phrase", "Frase de recuperación", "Frase de recuperação", "Wiederherstellungs­phrase", "Phrase de récupération"),
+("Restore wallet", "Restaurar billetera", "Restaurar carteira", "Wallet wieder­herstellen", "Restaurer le portefeuille"),
+("Your recovery phrase", "Tu frase de recuperación", "Sua frase de recuperação", "Deine Wiederherstellungs­phrase", "Votre phrase de récupération"),
 ]
 
 # Patterns for sentences that carry names or dates. $1, $2… are filled in (and translated again if they're known words).
