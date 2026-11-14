@@ -619,7 +619,7 @@ function tr(s) {
   if (d.done) d.done.add(out.replace(/[ \t\r\n]+/g, ' ').trim());
   return m[1] + out + m[3];
 }
-const NOI18N = '.code,.words,textarea,script,style,canvas,.credit-num,.qr,.share-card,[data-noi18n],.tx .note:not(.empty),.mint-pill,.kv dd.tiny,.uname,.tagrow .tag,.tx .ico,.pc-tip';
+const NOI18N = '.code,.words,textarea,script,style,canvas,.credit-num,.qr,.share-card,[data-noi18n],.tx .note:not(.empty),.mint-pill,.kv dd.tiny,.uname,.tx .ico,.pc-tip';
 // what you type in a textarea is never translated, but its placeholder is
 const i18nFilter = { acceptNode: n => { if (n.nodeType === 1 && n.matches(NOI18N)) { if (n.tagName === 'TEXTAREA' && !n.hasAttribute('data-noi18n')) trAttrs(n); return NodeFilter.FILTER_REJECT; } return NodeFilter.FILTER_ACCEPT; } };
 function trAttrs(el) { for (const a of ['placeholder', 'aria-label', 'title', 'alt']) { const v = el.getAttribute(a); if (v) { const t = tr(v); if (t !== v) el.setAttribute(a, t); } } }
@@ -1503,7 +1503,7 @@ function viewHistory() {
     <div class="row between"><div style="display:grid;gap:4px"><h2 class="h2">Notes</h2><span class="tiny muted">${noted}/${S.txs.length} noted</span></div>${S.txs.length ? '<button class="btn sm" data-act="csv">Export CSV</button>' : ''}</div>
     <div class="field"><label for="hq">Search notes</label><input id="hq" class="inp" type="search" placeholder="pizza, rent, Satoshi…" value="${esc(histQuery)}" data-input="hq" autocomplete="off"></div>
     <div class="seg three" role="group" aria-label="Filter">${[['all', 'ALL'], ['in', 'IN'], ['out', 'OUT']].map(([k, l]) => `<button data-act="hf" data-f="${k}" aria-pressed="${histFilter === k}">${l}</button>`).join('')}</div>
-    ${tags.length ? `<div class="tagrow" role="group" aria-label="Tags">${tags.map(([g, n]) => `<button class="tag" data-act="htag" data-tag="${esc(g)}" aria-pressed="${histTag === g}">#${esc(g)} <span>${n}</span></button>`).join('')}</div>` : `<div class="tiny muted">Tip: add #tags to notes, like #food or #rent, to group them.</div>`}
+    ${tags.length ? `<div class="tagrow" role="group" aria-label="Tags">${tags.map(([g, n]) => `<button class="tag" data-noi18n data-act="htag" data-tag="${esc(g)}" aria-pressed="${histTag === g}">#${esc(g)} <span>${n}</span></button>`).join('')}</div>` : `<div class="tiny muted">Tip: add #tags to notes, like #food or #rent, to group them.</div>`}
     <div class="txs" id="txList">${list.length ? list.map(txRow).join('') : `<div class="empty-state"><b>${S.txs.length ? 'NO MATCH' : 'GAME OVER?'}</b>${S.txs.length ? 'No transaction matches that search.' : 'Not yet. Your first transaction will land here.'}</div>`}</div>
   </section>`;
 }
@@ -2236,7 +2236,7 @@ async function sendToContactNostr(c, amount, note) {
 }
 function contactChips() {
   if (!S.contacts.length) return '';
-  return `<div class="field"><label>To a contact</label><div class="tagrow">${S.contacts.slice(0, 12).map(c => `<button class="tag" data-act="payContact" data-id="${c.id}">${esc(c.name)}</button>`).join('')}<button class="tag" data-act="contactsOpen">Manage</button></div></div>`;
+  return `<div class="field"><label>To a contact</label><div class="tagrow">${S.contacts.slice(0, 12).map(c => `<button class="tag" data-noi18n data-act="payContact" data-id="${c.id}">${esc(c.name)}</button>`).join('')}<button class="tag" data-act="contactsOpen">Manage</button></div></div>`;
 }
 function openContacts() {
   if (needSeed()) return;
@@ -2601,7 +2601,7 @@ function showMeltQuote(kind, mq, dest, note) {
   const opts = kind === 'onchain' ? (mq.fee_options || []) : [];
   const feeRow = kind === 'ln' ? `<dt>Fee reserve</dt><dd>${money(mq.fee_reserve)}</dd>` : '';
   setBody(`<dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd data-noi18n>${esc(note)}</dd>` : ''}</dl>
-    ${opts.length ? `<div class="field"><label>Fee speed</label><div class="txs">${opts.map((o, i) => `<label class="tx out" style="cursor:pointer"><span class="ico"><input type="radio" name="fee" value="${o.fee_index}" ${i === 0 ? 'checked' : ''} style="accent-color:var(--pink)"></span><span class="mid"><div class="note">~${o.estimated_blocks} block${o.estimated_blocks === 1 ? '' : 's'}</div><div class="meta">≈ ${Math.round(o.estimated_blocks * 10)} min</div></span><span class="amt">${fmt(o.fee_reserve)}</span></label>`).join('')}</div></div>` : ''}
+    ${opts.length ? `<div class="field"><label>Fee speed</label><div class="txs">${opts.map((o, i) => `<label class="tx out" style="cursor:pointer"><span class="ico"><input type="radio" name="fee" value="${o.fee_index}" ${i === 0 ? 'checked' : ''} style="accent-color:var(--pink)"></span><span class="mid"><div class="note">${esc(tr(`~${o.estimated_blocks} block${o.estimated_blocks === 1 ? '' : 's'}`))}</div><div class="meta">≈ ${Math.round(o.estimated_blocks * 10)} min</div></span><span class="amt">${fmt(o.fee_reserve)}</span></label>`).join('')}</div></div>` : ''}
     ${kind === 'ln' ? '<div class="tiny muted">Unused fee reserve comes back as change.</div>' : ''}
     ${kind === 'ln' && balanceOf(S.active) < amount + num(mq.fee_reserve) ? `<div class="notice">${esc((activeMint() || {}).name || 'This mint')} holds ${money(balanceOf(S.active))}, not enough on its own.${S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? ' You can split the payment across your mints.' : ''}</div>` : ''}
     <button class="btn solid pink block" id="payBtn">Pay ${money(amount)}</button>
@@ -2659,14 +2659,14 @@ function openRequest() {
     ${S.mints.length ? `<label class="toggle" for="onlyMine"><span><span class="tl">Only from my mints</span><span class="th">The payer must use one of the mints you use, so you never get ecash from a mint you don't trust.</span></span><input id="onlyMine" type="checkbox" checked></label>` : ''}
     <button class="btn solid lime block" data-act="reqCreate">Create request</button>
     <button class="btn block pink" data-act="splitOpen">Split a bill with friends instead</button>
-    ${recent.length ? `<div class="sub">Recent requests</div><div class="txs">${recent.map(r => `<button class="tx in" data-act="reqShow" data-id="${r.id}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note ${r.memo ? '' : 'empty'}">${esc(r.memo || 'No description')}</div><div class="meta"><span>${timeAgo(r.created)}</span>${r.paid.length ? `<span class="chip claimed">PAID ×${r.paid.length}</span>` : ''}</div></span><span class="amt">${r.amount ? fmt(r.amount) : 'ANY'}</span></button>`).join('')}</div>` : ''}
+    ${recent.length ? `<div class="sub">Recent requests</div><div class="txs">${recent.map(r => `<button class="tx in" data-act="reqShow" data-id="${r.id}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note ${r.memo ? '' : 'empty'}">${esc(r.memo || 'No description')}</div><div class="meta"><span>${timeAgo(r.created)}</span>${r.paid.length ? `<span class="chip claimed">PAID ×${r.paid.length}</span>` : ''}</div></span><span class="amt">${r.amount ? fmt(r.amount) : esc(tr('ANY'))}</span></button>`).join('')}</div>` : ''}
     <div id="sheetErr"></div>`);
 }
 function showRequest(r) {
   const paidBefore = r.paid.length;
   openSheet('Payment request', `
     <div class="label" style="text-align:center">${r.memo ? `<span data-noi18n>${esc(r.memo)}</span>` : 'Pay me'}</div>
-    <div class="credit-num" style="text-align:center;font-size:26px">${r.amount ? fmt(r.amount) : 'ANY'}<small>${unitTag()}</small></div>
+    <div class="credit-num" style="text-align:center;font-size:26px">${r.amount ? fmt(r.amount) : esc(tr('ANY'))}<small>${unitTag()}</small></div>
     ${qrBlock(r.encoded, 'Payment request QR')}
     <div class="code">${esc(r.encoded)}</div>
     <button class="btn solid lime block" data-act="copy" data-text="${esc(r.encoded)}">Copy request</button>${nfcBtn('nfcWrite', 'Write to NFC card', `data-text="${esc(r.encoded)}"`, 'btn block violet')}${ctBtn(r.encoded, 'Play as sound', 'btn block violet')}

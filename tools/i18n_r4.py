@@ -705,6 +705,8 @@ ROWS = [
 ("ARS", "ARS", "ARS", "ARS", "ARS"),
 ("SEK", "SEK", "SEK", "SEK", "SEK"),
 ("Gift", "Regalo", "Presente", "Geschenk", "Cadeau"),
+("~{#} block", "~{#} bloque", "~{#} bloco", "~{#} Block", "~{#} bloc"),
+("~{#} blocks", "~{#} bloques", "~{#} blocos", "~{#} Blöcke", "~{#} blocs"),
 ]
 
 # Patterns for sentences that carry names or dates. $1, $2… are filled in (and translated again if they're known words).
