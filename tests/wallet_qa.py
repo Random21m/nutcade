@@ -91,13 +91,20 @@ class W:
         await s.click('#payBtn'); await s.wait(3500)
         e=await s.err(); txt=await s.sheet_text(); await s.close(); return e, txt+' || '+q
 
+import re as _re
+def outside_net(t):
+    """Network trouble with a public service (the curated mints probed on the Add mint sheet, price APIs) is not a page error:
+    it depends on the machine's internet, not on NUTCADE. Errors from the local test mints still count."""
+    if 'ERR_TUNNEL' in t or 'ERR_CONNECTION' in t or 'Failed to load resource' in t: return True
+    m = _re.search(r"Access to fetch at '([^']+)' from origin .* blocked by CORS policy", t)
+    return bool(m) and not _re.match(r'https?://(127\.0\.0\.1|localhost)[:/]', m.group(1))
 async def newwallet(b, name):
     ctx=await b.new_context(viewport={'width':390,'height':844}, device_scale_factor=1, is_mobile=True, has_touch=True)
     # Nostr relays and npub.cash point at the local stand-ins (mock_nostr.py), so tests never touch public services.
     await ctx.add_init_script("if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs',JSON.stringify({sound:true,crt:true,relays:['ws://127.0.0.1:3350/relay'],npcHost:'http://127.0.0.1:3350'}))")
     pg=await ctx.new_page(); w=W(pg,name)
     pg.on('pageerror', lambda e: w.errs.append('PAGEERROR '+str(e)))
-    pg.on('console', lambda m: w.errs.append('CONSOLE '+m.text) if m.type=='error' and 'ERR_TUNNEL' not in m.text and 'ERR_CONNECTION' not in m.text and 'Failed to load resource' not in m.text else None)
+    pg.on('console', lambda m: w.errs.append('CONSOLE '+m.text) if m.type=='error' and not outside_net(m.text) else None)
     await pg.goto(URL); await pg.wait_for_timeout(800); return w
 
 async def main():
