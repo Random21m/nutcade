@@ -3375,13 +3375,6 @@ async function restoreFromMintNow(url, onStep, opts) {
   // (left out of this scan; each one settles itself as that deposit).
   for (const p of S.pending.filter(p => p.mint === url && p.id !== opts.except)) await reconcile(p, { force: true }).catch(() => {});
   for (const o of S.ops.filter(o => o.mint === url && o.id !== opts.except)) await settleOp(o.id).catch(() => {});
-  // the counters of anything still open: its coins stay out of what this scan credits. (Not the step this scan is
-  // repairing: its counters turned out to be used already, by another device with the same phrase, so the coins
-  // there are that device's, found and credited here like any others.)
-  const owned = new Set(), ex = opts.except;
-  for (const c of [].concat(S.pending.filter(p => p.mint === url && p.ctr && !p.changeDone && p.id !== ex).map(p => p.ctr), S.ops.filter(o => o.mint === url && o.id !== ex).flatMap(o => o.ctr), S.quotes.filter(q => q.mint === url && q.ctr && q.quote !== ex).map(q => q.ctr))) {
-    const r = await inTime(w.restore(c.start, c.n, { keysetId: c.id }), 30000); for (const p of r.proofs || []) owned.add(p.secret);
-  }
   const keysets = w.keyChain.getKeysets().filter(k => k.unit === 'sat');
   let found = [];
   for (const k of keysets) {
@@ -3393,11 +3386,6 @@ async function restoreFromMintNow(url, onStep, opts) {
       found = found.concat(r.proofs.filter((p, i) => st[i] && st[i].state === 'UNSPENT'));
     }
   }
-  // checked again with no wait before the write: not what we hold, nor a token we sent that hasn't been claimed, nor
-  // coins of a payment in flight, nor anything an open step owns
-  const have = new Set((S.proofs[url] || []).map(p => p.secret).concat(S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.pending.flatMap(p => p.proofs.map(x => x.secret)), [...owned]));
-  const fresh = found.filter(p => !have.has(p.secret));
-  let left = sum(fresh);
   // interrupted deposits from before their counters were recorded (issued by the mint, never stored) get what was
   // found first, each up to its amount; their quotes are then done
   const waiting = [];
@@ -3405,6 +3393,28 @@ async function restoreFromMintNow(url, onStep, opts) {
     if ((restoreDeposits[url] || new Set()).has(q.quote) || (opts.deposits || []).some(x => x.quote === q.quote)) { waiting.push(q); continue; }
     const st = await inTime(w.checkMintQuoteBolt11(q.quote), 30000).catch(() => null); if (st && st.state === 'ISSUED') waiting.push(q);
   }
+  // The counters of anything open at this mint: its coins stay out of what this scan credits. Worked out last, and
+  // again for anything that started meanwhile (a payment made during the scan: its change is its own), so that from
+  // the last look to the write nothing waits. (Not the step this scan is repairing: its counters turned out to be
+  // used already, by another device with the same phrase, so the coins there are that device's, found here like any
+  // others.)
+  const ex = opts.except, owned = new Set(), looked = new Set(), rkey = c => `${c.id}:${c.start}:${c.n}`;
+  const ranges = () => [].concat(S.pending.filter(p => p.mint === url && p.ctr && !p.changeDone && p.id !== ex).map(p => p.ctr), S.ops.filter(o => o.mint === url && o.id !== ex).flatMap(o => o.ctr), S.quotes.filter(q => q.mint === url && q.ctr && q.quote !== ex).map(q => q.ctr));
+  for (let i = 0; i < 5; i++) {
+    const todo = ranges().filter(c => !looked.has(rkey(c))); if (!todo.length) break;
+    for (const c of todo) { looked.add(rkey(c)); const r = await inTime(w.restore(c.start, c.n, { keysetId: c.id }), 30000); for (const p of r.proofs || []) owned.add(p.secret); }
+  }
+  if (ranges().some(c => !looked.has(rkey(c)))) throw new Error("The mint didn't answer. Try again in a moment.");
+  // from here to the write, no wait: not what we hold, nor a token we sent that hasn't been claimed, nor coins of a
+  // payment in flight, nor anything an open step owns
+  const haveNow = () => new Set((S.proofs[url] || []).map(p => p.secret).concat(S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.pending.flatMap(p => p.proofs.map(x => x.secret)), [...owned]));
+  let fresh = found.filter(p => !haveNow().has(p.secret));
+  if (fresh.length) {   // still unspent now (a coin found early may have been spent since), then the last look, with no wait after it
+    const st = await inTime(w.checkProofsStates(fresh), 30000); fresh = fresh.filter((p, i) => st[i] && st[i].state === 'UNSPENT');
+    if (ranges().some(c => !looked.has(rkey(c)))) throw new Error("The mint didn't answer. Try again in a moment.");
+    const have = haveNow(); fresh = fresh.filter(p => !have.has(p.secret));
+  }
+  let left = sum(fresh);
   for (const id of [...(restoreDeposits[url] || [])]) if (!S.quotes.some(x => x.quote === id && x.mint === url && !x.ctr)) restoreDeposits[url].delete(id);
   for (const q of waiting) {
     if (!S.quotes.some(x => x.quote === q.quote)) continue;
