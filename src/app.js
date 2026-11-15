@@ -42,7 +42,7 @@ const writeGuard = { paused: false };
 /* Every request to a mint has a time limit, so one mint that accepts a request and never answers can't hold anything
    else up: 20 s, or 2 minutes for a payment (a Lightning payment can take a while). A request cut off this way is
    a lost answer, which the records below settle with the mint afterwards. */
-const MINT_MS = 20000, MELT_MS = 120000;
+const MINT_MS = 20000, MELT_MS = 120000, STEP_MS = 150000;
 {
   const _fetch = window.fetch && window.fetch.bind(window);
   if (_fetch) window.fetch = (input, init) => {
@@ -3644,14 +3644,17 @@ function backgroundTick(startup) {
 // up the other mints or the other checks (gift refunds, Extra Life, heir claims, bounties, "was my token claimed").
 async function mintTick(url, startup) {
   const now = Date.now(), maxAge = 14 * 86400000;
+  // (each step has a time limit of its own too: one that joins a check already in flight, say one stuck on a mint
+  // from the last round, is left behind after it, and the rest of this mint's work goes on)
+  const step = p => inTime(p, STEP_MS);
   for (const o of S.ops.filter(o => o.mint === url)) {   // steps whose answer never came: settled with backoff (at once at a start)
     if (!startup && o.nextTry && now < o.nextTry) continue;
-    try { await settleOp(o.id); } catch (e) { o.tries = (o.tries || 0) + 1; o.nextTry = Date.now() + Math.min(30 * 60e3, 15e3 * 2 ** (o.tries - 1)); save(); }
+    try { await step(settleOp(o.id)); } catch (e) { o.tries = (o.tries || 0) + 1; o.nextTry = Date.now() + Math.min(30 * 60e3, 15e3 * 2 ** (o.tries - 1)); save(); }
   }
-  for (const q of S.quotes.filter(q => q.mint === url && (q.kind === 'onchain' || now - (txById(q.txId)?.ts || 0) < maxAge))) await checkQuote(q).catch(() => {});
-  for (const p of S.pending.filter(p => p.mint === url)) await reconcile(p, { force: !!startup }).catch(() => {});
-  await fetchPreimages(url).catch(() => {});
-  if (S.prefs.checkSent) for (const t of S.txs.filter(t => t.mint === url && t.status === 'pending' && t.method === 'ecash' && t.sent).slice(0, 10)) await checkClaim(t).catch(() => {});
+  for (const q of S.quotes.filter(q => q.mint === url && (q.kind === 'onchain' || now - (txById(q.txId)?.ts || 0) < maxAge))) await step(checkQuote(q)).catch(() => {});
+  for (const p of S.pending.filter(p => p.mint === url)) await step(reconcile(p, { force: !!startup })).catch(() => {});
+  await step(fetchPreimages(url)).catch(() => {});
+  if (S.prefs.checkSent) for (const t of S.txs.filter(t => t.mint === url && t.status === 'pending' && t.method === 'ecash' && t.sent).slice(0, 10)) await step(checkClaim(t)).catch(() => {});
 }
 /* A payment settled from its coins' state (the mint's quote check failed at that moment) has no preimage yet: it is
    asked for later, a few times, so Wallet Connect apps and the details can show it. */
