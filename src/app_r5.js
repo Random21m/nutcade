@@ -120,15 +120,18 @@ const saveExtra = () => store.set('extra', S.extra);
 const saveHeir = () => store.set('heirlooms', S.heirlooms.slice(0, 20));
 const extraLeft = () => S.extra ? S.extra.until - Date.now() : 0;
 const daysLeft = ms => Math.max(0, Math.ceil(ms / 86400e3));
-async function lockExtra(url, amount, heirPub, until, extraInputs, follow) {
-  const w = await getWallet(url);
-  const inputs = (extraInputs || []).concat(S.proofs[url] || []);
-  if (sum(inputs) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
-  const cfg = { send: { type: 'p2pk', options: { pubkey: myLockPub(), locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() };
-  const { r: { keep, send }, op } = await journaled(url, 'send', { inputs, amount, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow }, (cb, o) => rSend(o, w, amount, inputs, { includeFees: true, onCountersReserved: cb }, cfg));
-  const used = new Set(inputs.map(p => p.secret));
-  S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep)); closeOp(op); save();
-  return plain(send);
+// Lock sats of the balance for the Extra Life (setting it up): to your key, with your heir's key as the refund key
+// after the date. The journal has every output before the mint is asked, so an interrupted lock finishes as itself.
+const extraLockCfg = (w, until, heirPub) => ({ send: { type: 'p2pk', options: { pubkey: myLockPub(), locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() });
+async function lockExtra(url, amount, heirPub, until, follow) {
+  return (async () => {
+    const w = await getWallet(url), inputs = [...(S.proofs[url] || [])];
+    if (sum(inputs) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(inputs))}.`);
+    const { r: { keep, send }, op } = await journaled(url, 'send', { inputs, amount, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow }, (cb, o) => rSend(o, w, amount, inputs, { includeFees: true, onCountersReserved: cb }, extraLockCfg(w, until, heirPub)));
+    const used = new Set(inputs.map(p => p.secret));   // (keep holds the coins the swap didn't need, as they were)
+    S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep)); closeOp(op); save();
+    return plain(send);
+  })();
 }
 const extraToken = () => S.extra && L.getEncodedToken({ mint: S.extra.mint, unit: 'sat', proofs: S.extra.proofs });
 async function sendHeirCopy() {
@@ -149,45 +152,41 @@ async function startExtra(amount, heir, days, auto) {
   internalMove = true;
   try {
     const before = sum(S.proofs[S.active] || []);
-    const proofs = await lockExtra(S.active, amount, heir.pubkey, until, null, { k: 'extra', heir, days, auto: auto !== false, until });
+    const proofs = await lockExtra(S.active, amount, heir.pubkey, until, { k: 'extra', heir, days, auto: auto !== false, until });
     S.extra = { mint: S.active, amount, proofs, heir, until, days, auto: auto !== false, created: Date.now(), renewed: Date.now() }; saveExtra();
     addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, before - sum(S.proofs[S.active] || []) - amount), mint: S.active, note: `Extra Life for ${heir.name}`, status: 'done', extraLife: true });
   } finally { internalMove = false; }
   await sendHeirCopy().catch(() => false);
   return S.extra;
 }
-// CONTINUE: swap for fresh ecash with a later date. Fees come out of this mint's balance so the locked amount stays the same.
+/* CONTINUE: one swap. The Extra Life's own locked coins go in (signed with your key) and new coins locked with the
+   later date come out; nothing else goes in or out. No coin of your balance is touched, and there is never a moment
+   when the Extra Life is plain ecash: if the answer is lost, its journal record (written, with every output, before
+   the mint is asked) finishes it; if the request never reached the mint, the old coins and date simply stay. On a
+   mint that charges a fee to spend ecash, that fee comes out of the Extra Life itself. */
 async function continueExtra(quiet) {
-  const x = S.extra; if (!x) return;
-  if (x.unlocked) return relockExtra(x, quiet);
-  const w = await getWallet(x.mint);
-  const { r: got, op } = await journaled(x.mint, 'receive', { amount: x.amount, note: `Extra Life cashed out (was for ${x.heir.name})`, extra: true, follow: { k: 'extra-take' } }, (cb, o) => rRecv(o, w, extraToken(), { privkey: [myLockPriv()], onCountersReserved: cb }));
-  // the fresh coins stay the Extra Life's (in the same write the step closes) until they are locked again
-  const fresh = plain(got); x.proofs = fresh; x.unlocked = true; saveExtra(); closeOp(op); save();
-  return relockExtra(x, quiet);
-}
-async function relockExtra(x, quiet) {
-  const fresh = x.proofs, before = sum(S.proofs[x.mint] || []);
-  const until = Date.now() + x.days * 86400e3, follow = { k: 'extra-renew', until };
-  let proofs;
-  try { proofs = await lockExtra(x.mint, x.amount, x.heir.pubkey, until, fresh, follow); }
-  catch (e) {
-    if (S.ops.some(o => o.mint === x.mint && o.follow && o.follow.k === 'extra-renew')) throw e;   // asked, answer lost: its record finishes it
-    // the balance can't cover the fee: lock a little less rather than leave the sats unprotected
-    const amount = Math.max(1, sum(fresh) - 2);
-    try { proofs = await lockExtra(x.mint, amount, x.heir.pubkey, until, fresh, follow); x.amount = amount; }
-    catch (e2) {
-      if (S.ops.some(o => o.mint === x.mint && o.follow && o.follow.k === 'extra-renew')) throw e2;
-      addProofs(x.mint, fresh); S.extra = null; saveExtra();
-      addTx({ type: 'in', method: 'ecash', amount: sum(fresh), mint: x.mint, note: `Extra Life cashed out (was for ${x.heir.name})` });
-      throw new Error("Couldn't lock your Extra Life again, so the sats are back in your balance.");
-    }
-  }
-  Object.assign(x, { proofs, until, renewed: Date.now() }); delete x.unlocked; saveExtra();
-  const fee = before - sum(S.proofs[x.mint] || []);
-  if (fee > 0) addTx({ type: 'out', method: 'fee', amount: 0, fee, mint: x.mint, note: 'Mint fee for keeping Extra Life going', status: 'done' });
+  if (!S.extra) return;
+  const url = S.extra.mint;
+  const until = await (async () => {
+    const x = S.extra; if (!x || x.mint !== url) return 0;
+    if (S.ops.some(o => o.mint === url && o.follow && o.follow.k === 'extra-renew')) return 0;   // one is on its way: its record finishes it
+    const w = await getWallet(url), ins = [...x.proofs];
+    const fee = num(w.getFeesForProofs(ins)), target = sum(ins) - fee;
+    if (target < 1) throw new Error("This Extra Life is too small to cover the mint's fee to renew it. Cash it out instead.");
+    const until = Date.now() + x.days * 86400e3, follow = { k: 'extra-renew', until };
+    const cfg = extraLockCfg(w, until, x.heir.pubkey);
+    const pick = w._selectProofs; w._selectProofs = ps => ({ keep: [], send: ps });   // exactly the Extra Life's coins, all of them
+    let res;
+    try { res = await journaled(url, 'send', { inputs: ins, amount: target, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow }, (cb, o) => rSend(o, w, target, ins, { includeFees: false, privkey: x.unlocked ? undefined : [myLockPriv()], onCountersReserved: cb }, cfg)); }
+    finally { w._selectProofs = pick; }
+    const { r: { keep, send }, op } = res;
+    if (keep.length) { addProofs(url, keep); addTx({ type: 'in', method: 'ecash', amount: sum(plain(keep)), mint: url, note: `Extra Life cashed out (was for ${x.heir.name})` }); }   // (none: the amount is exact)
+    Object.assign(x, { proofs: plain(send), until, renewed: Date.now(), amount: Math.min(x.amount, sum(plain(send))) }); delete x.unlocked; saveExtra(); closeOp(op); save();
+    return until;
+  })();
+  if (!until) return;
   await sendHeirCopy().catch(() => false);
-  if (!quiet) { sfx('levelup'); toast(`CONTINUE! ${x.heir.name}'s copy now opens on ${fmtDay(until)}`, 'lime'); }
+  if (!quiet) { sfx('levelup'); toast(`CONTINUE! ${S.extra.heir.name}'s copy now opens on ${fmtDay(until)}`, 'lime'); }
 }
 async function cashOutExtra() {
   const x = S.extra; if (!x) return;
@@ -206,8 +205,8 @@ function extraEnded(f) {
 // opening NUTCADE counts as proof of life: with auto on, once half the time has passed it continues by itself
 async function extraTick() {
   const x = S.extra; if (!x) return;
-  // a CONTINUE that stopped between taking the old coins and locking the new ones: lock them now
-  if (x.unlocked && !S.ops.some(o => o.mint === x.mint)) { await relockExtra(x, true).catch(() => {}); return; }
+  // (an Extra Life left as plain coins by an earlier version: lock it again now)
+  if (x.unlocked && !S.ops.some(o => o.mint === x.mint)) { await continueExtra(true).catch(() => {}); return; }
   if (extraLeft() < 0) {
     // the date passed: if the heir already claimed, the Extra Life is over; if not, it's still ours to continue
     const st = await (await getWallet(x.mint)).checkProofsStates(x.proofs).catch(() => null);

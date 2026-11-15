@@ -288,7 +288,7 @@ async function restoreFromMintNow(url, onStep, opts) {
   if (ranges().some(c => !looked.has(rkey(c)))) throw new Error("The mint didn't answer. Try again in a moment.");
   // from here to the write, no wait: not what we hold, nor a token we sent that hasn't been claimed, nor coins of a
   // payment in flight, nor anything an open step owns
-  const haveNow = () => new Set((S.proofs[url] || []).map(p => p.secret).concat(S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.pending.flatMap(p => p.proofs.map(x => x.secret)), [...owned]));
+  const haveNow = () => new Set((S.proofs[url] || []).map(p => p.secret).concat(S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.pending.flatMap(p => p.proofs.map(x => x.secret)), S.extra && S.extra.mint === url ? S.extra.proofs.map(p => p.secret) : [], [...owned]));   // (nor the Extra Life's coins)
   let fresh = found.filter(p => !haveNow().has(p.secret));
   if (fresh.length) {   // still unspent now (a coin found early may have been spent since), then the last look, with no wait after it
     const st = await inTime(w.checkProofsStates(fresh), 30000); fresh = fresh.filter((p, i) => st[i] && st[i].state === 'UNSPENT');
@@ -903,10 +903,6 @@ async function settleOpNow(id) {
   for (const p of outs) delete p._send;
   const gone = new Set(spent.map(p => p.secret)), cur = (S.proofs[op.mint] || []).filter(p => held.has(p.secret));
   const removed = sum(cur.filter(p => gone.has(p.secret))), added = sum(fresh);
-  if (op.kind === 'receive' && op.follow && op.follow.k === 'extra-take' && S.extra && S.extra.mint === op.mint && fresh.length && !removed) {
-    // a CONTINUE that took the Extra Life's coins: they stay the Extra Life's, and are locked again next
-    S.extra.proofs = plain(fresh); S.extra.unlocked = true; saveExtra(); closeOp(op); save(); return 'settled';
-  }
   S.proofs[op.mint] = cur.filter(p => !gone.has(p.secret)).concat(plain(fresh));
   const waitingTx = op.txId && (txById(op.txId) || {}).status === 'pending' ? op.txId : null;   // a deposit waiting for exactly this: it gets it
   if (op.kind === 'receive' && added && waitingTx) updTx(waitingTx, { status: 'done', amount: added, ts: Date.now() });
@@ -914,8 +910,8 @@ async function settleOpNow(id) {
   else if (lockedOut.length) {
     const ps = plain(lockedOut), amount = Math.min(op.amount || sum(ps), sum(ps)), fee = Math.max(0, removed - added - amount);
     const f = op.follow || {};
-    if (f.k === 'extra-renew' && S.extra && S.extra.mint === op.mint) {   // Extra Life continued: its new coins and date
-      Object.assign(S.extra, { proofs: ps, until: f.until, renewed: Date.now(), amount: sum(ps) >= S.extra.amount ? S.extra.amount : amount }); delete S.extra.unlocked; saveExtra();
+    if (f.k === 'extra-renew' && S.extra && S.extra.mint === op.mint && S.extra.proofs.some(p => op.inputs.includes(p.secret))) {   // Extra Life continued: its new coins and date
+      Object.assign(S.extra, { proofs: ps, until: f.until, renewed: Date.now(), amount: Math.min(S.extra.amount, sum(ps)) }); delete S.extra.unlocked; saveExtra();
       if (removed > added) addTx({ type: 'out', method: 'fee', amount: 0, fee: removed - added, mint: op.mint, note: 'Mint fee for keeping Extra Life going', status: 'done', settled: true });
       else if (added > removed) addTx({ type: 'in', method: 'ecash', amount: added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true });
       setTimeout(() => sendHeirCopy().catch(() => {}), 0);

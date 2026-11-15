@@ -69,11 +69,40 @@ def error_strings():
             t = t.replace("\\'", "'").replace('\\"', '"')
             if re.match(r'^[A-Z][a-z]', t) and not t.endswith(': ') and not re.search(r"""nwcErr\(\s*'[A-Z_]+',\s*$""", s[max(0, m.start() - 40):m.start() + 7]):
                 out.add(t)
-    out |= {"The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
+    out |= { "The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
             'This invoice is already paid. NUTCADE is collecting the ecash from the mint, and it shows here as soon as it is in.', 'COLLECTING',
             'Mint fee for moving ecash under your phrase', 'Mint fee for an interrupted step', 'Mint fee for keeping Extra Life going', 'Ecash already spent elsewhere',
             'Some of this ecash was already spent. NUTCADE removed 1,234 SAT of spent ecash from your balance (see your notes). Try again with what is left.'}
     return sorted(out)
+
+
+EXTRA_AT_MINT = """(async()=>{const x=Nutcade.S.extra; if(!x) return null; const w=new CashuLib.Wallet(x.mint,{unit:'sat'}); await w.loadMint();
+  const st=await w.checkProofsStates(x.proofs); const s=JSON.parse(x.proofs[0].secret); const lt=+((s[1].tags||[]).find(t=>t[0]==='locktime')||[])[1];
+  return {amount:x.amount, sum:x.proofs.reduce((a,p)=>a+p.amount,0), unspent:st.every(t=>t.state==='UNSPENT'), kind:s[0], pub:s[1].data, lt, until:x.until, unlocked:!!x.unlocked, mint:x.mint}})()"""
+SECRETS_JS = """(()=>{const S=Nutcade.S; return [...Object.values(S.proofs).flat().map(p=>p.secret), ...((S.extra&&S.extra.proofs)||[]).map(p=>p.secret),
+  ...S.pending.flatMap(p=>p.proofs.map(x=>x.secret)), ...S.ops.flatMap(o=>(o.outs||[]).map(x=>x.s))].filter(Boolean)})()"""
+LEAK_JS = "(l)=>Object.keys(localStorage).filter(k=>{const v=localStorage.getItem(k)||''; return l.some(s=>v.includes(s))})"
+
+
+def quote_inv(n, mint):
+    """an invoice from a test mint, with its quote id (to ask the mint later whether it was paid)"""
+    q = json.loads(urllib.request.urlopen(urllib.request.Request(mint + '/v1/mint/quote/bolt11', data=json.dumps({'amount': n, 'unit': 'sat'}).encode(), headers={'Content-Type': 'application/json'})).read())
+    return q['request'], q['quote']
+
+
+def quote_state(mint, quote):
+    return json.loads(urllib.request.urlopen(mint + '/v1/mint/quote/bolt11/' + quote, timeout=10).read()).get('state')
+
+
+async def words_ok(w, mints):
+    """a restore from the wallet's own 12 words finds nothing the wallet doesn't already show"""
+    bal0, n0 = await w.bal(), await w.ev("Nutcade.S.txs.length")
+    await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=seedRestore]'); await w.wait(250)
+    await w.fill('#phraseIn', await w.ev("Nutcade.S.seed.mnemonic"))
+    await w.ev(f"document.querySelectorAll('[data-rmint]').forEach(i=>{{i.checked={json.dumps(list(mints))}.includes(i.dataset.rmint)}})")
+    await w.click('[data-act=doRestorePhrase]'); await w.until("/SCAN COMPLETE|CONTINUE/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 120000); t = await w.sheet_text()
+    await w.ev("Nutcade.closeSheet()")
+    return 'SCAN COMPLETE' in t and await w.bal() == bal0 and await w.ev("Nutcade.S.txs.length") == n0, (t[:100], await w.bal() - bal0, await w.ev("Nutcade.S.txs.length") - n0)
 
 
 async def unpaid(route):
@@ -987,22 +1016,36 @@ async def main():
         await books(w, 'interrupted Extra Life', broken, (A, B, FM))
         okh = await hr.until("Nutcade.S.heirlooms.some(h=>h.state==='waiting'&&h.amount===400)", 30000)
         check("(round 3, locked) and the heir's NUTCADE gets its copy", okh, await hr.ev("Nutcade.S.heirlooms.map(h=>[h.state,h.amount])"))
-        # an interrupted CONTINUE (its second swap, the new lock): the Extra Life continues with its new date
-        u0 = await w.ev("Nutcade.S.extra && Nutcade.S.extra.until")
-        swaps = {'n': 0}
-        async def second_held(route):
-            swaps['n'] += 1
-            if swaps['n'] == 2: return await held(8)(route)
-            await route.continue_()
-        await w.pg.route(f'{B}/v1/swap', second_held)
-        await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraContinue]'); await w.wait(2500)
-        held_ops = await w.ev("Nutcade.S.ops.map(o=>o.follow&&o.follow.k)")
-        await w.pg.reload(); await w.wait(800); await w.pg.unroute(f'{B}/v1/swap')
-        ok = await w.until(f"Nutcade.S.ops.length===0 && Nutcade.S.extra && !Nutcade.S.extra.unlocked && Nutcade.S.extra.until > {u0 or 0}", 90000)
-        x = await w.ev("Nutcade.S.extra && {amount:Nutcade.S.extra.amount, sec:JSON.parse(Nutcade.S.extra.proofs[0].secret)[0]}")
-        check('(round 3, locked) an interrupted CONTINUE finishes after a reload: the Extra Life is locked again with a later date, nothing lost',
-              ok and x and x['sec'] == 'P2PK' and x['amount'] >= 398, (ok, held_ops, x))
-        await books(w, 'interrupted CONTINUE', broken, (A, B, FM))
+        # (round 4, 1-3) CONTINUE is one swap: the Extra Life's own locked coins in, new locked coins out. Interrupted at
+        # every point (a reload while its answer is on the way, a lost answer, a request that never reaches the mint, a
+        # reload with the first restore failing) it ends as a valid Extra Life (new date if the mint did it, old date if
+        # not), with no coin of the balance touched, no fee line, and nothing for Find lost or the 12 words to find
+        mine_lock = await w.ev("'02'+CashuLib.nostrPub(CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32))")
+        async def never_sent(route):
+            try: await route.abort()
+            except Exception: pass
+        async def cont_cases(M, tag):
+            for how in ('reload', 'lost', 'never', 'failrestore'):
+                await w.ev("Nutcade.closeSheet()"); x0 = await w.ev(EXTRA_AT_MINT); b0, n0 = await w.bal(M), await w.ev("Nutcade.S.txs.length")
+                await w.pg.route(f'{M}/v1/swap', {'reload': held(8), 'lost': drop_answer, 'never': never_sent, 'failrestore': held(8)}[how])
+                if how == 'failrestore': await w.pg.route(f'{M}/v1/restore', failing(1, 500))
+                await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraContinue]'); await w.wait(1500)
+                if how in ('reload', 'failrestore'): await w.pg.reload(); await w.wait(800)
+                await w.pg.unroute(f'{M}/v1/swap')
+                ok = await w.until("Nutcade.S.ops.length===0", 120000); await w.wait(800)
+                if how == 'failrestore': await w.pg.unroute(f'{M}/v1/restore')
+                x = await w.ev(EXTRA_AT_MINT); nl = await w.ev(f"Nutcade.S.txs.slice(0, Nutcade.S.txs.length-{n0}).map(t=>[t.note,t.amount,t.fee])")
+                moved = how != 'never'
+                good = (ok and x and x0 and x['unspent'] and x['kind'] == 'P2PK' and x['pub'] == mine_lock and not x['unlocked'] and x['mint'] == M
+                        and (x['until'] > x0['until'] if moved else x['until'] == x0['until']) and x['lt'] == x['until'] // 1000
+                        and x0['amount'] - 1 <= x['amount'] <= x0['amount'] and x['sum'] >= x['amount'] and await w.bal(M) == b0 and not nl)
+                check(f'(round 4, 1-3) {tag}: CONTINUE {how}: the Extra Life is valid ({"new" if moved else "old"} date, locked to your key, unspent), the balance and history untouched, no fee line',
+                      good, (how, ok, x0 and {k: x0[k] for k in ('amount', 'sum', 'until')}, x and {k: x[k] for k in ('amount', 'sum', 'until', 'lt', 'unspent', 'unlocked')}, await w.bal(M) - b0, nl))
+                await books(w, f'CONTINUE {how} {tag}', broken, (A, B, FM))
+            rec0 = await w.ev(RECB(M)); await find_lost()
+            ok_w, why = await words_ok(w, (A, B, FM))
+            check(f'(round 4, 1-3) {tag}: after all of them, Find lost ecash finds nothing and a restore from the 12 words equals the balance', await w.ev(RECB(M)) == rec0 and ok_w, (await w.ev(RECB(M)) - rec0, why))
+        await cont_cases(B, 'no-fee mint')
         # an interrupted cash-out: the Extra Life is closed when it settles, and the heir's copy is marked ended
         async def cash_start():
             await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')
@@ -1067,6 +1110,14 @@ async def main():
         hb = []; await books(hr, 'interrupted bounty win', hb, (B,))
         check("(round 3, two-step) an interrupted bounty win settles after a reload: the friend gets the 180 SAT once and the bounty says won",
               okr and okc and ok and 176 <= await hr.bal(B) - hb0 <= 180 and not hb, (okr, okc, ok, await hr.bal(B) - hb0, hb))
+        # (round 4, 1-3) the same on the mint that charges a fee to spend ecash
+        await w.use(A); await extra_start('500'); await w.until("!!Nutcade.S.extra", 20000); await w.ev("Nutcade.S.extra.auto=false; localStorage.getItem('nutcade:extra') && localStorage.setItem('nutcade:extra', JSON.stringify(Nutcade.S.extra))"); await w.ev("Nutcade.closeSheet()")
+        await cont_cases(A, 'fee mint')
+        bb = await w.bal(A)
+        await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')
+        ok2 = await w.until("!Nutcade.S.extra", 30000); await w.ev("Nutcade.closeSheet()")
+        check('(round 4, 1-3) fee mint: after its CONTINUEs the Extra Life cashes out into the balance', ok2 and await w.bal(A) >= bb + 495, (ok2, await w.bal(A) - bb))
+        await books(w, 'fee-mint Extra Life cashed out', broken, (A, B, FM)); await w.use(B)
         # a plain token reclaimed, interrupted: marked back once, never "claimed" later
         tokR, _ = await w.send_ecash(160, 'r3 reclaim'); rid = await w.ev(f"Nutcade.S.txs.find(t=>t.token==={json.dumps(tokR)}).id")
         async def reclaim_start():
