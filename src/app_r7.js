@@ -493,7 +493,9 @@ const NWC = {
     if (d.timestamp + d.expiry < Date.now() / 1000) throw nwcErr('OTHER', 'The invoice has expired.');
     const sats = d.sats;
     // the same invoice is never paid twice: a paid one answers with its proof, one in flight is refused
-    const prev = S.txs.find(t => t.type === 'out' && t.method === 'ln' && t.request === inv && t.status !== 'failed' && t.status !== 'expired');
+    // (an app that may only see its own payments learns nothing about one it didn't make: just a refusal)
+    const prev = S.txs.find(t => t.type === 'out' && t.method === 'ln' && (t.request === inv || t.invoice === inv) && t.status !== 'failed' && t.status !== 'expired');
+    if (prev && !c.seeAll && prev.nwc !== c.id) throw nwcErr('RESTRICTED', 'This connection can\'t pay this invoice.');
     if (prev && prev.status === 'done') return { preimage: prev.preimage || '', fees_paid: num(prev.fee) * 1000 };
     if (prev) throw nwcErr('OTHER', 'This invoice is already being paid.');
     const cands = S.mints.filter(m => supports(m, 'melt', 'bolt11') && balanceOf(m.url) >= sats).sort((a, b) => (b.url === S.active) - (a.url === S.active) || balanceOf(b.url) - balanceOf(a.url));

@@ -685,6 +685,10 @@ async def main():
         ct = await w.ev("Nutcade.S.txs.find(t=>t.id===window.__crashTx)")
         check('(round 2, 1) an interrupted deposit whose recovery fails once is retried, then credited to the deposit itself', ok and ct['amount'] == 640 and not await w.ev("Nutcade.S.txs.some(t=>t.note==='Recovered with recovery phrase'&&t.mint===" + json.dumps(B) + "&&t.ts>Date.now()-60000)"), ct)
         await books(w, 'interrupted deposit retried', broken)
+        # (round 2, item 2) a scoped app asking to pay an invoice the user already paid learns nothing and pays nothing
+        mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
+        r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})
+        check('(round 2, 2) nwc: a scoped app asking about an invoice it didn\'t pay gets a refusal (RESTRICTED), no preimage or fee, nothing paid', r['answer'] and r['answer']['result'] is None and r['answer']['error']['code'] == 'RESTRICTED' and 'preimage' not in json.dumps(r['answer']) and await w.ev("Nutcade.S.txs.length") == n0, r.get('answer'))
         # a total budget, two payments racing for it: one goes through
         uri2 = await make_nwc(w, 'Racer', 'total', 500); await w.ev("Nutcade.closeSheet()")
         i1, i2 = invoice(300, B), invoice(300, B)
