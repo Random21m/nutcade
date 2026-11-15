@@ -3542,7 +3542,17 @@ async function mintTick(url, startup) {
   }
   for (const q of S.quotes.filter(q => q.mint === url && (q.kind === 'onchain' || now - (txById(q.txId)?.ts || 0) < maxAge))) await checkQuote(q).catch(() => {});
   for (const p of S.pending.filter(p => p.mint === url)) await reconcile(p, { force: !!startup }).catch(() => {});
+  await fetchPreimages(url).catch(() => {});
   if (S.prefs.checkSent) for (const t of S.txs.filter(t => t.mint === url && t.status === 'pending' && t.method === 'ecash' && t.sent).slice(0, 10)) await checkClaim(t).catch(() => {});
+}
+/* A payment settled from its coins' state (the mint's quote check failed at that moment) has no preimage yet: it is
+   asked for later, a few times, so Wallet Connect apps and the details can show it. */
+async function fetchPreimages(url) {
+  const w = await getWallet(url);
+  for (const t of S.txs.filter(t => t.mint === url && t.type === 'out' && t.method === 'ln' && t.status === 'done' && !t.preimage && t.quote && (t.preTries || 0) < 6 && Date.now() - t.ts < 7 * 86400e3).slice(0, 5)) {
+    let qs = null; try { qs = await w.checkMeltQuoteBolt11(t.quote); } catch (e) {}
+    updTx(t.id, qs && qs.payment_preimage ? { preimage: qs.payment_preimage } : { preTries: (t.preTries || 0) + 1 });
+  }
 }
 async function tickBody(startup) {
   if (!S.seed || tabLocked) return;

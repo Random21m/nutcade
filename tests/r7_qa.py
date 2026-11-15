@@ -896,6 +896,15 @@ async def main():
         await w.pg.unroute(re.compile(re.escape(FM) + '/v1/.*')); await w.pg.unroute(f'{FM}/v1/melt/bolt11'); await fy.pg.context.close()
         await w.pg.reload(); await w.wait(1500); await w.until(f"!Nutcade.S.pending.some(p=>p.mint==={json.dumps(FM)})", 150000)
         await books(w, 'hung mint', broken, (A, B, FM))
+        # (round 3, item 5) a payment settled from its coins' state (quote check failing then) gets its preimage later
+        await w.use(A); invP = invoice(400, B)
+        await w.pg.route(f'{A}/v1/melt/bolt11', drop_answer); await w.pg.route(re.compile(re.escape(A) + r'/v1/melt/quote/bolt11/.+'), failing(1, 500))
+        e, q = await w.pay_ln(invP); await w.pg.unroute(f'{A}/v1/melt/bolt11'); await w.pg.unroute(re.compile(re.escape(A) + r'/v1/melt/quote/bolt11/.+'))
+        p0 = await w.ev(f"(t=>t&&[t.status,!!t.preimage])(Nutcade.S.txs.find(t=>t.request==={json.dumps(invP)}))")
+        ok = await w.until(f"!!(Nutcade.S.txs.find(t=>t.request==={json.dumps(invP)})||{{}}).preimage", 90000)
+        pv = await w.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(invP)}).preimage"); ph = await w.ev(f"Nutcade.r7.decodeBolt11({json.dumps(invP)}).paymentHash")
+        check('(round 3, 5) a payment closed from its coins\' state gets its preimage from the mint later, and it matches the invoice', p0 and p0[0] == 'done' and ok and pv and __import__('hashlib').sha256(bytes.fromhex(pv)).hexdigest() == ph, (p0, pv))
+        await books(w, 'preimage later', broken, (A, B, FM))
         # (round 2, item 2) a scoped app asking to pay an invoice the user already paid learns nothing and pays nothing
         mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})
