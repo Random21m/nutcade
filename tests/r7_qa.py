@@ -52,6 +52,30 @@ async def wallet(b, vw=375, vh=667, lang='en', mobile=True):
     return w
 
 
+def error_strings():
+    """Every error message the app can show, from its source: literal ones, and templated ones whose only value is an
+    amount (a sample amount in its place); plus the round-3 notes and screens."""
+    import glob
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src')
+    out = set()
+    for f in sorted(glob.glob(os.path.join(src, 'app*.js'))):
+        s = open(f, encoding='utf-8').read()
+        for m in re.finditer(r"""(?:new Error|\w+Err)\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`)""", s):
+            t = m.group(1) or m.group(2) or m.group(3)
+            if t is None: continue
+            if m.group(3) is not None:
+                t = re.sub(r'\$\{money\([^}]*\)\}', '1,234 SAT', t)
+                if '${' in t: continue
+            t = t.replace("\\'", "'").replace('\\"', '"')
+            if re.match(r'^[A-Z][a-z]', t) and not t.endswith(': ') and not re.search(r"""nwcErr\(\s*'[A-Z_]+',\s*$""", s[max(0, m.start() - 40):m.start() + 7]):
+                out.add(t)
+    out |= {"The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
+            'This invoice is already paid. NUTCADE is collecting the ecash from the mint, and it shows here as soon as it is in.', 'COLLECTING',
+            'Mint fee for moving ecash under your phrase', 'Mint fee for an interrupted step', 'Mint fee for keeping Extra Life going', 'Ecash already spent elsewhere',
+            'Some of this ecash was already spent. NUTCADE removed 1,234 SAT of spent ecash from your balance (see your notes). Try again with what is left.'}
+    return sorted(out)
+
+
 async def unpaid(route):
     """the mint's real answer about a quote, but still UNPAID: holds a deposit unpaid however the test mint behaves"""
     r = await route.fetch(); j = await r.json(); j['state'] = 'UNPAID'
@@ -1072,6 +1096,14 @@ async def main():
         pv = await w.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(invP)}).preimage"); ph = await w.ev(f"Nutcade.r7.decodeBolt11({json.dumps(invP)}).paymentHash")
         check('(round 3, 5) a payment closed from its coins\' state gets its preimage from the mint later, and it matches the invoice', p0 and p0[0] == 'done' and ok and pv and __import__('hashlib').sha256(bytes.fromhex(pv)).hexdigest() == ph, (p0, pv))
         await books(w, 'preimage later', broken, (A, B, FM))
+        # (round 3, go 3) every error message the app can show is translated, in every language
+        errs = error_strings(); untr = {}
+        for lang in ('de', 'es', 'pt', 'fr'):
+            lw = await wallet(b, lang=lang)
+            got = await lw.ev(f"{json.dumps(errs)}.map(s=>Nutcade.tr(s))")
+            untr[lang] = [e for e, g in zip(errs, got) if g == e]
+            await lw.pg.context.close()
+        check(f'(round 3, go 3) all {len(errs)} error messages (and the round-3 notes) are translated into de, es, pt and fr', not any(untr.values()), {k: v[:6] for k, v in untr.items() if v})
         # (round 2, item 2) a scoped app asking to pay an invoice the user already paid learns nothing and pays nothing
         mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})

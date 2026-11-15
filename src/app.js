@@ -48,7 +48,7 @@ const MINT_MS = 20000, MELT_MS = 120000, STEP_MS = 150000;
   if (_fetch) window.fetch = (input, init) => {
     const u = String(typeof input === 'string' ? input : (input && input.url) || '').split('?')[0];
     if (!/\/v1\/(info|keys|keysets|swap|mint|melt|checkstate|restore)\b/.test(u)) return _fetch(input, init);
-    const ms = /\/v1\/melt\/(bolt11|onchain)$/.test(u) ? MELT_MS : MINT_MS, ac = new AbortController(), t = setTimeout(() => ac.abort(), ms);
+    const ms = /\/v1\/melt\/(bolt11|onchain)$/.test(u) ? MELT_MS : MINT_MS, ac = new AbortController(), t = setTimeout(() => ac.abort(new Error("The mint didn't answer in time.")), ms);
     const sig = init && init.signal; if (sig) { if (sig.aborted) ac.abort(); else sig.addEventListener('abort', () => ac.abort(), { once: true }); }
     return _fetch(input, Object.assign({}, init, { signal: ac.signal })).finally(() => clearTimeout(t));
   };
