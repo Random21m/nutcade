@@ -70,7 +70,7 @@ function openBlock(url) {
   const bal = balanceOf(url), n = mintName(url);
   const canMove = canMoveFrom(url);
   openSheet('Block mint', `<p style="margin:0">Block ${esc(n)}? NUTCADE will refuse ecash, payment requests and new deposits from it, and always tell you when it does. You can unblock it any time.</p>
-    ${bal ? `<div class="notice">Your ${money(bal)} at ${esc(n)} stays usable: you can still send it or move it to another mint. Moving it out is a good idea.</div>` : ''}
+    ${bal ? `<div class="notice">${canMove ? `Your ${money(bal)} at ${esc(n)} stays usable: you can still send it or move it to another mint. Moving it out is a good idea.` : `Your ${money(bal)} at ${esc(n)} stays usable: you can still send it.`}</div>` : ''}
     ${S.prefs.npc && S.prefs.npcMint === url ? `<div class="notice">Your Lightning address still sends payments to ${esc(n)}. Change its mint in Settings → Lightning address.</div>` : ''}
     <button class="btn solid gold block" data-act="blockMintGo" data-url="${esc(url)}">Block this mint</button>
     ${canMove ? `<button class="btn block" data-act="moveOpen" data-from="${esc(url)}">Move sats out first</button>` : bal ? noMoveHTML(url) : ''}<div id="sheetErr"></div>`);
