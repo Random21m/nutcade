@@ -861,16 +861,16 @@ async def main():
             except Exception: pass
             try: await route.abort()
             except Exception: pass
-        await w.use(B); nrec = await w.ev(RECB(B)); await w.pg.route(f'{B}/v1/mint/bolt11', drop_mint)
+        await w.use(B); nrec = await w.ev(RECB(B)); await w.pg.route(f'{B}/v1/mint/bolt11', drop_mint); await w.pg.route(f'{B}/v1/restore', failing(1000, 500))   # (held unsettled while we look)
         for amt in (410, 333):
             await w.home(); await w.click('[data-act=receive]'); await w.wait(150)
             if await w.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await w.click('[data-act=recvMethod][data-m=ln]'); await w.wait(100)
             await w.fill('#amtIn', str(amt)); await w.click('[data-act=doLnInvoice]'); await w.wait(2500); await w.ev("Nutcade.closeSheet()")
         await w.until("Nutcade.S.quotes.filter(q=>q.state==='PAID'||q.state==='ISSUED').length>=2", 30000)
-        await w.click('[data-act=tab][data-tab=history]'); await w.wait(200); await w.ev("[...document.querySelectorAll('#txList .tx')].find(r=>/PENDING/.test(r.innerText)&&/410/.test(r.innerText)).click()"); await w.wait(300)
+        await w.click('[data-act=tab][data-tab=history]'); await w.wait(200); await w.ev("document.querySelector('#txList [data-id=\"'+Nutcade.S.quotes.find(q=>q.amount==410).txId+'\"]').click()"); await w.wait(300)
         dtx = await w.sheet_text(); offer = await w.ev("!!document.querySelector('#layer [data-act=resumeInvoice]')")
         check('(round 3, 2) a deposit the mint says is paid is never offered for paying again: no Show invoice, it says it is being collected', not offer and 'already paid' in dtx, (offer, dtx[:200]))
-        await find_lost(); await w.pg.unroute(f'{B}/v1/mint/bolt11')
+        await w.pg.unroute(f'{B}/v1/restore'); await find_lost(); await w.pg.unroute(f'{B}/v1/mint/bolt11')
         ok = await w.until("[410,333].every(a=>Nutcade.S.txs.some(t=>t.type==='in'&&t.method==='ln'&&t.amount===a&&t.status==='done'&&t.mint===" + json.dumps(B) + "))", 90000)
         check('(round 3, 2) two interrupted deposits (one while Find lost ran) each settle as themselves, with no Recovered line and no quote left', ok and await w.ev(RECB(B)) == nrec and await w.ev(f"Nutcade.S.quotes.filter(q=>q.mint==={json.dumps(B)}).length") == 0, (ok, await w.ev(RECB(B)) - nrec))
         await books(w, 'interrupted deposits', broken, (A, B, FM))
@@ -888,22 +888,27 @@ async def main():
               ok and await w.ev(RECB(B)) == nrec and not await w.ev("Nutcade.S.txs.some(t=>t.type==='in'&&t.method==='ln'&&t.status==='done'&&t.amount===0)"), (ok, await w.ev(RECB(B)) - nrec))
         await books(w, 'deposit with a failed restore and two scans', broken, (A, B, FM))
         # (round 3, item 3) a reload while a token is being made on a slow mint: the step settles on the next start
-        await w.use(B); bB0 = await w.bal(B); await w.pg.route(f'{B}/v1/swap', held(4))
+        await w.use(B); bB0 = await w.bal(B); n3 = await w.ev("Nutcade.S.txs.length"); await w.pg.route(f'{B}/v1/swap', held(4))
         await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '500'); await w.click('[data-act=doSendEcash]'); await w.wait(1500)
         await w.pg.reload(); await w.wait(800); await w.pg.unroute(f'{B}/v1/swap')
         ok = await w.until("Nutcade.S.ops.length===0", 40000); bB1 = await w.bal(B)
+        new3 = await w.ev(f"Nutcade.S.txs.slice(0, Nutcade.S.txs.length-{n3}).map(t=>[t.type,t.method,t.amount,t.fee,t.status,t.note,t.mint&&t.mint.slice(-4)])")
         e, q = await w.pay_ln(invoice(300, A))
-        check('(round 3, 3) a reload during "make a token": the open step settles by itself, nothing is lost, the next payment works', ok and bB1 == bB0 and not e, (ok, bB1 - bB0, e))
+        check('(round 3, 3) a reload during "make a token": the open step settles by itself, nothing is lost, the next payment works', ok and bB1 == bB0 and not e, (ok, bB1 - bB0, e, new3))
         await books(w, 'reload during make a token', broken, (A, B, FM))
         # coins spent elsewhere (a stale copy): the payment drops them with a line, and explains instead of failing twice
         fx = await wallet(b); await fx.create(); await fx.add_mint(B)
-        tokS, _ = await w.send_ecash(200, 'r3 stale')
+        tokS, _ = await w.send_ecash(200, 'r3 stale'); sp0 = await w.ev("Nutcade.S.txs.filter(t=>t.note==='Ecash already spent elsewhere').reduce((a,t)=>a+t.amount,0)")
         await fx.receive_token(tokS)
-        await w.ev(f"(d=>{{Nutcade.S.proofs[{json.dumps(B)}].push(...d.proofs.map(p=>Object.assign({{}},p,{{amount:Number(p.amount)}})))}})(CashuLib.getDecodedToken({json.dumps(tokS)}))")   # as if the wallet never noticed
+        # as if the wallet never noticed: a stored copy of coins it once received (its history has them), spent elsewhere since
+        await w.ev(f"(d=>{{const P=JSON.parse(localStorage.getItem('nutcade:proofs')); P[{json.dumps(B)}].push(...d.proofs.map(p=>Object.assign({{}},p,{{amount:Number(p.amount)}}))); localStorage.setItem('nutcade:proofs', JSON.stringify(P));"
+                   f" const T=JSON.parse(localStorage.getItem('nutcade:txs')); T.unshift({{id:'stale1', type:'in', method:'ecash', amount:200, mint:{json.dumps(B)}, status:'done', ts:Date.now(), note:'stale copy'}}); localStorage.setItem('nutcade:txs', JSON.stringify(T));"
+                   f" localStorage.setItem('nutcade:gen', String(+(localStorage.getItem('nutcade:gen')||0)+1))}})(CashuLib.getDecodedToken({json.dumps(tokS)}, Object.keys(Nutcade.S.counters)))")
+        await w.pg.reload(); await w.wait(1500)
         real = await w.bal(B) - 200
         await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', str(real + 100)); await w.click('[data-act=doSendEcash]'); await w.wait(4000)
         er = await w.err(); await w.ev("Nutcade.closeSheet()")
-        check('(round 3, 3) "already spent": the spent coins are dropped with a line ("already spent elsewhere") and the error explains, it does not just repeat "already spent"', await w.ev("Nutcade.S.txs.some(t=>t.note==='Ecash already spent elsewhere'&&t.amount===200)") and 'already spent. proofs' not in er.lower(), er)
+        check('(round 3, 3) "already spent": the spent coins are dropped with a line ("already spent elsewhere") and the error explains, it does not just repeat "already spent"', await w.ev("Nutcade.S.txs.filter(t=>t.note==='Ecash already spent elsewhere').reduce((a,t)=>a+t.amount,0)") - sp0 == 200 and 'already spent. proofs' not in er.lower(), er)
         tok2b, e2b = await w.send_ecash(100)
         check('(round 3, 3) after that, a payment from the same mint works', tok2b and not e2b, e2b)
         await books(w, 'stale coins dropped', broken, (A, B, FM))
@@ -936,7 +941,7 @@ async def main():
         okey = await w.ev("(()=>{const k=crypto.getRandomValues(new Uint8Array(32)); return Array.from(CashuLib.getPubKeyFromPrivKey(k),x=>x.toString(16).padStart(2,'0')).join('')})()")
         ok, outs, bal0, new = await interrupted(gift_start)
         g = [t for t in new if t.get('type') == 'out' and t.get('method') == 'ecash' and t.get('token')]
-        sec = await w.ev(f"JSON.parse(CashuLib.getDecodedToken({json.dumps(g[0]['token'])}).proofs[0].secret)") if g else None
+        sec = json.loads(g[0]['sent'][0]['secret']) if g and g[0].get('sent') else None
         check('(round 3, locked) an interrupted gift (P2PK lock) is back after a reload as the same locked token: 300 SAT, locked to their key, back date kept, no loss line',
               ok and outs and outs[0] > 0 and len(g) == 1 and g[0]['amount'] == 300 and g[0]['status'] == 'pending' and g[0].get('lockUntil') and sec and sec[0] == 'P2PK' and sec[1]['data'] == okey
               and not any('no wallet can restore' in (t.get('note') or '') for t in new), (ok, outs, [(t.get('note'), t.get('amount'), t.get('status')) for t in new], sec and sec[0]))
@@ -951,7 +956,7 @@ async def main():
             await w.fill('#bountyAmt', '250'); await w.click('[data-act=chalSend]')
         ok, outs, bal0, new = await interrupted(bounty_start)
         g = [t for t in new if t.get('type') == 'out' and t.get('method') == 'ecash' and t.get('token')]
-        sec = await w.ev(f"JSON.parse(CashuLib.getDecodedToken({json.dumps(g[0]['token'])}).proofs[0].secret)") if g else None
+        sec = json.loads(g[0]['sent'][0]['secret']) if g and g[0].get('sent') else None
         cb = await w.ev("(c=>c&&{b:(c.bounties||[]).map(b=>({tx:b.txId,state:b.state,pre:!!b.pre,H:b.H,unsent:!!b.unsent})),sent:(c.sentTo||[]).length})(Nutcade.S.challenges.find(c=>c.dir==='out'&&c.seed===4242))")
         okb = await w.until("(c=>c&&(c.bounties||[]).length===1&&!c.bounties[0].unsent&&(c.sentTo||[]).length>0)(Nutcade.S.challenges.find(c=>c.dir==='out'&&c.seed===4242))", 40000)
         cb2 = await w.ev("(c=>c&&{b:(c.bounties||[]).map(b=>({tx:b.txId,state:b.state,pre:b.pre,H:b.H,unsent:!!b.unsent})),sent:(c.sentTo||[]).length})(Nutcade.S.challenges.find(c=>c.dir==='out'&&c.seed===4242))")
