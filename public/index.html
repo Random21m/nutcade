@@ -3375,8 +3375,11 @@ async function restoreFromMintNow(url, onStep, opts) {
   // (left out of this scan; each one settles itself as that deposit).
   for (const p of S.pending.filter(p => p.mint === url && p.id !== opts.except)) await reconcile(p, { force: true }).catch(() => {});
   for (const o of S.ops.filter(o => o.mint === url && o.id !== opts.except)) await settleOp(o.id).catch(() => {});
-  const owned = new Set();   // the counters of anything still open: its coins stay out of what this scan credits
-  for (const c of [].concat(S.pending.filter(p => p.mint === url && p.ctr && !p.changeDone).map(p => p.ctr), S.ops.filter(o => o.mint === url).flatMap(o => o.ctr), S.quotes.filter(q => q.mint === url && q.ctr).map(q => q.ctr))) {
+  // the counters of anything still open: its coins stay out of what this scan credits. (Not the step this scan is
+  // repairing: its counters turned out to be used already, by another device with the same phrase, so the coins
+  // there are that device's, found and credited here like any others.)
+  const owned = new Set(), ex = opts.except;
+  for (const c of [].concat(S.pending.filter(p => p.mint === url && p.ctr && !p.changeDone && p.id !== ex).map(p => p.ctr), S.ops.filter(o => o.mint === url && o.id !== ex).flatMap(o => o.ctr), S.quotes.filter(q => q.mint === url && q.ctr && q.quote !== ex).map(q => q.ctr))) {
     const r = await inTime(w.restore(c.start, c.n, { keysetId: c.id }), 30000); for (const p of r.proofs || []) owned.add(p.secret);
   }
   const keysets = w.keyChain.getKeysets().filter(k => k.unit === 'sat');
@@ -3581,7 +3584,7 @@ async function checkQuoteNow(id, txId) {
         }
         // the counters the new coins are signed for are on the deposit's record before the mint is asked
         const onCountersReserved = u => { if (u && u.count > 0) { q.ctr = { id: u.keysetId, start: u.start, n: u.count }; save(); } };
-        const proofs = await withRepair(q.mint, () => w.mintProofsBolt11(q.amount, r, Object.assign({}, cfg, { onCountersReserved })));
+        const proofs = await withRepair(q.mint, () => w.mintProofsBolt11(q.amount, r, Object.assign({}, cfg, { onCountersReserved })), { except: q.quote });
         const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
         S.proofs[q.mint] = (S.proofs[q.mint] || []).concat(plain(proofs).filter(p => !held.has(p.secret)));
         updTx(q.txId, { status: 'done', ts: Date.now() });
@@ -3931,7 +3934,7 @@ async function journaled(url, kind, info, run) {
       for (let i = 0; ; i++) {
         try { const r = await run(onCountersReserved, op); opMark(url, true); return { r, op }; }
         catch (e) {
-          if (i === 0 && isDupOutputs(e) && !flights.has('restore:' + normUrl(url))) { await restoreFromMint(url, null, { except: op.id }); continue; }   // counters behind (same phrase elsewhere): catch up, once
+          if (i === 0 && isDupOutputs(e) && !flights.has('restore:' + normUrl(url))) { op.ctr = []; op.outs = []; save(); await restoreFromMint(url, null, { except: op.id }); continue; }   // (nothing of this attempt was signed)   // counters behind (same phrase elsewhere): catch up, once
           opMark(url, false, e); e.op = op; throw e;
         }
       }
