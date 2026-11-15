@@ -3859,9 +3859,29 @@ async function meltNow(w, kind, mq, feeIndex, url, tx, pend, spent, amount, onCo
 /* One at a time per record (a payment, a deposit, a mint's restore): every caller in this tab shares the run in
    progress, and where the browser has Web Locks another tab waits for it too. */
 const flights = new Map();
+/* Web Locks where the browser has them. Where they are missing, or the browser refuses them (some sandboxed or
+   opaque-origin pages reject every request), the lock is the one in this tab instead (other tabs are kept out by the
+   takeover guard and the generation stamp on every save). Said once in the console. */
+let locksOff = false;
+async function withLock(name, fn, fallback = fn) {
+  if (locksOff || !(navigator.locks && navigator.locks.request)) return fallback();
+  let ran = false;
+  try { return await navigator.locks.request(name, () => { ran = true; return fn(); }); }
+  catch (e) {
+    if (ran) throw e;
+    locksOff = true; try { console.warn(`NUTCADE: this browser refused Web Locks (${(e && e.name) || e}); using the lock in this tab.`); } catch (x) {}
+    return fallback();
+  }
+}
+const tabQueue = new Map();   // one at a time per name, in this tab
+function inTab(name, fn) {
+  const run = (tabQueue.get(name) || Promise.resolve()).then(fn, fn), tail = run.catch(() => {});
+  tabQueue.set(name, tail); tail.then(() => { if (tabQueue.get(name) === tail) tabQueue.delete(name); });
+  return run;
+}
 function single(key, fn) {
   if (flights.has(key)) return flights.get(key);
-  const p = (async () => (navigator.locks && navigator.locks.request) ? navigator.locks.request('nutcade:' + key, () => fn()) : fn())().finally(() => flights.delete(key));
+  const p = withLock('nutcade:' + key, () => fn()).finally(() => flights.delete(key));
   flights.set(key, p);
   return p;
 }
@@ -3870,7 +3890,7 @@ function single(key, fn) {
    nothing. */
 function mintLock(url, fn) {
   const go = async () => { if (writeGuard.paused) throw pausedErr(); await syncIfStale(); return fn(); };
-  return (navigator.locks && navigator.locks.request) ? navigator.locks.request('nutcade:mint:' + normUrl(url), go) : go();
+  return withLock('nutcade:mint:' + normUrl(url), go, () => inTab('mint:' + normUrl(url), go));
 }
 /* opts.force: try a waiting change recovery now (at startup, or when you ask), instead of waiting for its backoff */
 function reconcile(pend, opts = {}) { return single('melt:' + pend.id, () => reconcileNow(pend.id, pend.txId, opts)); }

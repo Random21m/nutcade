@@ -39,9 +39,10 @@ async def forward(route):
     except Exception: pass
 
 
-async def wallet(b, vw=375, vh=667, lang='en', mobile=True):
+async def wallet(b, vw=375, vh=667, lang='en', mobile=True, init=None):
     ctx = await b.new_context(viewport={'width': vw, 'height': vh}, device_scale_factor=1, is_mobile=mobile, has_touch=mobile, accept_downloads=True)
     prefs = {'sound': False, 'music': False, 'crt': True, 'lang': lang, 'relays': ['ws://127.0.0.1:3350/relay'], 'npcHost': 'http://127.0.0.1:3350'}
+    if init: await ctx.add_init_script(init)
     await ctx.add_init_script("window.__i18nMiss=new Set(); if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs'," + json.dumps(json.dumps(prefs)) + ")")
     await ctx.route('https://lnurl.test/**', forward)
     await ctx.route('https://down.test/**', lambda r: r.abort())
@@ -1343,6 +1344,21 @@ async def main():
         pv = await w.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(invP)}).preimage"); ph = await w.ev(f"Nutcade.r7.decodeBolt11({json.dumps(invP)}).paymentHash")
         check('(round 3, 5) a payment closed from its coins\' state gets its preimage from the mint later, and it matches the invoice', p0 and p0[0] == 'done' and ok and pv and __import__('hashlib').sha256(bytes.fromhex(pv)).hexdigest() == ph, (p0, pv))
         await books(w, 'preimage later', broken, (A, B, FM))
+        # (round 5, 3) a browser that refuses Web Locks (every request rejects): the wallet uses the lock in its tab, and
+        # deposit, payment, send and claim all work, with history = balance
+        lk = await wallet(b, init="(()=>{const no=()=>Promise.reject(new DOMException('The request was denied.','SecurityError')); try{Object.defineProperty(Navigator.prototype,'locks',{configurable:true,get:()=>({request:no,query:no})})}catch(e){}})()")
+        warns = []; lk.pg.on('console', lambda m: warns.append(m.text) if m.type == 'warning' and 'Web Locks' in m.text else None)
+        await lk.create(); await lk.add_mint(B); await lk.use(B)
+        dep = await lk.receive_ln(1000)
+        tokL, eL = await lk.send_ecash(200, 'locks refused')
+        await w.use(B); tokW, _ = await w.send_ecash(120, 'to the no-locks wallet'); await w.ev("Nutcade.closeSheet()")
+        _, eC, _ = await lk.receive_token(tokW)
+        eP, qP = await lk.pay_ln(invoice(100, A))
+        lb = []; await books(lk, 'no Web Locks', lb, (B,))
+        st = await lk.ev("Nutcade.S.txs.map(t=>[t.type,t.method,t.amount,t.status])")
+        check('(round 5, 3) with Web Locks refused: a deposit, a payment, a token sent and one claimed all work, history = balance, no page error, said once in the console',
+              dep and tokL and not eL and not eC and not eP and not lb and not lk.errs and len(warns) == 1, (dep, bool(tokL), eL, eC, eP, lb, lk.errs[:3], len(warns), st[:6]))
+        await lk.pg.context.close()
         # (round 5, 2) French says "vous" throughout: no "tu" form anywhere in its dictionary or patterns
         frv = await w.ev("[...Object.values(NUTCADE_I18N.fr.t), ...(NUTCADE_I18N.fr.re||[]).map(r=>String(r[1]))]")
         tu = [v for v in frv if re.search(r"(^|[^\w-])(tu|ton|ta|tes|toi|Encaisse-la)(?![\w-])|(^|[.!?]\s+)Réessaie(?!\w)", v, re.I)]
