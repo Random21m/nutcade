@@ -127,7 +127,7 @@ async def tour(b, pa, pb, pc, pd):
         h = await wallet(b, vw, vh, lang, mobile)
         await h.pg.add_init_script("(()=>{const s=window.__i18nMiss;const a=s.add.bind(s);s.add=v=>{try{const k='qa:miss7';const c=JSON.parse(localStorage.getItem(k)||'[]');if(!c.includes(v)){c.push(v);localStorage.setItem(k,JSON.stringify(c))}}catch(e){}return a(v)}})()")
         await h.pg.reload(); await h.wait(700)
-        await h.create(); await h.add_mint(B); await h.add_mint(A); await h.use(A); await h.receive_ln(5000)
+        await h.create(); await h.add_mint(B); await h.add_mint(A); await h.use(B); await h.receive_ln(3000); await h.use(A); await h.receive_ln(5000)
         shot_dir = SHOTS if SHOTS and lang in ('en', 'de') else ''
         over, n, notgold = [], [0], []
         async def snap(name):
@@ -138,6 +138,19 @@ async def tour(b, pa, pb, pc, pd):
             if ng and name not in ('block_ln_refused',): notgold.append((name, ng))   # (that one is the existing Receive sheet)
             if shot_dir:
                 n[0] += 1; await h.pg.screenshot(path=os.path.join(shot_dir, f'{lang}_{n[0]:02d}_{name}.png'))
+        # (round 2, B) the pay, multinut and move sheets, in every language: their text is checked for English below
+        await h.home(); await h.click('[data-act=send]'); await h.wait(150); await h.click('[data-act=sendMethod][data-m=ln]'); await h.wait(100)
+        await h.fill('#destIn', invoice(6500, FM)); await h.click('[data-act=doMeltQuote]'); await h.until("!!document.querySelector('#mppBtn')", 15000); await snap('pay_not_enough')
+        await h.click('#mppBtn'); await h.until("!!document.querySelector('#mppPay') || !!(document.querySelector('#layer .notice.red'))", 20000); await snap('multinut_confirm')
+        await h.ev("Nutcade.closeSheet()"); await h.click('[data-act=tab][data-tab=mints]'); await h.wait(200); await h.click('#app [data-act=moveOpen]'); await h.wait(250); await snap('move_sheet')
+        await h.ev(f"document.querySelector('#mvFrom').value={json.dumps(A)}; document.querySelector('#mvTo').value={json.dumps(B)}"); await h.fill('#amtIn', '500')
+        await h.click('[data-act=moveQuote]'); await h.until("!!document.querySelector('#mvGo')", 15000); await snap('move_confirm')
+        await h.click('#mvGo'); await h.until("/MOVED|ON ITS WAY/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 30000); await snap('move_done')
+        await h.ev("Nutcade.closeSheet()")
+        # texts on those sheets that a normal tour doesn't reach (failures, the no-move variant): asked of the translator directly
+        await h.ev("""['The payment didn\'t go through, so the parts that were sent came back to your wallet.', 'The payment is in flight. NUTCADE will settle each part when the mints confirm. Check the parts in your notes.',
+            'Your 3,000 SAT at Mint B stays usable: you can still send it.', 'Mint B holds 300 SAT, not enough on its own.', 'Payment is in flight. NUTCADE will settle it when the mint confirms. Check the transaction in your notes.',
+            "The move didn't go through, so the sats stayed where they were.", "Paid. Its change hasn't come back yet; NUTCADE keeps trying."].forEach(t=>Nutcade.tr(t))""")
         vid = f'tour-{lang}'
         mock('/test/lnurlw', {'id': vid, 'min': 100, 'max': 2500, 'desc': 'Meetup voucher'})
         await h.ev(f"Nutcade.handleScan('lnurlw://lnurl.test/lnurlw/{vid}')"); await h.until("!!document.querySelector('[data-act=lnurlwGo]')", 8000); await snap('voucher')
