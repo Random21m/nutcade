@@ -8378,6 +8378,9 @@ function applyImport(u, coins, txs, pending, ops) {
 function settleImported(ops) {
   if (ops.length) setTimeout(async () => { for (const o of ops) { if (!S.mints.find(m => m.url === o.mint)) await addMint(o.mint).catch(() => {}); await settleOp(o.id).catch(() => {}); } refresh(); }, 0);
 }
+// the backup's Extra Life comes in when its coins are unspent, or when one of the steps coming in with it is the
+// CONTINUE that spent them (that step then finishes it here, with its new coins and date)
+const renewOf = (x, ops) => !!x && Array.isArray(x.proofs) && ops.some(o => o.follow && o.follow.k === 'extra-renew' && x.proofs.some(p => (o.inputs || []).includes(p.secret)));
 async function extraIfUnspent(x) {
   if (!x || !Array.isArray(x.proofs) || !x.proofs.length) return { ok: false };
   try { const w = await getWallet(normUrl(x.mint)); const st = await inTime(w.checkProofsStates(x.proofs), 30000); return { ok: st.every(y => y && y.state === 'UNSPENT'), asked: true }; } catch (e) { return { ok: false, asked: false }; }
@@ -8402,7 +8405,11 @@ async function importBackup(d) {
     if (coins) checked[u] = coins; else waiting.push(u);
   }
   let extra = null, extraLater = null;
-  if (d.extra && !S.extra) { const r = await extraIfUnspent(d.extra); if (r.ok) extra = d.extra; else if (!r.asked) extraLater = d.extra; }
+  if (d.extra && !S.extra) {
+    const xu = normUrl(d.extra.mint || '');
+    if (renewOf(d.extra, (part[xu] || { ops: [] }).ops)) { if (waiting.includes(xu)) extraLater = d.extra; else extra = d.extra; }
+    else { const r = await extraIfUnspent(d.extra); if (r.ok) extra = d.extra; else if (!r.asked) extraLater = d.extra; }
+  }
   await syncIfStale();
   let settle = [];
   for (const u of Object.keys(checked)) { const q = part[u]; settle = settle.concat(applyImport(u, checked[u], q.txs, q.pending, q.ops)); }
@@ -8426,7 +8433,7 @@ async function retryImports(url) {
   for (const rec of S.imports.filter(r => !url || r.mint === url)) {
     const ops = freshOps(rec.ops), coins = await checkImport(rec.mint, rec.proofs || [], ops);
     if (!coins) continue;
-    const ex = rec.extra && !S.extra ? await extraIfUnspent(rec.extra) : null;
+    const ex = rec.extra && !S.extra ? (renewOf(rec.extra, ops) ? { ok: true, asked: true } : await extraIfUnspent(rec.extra)) : null;
     if (ex && !ex.asked) continue;
     await mintLock(rec.mint, async () => {
       if (!S.imports.find(x => x.id === rec.id)) return;

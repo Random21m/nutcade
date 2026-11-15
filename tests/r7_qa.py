@@ -1235,6 +1235,37 @@ async def main():
               okb and await nd.bal(A) == wa and await nd.bal(B) == wb and not db and await nd.ev("Nutcade.S.txs.length") == n_after and 'Waiting to check with' not in await nd.ev("document.body.innerText"),
               (okb, await nd.bal(A) - wa, await nd.bal(B) - wb, db))
         await nd.pg.context.close()
+        # (round 5, 1) every record kind: a stale backup holding an already-settled bounty (fee mint) and an already-settled
+        # CONTINUE (no-fee mint, the Extra Life set up above), imported into the wallet that made it and into a new device
+        await w.use(A); xu0 = await w.ev("Nutcade.S.extra.until")
+        await w.pg.route(f'{A}/v1/swap', held(12)); await w.pg.route(f'{B}/v1/swap', held(12))
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(200)
+        await w.ev("Nutcade.startChallenge({game:'flipper', seed:7171, score:700, by:'R5B'})"); await w.wait(300)
+        await w.fill('#bountyAmt', '190'); await w.ev("[...document.querySelectorAll('#layer [data-act=chalSend]')].find(b=>b.textContent==='Heir R3').click()"); await w.wait(1500)
+        await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraContinue]'); await w.wait(1500)
+        kinds = await w.ev("Nutcade.S.ops.map(o=>o.follow&&o.follow.k).sort()")
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
+        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]')
+        bks = open(await (await dl.value).path()).read()
+        await w.until(f"Nutcade.S.ops.length===0 && Nutcade.S.extra.until > {xu0} && Nutcade.S.challenges.some(c=>c.seed===7171&&(c.bounties||[]).length===1)", 60000)
+        await w.pg.unroute(f'{A}/v1/swap'); await w.pg.unroute(f'{B}/v1/swap'); await w.wait(800)
+        BOUNTY = "Nutcade.S.txs.filter(t=>t.amount===190&&t.token).length"; XLINES = "Nutcade.S.txs.filter(t=>/^Extra Life/.test(t.note||'')).length"
+        k0 = (await w.ev(BOUNTY), await w.ev(XLINES), await w.ev("Nutcade.S.txs.length"), await w.bal(), await w.ev("Nutcade.S.extra.until"))
+        okw, _ = await import_into(w, bks); ob = []
+        await books(w, 'stale bounty + CONTINUE into its own wallet', ob, (A, B, FM))
+        k1 = (await w.ev(BOUNTY), await w.ev(XLINES), await w.ev("Nutcade.S.txs.length"), await w.bal(), await w.ev("Nutcade.S.extra.until"))
+        check('(round 5, 1) a stale backup with an already-settled bounty (fee mint) and CONTINUE (no-fee mint), imported into the wallet that made it: nothing settles twice, no new line, Extra Life unchanged, history = balance',
+              kinds == ['bounty', 'extra-renew'] and okw and k1 == k0 and not ob, (kinds, okw, k0, k1, ob))
+        broken.extend(ob)
+        nx = await wallet(b); await nx.create()
+        okx, _ = await import_into(nx, bks); await nx.wait(1500); xb = []
+        await books(nx, 'stale bounty + CONTINUE on a new device', xb, (A, B, FM))
+        x1 = (await nx.ev(BOUNTY), await nx.ev("Nutcade.S.txs.filter(t=>/^Extra Life/.test(t.note||'')).length"), await nx.ev("Nutcade.S.extra && Nutcade.S.extra.until"))
+        okx2, _ = await import_into(nx, bks); await books(nx, 'imported twice', xb, (A, B, FM))
+        x2 = (await nx.ev(BOUNTY), await nx.ev("Nutcade.S.txs.filter(t=>/^Extra Life/.test(t.note||'')).length"), await nx.ev("Nutcade.S.extra && Nutcade.S.extra.until"))
+        check('(round 5, 1) the same backup on a new device: the bounty and the CONTINUE settle once there (one bounty token, the Extra Life with its new date, no extra Extra Life line), history = balance; importing it again changes nothing',
+              okx and okx2 and x1[0] == 1 and x1[2] == k0[4] and x1[1] == await w.ev(XLINES) and x2 == x1 and not xb, (okx, okx2, x1, x2, k0, xb))
+        await nx.pg.context.close(); await w.use(B)
         # an interrupted cash-out: the Extra Life is closed when it settles, and the heir's copy is marked ended
         async def cash_start():
             await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')
