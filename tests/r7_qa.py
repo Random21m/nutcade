@@ -1206,6 +1206,34 @@ async def main():
                   ok3 and not ow and await w.bal() == bw0 and await w.ev("Nutcade.S.txs.length") == nw0 and await w.ev(GIFTS) == g0, (ok3, ow, await w.bal() - bw0, await w.ev("Nutcade.S.txs.length") - nw0, g0, await w.ev(GIFTS)))
             broken.extend(ow)
         await w.use(B)
+        # (round 5, 1) restoring while one mint is down: the other mints come in at once; that mint's part waits aside
+        # ("Waiting to check with ..."), and comes in once, when it answers, with history = balance
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
+        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]')
+        bkx = open(await (await dl.value).path()).read(); wa, wb = await w.bal(A), await w.bal(B)
+        nd = await wallet(b); await nd.create()
+        async def mint_down(route):
+            try: await route.abort()
+            except Exception: pass
+        await nd.pg.route(re.compile(re.escape(A) + r'/v1/.*'), mint_down)
+        okd, td = await import_into(nd, bkx)
+        await nd.home(); await nd.wait(300); panel = await nd.ev("document.body.innerText")
+        db = []; await books(nd, 'restored with a mint down', db, (A, B, FM))
+        s1 = (await nd.bal(A), await nd.bal(B), await nd.ev("Nutcade.S.imports.map(r=>r.mint)"))
+        check('(round 5, 1) restoring with one mint down: the other mints come in at once; that mint\'s part waits, shown as "Waiting to check with <mint>", nothing of it in the balance or history yet, history = balance',
+              okd and 'Waiting to check with' in td and 'Waiting to check with' in panel and s1[0] == 0 and s1[1] == wb and s1[2] == [A] and not db, (okd, td, s1, db))
+        await nd.pg.reload(); await nd.wait(1500)
+        check('(round 5, 1) and it is kept (a reload doesn\'t drop it)', await nd.ev("Nutcade.S.imports.length") == 1)
+        await nd.pg.unroute(re.compile(re.escape(A) + r'/v1/.*'))
+        await nd.home(); await nd.wait(300); await nd.click('[data-act=importsRetry]')
+        okb = await nd.until("Nutcade.S.imports.length===0", 40000); await nd.wait(800)
+        await nd.click('[data-act=tab][data-tab=wallet]'); await nd.wait(300)
+        n_after = await nd.ev("Nutcade.S.txs.length"); await nd.ev("window.dispatchEvent(new Event('online'))"); await nd.wait(3000)
+        await books(nd, 'mint back, part checked', db, (A, B, FM))
+        check('(round 5, 1) when the mint answers (Check now), its coins come in once, the same as the wallet that made the backup, history = balance; checking again adds nothing',
+              okb and await nd.bal(A) == wa and await nd.bal(B) == wb and not db and await nd.ev("Nutcade.S.txs.length") == n_after and 'Waiting to check with' not in await nd.ev("document.body.innerText"),
+              (okb, await nd.bal(A) - wa, await nd.bal(B) - wb, db))
+        await nd.pg.context.close()
         # an interrupted cash-out: the Extra Life is closed when it settles, and the heir's copy is marked ended
         async def cash_start():
             await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')

@@ -35,7 +35,7 @@ const raw = {
   del(k) { try { localStorage.removeItem('nutcade:' + k); } catch (e) {} }
 };
 // everything that holds ecash, keys or anything that can spend: with a PIN, only inside the encrypted vault
-const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc', 'ops', 'extra', 'hunts', 'found'];
+const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc', 'ops', 'extra', 'hunts', 'found', 'imports'];
 const vault = { on: raw.get('vault', null) != null, open: false, data: {}, dek: null, chain: Promise.resolve(), queued: false };
 // A tab paused because NUTCADE opened in another tab never writes the wallet again: work it still had in flight can't
 // overwrite what the active tab saved. (Counters still advance, so no secret is ever issued twice.)
@@ -1929,7 +1929,7 @@ function viewWallet() {
     </div>
     <div class="scanrow"><button class="btn violet scan-btn" data-act="scan"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h5v1H2v4H1zm9 0h5v5h-1V2h-4zM1 10h1v4h4v1H1zm13 0h1v5h-5v-1h4zM4 4h3v3H4zm5 0h3v3H9zM4 9h3v3H4zm5 0h1v1H9zm2 0h1v1h-1zm-2 2h1v1H9zm2 1h1v1h-1z"/></svg>Scan QR code</button>${window.Chiptune && window.Chiptune.canListen() ? '<button class="btn violet" data-act="ctListen" aria-label="Listen for a code sent as sound"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 1h4v8H6zM4 6h1v3a3 3 0 0 0 6 0V6h1v3a4 4 0 0 1-3.5 4V15h-1v-2A4 4 0 0 1 4 9z"/></svg>Listen</button>' : ''}</div>
     <div class="toolrow"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm pink" data-act="splitOpen">Split a bill</button>${S.extra ? '' : '<button class="btn sm lime" data-act="extraOpen">Extra Life</button>'}<button class="btn sm violet" data-act="huntNew">Treasure hunt</button></div>
-    ${splitPanels()}${piggyPanel()}${extraPanel()}${huntsPanel()}
+    ${importsPanel()}${splitPanels()}${piggyPanel()}${extraPanel()}${huntsPanel()}
     <div id="priceMount"></div>
     <div class="panel">
       <div class="row between"><span class="h2">Recent</span>${S.txs.length ? '<button class="linkbtn" data-act="tab" data-tab="history">All notes</button>' : ''}</div>
@@ -1984,7 +1984,7 @@ function hydrateFromVault() {
   let moved = false;
   for (const k of VAULT_KEYS) { const v = raw.get(k, undefined); if (v !== undefined) { if (d[k] === undefined || d[k] === null) d[k] = v; raw.del(k); moved = true; } }
   if (moved) queueVaultWrite();
-  S.hunts = d.hunts || []; S.found = d.found || {};
+  S.hunts = d.hunts || []; S.found = d.found || {}; S.imports = d.imports || [];
   S.seed = d.seed || null; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || []; S.nwc = d.nwc || []; S.ops = d.ops || []; S.extra = d.extra || null;
   seedBytes = null; raw.del('pinfails'); requestPersist(); mergeMintSpellings();
   nwcSince = Math.floor(Date.now() / 1000);   // Wallet Connect requests sent while it was locked are refused, not paid now
@@ -3261,7 +3261,9 @@ async function lnAddressInvoice(address, sats, comment) {
    one line per mint for what the backup changed, so it adds up to the balance: "Restored from backup" for coins the
    wallet didn't have, "Ecash already spent elsewhere" for coins the backup's own history counts that are gone since.
    An open step in it is settled here only if this wallet hasn't settled it already (by record, and by its coins).
-   If a mint can't be asked, nothing is imported. */
+   A mint that can't be asked right now doesn't hold up the others: its part of the backup (coins, history lines,
+   open steps) waits aside, stored like any other secret, shown as "Waiting to check with <mint>", and is checked
+   again by the background check and the Check now button; it comes in, the same way, once the mint answers. */
 const ledgerOf = (txs, u) => txs.reduce((s, t) => t.mint !== u || t.status === 'failed' || t.status === 'expired' ? s : t.type === 'in' ? s + (t.status === 'done' || t.status === 'claimed' ? num(t.amount) : 0) : s - num(t.amount) - num(t.fee), 0);
 const outSecret = o => { try { return new TextDecoder().decode(L.hexToBytes(o.s)); } catch (e) { return ''; } };
 function opSettledHere(o) {
@@ -3269,45 +3271,65 @@ function opSettledHere(o) {
   const mine = new Set([].concat(Object.values(S.proofs).flat().map(p => p.secret), S.txs.flatMap(t => (t.sent || []).map(p => p.secret)), S.extra ? S.extra.proofs.map(p => p.secret) : []));
   return (o.outs || []).some(x => mine.has(outSecret(x)));
 }
+S.imports = store.get('imports', []);   // parts of an imported backup waiting for their mint to answer: [{ id, mint, proofs, txs, pending, ops, extra, at }]
+const saveImports = () => store.set('imports', S.imports);
+const freshOps = ops => (ops || []).filter(o => o && o.id && typeof o.mint === 'string' && !S.ops.find(x => x.id === o.id)).map(o => Object.assign({ inputs: [], ctr: [], outs: [] }, o, { mint: normUrl(o.mint) })).filter(o => !opSettledHere(o));
+// a mint's part of a backup, checked at the mint: [unspent coins (and the coins of steps to settle here)] or null if it can't be asked
+async function checkImport(u, proofs, ops) {
+  const opIn = new Set(ops.flatMap(o => o.inputs));
+  if (!proofs.length) return [];
+  try { const w = await getWallet(u); const st = await inTime(w.checkProofsStates(proofs), 30000); return proofs.filter((p, i) => opIn.has(p.secret) || (st[i] && st[i].state === 'UNSPENT')); }
+  catch (e) { return null; }
+}
+// a mint's part of a backup, written in one go: history lines it doesn't have, coins not held, one line, its open steps
+function applyImport(u, coins, txs, pending, ops) {
+  const ids = new Set(S.txs.map(t => t.id)), newTxs = txs.filter(t => !ids.has(t.id));
+  for (const t of newTxs) S.txs.push(t);
+  S.txs.sort((a, b) => b.ts - a.ts);
+  for (const p of pending) if (!S.pending.find(x => x.id === p.id) && !ids.has(p.txId)) S.pending.push(p);   // (one whose payment this wallet already has was settled here)
+  const held = new Set((S.proofs[u] || []).map(p => p.secret).concat(S.pending.flatMap(p => p.proofs.map(x => x.secret)), S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret))));
+  const inc = coins.filter(p => !held.has(p.secret));
+  if (inc.length) addProofs(u, inc);
+  const diff = sum(inc) - ledgerOf(newTxs, u);
+  if (diff > 0) addTx({ type: 'in', method: 'ecash', amount: diff, mint: u, note: 'Restored from backup' });
+  else if (diff < 0) addTx({ type: 'out', method: 'ecash', amount: -diff, mint: u, note: 'Ecash already spent elsewhere', status: 'done' });
+  const fresh = ops.filter(o => !S.ops.find(x => x.id === o.id) && !opSettledHere(o));
+  for (const o of fresh) S.ops.push(o);
+  return fresh;
+}
+function settleImported(ops) {
+  if (ops.length) setTimeout(async () => { for (const o of ops) { if (!S.mints.find(m => m.url === o.mint)) await addMint(o.mint).catch(() => {}); await settleOp(o.id).catch(() => {}); } refresh(); }, 0);
+}
+async function extraIfUnspent(x) {
+  if (!x || !Array.isArray(x.proofs) || !x.proofs.length) return { ok: false };
+  try { const w = await getWallet(normUrl(x.mint)); const st = await inTime(w.checkProofsStates(x.proofs), 30000); return { ok: st.every(y => y && y.state === 'UNSPENT'), asked: true }; } catch (e) { return { ok: false, asked: false }; }
+}
 async function importBackup(d) {
   if (d.seed && (!S.seed || (S.seed.mnemonic !== d.seed && totalBalance() === 0))) setSeed(d.seed, true);
   for (const k in d.counters || {}) counterSource.advanceToAtLeast(k, d.counters[k]);
   for (const k of d.p2pk || []) if (!S.p2pk.find(x => x.pub === k.pub)) S.p2pk.push(k); store.set('p2pk', S.p2pk);
   for (const m of d.mints || []) if (m && m.url && !S.mints.find(x => x.url === normUrl(m.url))) S.mints.push(Object.assign({}, m, { url: normUrl(m.url) }));
-  // open steps it holds that this wallet hasn't settled: their coins come in as they were (the step settles them)
-  const opsIn = (Array.isArray(d.ops) ? d.ops : []).filter(o => o && o.id && typeof o.mint === 'string' && !S.ops.find(x => x.id === o.id))
-    .map(o => Object.assign({ inputs: [], ctr: [], outs: [] }, o, { mint: normUrl(o.mint) })).filter(o => !opSettledHere(o));
-  const opIn = new Set(opsIn.flatMap(o => o.inputs));
-  // every coin checked at its mint first (nothing is written until all of them are)
-  const add = {}, lists = {};
-  for (const [u0, ps] of Object.entries(d.proofs || {})) { const u = normUrl(u0); lists[u] = (lists[u] || []).concat(Array.isArray(ps) ? ps : []); }
-  for (const [u, ps] of Object.entries(lists)) {
-    const seen = new Set(), cand = ps.filter(p => p && p.secret && !seen.has(p.secret) && seen.add(p.secret)).map(p => Object.assign({}, p, { amount: num(p.amount) }));
-    if (!cand.length) continue;
-    let st;
-    try { const w = await getWallet(u); st = await inTime(w.checkProofsStates(cand), 30000); }
-    catch (e) { throw new Error(`Couldn't reach ${(S.mints.find(m => m.url === u) || {}).name || host(u)} to check the ecash in this backup. Nothing was imported. Try again when it answers.`); }
-    add[u] = cand.filter((p, i) => opIn.has(p.secret) || (st[i] && st[i].state === 'UNSPENT'));
+  // per mint: its coins, history lines, payments in flight and open steps (a backup's own waiting parts included)
+  const part = {}, P = u => part[u] || (part[u] = { proofs: [], txs: [], pending: [], ops: [] });
+  for (const [u0, ps] of Object.entries(d.proofs || {})) P(normUrl(u0)).proofs.push(...(Array.isArray(ps) ? ps : []));
+  for (const t of d.txs || []) if (t && t.id) P(normUrl(t.mint || '')).txs.push(Object.assign({}, t, t.mint ? { mint: normUrl(t.mint) } : {}));
+  for (const p of d.pending || []) if (p && p.id && p.mint) P(normUrl(p.mint)).pending.push(p);
+  for (const o of d.ops || []) if (o && o.mint) P(normUrl(o.mint)).ops.push(o);
+  for (const r of Array.isArray(d.imports) ? d.imports : []) if (r && r.mint) { const q = P(normUrl(r.mint)); q.proofs.push(...(r.proofs || [])); q.txs.push(...(r.txs || [])); q.pending.push(...(r.pending || [])); q.ops.push(...(r.ops || [])); }
+  const checked = {}, waiting = [];
+  for (const [u, q] of Object.entries(part)) {
+    const seen = new Set(); q.proofs = q.proofs.filter(p => p && p.secret && !seen.has(p.secret) && seen.add(p.secret)).map(p => Object.assign({}, p, { amount: num(p.amount) }));
+    q.ops = freshOps(q.ops);
+    const coins = u ? await checkImport(u, q.proofs, q.ops) : [];
+    if (coins) checked[u] = coins; else waiting.push(u);
   }
-  let extra = null;
-  if (d.extra && !S.extra && Array.isArray(d.extra.proofs) && d.extra.proofs.length) {
-    try { const w = await getWallet(normUrl(d.extra.mint)); const st = await inTime(w.checkProofsStates(d.extra.proofs), 30000); if (st.every(x => x && x.state === 'UNSPENT')) extra = d.extra; } catch (e) {}
-  }
+  let extra = null, extraLater = null;
+  if (d.extra && !S.extra) { const r = await extraIfUnspent(d.extra); if (r.ok) extra = d.extra; else if (!r.asked) extraLater = d.extra; }
   await syncIfStale();
-  // the write: the backup's history lines this wallet doesn't have, its coins (unspent, not held), one line per mint
-  const ids = new Set(S.txs.map(t => t.id)), newTxs = (d.txs || []).filter(t => t && t.id && !ids.has(t.id)).map(t => Object.assign({}, t, t.mint ? { mint: normUrl(t.mint) } : {}));
-  const urls = new Set(Object.keys(add).concat(newTxs.map(t => t.mint).filter(Boolean)));
-  for (const t of newTxs) S.txs.push(t);
-  S.txs.sort((a, b) => b.ts - a.ts);
-  for (const p of d.pending || []) if (p && p.id && !S.pending.find(x => x.id === p.id) && !ids.has(p.txId)) S.pending.push(p);   // (one whose payment this wallet already has was settled here)
-  for (const u of urls) {
-    const held = new Set((S.proofs[u] || []).map(p => p.secret).concat(S.pending.flatMap(p => p.proofs.map(x => x.secret)), S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret))));
-    const inc = (add[u] || []).filter(p => !held.has(p.secret));
-    if (inc.length) addProofs(u, inc);
-    const diff = sum(inc) - ledgerOf(newTxs, u);
-    if (diff > 0) addTx({ type: 'in', method: 'ecash', amount: diff, mint: u, note: 'Restored from backup' });
-    else if (diff < 0) addTx({ type: 'out', method: 'ecash', amount: -diff, mint: u, note: 'Ecash already spent elsewhere', status: 'done' });
-  }
+  let settle = [];
+  for (const u of Object.keys(checked)) { const q = part[u]; settle = settle.concat(applyImport(u, checked[u], q.txs, q.pending, q.ops)); }
+  for (const u of waiting) { const q = part[u]; S.imports.push({ id: uid(), mint: u, proofs: q.proofs, txs: q.txs, pending: q.pending, ops: q.ops, extra: extraLater && normUrl(extraLater.mint) === u ? extraLater : null, at: Date.now() }); }
+  if (waiting.length) saveImports();
   // Extra Life (only if its coins are still there), the copies we hold as an heir, and challenges (bounty secrets live there)
   if (extra) { S.extra = Object.assign({}, extra, { mint: normUrl(extra.mint) }); saveExtra(); }
   for (const h of d.heirlooms || []) if (!S.heirlooms.find(x => x.token === h.token)) S.heirlooms.push(h); saveHeir();
@@ -3315,16 +3337,40 @@ async function importBackup(d) {
   for (const h of d.hunts || []) if (!S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
   for (const k in d.found || {}) if (!S.found[k]) S.found[k] = d.found[k]; saveFound();
   for (const x of Array.isArray(d.blocked) ? d.blocked : []) if (x && typeof x.url === 'string' && /^https?:/i.test(x.url) && !isBlocked(x.url)) S.blocked.push({ url: normUrl(x.url), name: String(x.name || host(x.url)).slice(0, 60), at: +x.at || Date.now() }); saveBlocked();
-  for (const o of opsIn) if (!S.ops.find(x => x.id === o.id)) S.ops.push(o);
   if (!S.active && S.mints[0]) S.active = S.mints[0].url;
   save();
-  if (opsIn.length) setTimeout(async () => { for (const o of opsIn) { if (!S.mints.find(m => m.url === o.mint)) await addMint(o.mint).catch(() => {}); await settleOp(o.id).catch(() => {}); } refresh(); }, 0);
+  settleImported(settle);
+  return waiting;
+}
+// the parts waiting for their mint: checked again (background check, Check now); in once the mint answers, never dropped
+async function retryImports(url) {
+  let done = 0;
+  for (const rec of S.imports.filter(r => !url || r.mint === url)) {
+    const ops = freshOps(rec.ops), coins = await checkImport(rec.mint, rec.proofs || [], ops);
+    if (!coins) continue;
+    const ex = rec.extra && !S.extra ? await extraIfUnspent(rec.extra) : null;
+    if (ex && !ex.asked) continue;
+    await mintLock(rec.mint, async () => {
+      if (!S.imports.find(x => x.id === rec.id)) return;
+      const settle = applyImport(rec.mint, coins, rec.txs || [], rec.pending || [], ops);
+      if (ex && ex.ok && !S.extra) { S.extra = Object.assign({}, rec.extra, { mint: normUrl(rec.extra.mint) }); saveExtra(); }
+      S.imports = S.imports.filter(x => x.id !== rec.id); saveImports(); save();
+      settleImported(settle); done++;
+    });
+  }
+  return done;
+}
+function importsPanel() {
+  if (!S.imports.length) return '';
+  return S.imports.map(r => `<div class="panel"><span class="mid"><span class="h2">Waiting to check with <span data-noi18n>${esc((S.mints.find(m => m.url === r.mint) || {}).name || host(r.mint))}</span></span>
+    <span class="tiny">${money(sum(r.proofs || []))} from a backup</span><span class="tiny muted">It comes in once the mint answers and confirms it is unspent.</span></span>
+    <button class="btn sm" data-act="importsRetry">Check now</button></div>`).join('');
 }
 /* The backup holds everything that can spend (it is kept private, like the phrase it contains), including the open
    journal records: a step whose answer hasn't come yet (a gift, a bounty, Extra Life, a hunt...) keeps its saved
    outputs and secrets, so the wallet restored from this backup settles it there. Settling is by secret at the mint, so
    the same step settled on both devices gives the same coins, never two sets. */
-const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length) }, null, 1);
+const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: S.imports }, null, 1);
 const A = {
   close: () => closeSheet(),
   tab: b => { if (tab === 'history' && b.dataset.tab !== 'history') { histFilter = 'all'; histQuery = ''; histTag = ''; } tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); sfx('blip'); },
@@ -3405,8 +3451,13 @@ const A = {
   doRestore: b => run(b, 'CHECKING', async () => {
     let d; try { d = JSON.parse(val('restoreIn')); } catch (e) { throw new Error("That isn't valid backup text."); }
     if (!d || d.app !== 'nutcade') throw new Error('Not a NUTCADE backup.');
-    await importBackup(d);
-    closeSheet(); render(); toast('Backup restored.', 'lime');
+    const waiting = await importBackup(d);
+    closeSheet(); render();
+    toast(waiting.length ? `Backup restored. Waiting to check with ${waiting.map(u => (S.mints.find(m => m.url === u) || {}).name || host(u)).join(', ')}.` : 'Backup restored.', waiting.length ? 'gold' : 'lime');
+  }),
+  importsRetry: b => run(b, 'CHECKING', async () => {
+    const n = await retryImports(); refresh();
+    toast(S.imports.length ? `Waiting to check with ${S.imports.map(r => (S.mints.find(m => m.url === r.mint) || {}).name || host(r.mint)).join(', ')}.` : 'Backup restored.', S.imports.length ? 'gold' : 'lime');
   }),
   takeover: () => { try { chan && chan.postMessage({ t: 'takeover', id: TAB_ID }); } catch (e) {} location.reload(); },
   seedCreate: b => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (totalBalance() === 0) { S.seed.secured = true; store.set('seed', S.seed); } sfx('start'); render(); openShowPhrase(true); }),
@@ -3571,7 +3622,7 @@ const A = {
     <button class="btn solid red block" data-act="doReset">Reset wallet</button><div id="sheetErr"></div>`),
   doReset: () => {
     if (val('confirmWord').trim().toUpperCase() !== 'RESET') { showErr(new Error('Type RESET to confirm.')); return; }
-    try { for (const k of Object.keys(localStorage)) if (/^nutcade:(seed|counters|mints|active|proofs|pending|txs|quotes|p2pk|requests|contacts|dmseen|vault|pinfails|piggy|challenges|nwc|nwcseen|blocked|lnurlwUsed|ops|opsdone|gen)$/.test(k)) localStorage.removeItem(k); } catch (e) {}
+    try { for (const k of Object.keys(localStorage)) if (/^nutcade:(seed|counters|mints|active|proofs|pending|txs|quotes|p2pk|requests|contacts|dmseen|vault|pinfails|piggy|challenges|nwc|nwcseen|blocked|lnurlwUsed|ops|opsdone|imports|gen)$/.test(k)) localStorage.removeItem(k); } catch (e) {}
     try { npcSocketStop(); dmStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
     location.reload();
   },
@@ -3759,6 +3810,7 @@ async function mintTick(url, startup) {
   // (each step has a time limit of its own too: one that joins a check already in flight, say one stuck on a mint
   // from the last round, is left behind after it, and the rest of this mint's work goes on)
   const step = p => inTime(p, STEP_MS);
+  if (S.imports.some(r => r.mint === url)) await step(retryImports(url)).catch(() => {});   // a backup's part waiting for this mint
   for (const o of S.ops.filter(o => o.mint === url)) {   // steps whose answer never came: settled with backoff (at once at a start)
     if (!startup && o.nextTry && now < o.nextTry) continue;
     try { await step(settleOp(o.id)); } catch (e) { o.tries = (o.tries || 0) + 1; o.nextTry = Date.now() + Math.min(30 * 60e3, 15e3 * 2 ** (o.tries - 1)); save(); }
@@ -3779,7 +3831,7 @@ async function fetchPreimages(url) {
 }
 async function tickBody(startup) {
   if (!S.seed || tabLocked) return;
-  const urls = [...new Set(S.mints.map(m => m.url).concat(S.quotes.map(q => q.mint), S.pending.map(p => p.mint), S.ops.map(o => o.mint)))];
+  const urls = [...new Set(S.mints.map(m => m.url).concat(S.quotes.map(q => q.mint), S.pending.map(p => p.mint), S.ops.map(o => o.mint), S.imports.map(r => r.mint)))];
   await Promise.all([
     ...urls.map(u => mintTick(u, startup).catch(() => {})),
     (async () => { if (S.prefs.npc) await npcSync().catch(() => {}); })(),
