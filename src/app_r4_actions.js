@@ -58,9 +58,7 @@ Object.assign(A, {
     const bAmt = parseSat(val('bountyAmt'));
     let bounty = null, bo = null;
     if (bAmt > 0) { bo = await createBounty(c, k, bAmt); bounty = { token: bo.tx.token, amount: bAmt, until: bo.b.until }; }
-    // with a bounty the message is sealed with our own key, so Robin's NUTCADE can tell the sats really come from the challenger
-    const wrap = L.nip17.wrapEvent(bounty ? nostrKey() : rnd(32), { publicKey: k.pubkey }, JSON.stringify(Object.assign({ t: 'nutcade-challenge', ev: c.ev }, bounty ? { bounty } : {}, c.replay ? { replay: c.replay } : {})));
-    const ok = await relayPublish(wrap, 8000, [...new Set((k.relays || []).concat(relays()))].slice(0, 8));
+    const ok = await publishChallenge(c, k, bounty);
     if (!ok) throw new Error(bounty ? `No Nostr relay took the challenge. Your ${money(bAmt)} stay locked until ${fmtDay(bo.b.until)}, then come back to you.` : 'No Nostr relay accepted the challenge. Share the link instead.');
     c.sentTo = [...new Set((c.sentTo || []).concat(k.id))]; saveChallenges();
     sfx('coin'); toast(bounty ? `Challenge and ${money(bAmt)} bounty sent to ${k.name}` : `Challenge sent to ${k.name}`, 'lime');

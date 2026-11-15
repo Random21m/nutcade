@@ -11,12 +11,34 @@ function bountyField() {
   return `<div class="field" id="bountyF"><label for="bountyAmt">Put sats on it (optional)</label><input id="bountyAmt" class="inp" inputmode="numeric" placeholder="0" autocomplete="off">
     <div class="th">The mint locks them so only the friend you send to can win them, and only by beating your score within ${BOUNTY_DAYS} days. If they don't, the sats come back to you.</div></div>`;
 }
+// with a bounty the message is sealed with our own key, so Robin's NUTCADE can tell the sats really come from the challenger
+function publishChallenge(c, k, bounty) {
+  const wrap = L.nip17.wrapEvent(bounty ? nostrKey() : rnd(32), { publicKey: k.pubkey }, JSON.stringify(Object.assign({ t: 'nutcade-challenge', ev: c.ev }, bounty ? { bounty } : {}, c.replay ? { replay: c.replay } : {})));
+  return relayPublish(wrap, 8000, [...new Set((k.relays || []).concat(relays()))].slice(0, 8));
+}
+// a bounty whose swap was interrupted, settled from its record: it becomes the bounty it was going to be, and its
+// challenge goes out (now, or from the background check until a relay takes it)
+function bountyRecovered(f, tx) {
+  const c = S.challenges.find(x => x.id === f.chal && x.dir === 'out'); if (!c) return;
+  if ((c.bounties || []).some(b => b.txId === tx.id || b.H === f.b.H)) return;
+  const b = Object.assign({}, f.b, { txId: tx.id, state: 'open', unsent: f.contact || true });
+  c.bounties = (c.bounties || []).concat([b]); updTx(tx.id, { bounty: c.id }); saveChallenges();
+  setTimeout(() => sendRecoveredBounty(c, b).catch(() => {}), 0);
+}
+async function sendRecoveredBounty(c, b) {
+  const k = contactById(b.unsent) || S.contacts.find(x => x.pubkey === b.to), tx = txById(b.txId);
+  if (!k || !tx || tx.status !== 'pending' || !tx.token) return false;
+  if (!(await publishChallenge(c, k, { token: tx.token, amount: b.amount, until: b.until }))) return false;
+  delete b.unsent; c.sentTo = [...new Set((c.sentTo || []).concat(k.id))]; saveChallenges();
+  return true;
+}
 async function createBounty(c, k, amount) {
   if (!k.pubkey) throw new Error('Bounties need a contact with a Nostr address.');
   if (!(await mintCan(S.active, 14))) throw new Error(`${host(S.active)} can't lock sats to a secret (NUT-14). Pick another mint for bounties.`);
   const pre = rnd(32), H = await sha256hex(pre), until = Math.floor(Date.now() / 1000 + ((window.__nutcadeTest && __nutcadeTest.bountySecs) || BOUNTY_DAYS * 86400));
   const g = gameById(c.game);
-  const tx = await sendEcash(amount, `Bounty for ${k.name}: beat ${pad6(c.score)} on ${g ? g.name : c.game}`, '02' + k.pubkey, S.active, { locktime: until, hashlock: H, txx: { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name } });
+  const tx = await sendEcash(amount, `Bounty for ${k.name}: beat ${pad6(c.score)} on ${g ? g.name : c.game}`, '02' + k.pubkey, S.active, { locktime: until, hashlock: H, txx: { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name },
+    follow: { k: 'bounty', chal: c.id, contact: k.id, b: { to: k.pubkey, name: k.name, pre: hex(pre), H, amount, until: until * 1000 } } });
   updTx(tx.id, { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name, bounty: c.id });
   c.bounties = (c.bounties || []).concat([{ to: k.pubkey, name: k.name, txId: tx.id, pre: hex(pre), H, amount, until: until * 1000, state: 'open' }]);
   saveChallenges();
@@ -40,6 +62,7 @@ async function bountyOnResult(c, r) {
 }
 async function retryBounties() {
   for (const c of S.challenges.filter(x => x.dir === 'out')) for (const b of (c.bounties || []).filter(x => x.state === 'won' && Date.now() < x.until)) await releaseBounty(c, b).catch(() => {});
+  for (const c of S.challenges.filter(x => x.dir === 'out')) for (const b of (c.bounties || []).filter(x => x.unsent && x.state === 'open' && Date.now() < x.until)) await sendRecoveredBounty(c, b).catch(() => {});
 }
 // Decoding a token needs its mint's keyset ids. A wallet that never held sats at that mint doesn't have them yet, so ask the mint.
 async function decodeTok(t) {
@@ -96,12 +119,12 @@ const saveExtra = () => store.set('extra', S.extra);
 const saveHeir = () => store.set('heirlooms', S.heirlooms.slice(0, 20));
 const extraLeft = () => S.extra ? S.extra.until - Date.now() : 0;
 const daysLeft = ms => Math.max(0, Math.ceil(ms / 86400e3));
-async function lockExtra(url, amount, heirPub, until, extraInputs) {
+async function lockExtra(url, amount, heirPub, until, extraInputs, follow) {
   const w = await getWallet(url);
   const inputs = (extraInputs || []).concat(S.proofs[url] || []);
   if (sum(inputs) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
   const cfg = { send: { type: 'p2pk', options: { pubkey: myLockPub(), locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() };
-  const { r: { keep, send }, op } = await journaled(url, 'send', { inputs, amount, locked: true, note: 'Extra Life', tx: { locked: myLockPub() } }, (cb, o) => rSend(o, w, amount, inputs, { includeFees: true, onCountersReserved: cb }, cfg));
+  const { r: { keep, send }, op } = await journaled(url, 'send', { inputs, amount, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow }, (cb, o) => rSend(o, w, amount, inputs, { includeFees: true, onCountersReserved: cb }, cfg));
   const used = new Set(inputs.map(p => p.secret));
   S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep)); closeOp(op); save();
   return plain(send);
@@ -125,7 +148,7 @@ async function startExtra(amount, heir, days, auto) {
   internalMove = true;
   try {
     const before = sum(S.proofs[S.active] || []);
-    const proofs = await lockExtra(S.active, amount, heir.pubkey, until);
+    const proofs = await lockExtra(S.active, amount, heir.pubkey, until, null, { k: 'extra', heir, days, auto: auto !== false, until });
     S.extra = { mint: S.active, amount, proofs, heir, until, days, auto: auto !== false, created: Date.now(), renewed: Date.now() }; saveExtra();
     addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, before - sum(S.proofs[S.active] || []) - amount), mint: S.active, note: `Extra Life for ${heir.name}`, status: 'done', extraLife: true });
   } finally { internalMove = false; }
@@ -135,19 +158,33 @@ async function startExtra(amount, heir, days, auto) {
 // CONTINUE: swap for fresh ecash with a later date. Fees come out of this mint's balance so the locked amount stays the same.
 async function continueExtra(quiet) {
   const x = S.extra; if (!x) return;
+  if (x.unlocked) return relockExtra(x, quiet);
   const w = await getWallet(x.mint);
-  const { r: got, op } = await journaled(x.mint, 'receive', { amount: x.amount, note: `Extra Life cashed out (was for ${x.heir.name})`, extra: true }, (cb, o) => rRecv(o, w, extraToken(), { privkey: [myLockPriv()], onCountersReserved: cb }));
-  const fresh = plain(got); closeOp(op); save();
-  const until = Date.now() + x.days * 86400e3;
+  const { r: got, op } = await journaled(x.mint, 'receive', { amount: x.amount, note: `Extra Life cashed out (was for ${x.heir.name})`, extra: true, follow: { k: 'extra-take' } }, (cb, o) => rRecv(o, w, extraToken(), { privkey: [myLockPriv()], onCountersReserved: cb }));
+  // the fresh coins stay the Extra Life's (in the same write the step closes) until they are locked again
+  const fresh = plain(got); x.proofs = fresh; x.unlocked = true; saveExtra(); closeOp(op); save();
+  return relockExtra(x, quiet);
+}
+async function relockExtra(x, quiet) {
+  const fresh = x.proofs, before = sum(S.proofs[x.mint] || []);
+  const until = Date.now() + x.days * 86400e3, follow = { k: 'extra-renew', until };
   let proofs;
-  try { proofs = await lockExtra(x.mint, x.amount, x.heir.pubkey, until, fresh); }
+  try { proofs = await lockExtra(x.mint, x.amount, x.heir.pubkey, until, fresh, follow); }
   catch (e) {
+    if (S.ops.some(o => o.mint === x.mint && o.follow && o.follow.k === 'extra-renew')) throw e;   // asked, answer lost: its record finishes it
     // the balance can't cover the fee: lock a little less rather than leave the sats unprotected
     const amount = Math.max(1, sum(fresh) - 2);
-    try { proofs = await lockExtra(x.mint, amount, x.heir.pubkey, until, fresh); x.amount = amount; }
-    catch (e2) { addProofs(x.mint, fresh); S.extra = null; saveExtra(); throw new Error("Couldn't lock your Extra Life again, so the sats are back in your balance."); }
+    try { proofs = await lockExtra(x.mint, amount, x.heir.pubkey, until, fresh, follow); x.amount = amount; }
+    catch (e2) {
+      if (S.ops.some(o => o.mint === x.mint && o.follow && o.follow.k === 'extra-renew')) throw e2;
+      addProofs(x.mint, fresh); S.extra = null; saveExtra();
+      addTx({ type: 'in', method: 'ecash', amount: sum(fresh), mint: x.mint, note: `Extra Life cashed out (was for ${x.heir.name})` });
+      throw new Error("Couldn't lock your Extra Life again, so the sats are back in your balance.");
+    }
   }
-  Object.assign(x, { proofs, until, renewed: Date.now() }); saveExtra();
+  Object.assign(x, { proofs, until, renewed: Date.now() }); delete x.unlocked; saveExtra();
+  const fee = before - sum(S.proofs[x.mint] || []);
+  if (fee > 0) addTx({ type: 'out', method: 'fee', amount: 0, fee, mint: x.mint, note: 'Mint fee for keeping Extra Life going', status: 'done' });
   await sendHeirCopy().catch(() => false);
   if (!quiet) { sfx('levelup'); toast(`CONTINUE! ${x.heir.name}'s copy now opens on ${fmtDay(until)}`, 'lime'); }
 }
@@ -163,6 +200,8 @@ async function cashOutExtra() {
 // opening NUTCADE counts as proof of life: with auto on, once half the time has passed it continues by itself
 async function extraTick() {
   const x = S.extra; if (!x) return;
+  // a CONTINUE that stopped between taking the old coins and locking the new ones: lock them now
+  if (x.unlocked && !S.ops.some(o => o.mint === x.mint)) { await relockExtra(x, true).catch(() => {}); return; }
   if (extraLeft() < 0) {
     // the date passed: if the heir already claimed, the Extra Life is over; if not, it's still ours to continue
     const st = await (await getWallet(x.mint)).checkProofsStates(x.proofs).catch(() => null);

@@ -573,7 +573,7 @@ async function sendEcash(amount, note, lockTo, url = S.active, opts = {}) {
     const all = have.length && amount === maxSendable(w, have) && w._selectProofs;
     const pick = all ? w._selectProofs : null;
     if (all) w._selectProofs = ps => ({ keep: [], send: ps });
-    try { return await journaled(url, 'send', { inputs: have, amount, note, locked: !!lockTo, tx: Object.assign({ locked: lockTo || null }, opts.txx || {}) }, (cb, o) => rSend(o, w, amount, have, { includeFees: true, onCountersReserved: cb }, outCfg)); }
+    try { return await journaled(url, 'send', { inputs: have, amount, note, locked: !!lockTo, tx: Object.assign({ locked: lockTo || null }, opts.txx || {}), follow: opts.follow || null }, (cb, o) => rSend(o, w, amount, have, { includeFees: true, onCountersReserved: cb }, outCfg)); }
     finally { if (all) w._selectProofs = pick; }
   };
   const { r: { keep, send }, op } = await spentRetry(url, attempt).catch(e => { throw shortOf(e, w, url, amount, false); });
@@ -753,12 +753,14 @@ async function recoverChange(pend) {
    and the record is stored (inside the PIN vault when one is set) before the request leaves. NUT-09 restore gives
    back the mint's signature for any B_ it signed, so settling asks for exactly those B_, unblinds them with the
    saved blinding factors (checking the mint's DLEQ proof when it sends one) and gets every coin back: a locked
-   token is shown again as the token it was going to be, everything else lands in the balance. The record, secrets
-   included, is deleted once settled. */
+   token is shown again as the token it was going to be, everything else lands in the balance. A locked step whose
+   follow-up data is made just before the swap (a bounty's secret and its challenge, Extra Life's heir and date)
+   keeps that data in the same record, so it finishes as that step: a working bounty (the challenge is still sent),
+   an Extra Life that is set up or continued. The record, secrets included, is deleted once settled. */
 const opsRunning = new Set();
 const closeOp = op => { S.ops = S.ops.filter(o => o.id !== op.id); };
 async function journaled(url, kind, info, run) {
-  const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, created: Date.now(), ctr: [], outs: [] };
+  const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, follow: info.follow || null, created: Date.now(), ctr: [], outs: [] };
   S.ops.push(op); save();
   const onCountersReserved = u => { if (u && u.count > 0) { op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); save(); } };
   opsRunning.add(op.id);
@@ -837,13 +839,32 @@ async function settleOpNow(id) {
   for (const p of outs) delete p._send;
   const gone = new Set(spent.map(p => p.secret)), cur = (S.proofs[op.mint] || []).filter(p => held.has(p.secret));
   const removed = sum(cur.filter(p => gone.has(p.secret))), added = sum(fresh);
+  if (op.kind === 'receive' && op.follow && op.follow.k === 'extra-take' && S.extra && S.extra.mint === op.mint && fresh.length && !removed) {
+    // a CONTINUE that took the Extra Life's coins: they stay the Extra Life's, and are locked again next
+    S.extra.proofs = plain(fresh); S.extra.unlocked = true; saveExtra(); closeOp(op); save(); return 'settled';
+  }
   S.proofs[op.mint] = cur.filter(p => !gone.has(p.secret)).concat(plain(fresh));
   const waitingTx = op.txId && (txById(op.txId) || {}).status === 'pending' ? op.txId : null;   // a deposit waiting for exactly this: it gets it
   if (op.kind === 'receive' && added && waitingTx) updTx(waitingTx, { status: 'done', amount: added, ts: Date.now() });
   else if (op.kind === 'receive') { if (added) { addTx({ type: 'in', method: 'ecash', amount: added, fee: Math.max(0, op.amount - added), mint: op.mint, note: op.note || '', settled: true }); if (op.extra && S.extra) { S.extra = null; saveExtra(); } } }
   else if (lockedOut.length) {
-    const ps = plain(lockedOut), amount = Math.min(op.amount || sum(ps), sum(ps));
-    addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee: Math.max(0, removed - added - amount), mint: op.mint, note: op.note || '', status: 'pending', token: L.getEncodedToken({ mint: op.mint, proofs: ps, unit: 'sat' }), sent: ps, settled: true }, op.tx || {}));
+    const ps = plain(lockedOut), amount = Math.min(op.amount || sum(ps), sum(ps)), fee = Math.max(0, removed - added - amount);
+    const f = op.follow || {};
+    if (f.k === 'extra-renew' && S.extra && S.extra.mint === op.mint) {   // Extra Life continued: its new coins and date
+      Object.assign(S.extra, { proofs: ps, until: f.until, renewed: Date.now(), amount: sum(ps) >= S.extra.amount ? S.extra.amount : amount }); delete S.extra.unlocked; saveExtra();
+      if (removed > added) addTx({ type: 'out', method: 'fee', amount: 0, fee: removed - added, mint: op.mint, note: 'Mint fee for keeping Extra Life going', status: 'done', settled: true });
+      else if (added > removed) addTx({ type: 'in', method: 'ecash', amount: added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true });
+      setTimeout(() => sendHeirCopy().catch(() => {}), 0);
+      closeOp(op); save(); return 'settled';
+    }
+    if (f.k === 'extra' && !S.extra) {   // Extra Life set up as it was going to be
+      S.extra = { mint: op.mint, amount, proofs: ps, heir: f.heir, until: f.until, days: f.days, auto: f.auto !== false, created: Date.now(), renewed: Date.now() }; saveExtra();
+      addTx({ type: 'out', method: 'ecash', amount, fee, mint: op.mint, note: `Extra Life for ${f.heir.name}`, status: 'done', extraLife: true, settled: true });
+      setTimeout(() => sendHeirCopy().catch(() => {}), 0);
+    } else {
+      const t = addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee, mint: op.mint, note: op.note || '', status: 'pending', token: L.getEncodedToken({ mint: op.mint, proofs: ps, unit: 'sat' }), sent: ps, settled: true }, op.tx || {}));
+      if (f.k === 'bounty') bountyRecovered(f, t);   // a working bounty again: its secret is kept, the challenge is sent
+    }
     if (removed - added - amount < 0) addTx({ type: 'in', method: 'ecash', amount: amount + added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true });
   }
   else if (added > removed) addTx({ type: 'in', method: 'ecash', amount: added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true });
@@ -1689,7 +1710,7 @@ function fmtDate(ms, withTime) {
   catch (e) { return d.toDateString(); }
 }
 // Notes NUTCADE writes itself (not ones you typed) are shown in your language.
-const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step)$|Ecash already spent elsewhere$|To |Zap to |Wallet Connect: |LNURL voucher$)|\((part \d+ of \d+|cancelled at the till)\)$/;
+const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step|keeping Extra Life going)$|Ecash already spent elsewhere$|To |Zap to |Wallet Connect: |LNURL voucher$)|\((part \d+ of \d+|cancelled at the till)\)$/;
 function noteText(n) {
   if (!n || !AUTO_NOTE.test(n)) return n;
   const m = /^(.*) \((part \d+ of \d+|cancelled at the till)\)$/.exec(n);   // your own words before the suffix stay as you typed them

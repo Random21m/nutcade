@@ -883,7 +883,7 @@ async def main():
         check('(round 3, 3) a claim in flight in a tab paused by a takeover: the new tab settles it, gets the 111 SAT once, books add up', ok and await t3.bal(B) == hb + 111 and not b3, (ok, await t3.bal(B) - hb, b3))
         await pg3.close(); await w.pg.reload(); await w.wait(1500); await fx.pg.context.close()
         # (round 3, locked outputs) an interrupted gift (P2PK), bounty (HTLC) and Extra Life (locked to your own key) come
-        # back in full after a reload: the swap's outputs were on record, so the mint's signatures are fetched for them
+        # back in full after a reload: the swap's outputs (and the step's follow-up data) were on record
         await w.use(B); await w.receive_ln(3000)
         async def interrupted(start, wait_s=1500):
             n0 = await w.ev("Nutcade.S.txs.length"); bal0 = await w.bal(B)
@@ -915,23 +915,48 @@ async def main():
         ok, outs, bal0, new = await interrupted(bounty_start)
         g = [t for t in new if t.get('type') == 'out' and t.get('method') == 'ecash' and t.get('token')]
         sec = await w.ev(f"JSON.parse(CashuLib.getDecodedToken({json.dumps(g[0]['token'])}).proofs[0].secret)") if g else None
-        check('(round 3, locked) an interrupted bounty (HTLC lock) is back after a reload as its locked token: 250 SAT, it comes back to you on its date',
-              ok and outs and len(g) == 1 and g[0]['amount'] == 250 and g[0].get('lockUntil') and sec and sec[0] == 'HTLC', (ok, outs, [(t.get('note'), t.get('amount')) for t in new], sec and sec[0]))
+        cb = await w.ev("(c=>c&&{b:(c.bounties||[]).map(b=>({tx:b.txId,state:b.state,pre:!!b.pre,H:b.H,unsent:!!b.unsent})),sent:(c.sentTo||[]).length})(Nutcade.S.challenges.find(c=>c.dir==='out'&&c.seed===4242))")
+        okb = await w.until("(c=>c&&(c.bounties||[]).length===1&&!c.bounties[0].unsent&&(c.sentTo||[]).length>0)(Nutcade.S.challenges.find(c=>c.dir==='out'&&c.seed===4242))", 40000)
+        cb2 = await w.ev("(c=>c&&{b:(c.bounties||[]).map(b=>({tx:b.txId,state:b.state,pre:b.pre,H:b.H,unsent:!!b.unsent})),sent:(c.sentTo||[]).length})(Nutcade.S.challenges.find(c=>c.dir==='out'&&c.seed===4242))")
+        hok = bool(cb2 and cb2['b'] and cb2['b'][0]['pre'] and sec and __import__('hashlib').sha256(bytes.fromhex(cb2['b'][0]['pre'])).hexdigest() == cb2['b'][0]['H'] == sec[1]['data'])
+        check('(round 3, locked) an interrupted bounty (HTLC lock) settles after a reload into a working bounty: 250 SAT locked to the hash of its saved secret, linked to its challenge',
+              ok and outs and len(g) == 1 and g[0]['amount'] == 250 and g[0].get('lockUntil') and g[0].get('bounty') and sec and sec[0] == 'HTLC' and cb2 and len(cb2['b']) == 1 and cb2['b'][0]['tx'] == g[0]['id'] and cb2['b'][0]['state'] == 'open' and hok,
+              (ok, outs, [(t.get('note'), t.get('amount'), t.get('bounty')) for t in new], sec and sec[0], cb2, hok))
+        check('(round 3, locked) and its challenge still goes out to the friend (a relay took it)', okb, (cb, cb2))
         await books(w, 'interrupted bounty', broken, (A, B, FM))
         async def extra_start():
             await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.until("!!document.querySelector('#xlTo')", 5000); await w.wait(150)
             await w.ev("const s=document.querySelector('#xlTo'); s.value=[...s.options].find(o=>o.value).value; s.dispatchEvent(new Event('change',{bubbles:true}))")
             await w.fill('#amtIn', '400'); await w.click('[data-act=extraStart]')
+        mine = await w.ev("'02'+CashuLib.nostrPub(CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32))")
         ok, outs, bal0, new = await interrupted(extra_start)
-        g = [t for t in new if t.get('type') == 'out' and t.get('method') == 'ecash' and t.get('token')]
-        check('(round 3, locked) an interrupted Extra Life lock (to your own key) is back after a reload as its token, 400 SAT',
-              ok and outs and len(g) == 1 and g[0]['amount'] == 400, (ok, outs, [(t.get('note'), t.get('amount')) for t in new]))
-        if g:
-            bb = await w.bal(B)
-            await w.click('[data-act=tab][data-tab=history]'); await w.wait(200); await w.ev(f"Nutcade.closeSheet(); document.querySelector('#txList [data-id=\"{g[0]['id']}\"]')?.click()"); await w.wait(300)
-            await w.click('#layer [data-act=reclaim]'); ok2 = await w.until(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(g[0]['id'])}).status==='reclaimed'", 30000)
-            check('(round 3, locked) and you can take it back into your balance', ok2 and await w.bal(B) >= bb + 398, (ok2, await w.bal(B) - bb))
-        await w.ev("Nutcade.closeSheet()"); await books(w, 'interrupted Extra Life', broken, (A, B, FM))
+        x = await w.ev("Nutcade.S.extra && {amount:Nutcade.S.extra.amount, n:Nutcade.S.extra.proofs.length, until:Nutcade.S.extra.until, heir:Nutcade.S.extra.heir.name, unlocked:!!Nutcade.S.extra.unlocked, sec:JSON.parse(Nutcade.S.extra.proofs[0].secret)}")
+        toks = [t for t in new if t.get('token')]
+        check('(round 3, locked) an interrupted Extra Life lock finishes its setup after a reload: 400 SAT locked to your key for your heir, its history line, no stray token',
+              ok and outs and x and x['amount'] == 400 and not x['unlocked'] and x['sec'][0] == 'P2PK' and x['sec'][1]['data'] == mine and x['until'] > 0 and not toks
+              and any((t.get('note') or '').startswith('Extra Life for') and t.get('amount') == 400 for t in new), (ok, outs, x and {k: x[k] for k in ('amount', 'heir', 'unlocked')}, [(t.get('note'), t.get('amount')) for t in new]))
+        await books(w, 'interrupted Extra Life', broken, (A, B, FM))
+        # an interrupted CONTINUE (its second swap, the new lock): the Extra Life continues with its new date
+        u0 = await w.ev("Nutcade.S.extra && Nutcade.S.extra.until")
+        swaps = {'n': 0}
+        async def second_held(route):
+            swaps['n'] += 1
+            if swaps['n'] == 2: return await held(8)(route)
+            await route.continue_()
+        await w.pg.route(f'{B}/v1/swap', second_held)
+        await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraContinue]'); await w.wait(2500)
+        held_ops = await w.ev("Nutcade.S.ops.map(o=>o.follow&&o.follow.k)")
+        await w.pg.reload(); await w.wait(800); await w.pg.unroute(f'{B}/v1/swap')
+        ok = await w.until(f"Nutcade.S.ops.length===0 && Nutcade.S.extra && !Nutcade.S.extra.unlocked && Nutcade.S.extra.until > {u0 or 0}", 90000)
+        x = await w.ev("Nutcade.S.extra && {amount:Nutcade.S.extra.amount, sec:JSON.parse(Nutcade.S.extra.proofs[0].secret)[0]}")
+        check('(round 3, locked) an interrupted CONTINUE finishes after a reload: the Extra Life is locked again with a later date, nothing lost',
+              ok and x and x['sec'] == 'P2PK' and x['amount'] >= 398, (ok, held_ops, x))
+        await books(w, 'interrupted CONTINUE', broken, (A, B, FM))
+        bb = await w.bal(B)
+        await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')
+        ok2 = await w.until("!Nutcade.S.extra", 30000)
+        check('(round 3, locked) and it cashes out into your balance as usual', ok2 and await w.bal(B) >= bb + 396, (ok2, await w.bal(B) - bb))
+        await w.ev("Nutcade.closeSheet()"); await books(w, 'Extra Life cashed out', broken, (A, B, FM))
         # (round 3, item 4) one mint that never answers doesn't stop the background check for the others
         async def hang(route):
             await asyncio.sleep(400)
