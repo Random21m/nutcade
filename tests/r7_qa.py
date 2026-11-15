@@ -69,7 +69,7 @@ def error_strings():
             t = t.replace("\\'", "'").replace('\\"', '"')
             if re.match(r'^[A-Z][a-z]', t) and not t.endswith(': ') and not re.search(r"""nwcErr\(\s*'[A-Z_]+',\s*$""", s[max(0, m.start() - 40):m.start() + 7]):
                 out.add(t)
-    out |= {'NUTCADE is open in another tab.', "The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
+    out |= {"Mint B didn't answer in time. Try again in a moment.", "The mint didn't answer in time. Try again in a moment.", 'NUTCADE is open in another tab.', "The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
             'This invoice is already paid. NUTCADE is collecting the ecash from the mint, and it shows here as soon as it is in.', 'COLLECTING',
             'Mint fee for moving ecash under your phrase', 'Mint fee for an interrupted step', 'Mint fee for keeping Extra Life going', 'Ecash already spent elsewhere',
             'Some of this ecash was already spent. NUTCADE removed 1,234 SAT of spent ecash from your balance (see your notes). Try again with what is left.'}
@@ -1118,6 +1118,16 @@ async def main():
               len(sec) > 5 and not any(leaks.values()), leaks)
         check('(round 4, 3) and the interrupted CONTINUE finishes under the PIN: new date, valid at the mint, books add up', ok and x and x['unspent'] and not pb, (ok, x, pb))
         await pw.pg.context.close()
+        # (round 4, 5) a mint past its time limit is named in the message, in your language, with no raw address
+        async def hang_swap(route):
+            await asyncio.sleep(60)
+        await w.use(B); await w.pg.route(f'{B}/v1/swap', hang_swap)
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '100'); await w.click('[data-act=doSendEcash]')
+        await w.until("!!(document.querySelector('#sheetErr')||{}).innerText", 40000); er = await w.err()
+        await w.pg.unroute(f'{B}/v1/swap'); await w.ev("Nutcade.closeSheet()"); await w.until("Nutcade.S.ops.length===0", 60000)
+        bname = await w.ev(f"Nutcade.S.mints.find(m=>m.url==={json.dumps(B)}).name")
+        check('(round 4, 5) a mint request past its time limit says "<mint name> didn\'t answer in time. Try again in a moment.", with no raw address', er.startswith(f"{bname} didn't answer in time. Try again in a moment.") and 'http' not in er, er)
+        await books(w, 'mint timed out', broken, (A, B, FM))
         # an interrupted cash-out: the Extra Life is closed when it settles, and the heir's copy is marked ended
         async def cash_start():
             await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')

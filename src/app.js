@@ -372,6 +372,11 @@ async function getWallet(url) {
 function friendly(e, url) {
   if (e && e.keep) return e;   // already a sentence in your language (blocked mints, LNURL services)
   const m = String(e && e.message || e);
+  if (/didn't answer in time/i.test(m)) {   // a mint request past its time limit: the mint by its name (never a raw " at <address>")
+    const u = (m.match(/ at (https?:\/\/\S+)/) || [])[1] || url;
+    const name = u ? ((S.mints.find(x => x.url === normUrl(u)) || {}).name || host(u)) : '';
+    return new Error(name ? `${name} didn't answer in time. Try again in a moment.` : "The mint didn't answer in time. Try again in a moment.");
+  }
   if (/Failed to fetch|NetworkError|Load failed|network/i.test(m)) {
     const inFrame = window.top !== window.self;
     return new Error(inFrame
