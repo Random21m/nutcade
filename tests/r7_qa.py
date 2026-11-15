@@ -497,6 +497,15 @@ async def main():
         check('nwc: make_invoice refuses amounts that are not whole sats', r['answer']['error'] and r['answer']['error']['code'] == 'OTHER', r['answer'])
         r = await nwc(w, uri, 'lookup_invoice', {'payment_hash': '00' * 32})
         check('nwc: lookup_invoice of an unknown hash answers NOT_FOUND', r['answer']['error']['code'] == 'NOT_FOUND', r['answer'])
+        own = await w.ev("Nutcade.S.txs.find(t=>t.method==='ln'&&t.type==='in'&&!t.nwc&&t.request).request")   # a deposit made in the app, not by this connection
+        r = await nwc(w, uri, 'lookup_invoice', {'invoice': own}); rall = await nwc(w, uri, 'list_transactions', {'limit': 200, 'unpaid': True})
+        mine = await w.ev("Nutcade.S.nwc[0].id"); ids = await w.ev("Nutcade.S.txs.filter(t=>t.nwc===Nutcade.S.nwc[0].id&&t.method==='ln').map(t=>t.request)")
+        check('(fix 8) nwc: by default an app sees only its own payments and invoices (another invoice is NOT_FOUND to it)', r['answer']['error'] and r['answer']['error']['code'] == 'NOT_FOUND' and all(x['invoice'] in ids for x in rall['answer']['result']['transactions']) and len(rall['answer']['result']['transactions']) == len(ids), (r['answer'], len(rall['answer']['result']['transactions']), len(ids)))
+        await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=nwcEdit]'); await w.wait(200)
+        warn = await w.sheet_text(); await w.pg.check('#nwcAll'); await w.click('[data-act=nwcSave]'); await w.wait(300)
+        r = await nwc(w, uri, 'lookup_invoice', {'invoice': own})
+        check('(fix 8) nwc: with "see my whole wallet history" on (off by default, with a plain warning), it sees the other invoice too', 'whole wallet history' in warn and 'every Lightning payment' in warn and r['answer']['result'] and r['answer']['result']['invoice'] == own, r['answer'])
+        await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=nwcEdit]'); await w.wait(200); await w.pg.uncheck('#nwcAll'); await w.click('[data-act=nwcSave]'); await w.wait(300)
         r = await nwc(w, uri, 'list_transactions', {'limit': 10})
         lt = r['answer']['result']['transactions']
         check('nwc: list_transactions lists the Lightning payments, newest first', any(x['invoice'] == inv and x['type'] == 'outgoing' and x['state'] == 'settled' for x in lt) and any(x['invoice'] == mk['invoice'] for x in lt), [(x['type'], x['amount'], x['state']) for x in lt][:6])

@@ -310,11 +310,11 @@ function nwcUri(c, clientSk) {
   const q = c.relays.map(r => 'relay=' + encodeURIComponent(r)).join('&') + '&secret=' + clientSk + (S.prefs.npc ? '&lud16=' + encodeURIComponent(npcAddress()) : '');
   return `nostr+walletconnect://${c.pub}?${q}`;
 }
-function nwcCreate(name, budget) {
+function nwcCreate(name, budget, seeAll) {
   name = String(name || '').trim().slice(0, 40);
   if (!name) throw new Error('Give the connection a name, like the app it is for.');
   const sk = rnd(32), csk = rnd(32);
-  const c = { id: uid(), name, sk: hex(sk), pub: L.nostrPub(sk), client: L.nostrPub(csk), relays: relays().slice(0, 3), created: Date.now(), budget, enc: null, used: 0 };
+  const c = { id: uid(), name, sk: hex(sk), pub: L.nostrPub(sk), client: L.nostrPub(csk), relays: relays().slice(0, 3), created: Date.now(), budget, seeAll: !!seeAll, enc: null, used: 0 };
   S.nwc.push(c);
   if (!saveNwc()) { S.nwc = S.nwc.filter(x => x.id !== c.id); throw new Error("This browser won't save data."); }
   nwcListen(true); nwcInfo(c).catch(() => {});
@@ -468,7 +468,8 @@ function nwcTx(t) {
   if (t.status === 'done') o.settled_at = Math.floor(t.ts / 1000);
   return o;
 }
-const lnTxs = () => S.txs.filter(t => t.method === 'ln' && t.request);
+// an app sees only the payments and invoices it made, unless you let it see the whole wallet history
+const lnTxs = c => S.txs.filter(t => t.method === 'ln' && t.request && (c.seeAll || t.nwc === c.id));
 const NWC = {
   async get_info(c) { return { alias: 'NUTCADE', color: '#ffc700', pubkey: c.pub, network: 'mainnet', block_height: 0, block_hash: '', methods: NWC_METHODS, notifications: NWC_NOTES }; },
   async get_balance(c) {
@@ -543,13 +544,13 @@ const NWC = {
   async lookup_invoice(c, p) {
     const inv = p.invoice ? String(p.invoice).trim().toLowerCase() : '', h = p.payment_hash ? String(p.payment_hash).toLowerCase() : '';
     if (!inv && !h) throw nwcErr('OTHER', 'Give a payment_hash or an invoice.');
-    const t = lnTxs().find(t => (inv && t.request === inv) || (h && (invInfo(t.request) || {}).paymentHash === h));
+    const t = lnTxs(c).find(t => (inv && t.request === inv) || (h && (invInfo(t.request) || {}).paymentHash === h));
     if (!t) throw nwcErr('NOT_FOUND', 'No invoice like that in this wallet.');
     return nwcTx(t);
   },
   async list_transactions(c, p) {
     const from = +p.from || 0, until = +p.until || Infinity, lim = Math.min(Math.max(+p.limit || 50, 1), 200), off = Math.max(+p.offset || 0, 0);
-    const list = lnTxs().map(nwcTx).filter(o => (p.unpaid || o.state === 'settled' || (o.type === 'outgoing' && o.state === 'pending')) && (!p.type || o.type === p.type) && o.created_at >= from && o.created_at <= until)
+    const list = lnTxs(c).map(nwcTx).filter(o => (p.unpaid || o.state === 'settled' || (o.type === 'outgoing' && o.state === 'pending')) && (!p.type || o.type === p.type) && o.created_at >= from && o.created_at <= until)
       .sort((a, b) => b.created_at - a.created_at);
     return { transactions: list.slice(off, off + lim) };
   }
@@ -577,6 +578,7 @@ function openNwcNew() {
     <div class="notice">${NWC_HONEST}</div>
     <div class="field"><label for="nwcName">Name</label><input id="nwcName" class="inp" data-noi18n maxlength="40" placeholder="Damus" autocomplete="off"></div>
     ${budgetFields()}
+    ${seeAllField(false)}
     <div class="notice red">${NWC_WARN}</div>
     <button class="btn solid gold block" data-act="nwcCreate">Create connection</button><div id="sheetErr"></div>`);
 }
@@ -594,6 +596,7 @@ function openNwcEdit(id) {
   openSheet('Wallet Connect', `<div class="field"><label for="nwcName">Name</label><input id="nwcName" class="inp" data-noi18n maxlength="40" value="${esc(c.name)}" autocomplete="off"></div>
     ${budgetFields(c.budget)}
     <div class="tiny muted">${nwcBudgetText(c)}</div>
+    ${seeAllField(c.seeAll)}
     <div class="notice red">${NWC_WARN}</div>
     <button class="btn solid gold block" data-act="nwcSave" data-id="${esc(c.id)}">Save</button>
     <button class="btn block red" data-act="nwcRevokeAsk" data-id="${esc(c.id)}">Revoke</button><div id="sheetErr"></div>`);
@@ -605,7 +608,7 @@ function nwcPanel() {
     <div class="notice">${NWC_HONEST}</div>
     ${S.nwc.length ? `<div class="row between tiny"><span>This tab</span><span style="color:${live ? 'var(--lime)' : 'var(--gold)'}">${live ? 'ANSWERING' : 'CONNECTING'}</span></div>
     <div class="txs">${S.nwc.map(c => `<div class="tx out contact"><span class="ico" aria-hidden="true">⚡</span><span class="mid"><div class="note" data-noi18n>${esc(c.name)}</div>
-      <div class="meta"><span>${esc(nwcBudgetText(c))}</span></div><div class="meta"><span>${c.used ? `Last used ${timeAgo(c.used)}` : 'Not used yet'}</span></div></span>
+      <div class="meta"><span>${esc(nwcBudgetText(c))}</span></div><div class="meta"><span>${c.seeAll ? 'Sees your whole history' : 'Sees only its own payments'}</span></div><div class="meta"><span>${c.used ? `Last used ${timeAgo(c.used)}` : 'Not used yet'}</span></div></span>
       <span class="row cbtns"><button class="btn sm" data-act="nwcEdit" data-id="${esc(c.id)}">Edit</button><button class="btn sm red" data-act="nwcRevokeAsk" data-id="${esc(c.id)}">Revoke</button></span></div>`).join('')}</div>` : ''}
     <button class="btn sm gold" data-act="nwcNew">Connect an app</button>
   </div>`;

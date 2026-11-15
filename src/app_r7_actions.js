@@ -39,7 +39,7 @@ Object.assign(A, {
   nwcNew: () => { sfx('select'); openNwcNew(); },
   nwcCreate: b => run(b, 'CREATING', async () => {
     const budget = readBudget();
-    const { c, uri } = nwcCreate(val('nwcName'), budget);
+    const { c, uri } = nwcCreate(val('nwcName'), budget, !!($('#nwcAll') || {}).checked);
     sfx('coin'); refresh(); showNwcUri(c, uri);
   }),
   nwcEdit: b => openNwcEdit(b.dataset.id),
@@ -47,7 +47,7 @@ Object.assign(A, {
     const c = S.nwc.find(x => x.id === b.dataset.id); if (!c) { closeSheet(); return; }
     const name = val('nwcName').trim().slice(0, 40); if (!name) throw new Error('Give the connection a name, like the app it is for.');
     const budget = readBudget();
-    c.name = name; c.budget = budget; saveNwc(); sfx('coin'); closeSheet(); refresh(); toast(`${name} saved`, 'lime');
+    c.name = name; c.budget = budget; c.seeAll = !!($('#nwcAll') || {}).checked; saveNwc(); sfx('coin'); closeSheet(); refresh(); toast(`${name} saved`, 'lime');
   }),
   nwcRevokeAsk: b => {
     const c = S.nwc.find(x => x.id === b.dataset.id); if (!c) return;
