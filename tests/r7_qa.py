@@ -1046,6 +1046,29 @@ async def main():
             ok_w, why = await words_ok(w, (A, B, FM))
             check(f'(round 4, 1-3) {tag}: after all of them, Find lost ecash finds nothing and a restore from the 12 words equals the balance', await w.ev(RECB(M)) == rec0 and ok_w, (await w.ev(RECB(M)) - rec0, why))
         await cont_cases(B, 'no-fee mint')
+        # (round 4, 3) with a PIN set, no plain spendable coins in any localStorage key, at any step of an interrupted CONTINUE
+        pw = await wallet(b); await pw.create(); await pw.add_mint(B); await pw.use(B); await pw.receive_ln(3000)
+        await pw.ev("Nutcade.closeSheet()"); await pw.click('[data-act=tab][data-tab=settings]'); await pw.wait(100); await pw.click('[data-act=contactsOpen]'); await pw.wait(150)
+        await pw.click('[data-act=contactEdit]'); await pw.wait(150); await pw.fill('#cName', 'Heir R3'); await pw.fill('#cNostr', hr_addr); await pw.click('[data-act=contactSave]'); await pw.wait(300)
+        await set_pin(pw)
+        await pw.home(); await pw.click('[data-act=extraOpen]'); await pw.until("!!document.querySelector('#xlTo')", 5000); await pw.wait(150)
+        await pw.ev("const s=document.querySelector('#xlTo'); s.value=[...s.options].find(o=>o.text==='Heir R3').value; s.dispatchEvent(new Event('change',{bubbles:true}))")
+        await pw.fill('#amtIn', '600'); await pw.click('[data-act=extraStart]'); await pw.until("!!Nutcade.S.extra", 20000); await pw.ev("Nutcade.closeSheet()")
+        leaks = {}
+        sec = await pw.ev(SECRETS_JS); leaks['set up'] = await pw.pg.evaluate(LEAK_JS, sec)
+        u0 = await pw.ev("Nutcade.S.extra.until"); await pw.pg.route(f'{B}/v1/swap', held(8))
+        await pw.home(); await pw.click('[data-act=extraOpen]'); await pw.wait(300); await pw.click('[data-act=extraContinue]'); await pw.wait(1500)
+        sec = sorted(set(sec + await pw.ev(SECRETS_JS))); leaks['swap on its way'] = await pw.pg.evaluate(LEAK_JS, sec)
+        await pw.pg.reload(); await pw.wait(800); await pw.pg.unroute(f'{B}/v1/swap')
+        leaks['after reload, locked'] = await pw.pg.evaluate(LEAK_JS, sec)
+        await unlock(pw); ok = await pw.until(f"Nutcade.S.ops.length===0 && Nutcade.S.extra && Nutcade.S.extra.until > {u0}", 60000); await pw.wait(800)
+        sec = sorted(set(sec + await pw.ev(SECRETS_JS))); leaks['settled'] = await pw.pg.evaluate(LEAK_JS, sec)
+        x = await pw.ev(EXTRA_AT_MINT); pb = []
+        await books(pw, 'PIN CONTINUE', pb, (B,))
+        check('(round 4, 3) with a PIN, no plain spendable coins (or journal secrets) in any localStorage key: set up, swap on its way, reloaded and locked, settled',
+              len(sec) > 5 and not any(leaks.values()), leaks)
+        check('(round 4, 3) and the interrupted CONTINUE finishes under the PIN: new date, valid at the mint, books add up', ok and x and x['unspent'] and not pb, (ok, x, pb))
+        await pw.pg.context.close()
         # an interrupted cash-out: the Extra Life is closed when it settles, and the heir's copy is marked ended
         async def cash_start():
             await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')

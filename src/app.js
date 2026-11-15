@@ -34,7 +34,8 @@ const raw = {
   set(k, v) { try { localStorage.setItem('nutcade:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
   del(k) { try { localStorage.removeItem('nutcade:' + k); } catch (e) {} }
 };
-const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc', 'ops'];
+// everything that holds ecash, keys or anything that can spend: with a PIN, only inside the encrypted vault
+const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc', 'ops', 'extra', 'hunts', 'found'];
 const vault = { on: raw.get('vault', null) != null, open: false, data: {}, dek: null, chain: Promise.resolve(), queued: false };
 // A tab paused because NUTCADE opened in another tab never writes the wallet again: work it still had in flight can't
 // overwrite what the active tab saved. (Counters still advance, so no secret is ever issued twice.)
@@ -176,8 +177,8 @@ function save() {
 }
 async function syncIfStale() {
   if ((raw.get('gen', 0) || 0) === myGen) return;
-  if (vault.on) { if (!vault.open || !vault.dek) return; await vault.chain; await openVault(vault.dek); const d = vault.data; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.txs = d.txs || []; S.quotes = d.quotes || []; S.ops = d.ops || []; }
-  else { S.proofs = raw.get('proofs', {}); S.pending = raw.get('pending', []); S.txs = raw.get('txs', []); S.quotes = raw.get('quotes', []); S.ops = raw.get('ops', []); }
+  if (vault.on) { if (!vault.open || !vault.dek) return; await vault.chain; await openVault(vault.dek); const d = vault.data; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.txs = d.txs || []; S.quotes = d.quotes || []; S.ops = d.ops || []; S.extra = d.extra || null; }
+  else { S.proofs = raw.get('proofs', {}); S.pending = raw.get('pending', []); S.txs = raw.get('txs', []); S.quotes = raw.get('quotes', []); S.ops = raw.get('ops', []); S.extra = raw.get('extra', null); }
   const c = raw.get('counters', {}); for (const k in c) S.counters[k] = Math.max(S.counters[k] || 0, c[k] || 0);
   myGen = raw.get('gen', 0) || 0;
 }
@@ -1948,7 +1949,12 @@ const pinUI = { mode: null, value: '', first: '', old: '' };
 const PIN_MIN = 6, PIN_MAX = 12;
 function hydrateFromVault() {
   const d = vault.data;
-  S.seed = d.seed || null; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || []; S.nwc = d.nwc || []; S.ops = d.ops || [];
+  // keys that joined the vault in a later version (the Extra Life, treasure hunts) move in from plain storage
+  let moved = false;
+  for (const k of VAULT_KEYS) { const v = raw.get(k, undefined); if (v !== undefined) { if (d[k] === undefined || d[k] === null) d[k] = v; raw.del(k); moved = true; } }
+  if (moved) queueVaultWrite();
+  S.hunts = d.hunts || []; S.found = d.found || {};
+  S.seed = d.seed || null; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || []; S.nwc = d.nwc || []; S.ops = d.ops || []; S.extra = d.extra || null;
   seedBytes = null; raw.del('pinfails'); requestPersist(); mergeMintSpellings();
   nwcSince = Math.floor(Date.now() / 1000);   // Wallet Connect requests sent while it was locked are refused, not paid now
 }
