@@ -831,6 +831,25 @@ async def main():
         tm = await w.ev("Nutcade.S.txs.find(t=>t.type==='out'&&t.method==='ecash'&&t.amount===900&&t.token)")
         check('(round 3, 1b) Find lost ecash during a token make: the token is 900 SAT with no fee (no-fee mint), no Recovered line', tm and tm['fee'] == 0 and await w.ev(RECB(B)) == nrec, tm and tm['fee'])
         await books(w, 'find lost during a make', broken, (A, B, FM))
+        # (round 3, item 2) interrupted deposits (two at once, and one while Find lost runs) settle as themselves; never offered for paying
+        async def drop_mint(route):
+            try: await route.fetch()
+            except Exception: pass
+            try: await route.abort()
+            except Exception: pass
+        await w.use(B); nrec = await w.ev(RECB(B)); await w.pg.route(f'{B}/v1/mint/bolt11', drop_mint)
+        for amt in (410, 333):
+            await w.home(); await w.click('[data-act=receive]'); await w.wait(150)
+            if await w.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await w.click('[data-act=recvMethod][data-m=ln]'); await w.wait(100)
+            await w.fill('#amtIn', str(amt)); await w.click('[data-act=doLnInvoice]'); await w.wait(2500); await w.ev("Nutcade.closeSheet()")
+        await w.until("Nutcade.S.quotes.filter(q=>q.state==='PAID'||q.state==='ISSUED').length>=2", 30000)
+        await w.click('[data-act=tab][data-tab=history]'); await w.wait(200); await w.ev("[...document.querySelectorAll('#txList .tx')].find(r=>/PENDING/.test(r.innerText)&&/410/.test(r.innerText)).click()"); await w.wait(300)
+        dtx = await w.sheet_text(); offer = await w.ev("!!document.querySelector('#layer [data-act=resumeInvoice]')")
+        check('(round 3, 2) a deposit the mint says is paid is never offered for paying again: no Show invoice, it says it is being collected', not offer and 'already paid' in dtx, (offer, dtx[:200]))
+        await find_lost(); await w.pg.unroute(f'{B}/v1/mint/bolt11')
+        ok = await w.until("[410,333].every(a=>Nutcade.S.txs.some(t=>t.type==='in'&&t.method==='ln'&&t.amount===a&&t.status==='done'&&t.mint===" + json.dumps(B) + "))", 90000)
+        check('(round 3, 2) two interrupted deposits (one while Find lost ran) each settle as themselves, with no Recovered line and no quote left', ok and await w.ev(RECB(B)) == nrec and await w.ev(f"Nutcade.S.quotes.filter(q=>q.mint==={json.dumps(B)}).length") == 0, (ok, await w.ev(RECB(B)) - nrec))
+        await books(w, 'interrupted deposits', broken, (A, B, FM))
         # (round 2, item 2) a scoped app asking to pay an invoice the user already paid learns nothing and pays nothing
         mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})

@@ -227,11 +227,12 @@ async function restoreFromMintNow(url, onStep, opts) {
   if (!S.mints.find(m => m.url === url)) await addMint(url);
   const w = await getWallet(url);
   // Coins of a step still open at this mint belong to that step, never to "Recovered": payments (in flight here are
-  // waited for; their change goes to them) and swaps (settled from their record).
+  // waited for; their change goes to them), swaps (settled from their record), deposits with counters on record
+  // (left out of this scan; each one settles itself as that deposit).
   for (const p of S.pending.filter(p => p.mint === url && p.id !== opts.except)) await reconcile(p, { force: true }).catch(() => {});
   for (const o of S.ops.filter(o => o.mint === url && o.id !== opts.except)) await settleOp(o.id).catch(() => {});
   const owned = new Set();   // the counters of anything still open: its coins stay out of what this scan credits
-  for (const c of [].concat(S.pending.filter(p => p.mint === url && p.ctr && !p.changeDone).map(p => p.ctr), S.ops.filter(o => o.mint === url).flatMap(o => o.ctr))) {
+  for (const c of [].concat(S.pending.filter(p => p.mint === url && p.ctr && !p.changeDone).map(p => p.ctr), S.ops.filter(o => o.mint === url).flatMap(o => o.ctr), S.quotes.filter(q => q.mint === url && q.ctr).map(q => q.ctr))) {
     const r = await inTime(w.restore(c.start, c.n, { keysetId: c.id }), 30000); for (const p of r.proofs || []) owned.add(p.secret);
   }
   const keysets = w.keyChain.getKeysets().filter(k => k.unit === 'sat');
@@ -250,9 +251,16 @@ async function restoreFromMintNow(url, onStep, opts) {
   const have = new Set((S.proofs[url] || []).map(p => p.secret).concat(S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.pending.flatMap(p => p.proofs.map(x => x.secret)), [...owned]));
   const fresh = found.filter(p => !have.has(p.secret));
   let left = sum(fresh);
-  if (opts.deposit) {   // an interrupted deposit gets what was found, up to its amount; any rest is its own line
-    const credit = Math.min(left, num(opts.deposit.amount)); left -= credit;
-    updTx(opts.deposit.txId, { status: 'done', amount: credit });
+  // interrupted deposits from before their counters were recorded (issued by the mint, never stored) get what was
+  // found first, each up to its amount; their quotes are then done
+  const waiting = [...(opts.deposits || [])];
+  for (const q of S.quotes.filter(q => q.mint === url && !q.ctr && q.kind === 'bolt11' && !waiting.includes(q))) {
+    const st = await inTime(w.checkMintQuoteBolt11(q.quote), 30000).catch(() => null); if (st && st.state === 'ISSUED') waiting.push(q);
+  }
+  for (const q of waiting) {
+    if (!S.quotes.some(x => x.quote === q.quote)) continue;
+    const credit = Math.min(left, num(q.amount)); left -= credit;
+    updTx(q.txId, { status: 'done', amount: credit, ts: Date.now() }); S.quotes = S.quotes.filter(x => x.quote !== q.quote);
   }
   if (fresh.length) { addProofs(url, fresh); if (left) addTx({ type: 'in', method: 'ecash', amount: left, mint: url, note: 'Recovered with recovery phrase' }); }
   save();
@@ -415,6 +423,7 @@ async function checkQuoteNow(id, txId) {
     const w = await getWallet(q.mint);
     if (q.kind === 'bolt11') {
       const r = await w.checkMintQuoteBolt11(q.quote);
+      if (q.state !== r.state) { q.state = r.state; save(); }   // a paid invoice is never offered for paying again
       if (r.state === 'PAID') {
         let cfg;
         if (r.pubkey) {   // NUT-20 locked quote (npub.cash can lock payments to your Nostr key)
@@ -422,8 +431,11 @@ async function checkQuoteNow(id, txId) {
           if (!k) throw new Error("This payment is locked to a key this wallet doesn't have.");
           cfg = { privkey: k };
         }
-        const proofs = await withRepair(q.mint, () => w.mintProofsBolt11(q.amount, r, cfg));
-        addProofs(q.mint, proofs);
+        // the counters the new coins are signed for are on the deposit's record before the mint is asked
+        const onCountersReserved = u => { if (u && u.count > 0) { q.ctr = { id: u.keysetId, start: u.start, n: u.count }; save(); } };
+        const proofs = await withRepair(q.mint, () => w.mintProofsBolt11(q.amount, r, Object.assign({}, cfg, { onCountersReserved })));
+        const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
+        S.proofs[q.mint] = (S.proofs[q.mint] || []).concat(plain(proofs).filter(p => !held.has(p.secret)));
         updTx(q.txId, { status: 'done', ts: Date.now() });
         dropQuote(q); sfx('coin'); refresh();
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
@@ -432,11 +444,17 @@ async function checkQuoteNow(id, txId) {
         return 'paid';
       }
       if (r.state === 'ISSUED') {
-        // The mint issued this deposit but we never stored the ecash (app closed mid-request). Recover it from the phrase
-        // and credit it to this deposit. If the mint can't be asked now, the quote stays and this is tried again later.
-        let got;
-        try { got = await restoreFromMint(q.mint, null, { deposit: q }); } catch (e) { return 'waiting'; }
-        dropQuote(q); refresh();
+        // The mint issued this deposit but we never stored the ecash (an answer lost: reload, closed tab). It is restored
+        // from exactly the counters on its record and credited to this deposit. A record from before 1.12 has none: then
+        // the mint is scanned, and the scan credits what it finds to waiting deposits first. If the mint can't be asked
+        // now, the deposit stays and this is tried again later; it never becomes a separate "Recovered" line.
+        let got = 0;
+        try {
+          if (q.ctr) got = await creditDepositRange(w, q);
+          else { await restoreFromMint(q.mint, null, { deposits: [q] }); got = num((txById(q.txId) || {}).amount); }
+        } catch (e) { return 'waiting'; }
+        if (S.quotes.some(x => x.quote === q.quote)) return 'waiting';
+        refresh();
         if (got) { sfx('coin'); toast(`Recovered ${money(got)} from an interrupted deposit`, 'lime'); }
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         return 'paid';
@@ -464,6 +482,19 @@ async function checkQuoteNow(id, txId) {
   } finally { busyQuotes.delete(q.quote); }
 }
 function dropQuote(q) { S.quotes = S.quotes.filter(x => x.quote !== q.quote); save(); }
+// an interrupted deposit with its counters on record: exactly its coins, credited to it, in one write
+async function creditDepositRange(w, q) {
+  const r = await inTime(w.restore(q.ctr.start, q.ctr.n, { keysetId: q.ctr.id }), 30000);
+  const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
+  let found = (r.proofs || []).filter(p => !held.has(p.secret));
+  if (found.length) { const st = await inTime(w.checkProofsStates(found), 30000); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
+  const held2 = new Set((S.proofs[q.mint] || []).map(p => p.secret)); found = found.filter(p => !held2.has(p.secret));
+  const was = txById(q.txId), before = was && was.status === 'done' ? num(was.amount) : 0;
+  S.proofs[q.mint] = (S.proofs[q.mint] || []).concat(plain(found));
+  updTx(q.txId, { status: 'done', amount: before + sum(found), ts: Date.now() });
+  S.quotes = S.quotes.filter(x => x.quote !== q.quote); save();
+  return sum(found);
+}
 
 function cleanToken(t) { t = String(t || '').trim().replace(/^(web\+)?cashu:(\/\/)?/i, ''); const m = t.match(/cashu[AB][A-Za-z0-9_\-+/=]+/); return m ? m[0] : t; }
 function peekToken(t) {
@@ -2787,8 +2818,19 @@ async function run(btn, label, fn) {
   finally { if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = old; } }
 }
 
+const PAID_COLLECTING = 'This invoice is already paid. NUTCADE is collecting the ecash from the mint, and it shows here as soon as it is in.';
+const quotePaid = q => !q || q.state === 'PAID' || q.state === 'ISSUED';   // no quote left, or the mint says paid: never offer it for paying
 function showInvoice(tx) {
-  const q = S.quotes.find(x => x.quote === tx.quote);
+  const q = S.quotes.find(x => x.quote === tx.quote), st = (txById(tx.id) || {}).status;
+  if (st === 'expired') { setBody(`<div class="notice">This invoice has expired. Nothing was received.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
+  if (quotePaid(q) || st !== 'pending') {
+    setBody(`<div class="notice">${PAID_COLLECTING}</div><div class="row" style="justify-content:center"><span class="spinner" id="payState">COLLECTING</span></div>`, () => {
+      if (!q) return null; let alive = true;
+      (async () => { while (alive) { const r = await checkQuote(q).catch(() => null); if (r === 'paid') { if (alive) showDone('in', (txById(tx.id) || tx).amount, 'Lightning'); return; } await sleep(3000); } })();
+      return () => { alive = false; };
+    });
+    return;
+  }
   setBody(`<div class="label" style="text-align:center">Pay this invoice</div>
     <div class="credit-num" style="text-align:center;font-size:26px">${fmt(tx.amount)}<small>${unitTag()}</small></div>
     ${qrBlock('lightning:' + tx.request.toUpperCase(), 'Lightning invoice QR')}
@@ -2881,7 +2923,7 @@ function openTx(id) {
   else if (t.status === 'pending' && t.incoming) extra = `<div class="notice">This ecash came from ${esc(host(t.mint))}, a mint you don't use yet. Claiming adds that mint and trusts it with ${money(t.amount)}.</div><button class="btn block lime" data-act="claimIncoming" data-id="${t.id}">Trust mint &amp; claim</button>`;
   else if (t.status === 'pending' && t.method === 'ecash' && t.token) extra = `${t.lockUntil ? `<div class="notice cyan">Locked to ${esc(t.giftTo || 'one person')}. ${Date.now() < t.lockUntil ? `If they haven't claimed it by ${fmtDay(t.lockUntil)}, it comes back to you automatically.` : 'The lock has run out, so you can take it back.'}</div>` : ''}${qrBlock(t.token, 'Ecash token QR')}<div class="code">${esc(t.token)}</div>
     <div class="row" style="flex-wrap:wrap"><button class="btn sm pink" data-act="copy" data-text="${esc(t.token)}">Copy token</button>${nfcOK() ? `<button class="btn sm violet" data-act="nfcWrite" data-text="${esc(t.token)}">Write to NFC</button>` : ''}${ctBtn(t.token)}<button class="btn sm" data-act="checkClaim" data-id="${t.id}">Check claimed</button>${t.lockUntil ? (Date.now() < t.lockUntil ? `<button class="btn sm" disabled>Back on ${fmtDay(t.lockUntil)}</button>` : `<button class="btn sm gold" data-act="giftTake" data-id="${t.id}">Take it back</button>`) : `<button class="btn sm gold" data-act="reclaim" data-id="${t.id}">Reclaim</button>`}</div>`;
-  else if (t.status === 'pending' && t.type === 'in' && t.method === 'ln') extra = `<button class="btn block lime" data-act="resumeInvoice" data-id="${t.id}">Show invoice</button>`;
+  else if (t.status === 'pending' && t.type === 'in' && t.method === 'ln') extra = quotePaid(S.quotes.find(x => x.quote === t.quote)) ? `<div class="notice">${PAID_COLLECTING}</div>` : `<button class="btn block lime" data-act="resumeInvoice" data-id="${t.id}">Show invoice</button>`;
   else if (t.status === 'pending' && t.type === 'in' && t.method === 'onchain') extra = `<div class="row" style="flex-wrap:wrap"><button class="btn sm lime" data-act="resumeAddr" data-id="${t.id}">Show address</button><button class="btn sm red" data-act="stopWatch" data-id="${t.id}">Stop watching</button></div>`;
   else if (t.status === 'pending' && t.type === 'out') extra = `<button class="btn block violet" data-act="reconcileTx" data-id="${t.id}">Check payment</button>`;
   else if (t.changePending && t.type === 'out') extra = `<div class="notice">This payment went through. Its change (the unused fee reserve) hasn't come back from the mint yet, so the fee shown is the most it can be. NUTCADE keeps trying, and the fee drops when the change is back.</div><button class="btn block violet" data-act="reconcileTx" data-id="${t.id}">Try now</button>`;
