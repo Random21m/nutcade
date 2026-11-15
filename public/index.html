@@ -7582,7 +7582,9 @@ async function nwcDecrypt(c, enc, payload) {
 
 let nwcSocks = [], nwcKeyNow = '', nwcRetry = 0, nwcChain = Promise.resolve();
 let nwcSince = 0;   // when this tab started answering (opened or unlocked): anything sent before is refused, never paid
-const NWC_MAX_AGE = 60;
+// one age rule for every request: older than 60 s (or dated more than 60 s ahead) when it is handled is refused, never
+// carried out. Requests up to 10 minutes old are still fetched, only to answer them with that refusal.
+const NWC_MAX_AGE = 60, NWC_ANSWER_REFUSALS = 600;
 const nwcInfoSent = new Set();
 const nwcSeen = new Set(raw.get('nwcseen', []));
 const nwcWanted = () => !!(S.seed && S.nwc.length && !tabLocked && !(vault.on && !vault.open));
@@ -7595,7 +7597,7 @@ function nwcListen(force) {
   if (!force && key === nwcKeyNow && nwcSocks.some(s => s.readyState <= 1)) return;
   nwcStop(); nwcKeyNow = key;
   if (!nwcSince) nwcSince = Math.floor(Date.now() / 1000);
-  const since = Math.floor(Date.now() / 1000) - 600;   // recent requests are fetched so they can be refused with an answer
+  const since = Math.floor(Date.now() / 1000) - NWC_ANSWER_REFUSALS;   // recent requests are fetched so they can be refused with an answer
   for (const r of nwcRelays()) {
     let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
     nwcSocks.push(ws);
@@ -7628,7 +7630,7 @@ function onNwcEvent(ev) {
   const p = (ev.tags || []).find(t => t[0] === 'p'); const c = p && S.nwc.find(x => x.pub === p[1]);
   if (!c || ev.pubkey !== c.client) return;
   const now = Math.floor(Date.now() / 1000), exp = (ev.tags || []).find(t => t[0] === 'expiration');
-  if (ev.created_at < now - 600 || ev.created_at > now + 300 || (exp && +exp[1] < now)) return;
+  if (ev.created_at < now - NWC_ANSWER_REFUSALS || ev.created_at > now + NWC_ANSWER_REFUSALS || (exp && +exp[1] < now)) return;
   if (!L.verifyEvent(ev)) return;
   nwcSeen.add(ev.id); raw.set('nwcseen', [...nwcSeen].slice(-300));
   nwcChain = nwcChain.then(() => nwcHandle(c.id, ev)).catch(() => {});
@@ -7645,8 +7647,9 @@ async function nwcHandle(id, ev) {
     const now = Math.floor(Date.now() / 1000);
     if (ev.created_at < nwcSince - 2) throw nwcErr('OTHER', 'NUTCADE was closed or locked when this request was sent, so it was not carried out. Send it again.');
     if (now - ev.created_at > NWC_MAX_AGE) throw nwcErr('OTHER', 'This request is more than a minute old, so it was not carried out. Send it again.');
+    if (ev.created_at - now > NWC_MAX_AGE) throw nwcErr('OTHER', "This request is dated more than a minute ahead of this device's clock, so it was not carried out."); 
     if (!NWC_METHODS.includes(method)) throw nwcErr('NOT_IMPLEMENTED', `${method || 'This method'} is not supported.`);
-    result = await NWC[method](c, req.params || {});
+    result = await NWC[method](c, Object.assign({}, req.params || {}, { _ts: ev.created_at }));
   } catch (e) { error = { code: e.nwc || 'INTERNAL', message: String(e.message || e).slice(0, 300) }; }
   c = S.nwc.find(x => x.id === id); if (!c) return;   // revoked while it ran: no answer
   c.used = Date.now(); c.enc = enc; saveNwc();
@@ -7713,6 +7716,7 @@ const NWC = {
     const need = meltCost(url, sats, mq.fee_reserve).total, left = nwcLeft(c);
     if (left != null && need > left) { toast(`${c.name} asked to pay ${money(sats)}, more than its budget has left, so NUTCADE refused.`, 'gold'); throw nwcErr('QUOTA_EXCEEDED', `Over budget: this payment needs up to ${need} sat with its fee reserve, and ${left} sat of the budget is left.`); }
     if (!S.nwc.find(x => x.id === c.id)) throw nwcErr('UNAUTHORIZED', 'This connection was revoked.');
+    if (p._ts && Date.now() / 1000 - p._ts > NWC_MAX_AGE) throw nwcErr('OTHER', 'This request is more than a minute old, so it was not carried out. Send it again.');
     let tx;
     // the payment carries the connection from the start (saved before anything is sent), so its cost counts against
     // the budget while it is in flight and after a reload; only a confirmed failure gives it back

@@ -536,6 +536,8 @@ async def main():
         n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': invoice(77, B)}, age=90, wait=6)
         check('(fix 6) nwc: a request more than a minute old is refused with an error, not paid', r['answer'] and r['answer']['error'] and r['answer']['error']['code'] == 'OTHER' and 'minute old' in r['answer']['error']['message'] and await w.ev("Nutcade.S.txs.length") == n0, r.get('answer'))
+        r65 = await nwc(w, uri, 'pay_invoice', {'invoice': invoice(66, B)}, age=65, wait=6); r30 = await nwc(w, uri, 'get_info', age=30)
+        check('(fix 6) nwc: the 60 s rule: a payment 65 s old is refused (not paid), a request 30 s old is answered', r65['answer'] and r65['answer']['error'] and 'minute old' in r65['answer']['error']['message'] and not await w.ev("Nutcade.S.txs.some(t=>t.amount===66&&t.type==='out')") and r30['answer'] and r30['answer']['result'] and r30['answer']['result']['alias'] == 'NUTCADE', (r65.get('answer'), r30.get('answer')))
         r = await nwc(w, uri, 'get_info', age=900, wait=3)
         check('nwc: a request from long ago is ignored', r['answer'] is None)
         r = await nwc(w, uri, 'get_info', expired=True, wait=3)
