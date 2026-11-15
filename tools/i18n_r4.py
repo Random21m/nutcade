@@ -302,8 +302,8 @@ ROWS = [
 ("{#}H AGO", "HACE {#} H", "HÁ {#} H", "VOR {#} STD.", "IL Y A {#} H"),
 ("{#}D AGO", "HACE {#} D", "HÁ {#} D", "VOR {#} T.", "IL Y A {#} J"),
 ("Use D-pad", "Usar cruceta", "Usar direcional", "Steuerkreuz nutzen", "Utiliser la croix"),
-("Use joystick", "Usar joystick", "Usar joystick", "Joystick nutzen", "Utiliser le joystick"),
-("Joystick", "Joystick", "Joystick", "Joystick", "Joystick"),
+("Use joystick", "Usar la palanca", "Usar a alavanca", "Joystick nutzen", "Utiliser le joystick"),
+("Joystick", "Palanca de control", "Alavanca de controle", "Joystick", "Joystick"),
 
 # ===== Round 6: replays and ghosts, treasure hunts, loaded score cards =====
 ("Your replay goes with it: their NUTCADE checks your score is real, and they race your ghost.", "Tu repetición va con él: su NUTCADE comprueba que tu puntuación es real y compite contra tu fantasma.", "Seu replay vai junto: o NUTCADE da pessoa confere que sua pontuação é real e ela corre contra o seu fantasma.", "Deine Wiederholung geht mit: Ihr NUTCADE prüft, dass deine Punkte echt sind, und sie spielen gegen deinen Geist.", "Votre replay part avec : son NUTCADE vérifie que votre score est réel et affronte votre fantôme."),

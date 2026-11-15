@@ -208,6 +208,16 @@ async def tour(b, pa, pb, pc, pd):
         await h.click('[data-act=tab][data-tab=history]'); await h.wait(250); await snap('history_new_rows')
         await h.ev("[...document.querySelectorAll('#txList .tx')].find(r=>/NWC/.test(r.innerText)).click()"); await h.wait(250); await snap('history_nwc_detail')
         await h.ev("Nutcade.closeSheet()")
+        if lang != 'en':   # (C) screen-reader labels: none left in English where the language has another word (history with tags, settings, a game with joystick and D-pad)
+            ARIA = """(()=>{const D=window.NUTCADE_I18N[document.documentElement.lang.slice(0,2)].t;return [...document.querySelectorAll('[aria-label]')].map(e=>e.getAttribute('aria-label')).filter(l=>D[l]!==undefined&&D[l]!==l)})()"""
+            left = []
+            await h.ev("Nutcade.S.txs[0].note='Lunch #food'; Nutcade.render()"); await h.click('[data-act=tab][data-tab=history]'); await h.wait(250); left += await h.ev(ARIA)
+            await h.click('[data-act=tab][data-tab=settings]'); await h.wait(250); left += await h.ev(ARIA)
+            await h.click('[data-act=tab][data-tab=arcade]'); await h.wait(250); await h.ev("document.querySelector('[data-game=swarm]').click()"); await h.wait(500); left += await h.ev(ARIA)
+            await h.ev("document.querySelector('[data-g=pad]').click()"); await h.wait(250); left += await h.ev(ARIA)
+            await h.ev("document.querySelector('[data-g=pad]').click()"); await h.wait(150); await h.ev("document.querySelector('[data-g=exit]').click()"); await h.wait(200)
+            labels = await h.ev("['Filter','Tags','Sections','Joystick','Pause'].map(k=>[k, window.NUTCADE_I18N[document.documentElement.lang.slice(0,2)].t[k]])")
+            check(f'(C) aria {lang}: no screen-reader label left in English where {lang} has its own word (Filter, Tags, Sections, Joystick, Pause and the rest)', not left and all(v for k, v in labels), (left, labels))
         # solid (main) buttons in the new sheets are gold; Revoke stays red
         miss = [m for m in await h.ev("JSON.parse(localStorage.getItem('qa:miss7')||'[]')") if not ALLOW.match(m.strip())]
         if lang != 'en': miss_all[lang] = miss
