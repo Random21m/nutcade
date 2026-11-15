@@ -1107,7 +1107,8 @@ async def main():
         # (round 2, item 2) a scoped app asking to pay an invoice the user already paid learns nothing and pays nothing
         mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})
-        check('(round 2, 2) nwc: a scoped app asking about an invoice it didn\'t pay gets a refusal (RESTRICTED), no preimage or fee, nothing paid', r['answer'] and r['answer']['result'] is None and r['answer']['error']['code'] == 'RESTRICTED' and 'preimage' not in json.dumps(r['answer']) and await w.ev("Nutcade.S.txs.length") == n0, r.get('answer'))
+        check('(round 2, 2 + go 4) nwc: a scoped app asking to pay an invoice it didn\'t pay gets the answer a payment that fails gets (PAYMENT_FAILED, "Nothing left the wallet"), no sign this wallet paid it, nothing paid again',
+              r['answer'] and r['answer']['result'] is None and r['answer']['error']['code'] == 'PAYMENT_FAILED' and r['answer']['error']['message'] == 'The payment failed. Nothing left the wallet.' and 'preimage' not in json.dumps(r['answer']) and await w.ev("Nutcade.S.txs.length") == n0, r.get('answer'))
         # (round 2, item 3) an Extra Life copy claimed by several background checks at once: claimed once, never "ended"
         hb = await w.bal(B)
         await w.ev(f"Nutcade.S.heirlooms.unshift({{from:'ff',name:'Kim',token:{json.dumps(tokH)},amount:50,mint:{json.dumps(B)},until:Date.now()-60000,state:'waiting',at:Date.now()}}); for(let i=0;i<3;i++) window.dispatchEvent(new Event('online'))")

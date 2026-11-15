@@ -493,9 +493,10 @@ const NWC = {
     if (d.timestamp + d.expiry < Date.now() / 1000) throw nwcErr('OTHER', 'The invoice has expired.');
     const sats = d.sats;
     // the same invoice is never paid twice: a paid one answers with its proof, one in flight is refused
-    // (an app that may only see its own payments learns nothing about one it didn't make: just a refusal)
     const prev = S.txs.find(t => t.type === 'out' && t.method === 'ln' && (t.request === inv || t.invoice === inv) && t.status !== 'failed' && t.status !== 'expired');
-    if (prev && !c.seeAll && prev.nwc !== c.id) throw nwcErr('RESTRICTED', 'This connection can\'t pay this invoice.');
+    // (an app that may only see its own payments gets the very answer an invoice that can't be paid gets, after a
+    // moment, so it can't tell this wallet paid it; nothing is paid again)
+    if (prev && !c.seeAll && prev.nwc !== c.id) { await sleep(1500 + Math.random() * 2500); throw nwcErr('PAYMENT_FAILED', 'The payment failed. Nothing left the wallet.'); }
     if (prev && prev.status === 'done') return { preimage: prev.preimage || '', fees_paid: num(prev.fee) * 1000 };
     if (prev) throw nwcErr('OTHER', 'This invoice is already being paid.');
     const cands = S.mints.filter(m => supports(m, 'melt', 'bolt11') && balanceOf(m.url) >= sats).sort((a, b) => (b.url === S.active) - (a.url === S.active) || balanceOf(b.url) - balanceOf(a.url));
