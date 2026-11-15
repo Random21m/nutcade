@@ -124,14 +124,14 @@ const daysLeft = ms => Math.max(0, Math.ceil(ms / 86400e3));
 // after the date. The journal has every output before the mint is asked, so an interrupted lock finishes as itself.
 const extraLockCfg = (w, until, heirPub) => ({ send: { type: 'p2pk', options: { pubkey: myLockPub(), locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() });
 async function lockExtra(url, amount, heirPub, until, follow) {
-  return (async () => {
+  return mintLock(url, async () => {
     const w = await getWallet(url), inputs = [...(S.proofs[url] || [])];
     if (sum(inputs) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(inputs))}.`);
     const { r: { keep, send }, op } = await journaled(url, 'send', { inputs, amount, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow }, (cb, o) => rSend(o, w, amount, inputs, { includeFees: true, onCountersReserved: cb }, extraLockCfg(w, until, heirPub)));
     const used = new Set(inputs.map(p => p.secret));   // (keep holds the coins the swap didn't need, as they were)
     S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep)); closeOp(op); save();
     return plain(send);
-  })();
+  });
 }
 const extraToken = () => S.extra && L.getEncodedToken({ mint: S.extra.mint, unit: 'sat', proofs: S.extra.proofs });
 async function sendHeirCopy() {
@@ -167,7 +167,7 @@ async function startExtra(amount, heir, days, auto) {
 async function continueExtra(quiet) {
   if (!S.extra) return;
   const url = S.extra.mint;
-  const until = await (async () => {
+  const until = await mintLock(url, async () => {
     const x = S.extra; if (!x || x.mint !== url) return 0;
     if (S.ops.some(o => o.mint === url && o.follow && o.follow.k === 'extra-renew')) return 0;   // one is on its way: its record finishes it
     const w = await getWallet(url), ins = [...x.proofs];
@@ -183,7 +183,7 @@ async function continueExtra(quiet) {
     if (keep.length) { addProofs(url, keep); addTx({ type: 'in', method: 'ecash', amount: sum(plain(keep)), mint: url, note: `Extra Life cashed out (was for ${x.heir.name})` }); }   // (none: the amount is exact)
     Object.assign(x, { proofs: plain(send), until, renewed: Date.now(), amount: Math.min(x.amount, sum(plain(send))) }); delete x.unlocked; saveExtra(); closeOp(op); save();
     return until;
-  })();
+  });
   if (!until) return;
   await sendHeirCopy().catch(() => false);
   if (!quiet) { sfx('levelup'); toast(`CONTINUE! ${S.extra.heir.name}'s copy now opens on ${fmtDay(until)}`, 'lime'); }

@@ -40,6 +40,7 @@ const vault = { on: raw.get('vault', null) != null, open: false, data: {}, dek: 
 // A tab paused because NUTCADE opened in another tab never writes the wallet again: work it still had in flight can't
 // overwrite what the active tab saved. (Counters still advance, so no secret is ever issued twice.)
 const writeGuard = { paused: false };
+const pausedErr = () => Object.assign(new Error('NUTCADE is open in another tab.'), { paused: true, asked: true });
 /* Every request to a mint has a time limit, so one mint that accepts a request and never answers can't hold anything
    else up: 20 s, or 2 minutes for a payment (a Lightning payment can take a while). A request cut off this way is
    a lost answer, which the records below settle with the mint afterwards. */
@@ -49,6 +50,9 @@ const MINT_MS = 20000, MELT_MS = 120000, STEP_MS = 150000;
   if (_fetch) window.fetch = (input, init) => {
     const u = String(typeof input === 'string' ? input : (input && input.url) || '').split('?')[0];
     if (!/\/v1\/(info|keys|keysets|swap|mint|melt|checkstate|restore)\b/.test(u)) return _fetch(input, init);
+    // A paused tab (NUTCADE opened in another tab) asks a mint nothing more: not even the next step of something it
+    // started, whose result it could never write down. The tab in charge settles what it left, from its records.
+    if (writeGuard.paused) return Promise.reject(pausedErr());
     const ms = /\/v1\/melt\/(bolt11|onchain)$/.test(u) ? MELT_MS : MINT_MS, ac = new AbortController(), t = setTimeout(() => ac.abort(new Error("The mint didn't answer in time.")), ms);
     const sig = init && init.signal; if (sig) { if (sig.aborted) ac.abort(); else sig.addEventListener('abort', () => ac.abort(), { once: true }); }
     return _fetch(input, Object.assign({}, init, { signal: ac.signal })).finally(() => clearTimeout(t));
@@ -220,7 +224,8 @@ async function requestPersist() {
 if (S.seed) requestPersist();
 
 /* Swap every proof a mint holds into fresh outputs derived from the current phrase. */
-async function secureMint(url) {
+function secureMint(url) { return mintLock(url, () => secureMintNow(url)); }
+async function secureMintNow(url) {
   const ps = [...(S.proofs[url] || [])]; if (!ps.length) return 0;
   const w = await getWallet(url);
   const { r: fresh, op } = await journaled(url, 'swap', { inputs: ps }, (cb, o) => rRecv(o, w, ps, { onCountersReserved: cb }));
@@ -545,7 +550,11 @@ function peekToken(t) {
   const meta = L.getTokenMetadata(cleanToken(t));
   return { mint: normUrl(meta.mint), amount: num(meta.amount), unit: meta.unit || 'sat', memo: meta.memo || '' };
 }
-async function receiveToken(token, note, opts = {}) {
+function receiveToken(token, note, opts = {}) {
+  let mint = null; try { mint = normUrl(peekToken(cleanToken(token)).mint); } catch (e) {}
+  return mint ? mintLock(mint, () => receiveTokenNow(token, note, opts)) : receiveTokenNow(token, note, opts);
+}
+async function receiveTokenNow(token, note, opts = {}) {
   token = cleanToken(token);
   const meta = peekToken(token);
   if (!opts.own && isBlocked(meta.mint)) throw blockedErr(meta.mint);   // your own token coming back is still yours
@@ -616,7 +625,8 @@ function shortOf(e, w, url, want, melt) {
   if (max > 0) f.fix = { act: 'sendMax', a: max, label: $('#layer [data-act=doSendEcash]') ? `Send ${money(max)}` : `Use ${money(max)}` };
   return f;
 }
-async function sendEcash(amount, note, lockTo, url = S.active, opts = {}) {
+function sendEcash(amount, note, lockTo, url = S.active, opts = {}) { return mintLock(url, () => sendEcashNow(amount, note, lockTo, url, opts)); }
+async function sendEcashNow(amount, note, lockTo, url, opts) {
   piggyGuard(amount);
   const w = await getWallet(url);
   if (sum(S.proofs[url] || []) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
@@ -669,6 +679,11 @@ async function meltQuote(kind, dest, amount) {
 }
 async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {}) {
   const w = await getWallet(url);
+  const c = await mintLock(url, () => payPrep(w, kind, mq, feeIndex, note, dest, url, extra));
+  if (writeGuard.paused) throw pausedErr();   // (paused in between: the tab in charge settles the prepared ecash)
+  return single('melt:' + c.pend.id, () => meltNow(w, kind, mq, feeIndex, url, c.tx, c.pend, c.spent, c.amount, c.onCountersReserved));
+}
+async function payPrep(w, kind, mq, feeIndex, note, dest, url, extra) {
   const amount = num(mq.amount);
   const reserve = kind === 'ln' ? num(mq.fee_reserve) : num((mq.fee_options || []).find(f => f.fee_index === feeIndex)?.fee_reserve);
   const need = amount + reserve;
@@ -688,7 +703,7 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {
   const onCountersReserved = u => { if (u && u.count > 0) { pend.ctr = { id: u.keysetId, start: u.start, n: u.count }; save(); } };
   const used = new Set(inputs.map(p => p.secret));
   S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep)); S.pending.push(pend); closeOp(op); save();   // (the payment record takes over the coins from the swap's)
-  return single('melt:' + pend.id, () => meltNow(w, kind, mq, feeIndex, url, tx, pend, spent, amount, onCountersReserved));
+  return { tx, pend, spent, amount, onCountersReserved };
 }
 async function meltNow(w, kind, mq, feeIndex, url, tx, pend, spent, amount, onCountersReserved) {
   const send = pend.proofs;
@@ -723,6 +738,13 @@ function single(key, fn) {
   const p = (async () => (navigator.locks && navigator.locks.request) ? navigator.locks.request('nutcade:' + key, () => fn()) : fn())().finally(() => flights.delete(key));
   flights.set(key, p);
   return p;
+}
+/* One money step at a time per mint, in this tab and across tabs (Web Locks): from asking the mint to writing its
+   answer down. The step starts from what is saved now (another tab may have just written), and a paused tab starts
+   nothing. */
+function mintLock(url, fn) {
+  const go = async () => { if (writeGuard.paused) throw pausedErr(); await syncIfStale(); return fn(); };
+  return (navigator.locks && navigator.locks.request) ? navigator.locks.request('nutcade:mint:' + normUrl(url), go) : go();
 }
 /* opts.force: try a waiting change recovery now (at startup, or when you ask), instead of waiting for its backoff */
 function reconcile(pend, opts = {}) { return single('melt:' + pend.id, () => reconcileNow(pend.id, pend.txId, opts)); }
@@ -2203,6 +2225,7 @@ const BACKUP_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.pri
 const relays = () => (S.prefs.relays && S.prefs.relays.length) ? S.prefs.relays : BACKUP_RELAYS;
 
 function relayPublish(ev, timeout = 7000, list = relays()) {
+  if (writeGuard.paused) return Promise.resolve(0);   // a paused tab sends nothing (the tab in charge does)
   return new Promise(res => {
     let ok = 0, left = 0; const socks = []; let fin = false;
     const end = () => { if (fin) return; fin = true; socks.forEach(s => { try { s.close(); } catch (e) {} }); res(ok); };
@@ -2783,13 +2806,14 @@ async function sweepPhrase(phrase, urls, onStep) {
           found = found.concat(r.proofs.filter((p, i) => st[i] && st[i].state === 'UNSPENT'));
         }
       }
-      if (found.length) {
+      if (found.length) total += await mintLock(url, async () => {
         const w = await getWallet(url);
         const { r: mine, op } = await journaled(url, 'receive', { amount: sum(found), note: 'Restored from another phrase' }, (cb, o) => rRecv(o, w, found, { onCountersReserved: cb }));
-        addProofs(url, mine); total += sum(mine);
+        addProofs(url, mine);
         addTx({ type: 'in', method: 'ecash', amount: sum(mine), fee: Math.max(0, sum(found) - sum(mine)), mint: url, note: 'Restored from another phrase' });
         closeOp(op); save();
-      }
+        return sum(mine);
+      });
     } catch (e) { fails.push(host(url)); }
   }
   return { total, fails };
@@ -2804,8 +2828,10 @@ async function swapIn(token, note) {
   if (!dest || !supports(dest, 'mint', 'bolt11')) throw new Error('Your active mint must accept Lightning deposits to swap into it.');
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint);
   const fw = await getWallet(meta.mint), dw = await getWallet(dest.url);
+  await mintLock(meta.mint, async () => {
   const { r: got, op } = await journaled(meta.mint, 'receive', { amount: meta.amount, note: note || `Swapped from ${host(meta.mint)}` }, (cb, o) => rRecv(o, fw, token, Object.assign(S.p2pk.length ? { privkey: p2pkPrivs() } : {}, { onCountersReserved: cb })));
   addProofs(meta.mint, got); closeOp(op); save();
+  });
   const total = sum(S.proofs[meta.mint]);
   let amt = total - Math.max(2, Math.ceil(total * 0.02)), mq, melt, need;
   for (let i = 0; i < 4; i++) {

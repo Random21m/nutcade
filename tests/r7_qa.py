@@ -69,7 +69,7 @@ def error_strings():
             t = t.replace("\\'", "'").replace('\\"', '"')
             if re.match(r'^[A-Z][a-z]', t) and not t.endswith(': ') and not re.search(r"""nwcErr\(\s*'[A-Z_]+',\s*$""", s[max(0, m.start() - 40):m.start() + 7]):
                 out.add(t)
-    out |= { "The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
+    out |= {'NUTCADE is open in another tab.', "The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
             'This invoice is already paid. NUTCADE is collecting the ecash from the mint, and it shows here as soon as it is in.', 'COLLECTING',
             'Mint fee for moving ecash under your phrase', 'Mint fee for an interrupted step', 'Mint fee for keeping Extra Life going', 'Ecash already spent elsewhere',
             'Some of this ecash was already spent. NUTCADE removed 1,234 SAT of spent ecash from your balance (see your notes). Try again with what is left.'}
@@ -1046,6 +1046,55 @@ async def main():
             ok_w, why = await words_ok(w, (A, B, FM))
             check(f'(round 4, 1-3) {tag}: after all of them, Find lost ecash finds nothing and a restore from the 12 words equals the balance', await w.ev(RECB(M)) == rec0 and ok_w, (await w.ev(RECB(M)) - rec0, why))
         await cont_cases(B, 'no-fee mint')
+        # (round 4, 4) a takeover while CONTINUE's swap is on its way: the paused tab asks the mint nothing more, the tab in
+        # charge finishes the Extra Life from the record
+        rec = {'on': False, 'reqs': []}
+        dup = {'on': True, 'n': 0}   # "outputs already signed" answers from now on (none expected: a paused tab uses no counters at the mint)
+        async def dup_chk(r):
+            try:
+                if dup['on'] and r.status == 400 and '/v1/' in r.url and ('11003' in await r.text() or 'already signed' in (await r.text()).lower()): dup['n'] += 1
+            except Exception: pass
+        w.pg.on('response', lambda r: asyncio.ensure_future(dup_chk(r)))
+        w.pg.on('request', lambda r: rec['reqs'].append((__import__('time').time(), r.method, r.url)) if rec['on'] and '/v1/' in r.url and r.url.startswith(('http://127.0.0.1:33', 'http://localhost:33')) else None)
+        async def take_over():
+            pg3 = await w.pg.context.new_page(); t3 = W(pg3, 'tab3')
+            await pg3.goto(URL); await t3.until("!!document.querySelector('[data-act=takeover]')", 10000)
+            await t3.click('[data-act=takeover]'); tp = __import__('time').time(); await pg3.wait_for_timeout(1500)
+            return pg3, t3, tp
+        async def back_to_a(pg3):
+            await pg3.close(); await w.pg.reload(); await w.wait(1500)
+        x0 = await w.ev(EXTRA_AT_MINT); b0 = await w.bal(B)
+        await w.pg.route(f'{B}/v1/swap', held(6)); rec['on'] = True; rec['reqs'] = []
+        await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraContinue]'); await w.wait(1500)
+        pg3, t3, tp = await take_over()
+        await w.wait(9000); await w.pg.unroute(f'{B}/v1/swap')
+        ok = await t3.until(f"Nutcade.S.ops.length===0 && Nutcade.S.extra && Nutcade.S.extra.until > {x0['until']}", 60000)
+        late = [r for r in rec['reqs'] if r[0] > tp + 0.5]; rec['on'] = False
+        x = await t3.ev(EXTRA_AT_MINT); b3 = []
+        await books(t3, 'takeover during CONTINUE', b3, (A, B, FM))
+        check('(round 4, 4) a takeover during CONTINUE: the paused tab sends no request to any mint after it is paused',
+              not late, late[:4])
+        check('(round 4, 4) and the tab in charge finishes the Extra Life from the record: new date, locked to your key, unspent, balance untouched, books add up',
+              ok and x and x['unspent'] and x['pub'] == mine_lock and x['until'] > x0['until'] and await t3.bal(B) == b0 and not b3, (ok, x, await t3.bal(B) - b0, b3))
+        await back_to_a(pg3)
+        # (round 4, 4) a takeover while a Lightning payment is getting its ecash ready: nothing is paid from the paused tab
+        for M, O in ((B, A), (A, B)):
+            inv, qid = quote_inv(321, O); b0, n0 = await w.bal(M), await w.ev("Nutcade.S.txs.length")
+            await w.pg.route(f'{M}/v1/swap', held(6)); rec['on'] = True; rec['reqs'] = []
+            await ln_pay_start(M, inv); await w.wait(1500)
+            pg3, t3, tp = await take_over()
+            await w.wait(9000); await w.pg.unroute(f'{M}/v1/swap')
+            ok = await t3.until("Nutcade.S.ops.length===0", 60000); await t3.wait(1000)
+            late = [r for r in rec['reqs'] if r[0] > tp + 0.5]; rec['on'] = False
+            st = quote_state(O, qid); b3 = []
+            await books(t3, f'takeover during a payment {M[-4:]}', b3, (A, B, FM))
+            lines = await t3.ev(f"Nutcade.S.txs.slice(0, Nutcade.S.txs.length-{n0}).map(t=>[t.note||t.method,t.amount,t.fee])")
+            check(f'(round 4, 4) {M[-4:]}: a takeover while a payment gets its ecash ready: the paused tab sends no request after it is paused, the invoice is not paid',
+                  not late and st == 'UNPAID', (late[:4], st))
+            check(f'(round 4, 4) {M[-4:]}: and the tab in charge settles the prepared ecash: balance whole (less only the mint\'s swap fee), books add up, no payment line',
+                  ok and b0 - (2 if M == A else 0) <= await t3.bal(M) <= b0 and not b3 and not any(l[0] == 'ln' for l in lines), (ok, await t3.bal(M) - b0, b3, lines))
+            await back_to_a(pg3)
+        await w.use(B)
         # (round 4, 3) with a PIN set, no plain spendable coins in any localStorage key, at any step of an interrupted CONTINUE
         pw = await wallet(b); await pw.create(); await pw.add_mint(B); await pw.use(B); await pw.receive_ln(3000)
         await pw.ev("Nutcade.closeSheet()"); await pw.click('[data-act=tab][data-tab=settings]'); await pw.wait(100); await pw.click('[data-act=contactsOpen]'); await pw.wait(150)
@@ -1151,6 +1200,8 @@ async def main():
         st = await w.ev(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(rid)}).status")
         check('(round 3, two-step) an interrupted reclaim settles after a reload: the token is marked reclaimed, its 160 SAT back once', ok and st == 'reclaimed' and await w.bal(B) - bal0 == 160, (ok, st, await w.bal(B) - bal0))
         await books(w, 'interrupted reclaim', broken, (A, B, FM))
+        dup['on'] = False
+        check('(round 4, 4) after the takeovers, no mint answers "outputs already signed" to this wallet', dup['n'] == 0, dup['n'])
         await hr.pg.context.close()
         # (round 3, item 4) one mint that never answers doesn't stop the background check for the others
         async def hang(route):
