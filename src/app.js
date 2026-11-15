@@ -222,7 +222,7 @@ if (S.seed) requestPersist();
 async function secureMint(url) {
   const ps = [...(S.proofs[url] || [])]; if (!ps.length) return 0;
   const w = await getWallet(url);
-  const { r: fresh, op } = await journaled(url, 'swap', { inputs: ps }, cb => w.receive(ps, { onCountersReserved: cb }));
+  const { r: fresh, op } = await journaled(url, 'swap', { inputs: ps }, (cb, o) => rRecv(o, w, ps, { onCountersReserved: cb }));
   const used = new Set(ps.map(p => p.secret)), fee = sum(ps) - sum(fresh);
   S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(fresh));
   if (fee > 0) addTx({ type: 'out', method: 'fee', amount: 0, fee, mint: url, note: 'Mint fee for moving ecash under your phrase', status: 'done' });
@@ -523,7 +523,7 @@ async function receiveToken(token, note, opts = {}) {
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint);
   const w = await getWallet(meta.mint);
   let res;
-  try { const privs = allPrivs(); res = await journaled(meta.mint, 'receive', { amount: meta.amount, note: note || meta.memo }, cb => w.receive(token, Object.assign(privs.length ? { privkey: privs } : {}, { onCountersReserved: cb }))); }
+  try { const privs = allPrivs(); res = await journaled(meta.mint, 'receive', { amount: meta.amount, note: note || meta.memo }, (cb, o) => rRecv(o, w, token, Object.assign(privs.length ? { privkey: privs } : {}, { onCountersReserved: cb }))); }
   catch (e) { if (/witness|signature|p2pk|locked|locktime/i.test(e.message || '')) throw new Error("This ecash is locked to someone else's key, so this wallet can't claim it."); throw e; }
   const proofs = res.r, got = sum(proofs);
   addProofs(meta.mint, proofs);
@@ -573,7 +573,7 @@ async function sendEcash(amount, note, lockTo, url = S.active, opts = {}) {
     const all = have.length && amount === maxSendable(w, have) && w._selectProofs;
     const pick = all ? w._selectProofs : null;
     if (all) w._selectProofs = ps => ({ keep: [], send: ps });
-    try { return await journaled(url, 'send', { inputs: have }, cb => w.send(amount, have, { includeFees: true, onCountersReserved: cb }, outCfg)); }
+    try { return await journaled(url, 'send', { inputs: have, amount, note, locked: !!lockTo, tx: Object.assign({ locked: lockTo || null }, opts.txx || {}) }, (cb, o) => rSend(o, w, amount, have, { includeFees: true, onCountersReserved: cb }, outCfg)); }
     finally { if (all) w._selectProofs = pick; }
   };
   const { r: { keep, send }, op } = await spentRetry(url, attempt).catch(e => { throw shortOf(e, w, url, amount, false); });
@@ -582,7 +582,7 @@ async function sendEcash(amount, note, lockTo, url = S.active, opts = {}) {
   const token = L.getEncodedToken({ mint: url, proofs: send, unit: 'sat' });
   // the fee is everything the balance dropped by beyond the amount: the mint's fee for this swap (NUT-02) plus the
   // fee the token carries so the receiver gets the full amount
-  const tx = addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(have) - sum(keep) - amount), mint: url, note, status: 'pending', token, sent: plain(send), locked: lockTo || null });
+  const tx = addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(have) - sum(keep) - amount), mint: url, note, status: 'pending', token, sent: plain(send), locked: lockTo || null }, opts.txx || {}));
   closeOp(op); save();
   return tx;
 }
@@ -619,7 +619,7 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {
   if (sum(have) < need) throw new Error(`Not enough funds. Need ${money(need)} including fees; this mint holds ${money(sum(have))}.`);
   piggyGuard(need);
   let inputs;
-  const { r: { keep, send }, op } = await spentRetry(url, () => { inputs = [...(S.proofs[url] || [])]; return journaled(url, 'swap', { inputs }, cb => w.send(need, inputs, { includeFees: true, onCountersReserved: cb })); }).catch(e => { throw shortOf(e, w, url, need, true); });
+  const { r: { keep, send }, op } = await spentRetry(url, () => { inputs = [...(S.proofs[url] || [])]; return journaled(url, 'swap', { inputs }, (cb, o) => rSend(o, w, need, inputs, { includeFees: true, onCountersReserved: cb })); }).catch(e => { throw shortOf(e, w, url, need, true); });
   const spent = sum(inputs) - sum(keep);   // what left the balance: the amount, the fee reserve and any swap fee
   // extra (who asked: a Wallet Connect app, a zap) is on the record before anything is sent, so a reload can't lose it
   const tx = addTx(Object.assign({ type: 'out', method: kind, amount, fee: Math.max(0, spent - amount), mint: url, note, status: 'pending', request: dest, quote: mq.quote }, kind === 'ln' && mq.request && mq.request !== dest ? { invoice: String(mq.request) } : {}, extra));   // (a Lightning address payment keeps the invoice it paid, for its preimage)
@@ -747,18 +747,25 @@ async function recoverChange(pend) {
    dropped connection, a mint that stops answering), the record is settled with the mint later, at the next start,
    takeover or background check: our spent coins are dropped, the new coins are restored from exactly those counters,
    and the history line is written once. Settling is one at a time per record (in this tab and across tabs) and
-   idempotent by secret, so nothing is counted twice. */
+   idempotent by secret, so nothing is counted twice.
+   A swap also writes down every output it asks the mint to sign (amount, keyset, secret, blinding factor and B_),
+   including the ones no counter can re-create (ecash locked to a key or to a secret: gifts, bounties, Extra Life),
+   and the record is stored (inside the PIN vault when one is set) before the request leaves. NUT-09 restore gives
+   back the mint's signature for any B_ it signed, so settling asks for exactly those B_, unblinds them with the
+   saved blinding factors (checking the mint's DLEQ proof when it sends one) and gets every coin back: a locked
+   token is shown again as the token it was going to be, everything else lands in the balance. The record, secrets
+   included, is deleted once settled. */
 const opsRunning = new Set();
 const closeOp = op => { S.ops = S.ops.filter(o => o.id !== op.id); };
 async function journaled(url, kind, info, run) {
-  const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, created: Date.now(), ctr: [] };
+  const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, created: Date.now(), ctr: [], outs: [] };
   S.ops.push(op); save();
   const onCountersReserved = u => { if (u && u.count > 0) { op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); save(); } };
   opsRunning.add(op.id);
   try {
     return await single('op:' + op.id, async () => {
       for (let i = 0; ; i++) {
-        try { const r = await run(onCountersReserved); opMark(url, true); return { r, op }; }
+        try { const r = await run(onCountersReserved, op); opMark(url, true); return { r, op }; }
         catch (e) {
           if (i === 0 && isDupOutputs(e) && !flights.has('restore:' + normUrl(url))) { await restoreFromMint(url, null, { except: op.id }); continue; }   // counters behind (same phrase elsewhere): catch up, once
           opMark(url, false, e); e.op = op; throw e;
@@ -767,10 +774,37 @@ async function journaled(url, kind, info, run) {
     });
   } catch (e) {
     opsRunning.delete(op.id);
-    if (!op.ctr.length) { closeOp(op); save(); }   // never reached the mint: nothing to settle
+    if (!op.ctr.length && !op.outs.length) { closeOp(op); save(); }   // never reached the mint: nothing to settle
     else setTimeout(() => settleOp(op.id).catch(() => {}), 0);   // asked, and the answer is an error or never came: the mint decides
     throw e;
   } finally { opsRunning.delete(op.id); }
+}
+const saveNow = async () => { save(); if (vault.on) await vault.chain; };
+const outRec = (o, send) => ({ a: num(String(o.blindedMessage.amount)), id: o.blindedMessage.id, B: o.blindedMessage.B_, r: o.blindingFactor.toString(16), s: hex(o.secret), e: o.ephemeralE || null, send: send ? 1 : 0 });
+// a swap with its outputs on record: prepared (counters reserved), every output written down and stored, then asked
+async function askRecorded(w, op, prepared, privkey) {
+  const p = await prepared;
+  if (op) { op.outs = (p.sendOutputs || []).map(o => outRec(o, true)).concat((p.keepOutputs || []).map(o => outRec(o, false))); await saveNow(); }
+  return w.completeSwap(p, privkey);
+}
+const rSend = (op, w, amount, proofs, cfg, outCfg) => askRecorded(w, op, w.prepareSwapToSend(amount, proofs, cfg, outCfg), cfg && cfg.privkey);
+const rRecv = async (op, w, token, cfg) => (await askRecorded(w, op, w.prepareSwapToReceive(token, cfg), cfg && cfg.privkey)).keep;
+// the mint's signatures for exactly these recorded outputs (NUT-09), unblinded with the saved blinding factors
+let OutputDataClass = null;
+async function restoreRecorded(w, outs) {
+  if (!outs.length) return [];
+  if (!OutputDataClass) OutputDataClass = w.createOutputData(L.Amount.from(1), w.getOutputKeyset(), { type: 'random' })[0].constructor;
+  const bm = o => ({ amount: L.Amount.from(o.a), id: o.id, B_: o.B });
+  const res = await inTime(w.mint.restore({ outputs: outs.map(bm) }), 30000);
+  await w._ensureKeysetsForSignatures(res.signatures);
+  const sig = {}; (res.outputs || []).forEach((x, i) => { sig[x.B_] = res.signatures[i]; });
+  const got = [];
+  for (const o of outs) {
+    const g = sig[o.B]; if (!g || g.amount.isZero()) continue;
+    const d = new OutputDataClass(bm(o), BigInt('0x' + o.r), L.hexToBytes(o.s), o.e || undefined);
+    got.push(Object.assign(d.toProof(g, w.keysetForSignature(g.id)), { _send: o.send }));   // (toProof checks the DLEQ proof when the mint sent one)
+  }
+  return got;
 }
 async function settleOp(id) {
   for (let i = 0; i < 3; i++) {
@@ -784,10 +818,11 @@ async function settleOp(id) {
 async function settleOpNow(id) {
   await syncIfStale();
   const op = S.ops.find(o => o.id === id); if (!op || opsRunning.has(id)) return 'done';
-  if (!op.ctr.length) { closeOp(op); save(); return 'done'; }
+  if (!op.ctr.length && !(op.outs || []).length) { closeOp(op); save(); return 'done'; }
   const w = await getWallet(op.mint);
-  let outs = [];
+  let outs = await restoreRecorded(w, op.outs || []);
   for (const c of op.ctr) { const r = await inTime(w.restore(c.start, c.n, { keysetId: c.id }), 30000); outs = outs.concat(r.proofs || []); }
+  { const seen = new Set(); outs = outs.filter(p => !seen.has(p.secret) && seen.add(p.secret)); }
   const unspent = async ps => { if (!ps.length) return []; const st = await inTime(w.checkProofsStates(ps), 30000); return ps.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); };
   const heldNow = () => new Set((S.proofs[op.mint] || []).map(p => p.secret));
   let fresh = await unspent(outs.filter(p => !heldNow().has(p.secret)));
@@ -796,13 +831,21 @@ async function settleOpNow(id) {
   if (mine.length) { const st = await inTime(w.checkProofsStates(mine), 30000); spent = mine.filter((p, i) => st[i] && st[i].state === 'SPENT'); }
   // one write: spent coins out, new coins in (never one already held), the history line, the record closed
   const held = heldNow(); fresh = fresh.filter(p => !held.has(p.secret));
+  // a locked token the step was making is shown again as that token (only its sender can see it); the rest is balance
+  const lockedOut = op.kind === 'send' && op.locked ? fresh.filter(p => p._send) : [];
+  if (lockedOut.length) fresh = fresh.filter(p => !p._send);
+  for (const p of outs) delete p._send;
   const gone = new Set(spent.map(p => p.secret)), cur = (S.proofs[op.mint] || []).filter(p => held.has(p.secret));
   const removed = sum(cur.filter(p => gone.has(p.secret))), added = sum(fresh);
   S.proofs[op.mint] = cur.filter(p => !gone.has(p.secret)).concat(plain(fresh));
   const waitingTx = op.txId && (txById(op.txId) || {}).status === 'pending' ? op.txId : null;   // a deposit waiting for exactly this: it gets it
   if (op.kind === 'receive' && added && waitingTx) updTx(waitingTx, { status: 'done', amount: added, ts: Date.now() });
   else if (op.kind === 'receive') { if (added) { addTx({ type: 'in', method: 'ecash', amount: added, fee: Math.max(0, op.amount - added), mint: op.mint, note: op.note || '', settled: true }); if (op.extra && S.extra) { S.extra = null; saveExtra(); } } }
-  else if (op.locked && removed > added) addTx({ type: 'out', method: 'ecash', amount: removed - added, mint: op.mint, note: 'Locked ecash an interrupted step made, which no wallet can restore', status: 'done', settled: true });
+  else if (lockedOut.length) {
+    const ps = plain(lockedOut), amount = Math.min(op.amount || sum(ps), sum(ps));
+    addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee: Math.max(0, removed - added - amount), mint: op.mint, note: op.note || '', status: 'pending', token: L.getEncodedToken({ mint: op.mint, proofs: ps, unit: 'sat' }), sent: ps, settled: true }, op.tx || {}));
+    if (removed - added - amount < 0) addTx({ type: 'in', method: 'ecash', amount: amount + added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true });
+  }
   else if (added > removed) addTx({ type: 'in', method: 'ecash', amount: added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true });
   else if (removed > added) addTx(added ? { type: 'out', method: 'fee', amount: 0, fee: removed - added, mint: op.mint, note: 'Mint fee for an interrupted step', status: 'done', settled: true }
     : { type: 'out', method: 'ecash', amount: removed, mint: op.mint, note: 'Ecash already spent elsewhere', status: 'done', settled: true });
@@ -1646,7 +1689,7 @@ function fmtDate(ms, withTime) {
   catch (e) { return d.toDateString(); }
 }
 // Notes NUTCADE writes itself (not ones you typed) are shown in your language.
-const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step)$|Ecash already spent elsewhere$|Locked ecash an interrupted step made|To |Zap to |Wallet Connect: |LNURL voucher$)|\((part \d+ of \d+|cancelled at the till)\)$/;
+const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step)$|Ecash already spent elsewhere$|To |Zap to |Wallet Connect: |LNURL voucher$)|\((part \d+ of \d+|cancelled at the till)\)$/;
 function noteText(n) {
   if (!n || !AUTO_NOTE.test(n)) return n;
   const m = /^(.*) \((part \d+ of \d+|cancelled at the till)\)$/.exec(n);   // your own words before the suffix stay as you typed them
@@ -2652,7 +2695,7 @@ async function sweepPhrase(phrase, urls, onStep) {
       }
       if (found.length) {
         const w = await getWallet(url);
-        const { r: mine, op } = await journaled(url, 'receive', { amount: sum(found), note: 'Restored from another phrase' }, cb => w.receive(found, { onCountersReserved: cb }));
+        const { r: mine, op } = await journaled(url, 'receive', { amount: sum(found), note: 'Restored from another phrase' }, (cb, o) => rRecv(o, w, found, { onCountersReserved: cb }));
         addProofs(url, mine); total += sum(mine);
         addTx({ type: 'in', method: 'ecash', amount: sum(mine), fee: Math.max(0, sum(found) - sum(mine)), mint: url, note: 'Restored from another phrase' });
         closeOp(op); save();
@@ -2671,7 +2714,7 @@ async function swapIn(token, note) {
   if (!dest || !supports(dest, 'mint', 'bolt11')) throw new Error('Your active mint must accept Lightning deposits to swap into it.');
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint);
   const fw = await getWallet(meta.mint), dw = await getWallet(dest.url);
-  const { r: got, op } = await journaled(meta.mint, 'receive', { amount: meta.amount, note: note || `Swapped from ${host(meta.mint)}` }, cb => fw.receive(token, Object.assign(S.p2pk.length ? { privkey: p2pkPrivs() } : {}, { onCountersReserved: cb })));
+  const { r: got, op } = await journaled(meta.mint, 'receive', { amount: meta.amount, note: note || `Swapped from ${host(meta.mint)}` }, (cb, o) => rRecv(o, fw, token, Object.assign(S.p2pk.length ? { privkey: p2pkPrivs() } : {}, { onCountersReserved: cb })));
   addProofs(meta.mint, got); closeOp(op); save();
   const total = sum(S.proofs[meta.mint]);
   let amt = total - Math.max(2, Math.ceil(total * 0.02)), mq, melt, need;

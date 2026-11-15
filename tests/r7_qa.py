@@ -882,6 +882,56 @@ async def main():
         await books(t3, 'paused-tab claim', b3, (A, B, FM))
         check('(round 3, 3) a claim in flight in a tab paused by a takeover: the new tab settles it, gets the 111 SAT once, books add up', ok and await t3.bal(B) == hb + 111 and not b3, (ok, await t3.bal(B) - hb, b3))
         await pg3.close(); await w.pg.reload(); await w.wait(1500); await fx.pg.context.close()
+        # (round 3, locked outputs) an interrupted gift (P2PK), bounty (HTLC) and Extra Life (locked to your own key) come
+        # back in full after a reload: the swap's outputs were on record, so the mint's signatures are fetched for them
+        await w.use(B); await w.receive_ln(3000)
+        async def interrupted(start, wait_s=1500):
+            n0 = await w.ev("Nutcade.S.txs.length"); bal0 = await w.bal(B)
+            await w.pg.route(f'{B}/v1/swap', held(8)); await start(); await w.wait(wait_s)
+            outs = await w.ev("Nutcade.S.ops.map(o=>o.outs.length)")
+            await w.pg.reload(); await w.wait(800); await w.pg.unroute(f'{B}/v1/swap')
+            ok = await w.until("Nutcade.S.ops.length===0", 60000); await w.wait(500)
+            return ok, outs, bal0, await w.ev(f"Nutcade.S.txs.slice(0, Nutcade.S.txs.length-{n0})")
+        async def gift_start():
+            await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.pg.check('#giftOn')
+            await w.ev("const s=document.querySelector('#giftTo'); if (s) { s.value=''; s.dispatchEvent(new Event('change',{bubbles:true})) }")
+            await w.fill('#giftKey', okey); await w.fill('#amtIn', '300'); await w.click('[data-act=doSendEcash]')
+        okey = await w.ev("(()=>{const k=crypto.getRandomValues(new Uint8Array(32)); return Array.from(CashuLib.getPubKeyFromPrivKey(k),x=>x.toString(16).padStart(2,'0')).join('')})()")
+        ok, outs, bal0, new = await interrupted(gift_start)
+        g = [t for t in new if t.get('type') == 'out' and t.get('method') == 'ecash' and t.get('token')]
+        sec = await w.ev(f"JSON.parse(CashuLib.getDecodedToken({json.dumps(g[0]['token'])}).proofs[0].secret)") if g else None
+        check('(round 3, locked) an interrupted gift (P2PK lock) is back after a reload as the same locked token: 300 SAT, locked to their key, back date kept, no loss line',
+              ok and outs and outs[0] > 0 and len(g) == 1 and g[0]['amount'] == 300 and g[0]['status'] == 'pending' and g[0].get('lockUntil') and sec and sec[0] == 'P2PK' and sec[1]['data'] == okey
+              and not any('no wallet can restore' in (t.get('note') or '') for t in new), (ok, outs, [(t.get('note'), t.get('amount'), t.get('status')) for t in new], sec and sec[0]))
+        if g:
+            fz = await wallet(b); await fz.create(); await fz.add_mint(B); _, ez, _ = await fz.receive_token(g[0]['token'])
+            check('(round 3, locked) the recovered gift token is live ecash (someone else is told it is locked, not spent)', 'locked' in (ez or '').lower() and 'spent' not in (ez or '').lower(), ez)
+            await fz.pg.context.close()
+        await books(w, 'interrupted gift', broken, (A, B, FM))
+        async def bounty_start():
+            await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(200)
+            await w.ev("Nutcade.startChallenge({game:'flipper', seed:4242, score:1200, by:'R3B'})"); await w.wait(300)
+            await w.fill('#bountyAmt', '250'); await w.click('[data-act=chalSend]')
+        ok, outs, bal0, new = await interrupted(bounty_start)
+        g = [t for t in new if t.get('type') == 'out' and t.get('method') == 'ecash' and t.get('token')]
+        sec = await w.ev(f"JSON.parse(CashuLib.getDecodedToken({json.dumps(g[0]['token'])}).proofs[0].secret)") if g else None
+        check('(round 3, locked) an interrupted bounty (HTLC lock) is back after a reload as its locked token: 250 SAT, it comes back to you on its date',
+              ok and outs and len(g) == 1 and g[0]['amount'] == 250 and g[0].get('lockUntil') and sec and sec[0] == 'HTLC', (ok, outs, [(t.get('note'), t.get('amount')) for t in new], sec and sec[0]))
+        await books(w, 'interrupted bounty', broken, (A, B, FM))
+        async def extra_start():
+            await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.until("!!document.querySelector('#xlTo')", 5000); await w.wait(150)
+            await w.ev("const s=document.querySelector('#xlTo'); s.value=[...s.options].find(o=>o.value).value; s.dispatchEvent(new Event('change',{bubbles:true}))")
+            await w.fill('#amtIn', '400'); await w.click('[data-act=extraStart]')
+        ok, outs, bal0, new = await interrupted(extra_start)
+        g = [t for t in new if t.get('type') == 'out' and t.get('method') == 'ecash' and t.get('token')]
+        check('(round 3, locked) an interrupted Extra Life lock (to your own key) is back after a reload as its token, 400 SAT',
+              ok and outs and len(g) == 1 and g[0]['amount'] == 400, (ok, outs, [(t.get('note'), t.get('amount')) for t in new]))
+        if g:
+            bb = await w.bal(B)
+            await w.click('[data-act=tab][data-tab=history]'); await w.wait(200); await w.ev(f"Nutcade.closeSheet(); document.querySelector('#txList [data-id=\"{g[0]['id']}\"]')?.click()"); await w.wait(300)
+            await w.click('#layer [data-act=reclaim]'); ok2 = await w.until(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(g[0]['id'])}).status==='reclaimed'", 30000)
+            check('(round 3, locked) and you can take it back into your balance', ok2 and await w.bal(B) >= bb + 398, (ok2, await w.bal(B) - bb))
+        await w.ev("Nutcade.closeSheet()"); await books(w, 'interrupted Extra Life', broken, (A, B, FM))
         # (round 3, item 4) one mint that never answers doesn't stop the background check for the others
         async def hang(route):
             await asyncio.sleep(400)

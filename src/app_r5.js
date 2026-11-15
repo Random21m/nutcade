@@ -16,7 +16,7 @@ async function createBounty(c, k, amount) {
   if (!(await mintCan(S.active, 14))) throw new Error(`${host(S.active)} can't lock sats to a secret (NUT-14). Pick another mint for bounties.`);
   const pre = rnd(32), H = await sha256hex(pre), until = Math.floor(Date.now() / 1000 + ((window.__nutcadeTest && __nutcadeTest.bountySecs) || BOUNTY_DAYS * 86400));
   const g = gameById(c.game);
-  const tx = await sendEcash(amount, `Bounty for ${k.name}: beat ${pad6(c.score)} on ${g ? g.name : c.game}`, '02' + k.pubkey, S.active, { locktime: until, hashlock: H });
+  const tx = await sendEcash(amount, `Bounty for ${k.name}: beat ${pad6(c.score)} on ${g ? g.name : c.game}`, '02' + k.pubkey, S.active, { locktime: until, hashlock: H, txx: { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name } });
   updTx(tx.id, { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name, bounty: c.id });
   c.bounties = (c.bounties || []).concat([{ to: k.pubkey, name: k.name, txId: tx.id, pre: hex(pre), H, amount, until: until * 1000, state: 'open' }]);
   saveChallenges();
@@ -101,7 +101,7 @@ async function lockExtra(url, amount, heirPub, until, extraInputs) {
   const inputs = (extraInputs || []).concat(S.proofs[url] || []);
   if (sum(inputs) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
   const cfg = { send: { type: 'p2pk', options: { pubkey: myLockPub(), locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() };
-  const { r: { keep, send }, op } = await journaled(url, 'send', { inputs, locked: true, note: 'Extra Life' }, cb => w.send(amount, inputs, { includeFees: true, onCountersReserved: cb }, cfg));
+  const { r: { keep, send }, op } = await journaled(url, 'send', { inputs, amount, locked: true, note: 'Extra Life', tx: { locked: myLockPub() } }, (cb, o) => rSend(o, w, amount, inputs, { includeFees: true, onCountersReserved: cb }, cfg));
   const used = new Set(inputs.map(p => p.secret));
   S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep)); closeOp(op); save();
   return plain(send);
@@ -136,7 +136,7 @@ async function startExtra(amount, heir, days, auto) {
 async function continueExtra(quiet) {
   const x = S.extra; if (!x) return;
   const w = await getWallet(x.mint);
-  const { r: got, op } = await journaled(x.mint, 'receive', { amount: x.amount, note: `Extra Life cashed out (was for ${x.heir.name})`, extra: true }, cb => w.receive(extraToken(), { privkey: [myLockPriv()], onCountersReserved: cb }));
+  const { r: got, op } = await journaled(x.mint, 'receive', { amount: x.amount, note: `Extra Life cashed out (was for ${x.heir.name})`, extra: true }, (cb, o) => rRecv(o, w, extraToken(), { privkey: [myLockPriv()], onCountersReserved: cb }));
   const fresh = plain(got); closeOp(op); save();
   const until = Date.now() + x.days * 86400e3;
   let proofs;
