@@ -408,6 +408,7 @@ async def main():
         await w.ev("Nutcade.closeSheet()"); await books(w, 'unblocked claim', broken)
         await w.home(); await w.receive_token(tokB); check('block: after unblocking, tokens from the mint are accepted again', await w.bal(B) >= ba - 100 + 120 + 150 - 2)
         await books(w, 'unblocked token', broken)
+        tokH, _ = await fr.send_ecash(50, 'For the heirloom test')   # (round 2, item 3) a plain token, held as an Extra Life copy below
         # (fix 7) a single mint with sats, blocked: no Move button; it says why and offers Add a mint / Send from it
         await fr.ev("Nutcade.closeSheet()"); await fr.click('[data-act=tab][data-tab=mints]'); await fr.wait(200)
         await fr.ev(f"document.querySelector('[data-act=blockMint][data-url=\"{B}\"]').click()"); await fr.wait(250); t1 = await fr.sheet_text()
@@ -689,6 +690,12 @@ async def main():
         mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})
         check('(round 2, 2) nwc: a scoped app asking about an invoice it didn\'t pay gets a refusal (RESTRICTED), no preimage or fee, nothing paid', r['answer'] and r['answer']['result'] is None and r['answer']['error']['code'] == 'RESTRICTED' and 'preimage' not in json.dumps(r['answer']) and await w.ev("Nutcade.S.txs.length") == n0, r.get('answer'))
+        # (round 2, item 3) an Extra Life copy claimed by several background checks at once: claimed once, never "ended"
+        hb = await w.bal(B)
+        await w.ev(f"Nutcade.S.heirlooms.unshift({{from:'ff',name:'Kim',token:{json.dumps(tokH)},amount:50,mint:{json.dumps(B)},until:Date.now()-60000,state:'waiting',at:Date.now()}}); for(let i=0;i<3;i++) window.dispatchEvent(new Event('online'))")
+        await w.until("Nutcade.S.heirlooms[0].state!=='waiting'", 75000); await w.wait(3000)
+        check('(round 2, 3) an heirloom claimed by overlapping background checks ends up claimed (not "ended"), its sats arrive once', await w.ev("Nutcade.S.heirlooms[0].state") == 'claimed' and await w.bal(B) == hb + 50, (await w.ev("Nutcade.S.heirlooms[0].state"), await w.bal(B) - hb))
+        await books(w, 'heirloom claimed once', broken)
         # a total budget, two payments racing for it: one goes through
         uri2 = await make_nwc(w, 'Racer', 'total', 500); await w.ev("Nutcade.closeSheet()")
         i1, i2 = invoice(300, B), invoice(300, B)

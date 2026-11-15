@@ -2414,7 +2414,9 @@ function holdIncoming(token, note) {
   if (S.txs.some(t => t.incoming === cleanToken(token))) throw new Error('This token is already saved and waiting.');
   return addTx({ type: 'in', method: 'ecash', amount: meta.amount, mint: meta.mint, note: note || meta.memo || '', status: 'pending', incoming: cleanToken(token), offline: true });
 }
-async function claimSaved() {
+let claimingSaved = null;
+function claimSaved() { if (!claimingSaved) claimingSaved = claimSavedNow().finally(() => { claimingSaved = null; }); return claimingSaved; }   // one at a time
+async function claimSavedNow() {
   if (isOffline()) return 0;
   let n = 0;
   for (const t of S.txs.filter(t => t.status === 'pending' && t.incoming && t.offline && S.mints.find(m => m.url === t.mint))) {
@@ -3314,7 +3316,16 @@ document.addEventListener('keydown', e => {
   } if (e.key === 'Enter' && e.target.dataset && e.target.dataset.cw !== undefined && $('[data-act=gateConfirm]')) { e.preventDefault(); A.gateConfirm($('[data-act=gateConfirm]')); } if (e.key === 'Escape' && $('#layer .sheet')) closeSheet(); if (e.key === 'Enter' && e.target.id === 'mintUrl') A.addMintUrl($('[data-act="addMintUrl"]')); });
 
 /* ---------- background checks ---------- */
-async function backgroundTick(startup) {
+// one background check at a time: the timer, coming back online and opening the app can all ask for one, and two at
+// once could claim the same thing twice (the second then wrongly finding it "already spent")
+let tickRun = null, tickAt = 0;
+function backgroundTick(startup) {
+  if (tickRun && Date.now() - tickAt < 120e3) return tickRun;   // (one stuck for 2 minutes is left behind)
+  tickAt = Date.now();
+  const me = tickRun = tickBody(startup).finally(() => { if (tickRun === me) tickRun = null; });
+  return me;
+}
+async function tickBody(startup) {
   if (!S.seed || tabLocked) return;
   {
     const now = Date.now(), maxAge = 14 * 86400000;

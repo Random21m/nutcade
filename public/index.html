@@ -5533,7 +5533,9 @@ function holdIncoming(token, note) {
   if (S.txs.some(t => t.incoming === cleanToken(token))) throw new Error('This token is already saved and waiting.');
   return addTx({ type: 'in', method: 'ecash', amount: meta.amount, mint: meta.mint, note: note || meta.memo || '', status: 'pending', incoming: cleanToken(token), offline: true });
 }
-async function claimSaved() {
+let claimingSaved = null;
+function claimSaved() { if (!claimingSaved) claimingSaved = claimSavedNow().finally(() => { claimingSaved = null; }); return claimingSaved; }   // one at a time
+async function claimSavedNow() {
   if (isOffline()) return 0;
   let n = 0;
   for (const t of S.txs.filter(t => t.status === 'pending' && t.incoming && t.offline && S.mints.find(m => m.url === t.mint))) {
@@ -6152,7 +6154,7 @@ async function takeBackGift(t) {
   if (await checkClaim(t).catch(() => false)) return 'claimed';
   reclaiming.add(t.id);
   try { await receiveToken(t.token, `Gift came back${t.giftTo ? ' from ' + t.giftTo : ''}`, { own: true }); }
-  catch (e) { if (/already spent|spent/i.test(e.message || '')) { updTx(t.id, { status: 'claimed' }); return 'claimed'; } throw e; }
+  catch (e) { if (/already spent|spent/i.test(e.message || '')) { const cur = txById(t.id); if (cur && cur.status === 'reclaimed') return 'back'; updTx(t.id, { status: 'claimed' }); return 'claimed'; } throw e; }   // (an overlapping take-back that already got it isn't "claimed by them")
   finally { setTimeout(() => reclaiming.delete(t.id), 5000); }
   updTx(t.id, { status: 'reclaimed' });
   return 'back';
@@ -6889,10 +6891,14 @@ async function onExtraLife(p, from) {
   if (!old) { sfx('select'); toast(`${h.name} made you the heir of their Extra Life`, 'gold'); }
   if (tab === 'wallet' && !$('#layer .sheet')) refresh();
 }
+const claimingHeir = new Set();
 async function claimHeirlooms() {
   for (const h of S.heirlooms.filter(x => x.state === 'waiting' && Date.now() > x.until + 30e3)) {
+    if (claimingHeir.has(h.token)) continue;   // already being claimed: a second try would only find it spent
+    claimingHeir.add(h.token);
     try { await receiveToken(h.token, `Extra Life from ${h.name}`); h.state = 'claimed'; saveHeir(); sfx('coin'); toast(`${h.name}'s Extra Life passed to you: ${money(h.amount)}`, 'gold'); refresh(); }
-    catch (e) { if (/spent/i.test(e.message || '')) { h.state = 'ended'; saveHeir(); } }
+    catch (e) { if (/spent/i.test(e.message || '') && h.state === 'waiting') { h.state = 'ended'; saveHeir(); } }
+    finally { claimingHeir.delete(h.token); }
   }
 }
 
@@ -8471,7 +8477,16 @@ document.addEventListener('keydown', e => {
   } if (e.key === 'Enter' && e.target.dataset && e.target.dataset.cw !== undefined && $('[data-act=gateConfirm]')) { e.preventDefault(); A.gateConfirm($('[data-act=gateConfirm]')); } if (e.key === 'Escape' && $('#layer .sheet')) closeSheet(); if (e.key === 'Enter' && e.target.id === 'mintUrl') A.addMintUrl($('[data-act="addMintUrl"]')); });
 
 /* ---------- background checks ---------- */
-async function backgroundTick(startup) {
+// one background check at a time: the timer, coming back online and opening the app can all ask for one, and two at
+// once could claim the same thing twice (the second then wrongly finding it "already spent")
+let tickRun = null, tickAt = 0;
+function backgroundTick(startup) {
+  if (tickRun && Date.now() - tickAt < 120e3) return tickRun;   // (one stuck for 2 minutes is left behind)
+  tickAt = Date.now();
+  const me = tickRun = tickBody(startup).finally(() => { if (tickRun === me) tickRun = null; });
+  return me;
+}
+async function tickBody(startup) {
   if (!S.seed || tabLocked) return;
   {
     const now = Date.now(), maxAge = 14 * 86400000;

@@ -195,10 +195,14 @@ async function onExtraLife(p, from) {
   if (!old) { sfx('select'); toast(`${h.name} made you the heir of their Extra Life`, 'gold'); }
   if (tab === 'wallet' && !$('#layer .sheet')) refresh();
 }
+const claimingHeir = new Set();
 async function claimHeirlooms() {
   for (const h of S.heirlooms.filter(x => x.state === 'waiting' && Date.now() > x.until + 30e3)) {
+    if (claimingHeir.has(h.token)) continue;   // already being claimed: a second try would only find it spent
+    claimingHeir.add(h.token);
     try { await receiveToken(h.token, `Extra Life from ${h.name}`); h.state = 'claimed'; saveHeir(); sfx('coin'); toast(`${h.name}'s Extra Life passed to you: ${money(h.amount)}`, 'gold'); refresh(); }
-    catch (e) { if (/spent/i.test(e.message || '')) { h.state = 'ended'; saveHeir(); } }
+    catch (e) { if (/spent/i.test(e.message || '') && h.state === 'waiting') { h.state = 'ended'; saveHeir(); } }
+    finally { claimingHeir.delete(h.token); }
   }
 }
 

@@ -223,7 +223,7 @@ async def main():
         wait_s = max(0, (await w.ev("Nutcade.S.extra.until")) / 1000 - time.time()) + 35
         await w.wait(int(wait_s * 1000))
         await fr.ev("Nutcade.closeSheet(); window.dispatchEvent(new Event('online'))")
-        ok = await fr.until(f"{TOTAL} >= {fb + 790}", 25000)
+        ok = await fr.until(f"{TOTAL} >= {fb + 790} && Nutcade.S.heirlooms[0].state === 'claimed'", 25000)   # the state, not just the sats
         check("extra life: after the date, the heir's NUTCADE claims it", ok and await fr.ev("Nutcade.S.heirlooms[0].state") == 'claimed', (await fr.bal()) - fb)
         await w.ev("Nutcade.closeSheet(); window.dispatchEvent(new Event('online'))")
         ok = await w.until("!Nutcade.S.extra", 20000)

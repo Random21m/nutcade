@@ -158,7 +158,7 @@ async function takeBackGift(t) {
   if (await checkClaim(t).catch(() => false)) return 'claimed';
   reclaiming.add(t.id);
   try { await receiveToken(t.token, `Gift came back${t.giftTo ? ' from ' + t.giftTo : ''}`, { own: true }); }
-  catch (e) { if (/already spent|spent/i.test(e.message || '')) { updTx(t.id, { status: 'claimed' }); return 'claimed'; } throw e; }
+  catch (e) { if (/already spent|spent/i.test(e.message || '')) { const cur = txById(t.id); if (cur && cur.status === 'reclaimed') return 'back'; updTx(t.id, { status: 'claimed' }); return 'claimed'; } throw e; }   // (an overlapping take-back that already got it isn't "claimed by them")
   finally { setTimeout(() => reclaiming.delete(t.id), 5000); }
   updTx(t.id, { status: 'reclaimed' });
   return 'back';
