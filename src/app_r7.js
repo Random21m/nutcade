@@ -368,6 +368,8 @@ async function nwcDecrypt(c, enc, payload) {
 }
 
 let nwcSocks = [], nwcKeyNow = '', nwcRetry = 0, nwcChain = Promise.resolve();
+let nwcSince = 0;   // when this tab started answering (opened or unlocked): anything sent before is refused, never paid
+const NWC_MAX_AGE = 60;
 const nwcInfoSent = new Set();
 const nwcSeen = new Set(raw.get('nwcseen', []));
 const nwcWanted = () => !!(S.seed && S.nwc.length && !tabLocked && !(vault.on && !vault.open));
@@ -379,7 +381,8 @@ function nwcListen(force) {
   const pubs = S.nwc.map(c => c.pub), key = pubs.join(',') + '|' + nwcRelays().join(',');
   if (!force && key === nwcKeyNow && nwcSocks.some(s => s.readyState <= 1)) return;
   nwcStop(); nwcKeyNow = key;
-  const since = Math.floor(Date.now() / 1000) - 120;
+  if (!nwcSince) nwcSince = Math.floor(Date.now() / 1000);
+  const since = Math.floor(Date.now() / 1000) - 600;   // recent requests are fetched so they can be refused with an answer
   for (const r of nwcRelays()) {
     let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
     nwcSocks.push(ws);
@@ -412,7 +415,7 @@ function onNwcEvent(ev) {
   const p = (ev.tags || []).find(t => t[0] === 'p'); const c = p && S.nwc.find(x => x.pub === p[1]);
   if (!c || ev.pubkey !== c.client) return;
   const now = Math.floor(Date.now() / 1000), exp = (ev.tags || []).find(t => t[0] === 'expiration');
-  if (ev.created_at < now - 120 || ev.created_at > now + 300 || (exp && +exp[1] < now)) return;
+  if (ev.created_at < now - 600 || ev.created_at > now + 300 || (exp && +exp[1] < now)) return;
   if (!L.verifyEvent(ev)) return;
   nwcSeen.add(ev.id); raw.set('nwcseen', [...nwcSeen].slice(-300));
   nwcChain = nwcChain.then(() => nwcHandle(c.id, ev)).catch(() => {});
@@ -426,6 +429,9 @@ async function nwcHandle(id, ev) {
   const method = String(req && req.method || '');
   let result = null, error = null;
   try {
+    const now = Math.floor(Date.now() / 1000);
+    if (ev.created_at < nwcSince - 2) throw nwcErr('OTHER', 'NUTCADE was closed or locked when this request was sent, so it was not carried out. Send it again.');
+    if (now - ev.created_at > NWC_MAX_AGE) throw nwcErr('OTHER', 'This request is more than a minute old, so it was not carried out. Send it again.');
     if (!NWC_METHODS.includes(method)) throw nwcErr('NOT_IMPLEMENTED', `${method || 'This method'} is not supported.`);
     result = await NWC[method](c, req.params || {});
   } catch (e) { error = { code: e.nwc || 'INTERNAL', message: String(e.message || e).slice(0, 300) }; }
@@ -558,7 +564,8 @@ function readBudget() {
   const n = satsOf('amtIn'); if (!n || n <= 0) throw amtErr('Type the budget in SAT, like 10000, or pick No budget.', 'zero');
   return { per, sats: n };
 }
-const NWC_HONEST = 'Wallet Connect only answers while NUTCADE is open and unlocked in a browser tab. When it is closed, connected apps get no answer, and requests made meanwhile are not paid later.';
+const NWC_HONEST = 'Wallet Connect only answers while NUTCADE is open and unlocked in a browser tab. Requests sent while it is closed or locked, or more than a minute old, are refused, never paid later.';
+const seeAllField = on => `<label class="toggle" for="nwcAll"><span><span class="tl">Let this app see my whole wallet history</span><span class="th">Off, it sees only the payments and invoices it made itself. On, it sees every Lightning payment and invoice in this wallet: amounts, dates and descriptions.</span></span><input id="nwcAll" type="checkbox" ${on ? 'checked' : ''}></label>`;
 const NWC_WARN = 'Whoever has this connection can spend from this wallet without asking you: up to its budget, or your whole balance if there is no budget.';
 function openNwcNew() {
   if (needSeed()) return;
