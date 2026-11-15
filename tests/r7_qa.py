@@ -69,7 +69,7 @@ def error_strings():
             t = t.replace("\\'", "'").replace('\\"', '"')
             if re.match(r'^[A-Z][a-z]', t) and not t.endswith(': ') and not re.search(r"""nwcErr\(\s*'[A-Z_]+',\s*$""", s[max(0, m.start() - 40):m.start() + 7]):
                 out.add(t)
-    out |= {"Mint B didn't answer in time. Try again in a moment.", "The mint didn't answer in time. Try again in a moment.", 'NUTCADE is open in another tab.', "The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
+    out |= {"Mint B didn't answer in time. Try again in a moment.", "The mint didn't answer in time. Try again in a moment.", 'Restore ecash from another phrase', 'NUTCADE is open in another tab.', "The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
             'This invoice is already paid. NUTCADE is collecting the ecash from the mint, and it shows here as soon as it is in.', 'COLLECTING',
             'Mint fee for moving ecash under your phrase', 'Mint fee for an interrupted step', 'Mint fee for keeping Extra Life going', 'Ecash already spent elsewhere',
             'Some of this ecash was already spent. NUTCADE removed 1,234 SAT of spent ecash from your balance (see your notes). Try again with what is left.'}
@@ -1128,6 +1128,11 @@ async def main():
         bname = await w.ev(f"Nutcade.S.mints.find(m=>m.url==={json.dumps(B)}).name")
         check('(round 4, 5) a mint request past its time limit says "<mint name> didn\'t answer in time. Try again in a moment.", with no raw address', er.startswith(f"{bname} didn't answer in time. Try again in a moment.") and 'http' not in er, er)
         await books(w, 'mint timed out', broken, (A, B, FM))
+        # (round 4, 6) Settings has Restore ecash from another phrase, and it opens
+        await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
+        vis = await w.ev("(b=>!!b&&b.getClientRects().length>0)(document.querySelector('[data-act=sweepOpen]'))")
+        await w.click('[data-act=sweepOpen]'); await w.wait(300); st6 = await w.sheet_text(); await w.ev("Nutcade.closeSheet()")
+        check('(round 4, 6) Settings shows "Restore ecash from another phrase", and it opens the restore screen', vis and 'Other 12 words' in st6, (vis, st6[:80]))
         # an interrupted cash-out: the Extra Life is closed when it settles, and the heir's copy is marked ended
         async def cash_start():
             await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')

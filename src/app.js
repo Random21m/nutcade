@@ -2129,7 +2129,7 @@ function viewSettings() {
       <div class="row between tiny"><span>Recovery phrase backed up</span><span style="color:${S.seed && S.seed.backedUp ? 'var(--lime)' : 'var(--red)'}">${S.seed && S.seed.backedUp ? 'YES' : 'NOT YET'}</span></div>
       <div class="row between tiny"><span>Protected from browser clean-up</span><span style="color:${persisted ? 'var(--lime)' : 'var(--gold)'}">${persisted ? 'YES' : persisted === false ? 'NOT GRANTED' : 'CHECKING'}</span></div>
       ${persisted ? '' : '<div class="th">On iPhone, add NUTCADE to your home screen so Safari keeps its data.</div>'}
-      <div class="row wrap"><button class="btn sm gold" data-act="seedShow">Show recovery phrase</button><button class="btn sm violet" data-act="findLost">Find lost ecash</button></div>
+      <div class="row wrap"><button class="btn sm gold" data-act="seedShow">Show recovery phrase</button><button class="btn sm violet" data-act="findLost">Find lost ecash</button><button class="btn sm" data-act="sweepOpen">Restore ecash from another phrase</button></div>
       <div class="sub">Mint list on Nostr</div>
       ${toggle('nostrBackup', 'Back up my mint list to Nostr', 'Saves the list of mints you use, encrypted with a key from your 12 words, so restoring finds them for you. Works with cashu.me.')}
       ${S.prefs.nostrBackup ? `<div class="row between tiny"><span>Last backup</span><span style="color:${S.prefs.mintBackupAt ? 'var(--lime)' : 'var(--gold)'}">${mintBackupState === 'saving' ? 'SAVING…' : S.prefs.mintBackupAt ? timeAgo(S.prefs.mintBackupAt * 1000).toUpperCase() : mintBackupState === 'failed' ? 'RELAYS DIDN\'T ANSWER' : 'NOT YET'}</span></div><button class="btn sm" data-act="mintBackupNow">Back up now</button>` : ''}
