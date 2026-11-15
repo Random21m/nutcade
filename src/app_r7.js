@@ -492,7 +492,8 @@ const NWC = {
       if (balanceOf(m.url) >= sats + num(q.fee_reserve)) { mq = q; url = m.url; break; }
     }
     if (!mq) throw nwcErr('INSUFFICIENT_BALANCE', `Not enough sats for ${sats} sat plus the Lightning fee reserve in any one mint.`);
-    const need = sats + num(mq.fee_reserve), left = nwcLeft(c);
+    // the budget is checked against the most this payment can cost: amount, Lightning fee reserve and the mint's fees
+    const need = meltCost(url, sats, mq.fee_reserve).total, left = nwcLeft(c);
     if (left != null && need > left) { toast(`${c.name} asked to pay ${money(sats)}, more than its budget has left, so NUTCADE refused.`, 'gold'); throw nwcErr('QUOTA_EXCEEDED', `Over budget: this payment needs up to ${need} sat with its fee reserve, and ${left} sat of the budget is left.`); }
     if (!S.nwc.find(x => x.id === c.id)) throw nwcErr('UNAUTHORIZED', 'This connection was revoked.');
     let tx;

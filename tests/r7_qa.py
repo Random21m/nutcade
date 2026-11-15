@@ -494,6 +494,17 @@ async def main():
         r = await nwc(w, uri, 'pay_invoice', {'invoice': invoice(400, B)})
         check('nwc: a payment past the budget answers QUOTA_EXCEEDED and pays nothing', r['answer']['error'] and r['answer']['error']['code'] == 'QUOTA_EXCEEDED' and await w.ev("Nutcade.S.txs.length") == n0 and await w.bal() == ba, r['answer'])
         await books(w, 'nwc budget', broken)
+        # (fix 1) fee mint, budget = amount + Lightning reserve only: refused, since the mint's fees could push it over
+        uriT = await make_nwc(w, 'Tight', 'total', 12); await w.ev("Nutcade.closeSheet()"); await w.use(A); n0 = await w.ev("Nutcade.S.txs.length")
+        r = await nwc(w, uriT, 'pay_invoice', {'invoice': invoice(10, B)})
+        check('(fix 1) nwc: on the fee mint, a 10 SAT invoice against a 12 SAT budget (amount + reserve) is refused: the worst case includes the mint fee', r['answer']['error'] and r['answer']['error']['code'] == 'QUOTA_EXCEEDED' and await w.ev("Nutcade.S.txs.length") == n0, r['answer'])
+        cost = await w.ev(f"(async()=>{{const q=await (await fetch('{A}/v1/melt/quote/bolt11',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{request:{json.dumps(invoice(10, B))},unit:'sat'}})}})).json(); return Nutcade.r7.meltCost({json.dumps(A)}, q.amount, q.fee_reserve)}})()")
+        await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.ev("[...document.querySelectorAll('#set-nwc [data-act=nwcEdit]')].pop().click()"); await w.wait(200)
+        await w.fill('#amtIn', str(cost['total'])); await w.click('[data-act=nwcSave]'); await w.wait(300)
+        r = await nwc(w, uriT, 'pay_invoice', {'invoice': invoice(10, B)})
+        sp = await w.ev("(c=>Nutcade.S.txs.filter(t=>t.nwc===c.id&&t.type==='out'&&t.status!=='failed').reduce((s,t)=>s+t.amount+(t.fee||0),0))(Nutcade.S.nwc.find(c=>c.name==='Tight'))")
+        check('(fix 1) nwc: with the budget at the worst case it pays, and what it really cost stays within the budget', r['answer']['error'] is None and 10 < sp <= cost['total'], (r['answer'], sp, cost))
+        await books(w, 'nwc tight budget', broken)
         # a total budget, two payments racing for it: one goes through
         uri2 = await make_nwc(w, 'Racer', 'total', 500); await w.ev("Nutcade.closeSheet()")
         i1, i2 = invoice(300, B), invoice(300, B)

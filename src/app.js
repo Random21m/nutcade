@@ -271,6 +271,7 @@ async function getWallet(url) {
   const p = (async () => {
     const w = new L.Wallet(url, { unit: 'sat', bip39seed: seedFor(), counterSource });
     await w.loadMint();
+    p.ready = w;   // for the few places that need it without waiting (the cost shown on a pay screen)
     return w;
   })();
   wallets[url] = p;
@@ -490,6 +491,25 @@ async function sendEcash(amount, note, lockTo, url = S.active, opts = {}) {
   // fee the token carries so the receiver gets the full amount
   return addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(have) - sum(keep) - amount), mint: url, note, status: 'pending', token, sent: plain(send), locked: lockTo || null });
 }
+/* The most a payment from a mint can take from the balance, worked out before paying: the amount, the Lightning
+   fee reserve (unused reserve comes back as change), and the mint's input fees (NUT-02) for getting the ecash
+   ready (a swap that may spend every coin at that mint) and for the coins the payment itself spends. Shown on every
+   screen that asks you to confirm a payment, and used for Wallet Connect budgets. */
+function meltCost(url, amount, reserve) {
+  amount = num(amount); reserve = num(reserve);
+  const w = (wallets[url] || {}).ready, have = S.proofs[url] || [];
+  let mintFee = 0;
+  if (w && have.length) {
+    const fee = (n, id) => { try { return num(w.getFeesForKeyset(n, id || have[0].id)); } catch (e) { return 0; } };
+    const coins = a => { let c = 0; for (let x = a; x > 0; x = Math.floor(x / 2)) c += x % 2; return c; };
+    let swap = 0; try { swap = num(w.getFeesForProofs(have)); } catch (e) { swap = fee(have.length); }
+    let kid = have[0].id; try { kid = w.keysetId; } catch (e) {}
+    let r = 0; for (let j = 0; j < 4; j++) r = fee(coins(amount + reserve + r), kid);
+    mintFee = swap + r;
+  }
+  return { amount, reserve, mintFee, total: amount + reserve + mintFee };
+}
+const costRows = c => `<dt>Fee reserve</dt><dd>${money(c.reserve)}</dd>${c.mintFee ? `<dt>Mint fee, at most</dt><dd>${money(c.mintFee)}</dd>` : ''}<dt>Total, at most</dt><dd>${money(c.total)}</dd>`;
 async function meltQuote(kind, dest, amount) {
   const w = await getWallet(S.active);
   if (kind === 'ln') return w.createMeltQuoteBolt11(dest);
@@ -3260,7 +3280,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed } };
+window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed } };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}
