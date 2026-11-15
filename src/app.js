@@ -223,7 +223,7 @@ async function restoreFromMintNow(url, onStep, opts) {
   if (!S.mints.find(m => m.url === url)) await addMint(url);
   const w = await getWallet(url);
   // change of a payment that is still being recovered belongs to that payment: credit it there first (lowering its fee)
-  for (const p of S.pending.filter(p => p.mint === url && p.paid && p.ctr && !p.changeDone)) { await reconcile(p, { force: true }); if (S.pending.includes(p)) throw new Error("The mint didn't answer. Try again in a moment."); }
+  for (const p of S.pending.filter(p => p.mint === url && p.paid && p.ctr && !p.changeDone)) { await reconcile(p, { force: true }); if (S.pending.some(x => x.id === p.id)) throw new Error("The mint didn't answer. Try again in a moment."); }
   const keysets = w.keyChain.getKeysets().filter(k => k.unit === 'sat');
   let found = [];
   for (const k of keysets) {
