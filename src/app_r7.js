@@ -376,7 +376,7 @@ async function nwcDecrypt(c, enc, payload) {
 }
 
 let nwcSocks = [], nwcKeyNow = '', nwcRetry = 0, nwcChain = Promise.resolve();
-let nwcSince = 0;   // when this tab started answering (opened or unlocked): anything sent before is refused, never paid
+let nwcSince = Math.floor(Date.now() / 1000);   // when this tab opened (reset when it is unlocked): anything sent before is refused, never paid
 // one age rule for every request: older than 60 s (or dated more than 60 s ahead) when it is handled is refused, never
 // carried out. Requests up to 10 minutes old are still fetched, only to answer them with that refusal.
 const NWC_MAX_AGE = 60, NWC_ANSWER_REFUSALS = 600;
@@ -391,7 +391,6 @@ function nwcListen(force) {
   const pubs = S.nwc.map(c => c.pub), key = pubs.join(',') + '|' + nwcRelays().join(',');
   if (!force && key === nwcKeyNow && nwcSocks.some(s => s.readyState <= 1)) return;
   nwcStop(); nwcKeyNow = key;
-  if (!nwcSince) nwcSince = Math.floor(Date.now() / 1000);
   const since = Math.floor(Date.now() / 1000) - NWC_ANSWER_REFUSALS;   // recent requests are fetched so they can be refused with an answer
   for (const r of nwcRelays()) {
     let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
@@ -440,8 +439,9 @@ async function nwcHandle(id, ev) {
   let result = null, error = null;
   try {
     const now = Math.floor(Date.now() / 1000);
-    if (ev.created_at < nwcSince - 2) throw nwcErr('OTHER', 'NUTCADE was closed or locked when this request was sent, so it was not carried out. Send it again.');
     if (now - ev.created_at > NWC_MAX_AGE) throw nwcErr('OTHER', 'This request is more than a minute old, so it was not carried out. Send it again.');
+    // sent while this tab wasn't answering (closed or locked); one sent in the very second it started counts as before: refused
+    if (ev.created_at <= nwcSince) throw nwcErr('OTHER', 'NUTCADE was closed or locked when this request was sent, so it was not carried out. Send it again.');
     if (ev.created_at - now > NWC_MAX_AGE) throw nwcErr('OTHER', "This request is dated more than a minute ahead of this device's clock, so it was not carried out."); 
     if (!NWC_METHODS.includes(method)) throw nwcErr('NOT_IMPLEMENTED', `${method || 'This method'} is not supported.`);
     result = await NWC[method](c, Object.assign({}, req.params || {}, { _ts: ev.created_at }));

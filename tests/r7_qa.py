@@ -543,6 +543,7 @@ async def main():
         check('nwc: notifications payment_sent and payment_received are sent to the app', (23197, 'payment_sent') in kinds and (23197, 'payment_received') in kinds, kinds)
         r = await nwc(w, uri, 'make_invoice_x')
         check('nwc: an unknown method answers NOT_IMPLEMENTED', r['answer']['error']['code'] == 'NOT_IMPLEMENTED', r['answer'])
+        await w.until("Date.now()/1000 - Nutcade.r7.nwcSince() > 40", 60000)   # backdated requests below must not predate this tab's answering
         n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': invoice(77, B)}, age=90, wait=6)
         check('(fix 6) nwc: a request more than a minute old is refused with an error, not paid', r['answer'] and r['answer']['error'] and r['answer']['error']['code'] == 'OTHER' and 'minute old' in r['answer']['error']['message'] and await w.ev("Nutcade.S.txs.length") == n0, r.get('answer'))
