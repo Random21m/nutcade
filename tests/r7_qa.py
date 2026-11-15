@@ -1315,6 +1315,10 @@ async def main():
         pv = await w.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(invP)}).preimage"); ph = await w.ev(f"Nutcade.r7.decodeBolt11({json.dumps(invP)}).paymentHash")
         check('(round 3, 5) a payment closed from its coins\' state gets its preimage from the mint later, and it matches the invoice', p0 and p0[0] == 'done' and ok and pv and __import__('hashlib').sha256(bytes.fromhex(pv)).hexdigest() == ph, (p0, pv))
         await books(w, 'preimage later', broken, (A, B, FM))
+        # (round 5, 2) French says "vous" throughout: no "tu" form anywhere in its dictionary or patterns
+        frv = await w.ev("[...Object.values(NUTCADE_I18N.fr.t), ...(NUTCADE_I18N.fr.re||[]).map(r=>String(r[1]))]")
+        tu = [v for v in frv if re.search(r"(^|[^\w-])(tu|ton|ta|tes|toi|Encaisse-la)(?![\w-])|(^|[.!?]\s+)Réessaie(?!\w)", v, re.I)]
+        check(f'(round 5, 2) French uses "vous" everywhere: none of its {len(frv)} strings has a "tu" form (tu, ton, ta, tes, toi, Réessaie, Encaisse-la)', len(frv) > 500 and not tu, tu[:5])
         # (round 3, go 3) every error message the app can show is translated, in every language
         errs = error_strings(); untr = {}
         for lang in ('de', 'es', 'pt', 'fr'):
