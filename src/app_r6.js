@@ -115,8 +115,9 @@ async function openChest(pub) {
     huntWon({ pub }, tx);
     sfx('levelup'); celebrate('in', tx.amount); toast(`Treasure! ${money(tx.amount)} is yours`, 'lime'); refresh();
   } catch (e) {
+    if (/spent/i.test(e.message || '') && e.op) await settleOp(e.op.id).catch(() => {});   // our own claim's record first: it may have got it after all
     if (f.state === 'won') return;
-    f.state = /spent/i.test(e.message || '') && !S.ops.some(o => o.follow && o.follow.k === 'hunt' && o.follow.pub === pub) ? 'gone' : 'hunting'; saveFound();
+    f.state = /spent/i.test(e.message || '') ? 'gone' : 'hunting'; saveFound();
     if (f.state === 'gone') { sfx('err'); toast('Someone opened this chest first!', 'pink'); }
     else showErr(e);
   }

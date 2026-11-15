@@ -103,7 +103,7 @@ async function claimBounty(rec, pre, from) {
   const unlocked = L.getEncodedToken({ mint: d.mint, unit: 'sat', proofs: d.proofs.map(p => Object.assign({}, p, { witness: JSON.stringify({ preimage: pre }) })) });
   const who = nameFor(rec.pubkey) || rec.by, g = gameById(rec.game);
   try { await receiveToken(unlocked, `Bounty from ${who}: beat ${pad6(rec.score)} on ${g ? g.name : rec.game}`, { follow: { k: 'bounty-won', rec: rec.id } }); }
-  catch (e) { if (/spent/i.test(e.message || '') && b.state !== 'won') { b.state = 'gone'; saveChallenges(); } return; }
+  catch (e) { if (/spent/i.test(e.message || '') && b.state !== 'won') { if (e.op) await settleOp(e.op.id).catch(() => {}); if (b.state !== 'won') { b.state = 'gone'; saveChallenges(); } } return; }
   bountyWon({ rec: rec.id });
   sfx('levelup'); celebrate('in', b.amount); toast(`You won ${who}'s ${money(b.amount)} bounty!`, 'lime'); refresh();
 }
@@ -253,7 +253,9 @@ async function claimHeirlooms() {
     if (claimingHeir.has(h.token)) continue;   // already being claimed: a second try would only find it spent
     claimingHeir.add(h.token);
     try { await receiveToken(h.token, `Extra Life from ${h.name}`, { follow: { k: 'heir', token: h.token } }); heirClaimed({ token: h.token }); sfx('coin'); toast(`${h.name}'s Extra Life passed to you: ${money(h.amount)}`, 'gold'); refresh(); }
-    catch (e) { if (/spent/i.test(e.message || '') && h.state === 'waiting' && !S.ops.some(o => o.follow && o.follow.k === 'heir' && o.follow.token === h.token)) { h.state = 'ended'; saveHeir(); } }
+    catch (e) {   // "already spent": our own claim's record is settled first (it may have got it after all), then it ended
+      if (/spent/i.test(e.message || '') && h.state === 'waiting') { if (e.op) await settleOp(e.op.id).catch(() => {}); if (h.state === 'waiting') { h.state = 'ended'; saveHeir(); } }
+    }
     finally { claimingHeir.delete(h.token); }
   }
 }
