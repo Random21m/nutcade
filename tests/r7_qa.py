@@ -789,6 +789,48 @@ async def main():
         await w.click('[data-act=doRestorePhrase]'); await w.until("/SCAN COMPLETE|CONTINUE/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 120000); rtxt = await w.sheet_text()
         check('(round 2, C) a restore from the 12 words after the recovery-failure and race cases finds nothing extra', 'SCAN COMPLETE' in rtxt and await w.bal() == bal0 and await w.ev("Nutcade.S.txs.length") == n0, (rtxt[:120], await w.bal() - bal0))
         await w.ev("Nutcade.closeSheet()"); await books(w, 'restore from 12 words', broken, (A, B, FM))
+        # ================= round 3 =================
+        def held(delay):   # the mint does it at once; its answer reaches the page `delay` s later
+            async def h(route):
+                try: r = await route.fetch()
+                except Exception: return
+                await asyncio.sleep(delay)
+                try: await route.fulfill(response=r)
+                except Exception: pass
+            return h
+        async def find_lost():
+            await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
+            await w.click('[data-act=findLost]'); await w.wait(500); await w.until("!document.querySelector('[data-act=findLost] .spinner')", 120000); await w.wait(500)
+        RECB = lambda m: f"Nutcade.S.txs.filter(t=>t.note==='Recovered with recovery phrase'&&t.mint==={json.dumps(m)}).length"
+        async def ln_pay_start(M, inv):
+            await w.use(M); await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=sendMethod][data-m=ln]'); await w.wait(100)
+            await w.fill('#destIn', inv); await w.click('[data-act=doMeltQuote]'); await w.until("!!document.querySelector('#payBtn')", 20000); await w.click('#payBtn')
+        await w.pg.route_web_socket(re.compile(r'127\.0\.0\.1:33(38|39|40)'), lambda ws: None)   # no live updates from the mints: polling only
+        await w.pg.reload(); await w.wait(1500)
+        # (round 3, item 1a) Find lost ecash while a payment's answer is on its way: its change is the payment's, never "Recovered"
+        for M, O in ((B, A), (A, B)):
+            nrec = await w.ev(RECB(M)); inv = invoice(900, O)
+            await w.pg.route(f'{M}/v1/melt/bolt11', held(7)); await ln_pay_start(M, inv)
+            await w.wait(2500); await find_lost()
+            await w.until(f"(t=>t&&t.status==='done'&&!t.changePending)(Nutcade.S.txs.find(t=>t.request==={json.dumps(inv)}))", 60000); await w.pg.unroute(f'{M}/v1/melt/bolt11')
+            t1 = await w.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(inv)})")
+            check(f'(round 3, 1a) {M[-4:]}: Find lost ecash during a slow payment answer: the change goes to the payment once, no Recovered line', change_ok(900, t1) and await w.ev(RECB(M)) == nrec, (t1 and (t1['fee'], t1.get('change')), await w.ev(RECB(M)) - nrec))
+            await books(w, 'find lost during slow payment ' + M[-4:], broken, (A, B, FM))
+        # (round 3, item 1b) Find lost ecash while a token claim, then a token make, is waiting for the mint's answer
+        await w.use(B); tokC, _ = await w.send_ecash(700, 'r3 claim'); nrec = await w.ev(RECB(B))
+        await w.pg.route(f'{B}/v1/swap', held(6))
+        await w.home(); await w.click('[data-act=receive]'); await w.wait(150); await w.click('[data-act=recvMethod][data-m=ecash]'); await w.wait(100); await w.fill('#tokIn', tokC); await w.click('[data-act=doReceiveToken]')
+        await w.wait(1500); await w.ev("Nutcade.closeSheet()"); await find_lost()
+        await w.until(f"Nutcade.S.txs.some(t=>t.token==={json.dumps(tokC)}&&t.status==='reclaimed')", 30000); await w.wait(1000)
+        check('(round 3, 1b) Find lost ecash during a token claim: the claim records the ecash once, no Recovered line', await w.ev(RECB(B)) == nrec and await w.ev("Nutcade.S.ops.length") == 0, await w.ev(RECB(B)) - nrec)
+        await books(w, 'find lost during a claim', broken, (A, B, FM))
+        n0 = await w.ev("Nutcade.S.txs.length")
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '900'); await w.click('[data-act=doSendEcash]')
+        await w.wait(1500); await w.ev("Nutcade.closeSheet()"); await find_lost()
+        await w.until("Nutcade.S.txs.some(t=>t.type==='out'&&t.method==='ecash'&&t.amount===900&&t.token)", 30000); await w.pg.unroute(f'{B}/v1/swap'); await w.wait(1000)
+        tm = await w.ev("Nutcade.S.txs.find(t=>t.type==='out'&&t.method==='ecash'&&t.amount===900&&t.token)")
+        check('(round 3, 1b) Find lost ecash during a token make: the token is 900 SAT with no fee (no-fee mint), no Recovered line', tm and tm['fee'] == 0 and await w.ev(RECB(B)) == nrec, tm and tm['fee'])
+        await books(w, 'find lost during a make', broken, (A, B, FM))
         # (round 2, item 2) a scoped app asking to pay an invoice the user already paid learns nothing and pays nothing
         mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})

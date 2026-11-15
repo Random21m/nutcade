@@ -101,8 +101,9 @@ async function lockExtra(url, amount, heirPub, until, extraInputs) {
   const inputs = (extraInputs || []).concat(S.proofs[url] || []);
   if (sum(inputs) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
   const cfg = { send: { type: 'p2pk', options: { pubkey: myLockPub(), locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() };
-  const { keep, send } = await withRepair(url, () => w.send(amount, inputs, { includeFees: true }, cfg));
-  S.proofs[url] = plain(keep); save();
+  const { r: { keep, send }, op } = await journaled(url, 'send', { inputs, locked: true, note: 'Extra Life' }, cb => w.send(amount, inputs, { includeFees: true, onCountersReserved: cb }, cfg));
+  const used = new Set(inputs.map(p => p.secret));
+  S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep)); closeOp(op); save();
   return plain(send);
 }
 const extraToken = () => S.extra && L.getEncodedToken({ mint: S.extra.mint, unit: 'sat', proofs: S.extra.proofs });
@@ -135,7 +136,8 @@ async function startExtra(amount, heir, days, auto) {
 async function continueExtra(quiet) {
   const x = S.extra; if (!x) return;
   const w = await getWallet(x.mint);
-  const fresh = plain(await withRepair(x.mint, () => w.receive(extraToken(), { privkey: [myLockPriv()] })));
+  const { r: got, op } = await journaled(x.mint, 'receive', { amount: x.amount, note: `Extra Life cashed out (was for ${x.heir.name})`, extra: true }, cb => w.receive(extraToken(), { privkey: [myLockPriv()], onCountersReserved: cb }));
+  const fresh = plain(got); closeOp(op); save();
   const until = Date.now() + x.days * 86400e3;
   let proofs;
   try { proofs = await lockExtra(x.mint, x.amount, x.heir.pubkey, until, fresh); }
