@@ -259,14 +259,27 @@ async def main():
         check('voucher: the lnurlw:// form (LUD-17) works, into a chosen mint, for a fixed amount', await w.bal(B) == bB + 777, await w.bal(B) - bB)
         await books(w, 'voucher B', broken)
         # the service says no
-        for vid, mode, want in (('v3', 'error', 'The voucher service turned this down.'), ('v4', 'spent', 'This voucher was already used.')):
+        # (fix 3) a refusal never drops the invoice: it stays watched, and if the service pays it after all, it is minted
+        for vid, mode, want in (('v3', 'error', 'The voucher service turned this down.'), ('v4', 'spent', 'The voucher service says this voucher was already used.')):
             vv = mock('/test/lnurlw', {'id': vid, 'min': 10, 'max': 300, 'desc': 'Gift card', 'mode': mode}); ba = await w.bal(A)
-            await w.pg.route(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'), unpaid)
+            await w.pg.route(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'), unpaid)   # unpaid while the screen is read
             t = await withdraw(w, vv['lnurl'], 300)
-            await w.pg.unroute(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'))
-            ft = await w.ev("Nutcade.S.txs[0]")
-            check(f'voucher: a service ERROR ({mode}) says so in plain words, shows its reason, and that nothing was received or spent', want in t and 'Nothing was received and nothing was spent.' in t and ft['status'] == 'failed' and await w.bal(A) == ba, (t[:250], ft['status']))
-            await books(w, 'voucher ' + mode, broken)
+            ft = await w.ev("Nutcade.S.txs[0]"); kept = await w.ev("Nutcade.S.quotes.some(q=>q.txId===Nutcade.S.txs[0].id)")
+            check(f'voucher: a service ERROR ({mode}) is reported with its reason as not confirmed yet, the invoice is kept and watched, nothing spent', want in t and 'Not confirmed yet' in t and 'Nothing was spent.' in t and ft['status'] == 'pending' and kept and await w.bal(A) == ba, (t[:300], ft['status'], kept))
+            await w.pg.unroute(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'))   # the (test) mint now reports the invoice paid: as if the service paid after all
+            ok = await w.until(f"(Nutcade.S.proofs[{json.dumps(A)}]||[]).reduce((t,p)=>t+p.amount,0) >= {ba + 300}", 30000); await w.wait(500)
+            check(f'voucher: after a refusal ({mode}), the service paying later is still minted, exactly once', ok and await w.bal(A) == ba + 300 and (await w.ev(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(ft['id'])})") or {}).get('status') == 'done', await w.bal(A) - ba)
+            await w.ev("Nutcade.closeSheet()"); await books(w, 'voucher ' + mode, broken)
+        # refused, then never paid: it expires at the mint, and only then is it reported as over
+        mock('/test/lnurlw', {'id': 'v3x', 'min': 1, 'max': 120, 'desc': 'Refused', 'mode': 'error'}); ba = await w.bal(A)
+        await w.pg.route(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'), unpaid)
+        await withdraw(w, 'lnurlw://lnurl.test/lnurlw/v3x', 120)
+        await w.ev("(q=>{q.expiry=Math.floor(Date.now()/1000)+2})(Nutcade.S.quotes.find(q=>q.amount===120))")
+        await w.until("/expired/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 15000); t = await w.sheet_text()
+        await w.pg.unroute(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'))
+        et = await w.ev("Nutcade.S.txs.find(t=>t.note==='Refused')")
+        check('voucher: a refused voucher that never pays expires at the mint and says so, with nothing spent', 'never paid, and the invoice has expired' in t and et['status'] == 'expired' and await w.bal(A) == ba, (t[:200], et['status']))
+        await w.ev("Nutcade.closeSheet()"); await books(w, 'voucher refused, expired', broken)
         # nothing left on the voucher; a dead link; an unreachable service
         mock('/test/lnurlw', {'id': 'v5', 'min': 1, 'max': 100, 'mode': 'empty'})
         t = await withdraw(w, 'lnurlw://lnurl.test/lnurlw/v5')

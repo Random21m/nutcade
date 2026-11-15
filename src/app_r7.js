@@ -156,15 +156,11 @@ async function withdrawVoucher(v, sats, url) {
       return { tx, q, late: true, why: e.timeout ? `${v.host} didn't answer in time.` : `Couldn't reach ${v.host}.` };
     }
     if (r.status === 'ERROR' || (r.status && String(r.status).toUpperCase() !== 'OK')) {
-      // the service said no: one last look in case it paid anyway, then the invoice is dropped
-      // (a background check may be minting it at this very moment: wait for it rather than race it)
-      let st = 'busy';
-      for (let i = 0; i < 60 && st === 'busy'; i++) { st = q ? await checkQuote(q).catch(() => 'waiting') : 'gone'; if (st === 'busy') await sleep(250); }
-      if (st === 'paid' || (txById(tx.id) || {}).status === 'done') { wdUsed.add(v.k1); raw.set('lnurlwUsed', [...wdUsed].slice(-200)); return { tx, q, paid: true }; }
-      drop(); refresh();
+      // The service says no, but only the mint knows whether the invoice gets paid: it stays watched until it expires
+      // at the mint, and is minted if it is paid after all. Nothing is dropped because of what the service says.
       const used = /used|already|claimed|redeem|spent|exhaust|no (more )?(balance|funds)/i.test(r.reason || '');
       const exp = /expire/i.test(r.reason || '');
-      throw serviceErr(used ? 'This voucher was already used.' : exp ? 'This voucher has expired.' : 'The voucher service turned this down.', r.reason, 'Nothing was received and nothing was spent.');
+      return { tx, q, refused: used ? 'The voucher service says this voucher was already used.' : exp ? 'The voucher service says this voucher has expired.' : 'The voucher service turned this down.', reason: r.reason ? String(r.reason).slice(0, 200) : '' };
     }
     wdUsed.add(v.k1); raw.set('lnurlwUsed', [...wdUsed].slice(-200));
     return { tx, q };
@@ -177,7 +173,8 @@ function showWithdrawWait(res) {
   setBody(`<div class="label" style="text-align:center">Withdrawing</div>
     <div class="credit-num" style="text-align:center;font-size:26px">${fmt(tx.amount)}<small>${unitTag()}</small></div>
     ${res.late ? `<div class="notice">${esc(res.why)} If it pays, the sats arrive here while NUTCADE is open${until ? `, until the invoice expires on ${until}` : ''}.</div>` : ''}
-    <div class="row" style="justify-content:center"><span class="spinner" id="payState">WAITING FOR THE VOUCHER TO PAY</span></div>
+    ${res.refused ? `<div class="notice red">${esc(res.refused)}${res.reason ? `<div class="tiny muted raw" data-noi18n>${esc(res.reason)}</div>` : ''}</div><div class="notice">Not confirmed yet: NUTCADE keeps watching the invoice${until ? ` until it expires on ${until}` : ' until it expires'}, and the sats arrive if it is paid after all. Nothing was spent.</div>` : ''}
+    <div class="row" style="justify-content:center"><span class="spinner" id="payState">${res.refused ? 'STILL WATCHING' : 'WAITING FOR THE VOUCHER TO PAY'}</span></div>
     <div class="tiny muted" style="text-align:center">You can close this. NUTCADE keeps checking while it's open.</div>`, () => {
     if (!q) return null;
     let alive = true;
@@ -190,7 +187,7 @@ function showWithdrawWait(res) {
           const r = await checkQuote(q);
           if (r === 'paid') return done();
           if (r === 'expired' || (r === 'gone' && (txById(tx.id) || {}).status === 'expired')) {
-            if (alive) { alive = false; setBody(`${errHTML(serviceErr("The voucher didn't pay before the invoice expired.", '', 'Nothing was received and nothing was spent.'))}<button class="btn solid gold block" data-act="close">OK</button>`); refresh(); }
+            if (alive) { alive = false; setBody(`${errHTML(serviceErr(res.refused ? 'The voucher service never paid, and the invoice has expired.' : "The voucher didn't pay before the invoice expired.", '', 'Nothing was received and nothing was spent.'))}<button class="btn solid gold block" data-act="close">OK</button>`); refresh(); }
             return;
           }
         } catch (e) {}
