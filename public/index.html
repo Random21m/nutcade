@@ -8310,6 +8310,11 @@ function nwcPanel() {
 
 
 /* ---------- actions ---------- */
+/* The backup holds everything that can spend (it is kept private, like the phrase it contains), including the open
+   journal records: a step whose answer hasn't come yet (a gift, a bounty, Extra Life, a hunt...) keeps its saved
+   outputs and secrets, so the wallet restored from this backup settles it there. Settling is by secret at the mint, so
+   the same step settled on both devices gives the same coins, never two sets. */
+const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length) }, null, 1);
 const A = {
   close: () => closeSheet(),
   tab: b => { if (tab === 'history' && b.dataset.tab !== 'history') { histFilter = 'all'; histQuery = ''; histTag = ''; } tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); sfx('blip'); },
@@ -8383,7 +8388,7 @@ const A = {
   reconcileAll: b => run(b, '…', async () => { for (const p of [...S.pending]) await reconcile(p, { force: true }).catch(() => {}); refresh(); }),
   pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } refresh(); sfx('blip'); },
   backup: () => {
-    const data = JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs });
+    const data = backupData();
     openSheet('Backup', `<div class="notice red">This contains your recovery phrase and spendable ecash. Keep it private.</div><div class="code" style="max-height:200px">${esc(data)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(data)}">Copy backup</button>`);
   },
   restore: () => openSheet('Import backup', `<div class="field"><span class="flabel">Backup file</span><div class="row filepick"><label class="btn sm violet"><span>Choose a file</span><input id="restoreFile" type="file" accept=".json,application/json"></label><span id="restoreFileName" class="tiny muted">No file chosen</span></div></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`),
@@ -8405,8 +8410,12 @@ const A = {
       for (const h of d.hunts || []) if (!S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
       for (const k in d.found || {}) if (!S.found[k]) S.found[k] = d.found[k]; saveFound();
       for (const x of Array.isArray(d.blocked) ? d.blocked : []) if (x && typeof x.url === 'string' && /^https?:/i.test(x.url) && !isBlocked(x.url)) S.blocked.push({ url: normUrl(x.url), name: String(x.name || host(x.url)).slice(0, 60), at: +x.at || Date.now() }); saveBlocked();
+      // open steps from the backup are settled here, from their saved outputs (once each: by record, and by secret)
+      const opsIn = (Array.isArray(d.ops) ? d.ops : []).filter(o => o && o.id && typeof o.mint === 'string' && !S.ops.find(x => x.id === o.id)).map(o => Object.assign({ inputs: [], ctr: [], outs: [] }, o, { mint: normUrl(o.mint) }));
+      for (const o of opsIn) S.ops.push(o);
       if (!S.active && S.mints[0]) S.active = S.mints[0].url;
       save(); closeSheet(); render(); toast('Backup restored. Run Check proofs to drop spent ecash.', 'lime');
+      if (opsIn.length) setTimeout(async () => { for (const o of opsIn) { if (!S.mints.find(m => m.url === o.mint)) await addMint(o.mint).catch(() => {}); await settleOp(o.id).catch(() => {}); } refresh(); }, 0);
     } catch (e) { showErr(new Error(e.message.includes('JSON') ? "That isn't valid backup text." : e.message)); }
   },
   takeover: () => { try { chan && chan.postMessage({ t: 'takeover', id: TAB_ID }); } catch (e) {} location.reload(); },
@@ -8520,7 +8529,7 @@ const A = {
   jump: b => { const el = document.getElementById(b.dataset.id); if (el) el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); },
   setTheme: b => { S.prefs.theme = b.dataset.t; save(); refresh(); sfx('select'); },
   backupDownload: () => {
-    const data = JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked }, null, 1);
+    const data = backupData();
     try {
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
       a.download = `nutcade-backup-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(a); a.click(); a.remove();

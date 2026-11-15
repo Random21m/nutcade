@@ -1133,6 +1133,32 @@ async def main():
         vis = await w.ev("(b=>!!b&&b.getClientRects().length>0)(document.querySelector('[data-act=sweepOpen]'))")
         await w.click('[data-act=sweepOpen]'); await w.wait(300); st6 = await w.sheet_text(); await w.ev("Nutcade.closeSheet()")
         check('(round 4, 6) Settings shows "Restore ecash from another phrase", and it opens the restore screen', vis and 'Other 12 words' in st6, (vis, st6[:80]))
+        # (round 4, 7) a backup taken while a locked step is open holds its record: restored on another device, the step
+        # settles there as itself; the original settles it too; the two hold the very same coins (one set at the mint)
+        await w.use(B); okey3 = await w.ev("(()=>{const k=crypto.getRandomValues(new Uint8Array(32)); return Array.from(CashuLib.getPubKeyFromPrivKey(k),x=>x.toString(16).padStart(2,'0')).join('')})()")
+        await w.pg.route(f'{B}/v1/swap', held(15)); n7 = await w.ev("Nutcade.S.txs.length")
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.pg.check('#giftOn')
+        await w.ev("const s=document.querySelector('#giftTo'); if (s) { s.value=''; s.dispatchEvent(new Event('change',{bubbles:true})) }")
+        await w.fill('#giftKey', okey3); await w.fill('#amtIn', '333'); await w.click('[data-act=doSendEcash]'); await w.wait(2000)
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
+        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]')
+        bk = open(await (await dl.value).path()).read(); bkd = json.loads(bk)
+        nb = await wallet(b); await nb.create(); await nb.click('[data-act=tab][data-tab=settings]'); await nb.wait(150)
+        await nb.click('[data-act=restore]'); await nb.wait(150); await nb.pg.fill('#restoreIn', bk); await nb.click('[data-act=doRestore]')
+        okn = await nb.until("Nutcade.S.ops.length===0 && Nutcade.S.txs.some(t=>t.amount===333&&t.token&&t.status==='pending')", 60000); await nb.wait(800)
+        await w.until("Nutcade.S.ops.length===0 && Nutcade.S.txs.some(t=>t.amount===333&&t.token)", 60000); await w.pg.unroute(f'{B}/v1/swap'); await w.wait(800)
+        nbb = []; await books(nb, 'restored backup with an open step', nbb, (A, B, FM))
+        await nb.pg.reload(); await nb.wait(2500); await books(nb, 'restored backup, reloaded', nbb, (A, B, FM))
+        sw = await w.ev("Nutcade.S.txs.find(t=>t.amount===333&&t.token).sent.map(p=>p.secret).sort()")
+        sn = await nb.ev("Nutcade.S.txs.find(t=>t.amount===333&&t.token).sent.map(p=>p.secret).sort()")
+        lines_nb = await nb.ev("Nutcade.S.txs.filter(t=>t.amount===333&&t.token).length")
+        check('(round 4, 7) the backup holds the open step\'s record (its outputs and secrets) while it is open', len(bkd.get('ops') or []) == 1 and (bkd['ops'][0].get('outs') or []), [len(bkd.get('ops') or [])])
+        check('(round 4, 7) restored on a new device, the open gift settles there as itself (one locked 333 SAT token), history = balance, and again after a reload',
+              okn and lines_nb == 1 and not nbb, (okn, lines_nb, nbb))
+        check('(round 4, 7) the original device settles it too, with the very same coins (one set at the mint, never two), and both wallets show the same balance',
+              sw and sw == sn and await w.bal(B) == await nb.bal(B), (len(sw or []), len(sn or []), await w.bal(B), await nb.bal(B)))
+        await books(w, 'backup with an open step', broken, (A, B, FM))
+        await nb.pg.context.close()
         # an interrupted cash-out: the Extra Life is closed when it settles, and the heir's copy is marked ended
         async def cash_start():
             await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')
