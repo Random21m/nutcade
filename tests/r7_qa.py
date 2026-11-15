@@ -882,6 +882,20 @@ async def main():
         await books(t3, 'paused-tab claim', b3, (A, B, FM))
         check('(round 3, 3) a claim in flight in a tab paused by a takeover: the new tab settles it, gets the 111 SAT once, books add up', ok and await t3.bal(B) == hb + 111 and not b3, (ok, await t3.bal(B) - hb, b3))
         await pg3.close(); await w.pg.reload(); await w.wait(1500); await fx.pg.context.close()
+        # (round 3, item 4) one mint that never answers doesn't stop the background check for the others
+        async def hang(route):
+            await asyncio.sleep(400)
+        await w.use(FM); await w.receive_ln(800); await w.use(A)
+        await w.pg.route(f'{FM}/v1/melt/bolt11', hang); await ln_pay_start(FM, invoice(200, B)); await w.wait(1500); await w.ev("Nutcade.closeSheet()")
+        await w.pg.route(re.compile(re.escape(FM) + '/v1/.*'), hang)   # from now on FM accepts every request and never answers
+        fy = await wallet(b); await fy.create(); await fy.add_mint(B)
+        await w.use(B); tokH2, _ = await w.send_ecash(150, 'r3 claimed?'); await fy.receive_token(tokH2); await w.ev("Nutcade.closeSheet()")
+        t0 = __import__('time').time()
+        ok = await w.until(f"Nutcade.S.txs.some(t=>t.token==={json.dumps(tokH2)}&&t.status==='claimed')", 90000)
+        check('(round 3, 4) with one mint hung, the background check still runs for the others ("was my token claimed" answered)', ok, round(__import__('time').time() - t0))
+        await w.pg.unroute(re.compile(re.escape(FM) + '/v1/.*')); await w.pg.unroute(f'{FM}/v1/melt/bolt11'); await fy.pg.context.close()
+        await w.pg.reload(); await w.wait(1500); await w.until(f"!Nutcade.S.pending.some(p=>p.mint==={json.dumps(FM)})", 150000)
+        await books(w, 'hung mint', broken, (A, B, FM))
         # (round 2, item 2) a scoped app asking to pay an invoice the user already paid learns nothing and pays nothing
         mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})

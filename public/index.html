@@ -3158,6 +3158,20 @@ const vault = { on: raw.get('vault', null) != null, open: false, data: {}, dek: 
 // A tab paused because NUTCADE opened in another tab never writes the wallet again: work it still had in flight can't
 // overwrite what the active tab saved. (Counters still advance, so no secret is ever issued twice.)
 const writeGuard = { paused: false };
+/* Every request to a mint has a time limit, so one mint that accepts a request and never answers can't hold anything
+   else up: 20 s, or 2 minutes for a payment (a Lightning payment can take a while). A request cut off this way is
+   a lost answer, which the records below settle with the mint afterwards. */
+const MINT_MS = 20000, MELT_MS = 120000;
+{
+  const _fetch = window.fetch && window.fetch.bind(window);
+  if (_fetch) window.fetch = (input, init) => {
+    const u = String(typeof input === 'string' ? input : (input && input.url) || '').split('?')[0];
+    if (!/\/v1\/(info|keys|keysets|swap|mint|melt|checkstate|restore)\b/.test(u)) return _fetch(input, init);
+    const ms = /\/v1\/melt\/(bolt11|onchain)$/.test(u) ? MELT_MS : MINT_MS, ac = new AbortController(), t = setTimeout(() => ac.abort(), ms);
+    const sig = init && init.signal; if (sig) { if (sig.aborted) ac.abort(); else sig.addEventListener('abort', () => ac.abort(), { once: true }); }
+    return _fetch(input, Object.assign({}, init, { signal: ac.signal })).finally(() => clearTimeout(t));
+  };
+}
 const store = {
   get(k, d) { if (vault.on && VAULT_KEYS.includes(k)) return vault.open && vault.data[k] !== undefined ? vault.data[k] : d; return raw.get(k, d); },
   set(k, v) { if (writeGuard.paused && k !== 'counters') return false; if (vault.on && VAULT_KEYS.includes(k)) { if (!vault.open) return false; vault.data[k] = v; queueVaultWrite(); return true; } return raw.set(k, v); }
@@ -8681,6 +8695,8 @@ function backgroundTick(startup) {
   const me = tickRun = tickBody(startup).finally(() => { if (tickRun === me) tickRun = null; });
   return me;
 }
+// Each mint's work runs on its own (and every mint request has a time limit), so a mint that never answers can't hold
+// up the other mints or the other checks (gift refunds, Extra Life, heir claims, bounties, "was my token claimed").
 async function mintTick(url, startup) {
   const now = Date.now(), maxAge = 14 * 86400000;
   for (const o of S.ops.filter(o => o.mint === url)) {   // steps whose answer never came: settled with backoff (at once at a start)
@@ -8694,11 +8710,14 @@ async function mintTick(url, startup) {
 async function tickBody(startup) {
   if (!S.seed || tabLocked) return;
   const urls = [...new Set(S.mints.map(m => m.url).concat(S.quotes.map(q => q.mint), S.pending.map(p => p.mint), S.ops.map(o => o.mint)))];
-  for (const u of urls) await mintTick(u, startup).catch(() => {});
-  if (S.prefs.npc) await npcSync().catch(() => {});
-  await claimSaved().catch(() => {});
-  await refundExpiredGifts().catch(() => {});
-  await extraTick().catch(() => {}); await claimHeirlooms().catch(() => {}); await retryBounties().catch(() => {});
+  await Promise.all([
+    ...urls.map(u => mintTick(u, startup).catch(() => {})),
+    (async () => { if (S.prefs.npc) await npcSync().catch(() => {}); })(),
+    claimSaved().catch(() => {}),
+    refundExpiredGifts().catch(() => {}),
+    (async () => { await extraTick().catch(() => {}); await claimHeirlooms().catch(() => {}); })(),
+    retryBounties().catch(() => {})
+  ]);
   if (S.prefs.nostrBackup && S.mints.length && S.prefs.mintBackupList !== S.mints.map(m => m.url).join(' ') && Date.now() - mintBackupTry > 10 * 60e3) scheduleMintBackup(startup ? 4000 : 0);
 }
 let tickCount = 0;
