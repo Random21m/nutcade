@@ -29,11 +29,12 @@ Object.assign(A, {
   zapQuote: b => run(b, 'ASKING', async () => {
     const z = curZap; if (!z) return;
     const sats = amt(), comment = val('zapComment').trim();
-    const { pr, zapReq } = await zapInvoice(z, sats, comment);
+    const anon = !!($('#zapAnon') || {}).checked;
+    const { pr, zapReq } = await zapInvoice(z, sats, comment, anon);
     const mq = await meltQuote('ln', pr);
     if (num(mq.amount) !== sats) throw serviceErr(`The invoice asked for ${money(num(mq.amount))} instead of ${money(sats)}. Nothing was sent.`);
     const note = z.zapOk ? `Zap to ${z.name}` : `To ${z.name}`;
-    zapByQuote.set(mq.quote, z.zapOk ? { zap: { pubkey: z.pubkey, id: zapReq.id }, zapName: z.name } : { lnName: z.name });
+    zapByQuote.set(mq.quote, z.zapOk ? { zap: { pubkey: z.pubkey, id: zapReq.id, anon }, zapName: z.name } : { lnName: z.name });
     showMeltQuote('ln', mq, z.addr, note);
   }),
   nwcNew: () => { sfx('select'); openNwcNew(); },

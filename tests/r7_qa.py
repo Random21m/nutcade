@@ -416,8 +416,18 @@ async def main():
         check('zap: the profile is fetched, the endpoint allows Nostr, and the quote shows the fee before paying', 'Fee reserve' in q and 'alice@lnurl.test' in q, q[:200])
         tot = re.search(r'Total, at most\n([\d,]+) SAT', q); mf = re.search(r'Mint fee, at most\n([\d,]+) SAT', q)
         check('(fix 4) pay screen on the fee mint: it shows the mint fee and the total at most, and the payment cost no more than that total', bool(tot and mf) and int(mf.group(1)) >= 1 and ba - await w.bal(A) <= int(tot.group(1).replace(',', '')), (q[:300], ba - await w.bal(A)))
+        check('(fix 9) zap: the sheet said the zap is signed with this wallet\'s Nostr key and can be linked to you', 'signed with this wallet' in w.zap_pre and 'link it to you' in w.zap_pre, w.zap_pre[:400])
         zp = await w.ev("Nutcade.S.txs[0].preimage"); zh = await w.ev("Nutcade.r7.decodeBolt11(Nutcade.S.txs[0].request).paymentHash")
         check('(fix 5) zap: the payment preimage is stored, and it matches the invoice', bool(zp) and __import__('hashlib').sha256(bytes.fromhex(zp)).hexdigest() == zh, (zp, zh))
+        # anonymous zap: a fresh one-time key signs it, tagged anon, and the receiver's endpoint still accepts it
+        nz = len(mock('/test/state')['zaps'])
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=sendMethod][data-m=ln]'); await w.wait(100)
+        await w.fill('#destIn', pa['npub']); await w.click('[data-act=doMeltQuote]'); await w.until("!!document.querySelector('[data-act=zapQuote]')", 12000)
+        await w.fill('#amtIn', '33'); await w.pg.check('#zapAnon'); await w.click('[data-act=zapQuote]'); await w.until("!!document.querySelector('#payBtn')", 12000)
+        await w.click('#payBtn'); await w.until("!document.querySelector('#payBtn')", 15000); await w.wait(400)
+        za = mock('/test/state')['zaps'][nz:]; ze = za[0]['event'] if za else {}
+        check('(fix 9) anonymous zap: signed by a one-time key (not the wallet\'s), tagged anon, accepted by the endpoint and paid', len(za) == 1 and za[0]['valid'] and ze['pubkey'] != mynpub and ['anon'] in ze['tags'] and await w.ev("Nutcade.S.txs[0].status") == 'done' and await w.ev("Nutcade.S.txs[0].zap.anon"), za)
+        await w.ev("Nutcade.closeSheet()"); await books(w, 'anonymous zap', broken)
         check("zap: the kind-9734 zap request is signed with the wallet's Nostr key and carries amount, p, lnurl, relays and the comment",
               len(z) == 1 and z[0]['valid'] and ev['pubkey'] == mynpub and tags.get('amount') == ['210000'] and tags.get('p') == [pa['pubkey']] and tags.get('lnurl', [''])[0].startswith('lnurl1') and tags.get('relays') and ev['content'] == 'gm from the arcade', z)
         zt = await w.ev("Nutcade.S.txs[0]")
