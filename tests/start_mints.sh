@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Starts four local Nutshell test mints with fake Lightning:
+# (fake Lightning that returns real payment preimages: see stub/sitecustomize.py)
 #   3338 normal (input fees), 3339 no fees, 3340 every payment fails, 3341 every payment stays pending
 set -euo pipefail
 PY=${MINT_PY:-python3}
@@ -10,7 +11,7 @@ start() {
   local d="$ROOT/$port"; rm -rf "$d"; mkdir -p "$d"
   ( cd "$d" && env MINT_BACKEND_BOLT11_SAT=FakeWallet MINT_PRIVATE_KEY="nutcade-test-$port" MINT_LISTEN_HOST=127.0.0.1 MINT_LISTEN_PORT=$port \
       MINT_DATABASE=data/mint FAKEWALLET_BRR=TRUE FAKEWALLET_DELAY_INCOMING_PAYMENT=0.5 FAKEWALLET_DELAY_OUTGOING_PAYMENT=0.5 \
-      MINT_INFO_NAME="$name" "$@" PYTHONPATH="$STUB" nohup "$PY" -m uvicorn cashu.mint.app:app --host 127.0.0.1 --port $port > "$d/log" 2>&1 & )
+      MINT_INFO_NAME="$name" NUTCADE_PREIMAGE_DIR="$ROOT/preimages" "$@" PYTHONPATH="$STUB" nohup "$PY" -m uvicorn cashu.mint.app:app --host 127.0.0.1 --port $port > "$d/log" 2>&1 & )
 }
 start "Mint A" 3338 NUTCADE_FAKE_MPP=1
 start "Mint B" 3339 MINT_INPUT_FEE_PPK=0 NUTCADE_FAKE_MPP=1

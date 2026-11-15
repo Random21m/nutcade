@@ -388,6 +388,8 @@ async def main():
         check('zap: the profile is fetched, the endpoint allows Nostr, and the quote shows the fee before paying', 'Fee reserve' in q and 'alice@lnurl.test' in q, q[:200])
         tot = re.search(r'Total, at most\n([\d,]+) SAT', q); mf = re.search(r'Mint fee, at most\n([\d,]+) SAT', q)
         check('(fix 4) pay screen on the fee mint: it shows the mint fee and the total at most, and the payment cost no more than that total', bool(tot and mf) and int(mf.group(1)) >= 1 and ba - await w.bal(A) <= int(tot.group(1).replace(',', '')), (q[:300], ba - await w.bal(A)))
+        zp = await w.ev("Nutcade.S.txs[0].preimage"); zh = await w.ev("Nutcade.r7.decodeBolt11(Nutcade.S.txs[0].request).paymentHash")
+        check('(fix 5) zap: the payment preimage is stored, and it matches the invoice', bool(zp) and __import__('hashlib').sha256(bytes.fromhex(zp)).hexdigest() == zh, (zp, zh))
         check("zap: the kind-9734 zap request is signed with the wallet's Nostr key and carries amount, p, lnurl, relays and the comment",
               len(z) == 1 and z[0]['valid'] and ev['pubkey'] == mynpub and tags.get('amount') == ['210000'] and tags.get('p') == [pa['pubkey']] and tags.get('lnurl', [''])[0].startswith('lnurl1') and tags.get('relays') and ev['content'] == 'gm from the arcade', z)
         zt = await w.ev("Nutcade.S.txs[0]")
@@ -441,7 +443,10 @@ async def main():
         inv = invoice(500, B); ba = await w.bal(A)
         r = await nwc(w, uri, 'pay_invoice', {'invoice': inv})
         pt = await w.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(inv)})")
-        check('nwc: pay_invoice pays and returns the preimage (only one that matches the invoice; the test mint has none) and the fee', r['answer'] and r['answer']['error'] is None and 'preimage' in r['answer']['result'] and r['answer']['result']['fees_paid'] == pt['fee'] * 1000 and pt and pt['status'] == 'done', r.get('answer'))
+        ph = await w.ev(f"Nutcade.r7.decodeBolt11({json.dumps(inv)}).paymentHash"); pre = ((r.get('answer') or {}).get('result') or {}).get('preimage') or ''
+        check('(fix 5) nwc: pay_invoice pays and returns the real preimage (it hashes to the invoice\'s payment hash) and the fee', r['answer'] and r['answer']['error'] is None and len(pre) == 64 and __import__('hashlib').sha256(bytes.fromhex(pre)).hexdigest() == ph and r['answer']['result']['fees_paid'] == pt['fee'] * 1000 and pt and pt['status'] == 'done' and pt.get('preimage') == pre, r.get('answer'))
+        rl = await nwc(w, uri, 'lookup_invoice', {'invoice': inv})
+        check('(fix 5) nwc: lookup_invoice of a paid invoice returns the same preimage', rl['answer']['result'] and rl['answer']['result']['preimage'] == pre, rl.get('answer'))
         check('nwc: the payment shows in history marked with the connection name', pt and pt['note'] == 'Wallet Connect: Damus' and pt['nwc'] and pt['nwcName'] == 'Damus', pt and pt['note'])
         await books(w, 'nwc pay', broken)
         r2 = await nwc(w, uri, 'pay_invoice', {'invoice': inv})

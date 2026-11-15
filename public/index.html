@@ -3681,7 +3681,7 @@ async function reconcile(pend) {
     await recoverChange(pend).catch(() => 0);
     S.pending = S.pending.filter(p => p.id !== pend.id);
     settleMelt(pend, 'done', 0);
-    updTx(pend.txId, { outpoint: qs.outpoint || null });
+    updTx(pend.txId, { outpoint: qs.outpoint || null, preimage: qs.payment_preimage || (txById(pend.txId) || {}).preimage || null });
     return 'paid';
   }
   const states = await w.checkProofsStates(pend.proofs);
