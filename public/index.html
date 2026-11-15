@@ -3354,7 +3354,18 @@ async function secureAll(onStep) {
   S.seed.secured = true; store.set('seed', S.seed);
   return fees;
 }
-function restoreFromMint(url, onStep, opts = {}) { url = normUrl(url); return single('restore:' + url, () => restoreFromMintNow(url, onStep, opts)); }
+/* One scan at a time per mint. A caller that joins a scan already running doesn't lose what it asked for: the
+   deposits it brings are added to the ones that scan credits (read when it credits, not when it started), and if
+   it joined too late for that, it gets a scan of its own. */
+const restoreDeposits = {};
+async function restoreFromMint(url, onStep, opts = {}) {
+  url = normUrl(url);
+  const mine = (opts.deposits || []).map(q => q.quote);
+  if (mine.length) { const s = restoreDeposits[url] || (restoreDeposits[url] = new Set()); mine.forEach(id => s.add(id)); }
+  const r = await single('restore:' + url, () => restoreFromMintNow(url, onStep, opts));
+  if (mine.some(id => S.quotes.some(q => q.quote === id && !(q.empty >= 3)) && (restoreDeposits[url] || new Set()).has(id))) return single('restore:' + url, () => restoreFromMintNow(url, onStep, opts));
+  return r;
+}
 async function restoreFromMintNow(url, onStep, opts) {
   await syncIfStale();
   if (!S.mints.find(m => m.url === url)) await addMint(url);
@@ -3386,14 +3397,18 @@ async function restoreFromMintNow(url, onStep, opts) {
   let left = sum(fresh);
   // interrupted deposits from before their counters were recorded (issued by the mint, never stored) get what was
   // found first, each up to its amount; their quotes are then done
-  const waiting = [...(opts.deposits || [])];
-  for (const q of S.quotes.filter(q => q.mint === url && !q.ctr && q.kind === 'bolt11' && !waiting.includes(q))) {
+  const waiting = [];
+  for (const q of S.quotes.filter(q => q.mint === url && !q.ctr && q.kind === 'bolt11')) {
+    if ((restoreDeposits[url] || new Set()).has(q.quote) || (opts.deposits || []).some(x => x.quote === q.quote)) { waiting.push(q); continue; }
     const st = await inTime(w.checkMintQuoteBolt11(q.quote), 30000).catch(() => null); if (st && st.state === 'ISSUED') waiting.push(q);
   }
+  for (const id of [...(restoreDeposits[url] || [])]) if (!S.quotes.some(x => x.quote === id && x.mint === url && !x.ctr)) restoreDeposits[url].delete(id);
   for (const q of waiting) {
     if (!S.quotes.some(x => x.quote === q.quote)) continue;
     const credit = Math.min(left, num(q.amount)); left -= credit;
+    if (!credit && (q.empty = (q.empty || 0) + 1) < 3) continue;   // nothing found for it this time: it waits (it is never credited 0 at once)
     updTx(q.txId, { status: 'done', amount: credit, ts: Date.now() }); S.quotes = S.quotes.filter(x => x.quote !== q.quote);
+    if (restoreDeposits[url]) restoreDeposits[url].delete(q.quote);
   }
   if (fresh.length) { addProofs(url, fresh); if (left) addTx({ type: 'in', method: 'ecash', amount: left, mint: url, note: 'Recovered with recovery phrase' }); }
   save();
@@ -3622,6 +3637,7 @@ async function creditDepositRange(w, q) {
   let found = (r.proofs || []).filter(p => !held.has(p.secret));
   if (found.length) { const st = await inTime(w.checkProofsStates(found), 30000); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
   const held2 = new Set((S.proofs[q.mint] || []).map(p => p.secret)); found = found.filter(p => !held2.has(p.secret));
+  if (!found.length && (q.empty = (q.empty || 0) + 1) < 3) { save(); return 0; }   // nothing there yet: it waits, it isn't closed at 0
   const was = txById(q.txId), before = was && was.status === 'done' ? num(was.amount) : 0;
   S.proofs[q.mint] = (S.proofs[q.mint] || []).concat(plain(found));
   updTx(q.txId, { status: 'done', amount: before + sum(found), ts: Date.now() });

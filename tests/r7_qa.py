@@ -850,6 +850,19 @@ async def main():
         ok = await w.until("[410,333].every(a=>Nutcade.S.txs.some(t=>t.type==='in'&&t.method==='ln'&&t.amount===a&&t.status==='done'&&t.mint===" + json.dumps(B) + "))", 90000)
         check('(round 3, 2) two interrupted deposits (one while Find lost ran) each settle as themselves, with no Recovered line and no quote left', ok and await w.ev(RECB(B)) == nrec and await w.ev(f"Nutcade.S.quotes.filter(q=>q.mint==={json.dumps(B)}).length") == 0, (ok, await w.ev(RECB(B)) - nrec))
         await books(w, 'interrupted deposits', broken, (A, B, FM))
+        # (round 3, 2, go) the exact case: the deposit's own restore fails once, and Find lost is tapped at once and again
+        # 3 s later (so one scan joins another): the deposit is still credited to itself, never 0, never "Recovered"
+        nrec = await w.ev(RECB(B)); await w.pg.route(f'{B}/v1/mint/bolt11', drop_mint); await w.pg.route(f'{B}/v1/restore', failing(1, 500))
+        await w.home(); await w.click('[data-act=receive]'); await w.wait(150)
+        if await w.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await w.click('[data-act=recvMethod][data-m=ln]'); await w.wait(100)
+        await w.fill('#amtIn', '444'); await w.click('[data-act=doLnInvoice]'); await w.until("Nutcade.S.quotes.some(q=>q.amount==444&&q.ctr)", 30000); await w.ev("Nutcade.closeSheet()")
+        await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.ev("document.querySelector('[data-act=findLost]').click()"); await w.wait(3000)
+        await w.ev("const b=document.querySelector('[data-act=findLost]'); if (b && !b.disabled) b.click()"); await w.pg.unroute(f'{B}/v1/mint/bolt11')
+        ok = await w.until(f"Nutcade.S.txs.some(t=>t.type==='in'&&t.method==='ln'&&t.amount===444&&t.status==='done'&&t.mint==={json.dumps(B)}) && !Nutcade.S.quotes.some(q=>q.amount==444)", 90000)
+        await w.until("!document.querySelector('[data-act=findLost] .spinner')", 60000); await w.pg.unroute(f'{B}/v1/restore')
+        check('(round 3, 2) Find lost tapped at once and 3 s later while the deposit\'s restore failed once: the deposit gets its 444 SAT, no Recovered line, nothing credited 0',
+              ok and await w.ev(RECB(B)) == nrec and not await w.ev("Nutcade.S.txs.some(t=>t.type==='in'&&t.method==='ln'&&t.status==='done'&&t.amount===0)"), (ok, await w.ev(RECB(B)) - nrec))
+        await books(w, 'deposit with a failed restore and two scans', broken, (A, B, FM))
         # (round 3, item 3) a reload while a token is being made on a slow mint: the step settles on the next start
         await w.use(B); bB0 = await w.bal(B); await w.pg.route(f'{B}/v1/swap', held(4))
         await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '500'); await w.click('[data-act=doSendEcash]'); await w.wait(1500)
