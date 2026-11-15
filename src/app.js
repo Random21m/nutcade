@@ -1784,7 +1784,7 @@ function viewSettings() {
 
     <div class="panel" id="set-tools"><span class="h2">Wallet tools</span>
       <p class="th" style="margin:0">Use these if your balance looks wrong or a payment seems stuck.</p>
-      <div class="row wrap"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm" data-act="tillOpen">Today's till</button><button class="btn sm" data-act="moveOpen">Move sats between mints</button><button class="btn sm lime" data-act="extraOpen">Extra Life</button></div>
+      <div class="row wrap"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm" data-act="tillOpen">Today's till</button>${S.mints.some(m => canMoveFrom(m.url)) ? '<button class="btn sm" data-act="moveOpen">Move sats between mints</button>' : ''}<button class="btn sm lime" data-act="extraOpen">Extra Life</button></div>
       <div class="row wrap"><button class="btn sm violet" data-act="clean">Remove spent ecash</button><button class="btn sm" data-act="reconcileAll">Check stuck payments${inflight ? ` (${inflight})` : ''}</button></div>
     </div>
 

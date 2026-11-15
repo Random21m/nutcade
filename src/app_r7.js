@@ -68,13 +68,17 @@ function blockMint(url) {
 function unblockMint(url) { url = normUrl(url); S.blocked = S.blocked.filter(b => b.url !== url); saveBlocked(); }
 function openBlock(url) {
   const bal = balanceOf(url), n = mintName(url);
-  const canMove = bal > 0 && S.mints.filter(m => m.url !== url && !isBlocked(m.url) && supports(m, 'mint', 'bolt11')).length && supports(S.mints.find(m => m.url === url), 'melt', 'bolt11');
+  const canMove = canMoveFrom(url);
   openSheet('Block mint', `<p style="margin:0">Block ${esc(n)}? NUTCADE will refuse ecash, payment requests and new deposits from it, and always tell you when it does. You can unblock it any time.</p>
     ${bal ? `<div class="notice">Your ${money(bal)} at ${esc(n)} stays usable: you can still send it or move it to another mint. Moving it out is a good idea.</div>` : ''}
     ${S.prefs.npc && S.prefs.npcMint === url ? `<div class="notice">Your Lightning address still sends payments to ${esc(n)}. Change its mint in Settings → Lightning address.</div>` : ''}
     <button class="btn solid gold block" data-act="blockMintGo" data-url="${esc(url)}">Block this mint</button>
-    ${canMove ? `<button class="btn block" data-act="moveOpen" data-from="${esc(url)}">Move sats out first</button>` : ''}<div id="sheetErr"></div>`);
+    ${canMove ? `<button class="btn block" data-act="moveOpen" data-from="${esc(url)}">Move sats out first</button>` : bal ? noMoveHTML(url) : ''}<div id="sheetErr"></div>`);
 }
+// sats can move out of a mint over Lightning only to another mint (not blocked) that takes Lightning deposits
+const canMoveFrom = url => balanceOf(url) > 0 && supports(S.mints.find(m => m.url === url), 'melt', 'bolt11') && S.mints.some(m => m.url !== url && !isBlocked(m.url) && supports(m, 'mint', 'bolt11'));
+const noMoveHTML = url => `<div class="notice">There's no other mint here that takes Lightning deposits, so these sats can't be moved yet. Add a mint to move them to, or send them from ${esc(mintName(url))}.</div>
+  <div class="btngrid"><button class="btn" data-act="pickMint">Add a mint</button><button class="btn" data-act="sendFrom" data-url="${esc(url)}">Send from ${esc(mintName(url))}</button></div>`;
 const blockedNotice = url => isBlocked(url) ? `<div class="notice red">${esc(mintName(url))} is blocked: its tokens, payment requests and deposits are refused.${balanceOf(url) ? ` Your ${money(balanceOf(url))} there still works, so you can move it out.` : ''}</div>` : '';
 
 /* ---------- LNURL (LUD-01, LUD-17): a scanned or pasted LNURL is read first, to see what it is ---------- */

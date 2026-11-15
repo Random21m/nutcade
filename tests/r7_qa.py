@@ -369,6 +369,13 @@ async def main():
         await nw.pg.reload(); await nw.wait(900)
         check('block: importing the backup restores the blocked list (and it survives a reload)', await nw.ev(f"Nutcade.r7.isBlocked({json.dumps(B)})"))
         await nw.pg.context.close()
+        # (fix 7) two mints, the one with sats blocked: Move sats out opens the move sheet (it used to only toast)
+        t2 = await wallet(b); await t2.create(); await t2.add_mint(A); await t2.add_mint(B); await t2.use(B); await t2.receive_ln(600)
+        await t2.click('[data-act=tab][data-tab=mints]'); await t2.wait(200); await t2.ev(f"document.querySelector('[data-act=blockMint][data-url=\"{B}\"]').click()"); await t2.wait(250)
+        await t2.click('[data-act=blockMintGo]'); await t2.wait(250); await t2.click('#layer [data-act=moveOpen]'); await t2.wait(300)
+        mv2 = await t2.ev("document.querySelector('#mvFrom') ? [document.querySelector('#mvFrom').value, [...document.querySelector('#mvTo').options].map(o=>o.value)] : null")
+        check('block: with two mints and the one holding sats blocked, Move sats out opens the move sheet, from it to the other', mv2 == [B, [A]], mv2)
+        await t2.pg.context.close()
         # unblock from the refused note; then the ecash is claimed
         await w.click('[data-act=tab][data-tab=history]'); await w.wait(200)
         await w.ev("[...document.querySelectorAll('#txList .tx')].find(r=>/BLOCKED/.test(r.innerText)).click()"); await w.wait(300)
@@ -383,6 +390,14 @@ async def main():
         await w.ev("Nutcade.closeSheet()"); await books(w, 'unblocked claim', broken)
         await w.home(); await w.receive_token(tokB); check('block: after unblocking, tokens from the mint are accepted again', await w.bal(B) >= ba - 100 + 120 + 150 - 2)
         await books(w, 'unblocked token', broken)
+        # (fix 7) a single mint with sats, blocked: no Move button; it says why and offers Add a mint / Send from it
+        await fr.ev("Nutcade.closeSheet()"); await fr.click('[data-act=tab][data-tab=mints]'); await fr.wait(200)
+        await fr.ev(f"document.querySelector('[data-act=blockMint][data-url=\"{B}\"]').click()"); await fr.wait(250); t1 = await fr.sheet_text()
+        m1 = await fr.ev("!!document.querySelector('#layer [data-act=moveOpen]')")
+        await fr.click('[data-act=blockMintGo]'); await fr.wait(250); t1b = await fr.sheet_text(); m1b = await fr.ev("!!document.querySelector('#layer [data-act=moveOpen]')")
+        check("block: with no other mint to move to, no Move button is offered; it says so and offers Add a mint and Send", not m1 and not m1b and "can't be moved yet" in t1 and "can't be moved yet" in t1b and await fr.ev("!!document.querySelector('#layer [data-act=pickMint]') && !!document.querySelector('#layer [data-act=sendFrom]')"), (t1[:300], m1, m1b))
+        await fr.click('#layer [data-act=sendFrom]'); await fr.wait(300)
+        check('block: Send from the blocked mint opens Send with it as the source', await fr.ev("!!document.querySelector('[data-act=doSendEcash]') && Nutcade.S.active===" + json.dumps(B)))
         await fr.pg.context.close()
 
         # =================== zaps (NIP-57) ===================

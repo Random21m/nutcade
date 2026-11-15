@@ -276,7 +276,7 @@ function evenOut() {   // biggest mint down toward half, into the healthiest oth
   const tot = totalBalance(); if (S.mints.length < 2 || tot < 1000) return null;
   const by = S.mints.map(m => ({ m, bal: balanceOf(m.url) })).sort((a, b) => b.bal - a.bal);
   const top = by[0]; if (top.bal / tot <= 0.6 || !supports(top.m, 'melt', 'bolt11')) return null;
-  const to = by.slice(1).filter(x => supports(x.m, 'mint', 'bolt11') && (!health[x.m.url] || health[x.m.url].ok)).sort((a, b) => a.bal - b.bal)[0];
+  const to = by.slice(1).filter(x => supports(x.m, 'mint', 'bolt11') && !isBlocked(x.m.url) && (!health[x.m.url] || health[x.m.url].ok)).sort((a, b) => a.bal - b.bal)[0];
   if (!to) return null;
   const amount = Math.floor(top.bal - tot / 2);
   return amount >= 10 ? { from: top.m.url, to: to.m.url, amount } : null;
@@ -298,7 +298,7 @@ function healthPanel() {
     ${tot ? `<div class="spread" role="img" aria-label="How your sats are spread across mints">${rows.filter(r => r.bal).map(r => `<i style="flex:${r.bal};background:${r.col}"></i>`).join('')}</div>
     <div class="legend" data-noi18n>${rows.filter(r => r.bal).map(r => `<span><i style="background:${r.col}"></i>${esc(r.m.name)} ${Math.round(r.bal / tot * 100)}%</span>`).join('')}</div>` : '<div class="tiny muted">No sats yet. Health checks still show which mints answer.</div>'}
     ${notes.join('')}
-    ${rows.filter(r => r.bal).length && S.mints.length > 1 ? '<button class="btn sm" data-act="moveOpen">Move sats between mints</button>' : ''}
+    ${S.mints.some(m => canMoveFrom(m.url)) ? '<button class="btn sm" data-act="moveOpen">Move sats between mints</button>' : ''}
   </div>`;
 }
 function mintHealthLine(m) {
@@ -308,8 +308,10 @@ function mintHealthLine(m) {
 function openMove(from, to, amount) {
   const src = S.mints.filter(m => balanceOf(m.url) > 0 && supports(m, 'melt', 'bolt11'));
   const dst = S.mints.filter(m => supports(m, 'mint', 'bolt11') && !isBlocked(m.url));   // nothing moves into a blocked mint
-  if (!src.length || dst.length < 2) { toast('Moving sats needs two mints that both handle Lightning.', 'gold'); return; }
-  from = from || src.slice().sort((a, b) => balanceOf(b.url) - balanceOf(a.url))[0].url;
+  // a mint can be moved from only if another mint can take the sats (canMoveFrom); the button isn't offered otherwise
+  const movable = src.filter(m => canMoveFrom(m.url));
+  if (!movable.length || (from && !canMoveFrom(from))) { toast('Moving sats needs two mints that both handle Lightning.', 'gold'); return; }
+  from = from || movable.slice().sort((a, b) => balanceOf(b.url) - balanceOf(a.url))[0].url;
   to = to || (dst.find(m => m.url !== from) || {}).url;
   openSheet('Move sats', `
     <p style="margin:0">Moves sats from one of your mints to another over Lightning. The sending mint charges a small Lightning fee, shown before you confirm.</p>
