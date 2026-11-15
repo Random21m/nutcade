@@ -203,9 +203,11 @@ async function secureAll(onStep) {
   S.seed.secured = true; store.set('seed', S.seed);
   return fees;
 }
-async function restoreFromMint(url, onStep) {
+async function restoreFromMint(url, onStep, opts = {}) {
   if (!S.mints.find(m => m.url === url)) await addMint(url);
   const w = await getWallet(url);
+  // change of a payment that is still being recovered belongs to that payment: credit it there first (lowering its fee)
+  for (const p of S.pending.filter(p => p.mint === url && p.paid && p.ctr && !p.changeDone)) { await recoverChange(p); await finishPaid(p); }
   const keysets = w.keyChain.getKeysets().filter(k => k.unit === 'sat');
   let found = [];
   for (const k of keysets) {
@@ -217,9 +219,15 @@ async function restoreFromMint(url, onStep) {
       found = found.concat(r.proofs.filter((p, i) => st[i] && st[i].state === 'UNSPENT'));
     }
   }
-  const have = new Set((S.proofs[url] || []).map(p => p.secret));
+  // not what we hold, nor ecash in a token we sent that hasn't been claimed yet, nor coins of a payment in flight
+  const have = new Set((S.proofs[url] || []).map(p => p.secret).concat(S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.pending.flatMap(p => p.proofs.map(x => x.secret))));
   const fresh = found.filter(p => !have.has(p.secret));
-  if (fresh.length) { addProofs(url, fresh); addTx({ type: 'in', method: 'ecash', amount: sum(fresh), mint: url, note: 'Recovered with recovery phrase' }); }
+  let left = sum(fresh);
+  if (opts.deposit) {   // an interrupted deposit gets what was found, up to its amount; any rest is its own line
+    const credit = Math.min(left, num(opts.deposit.amount)); left -= credit;
+    updTx(opts.deposit.txId, { status: 'done', amount: credit });
+  }
+  if (fresh.length) { addProofs(url, fresh); if (left) addTx({ type: 'in', method: 'ecash', amount: left, mint: url, note: 'Recovered with recovery phrase' }); }
   return sum(fresh);
 }
 
@@ -326,7 +334,7 @@ async function addMint(url, opts = {}) {
 const activeMint = () => S.mints.find(m => m.url === S.active) || null;
 const balanceOf = url => sum(S.proofs[url]);
 const totalBalance = () => S.mints.reduce((t, m) => t + balanceOf(m.url), 0);
-const pendingOut = () => S.pending.reduce((t, p) => t + sum(p.proofs), 0);
+const pendingOut = () => S.pending.filter(p => !p.paid).reduce((t, p) => t + sum(p.proofs), 0);
 
 function addTx(t) {
   const tx = Object.assign({ id: uid(), ts: Date.now(), note: '', status: 'done', fee: 0 }, t);
@@ -393,9 +401,11 @@ async function checkQuote(q) {
         return 'paid';
       }
       if (r.state === 'ISSUED') {
-        // The mint issued this deposit but we never stored the ecash (app closed mid-request). Recover it from the phrase.
-        const got = await restoreFromMint(q.mint).catch(() => 0);
-        dropQuote(q); updTx(q.txId, { status: 'done' }); refresh();
+        // The mint issued this deposit but we never stored the ecash (app closed mid-request). Recover it from the phrase
+        // and credit it to this deposit. If the mint can't be asked now, the quote stays and this is tried again later.
+        let got;
+        try { got = await restoreFromMint(q.mint, null, { deposit: q }); } catch (e) { return 'waiting'; }
+        dropQuote(q); refresh();
         if (got) { sfx('coin'); toast(`Recovered ${money(got)} from an interrupted deposit`, 'lime'); }
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         return 'paid';
@@ -557,43 +567,68 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {
     throw f;
   }
 }
-async function reconcile(pend) {
+/* opts.force: try a waiting change recovery now (at startup, or when you ask), instead of waiting for its backoff */
+async function reconcile(pend, opts = {}) {
+  if (pend.paid) return finishPaid(pend, opts);   // the payment went through; only its change may still be at the mint
   const w = await getWallet(pend.mint);
   let qs = null;
   try { qs = pend.kind === 'ln' ? await w.checkMeltQuoteBolt11(pend.quote) : await w.checkMeltQuoteOnchain(pend.quote); } catch (e) {}
-  if (qs && qs.state === 'PAID') {
-    await recoverChange(pend).catch(() => 0);
-    S.pending = S.pending.filter(p => p.id !== pend.id);
-    settleMelt(pend, 'done', 0);
-    updTx(pend.txId, { outpoint: qs.outpoint || null, preimage: qs.payment_preimage || (txById(pend.txId) || {}).preimage || null });
-    return 'paid';
-  }
+  if (qs && qs.state === 'PAID') { markPaid(pend, qs); return finishPaid(pend, opts); }
   const states = await w.checkProofsStates(pend.proofs);
   const unspent = pend.proofs.filter((p, i) => states[i] && states[i].state === 'UNSPENT');
   const stillPending = states.some(s => s.state === 'PENDING');
   if (!stillPending) {
-    if (unspent.length) addProofs(pend.mint, unspent);
-    if (!unspent.length) await recoverChange(pend).catch(() => 0);   // paid: its change may still be at the mint
+    if (!unspent.length) { markPaid(pend, null); return finishPaid(pend, opts); }   // every coin spent: it was paid
+    addProofs(pend.mint, unspent);
     S.pending = S.pending.filter(p => p.id !== pend.id);
-    const allSpent = unspent.length === 0;
-    settleMelt(pend, allSpent ? 'done' : 'failed', sum(unspent));
+    settleMelt(pend, 'failed', sum(unspent));
     save();
-    return allSpent ? 'paid' : 'returned';
+    return 'returned';
   }
   return 'pending';
+}
+/* A melt the mint reports paid is recorded as done right away, with the fee so far (the whole reserve, until the
+   change is back). Its pending record stays, with the counter range of its change, until the change has really been
+   recovered: a failed attempt (no connection, a 500 or 429, a reload or a closed tab in the middle) is retried with
+   backoff on later starts and on the regular check, and the fee is only lowered by what actually came back. */
+function markPaid(pend, qs) {
+  pend.paid = true; pend.proofs = [];   // spent: no longer "in flight"
+  settleMelt(pend, 'done', 0);
+  const t = txById(pend.txId);
+  updTx(pend.txId, { outpoint: (qs && qs.outpoint) || (t && t.outpoint) || null, preimage: (qs && qs.payment_preimage) || (t && t.preimage) || null, changePending: !!(pend.ctr && !pend.changeDone) });
+  save();
+}
+async function finishPaid(pend, opts = {}) {
+  if (pend.ctr && !pend.changeDone) {
+    if (!opts.force && pend.nextTry && Date.now() < pend.nextTry) return 'paid';
+    try { await recoverChange(pend); }
+    catch (e) { pend.tries = (pend.tries || 0) + 1; pend.nextTry = Date.now() + Math.min(30 * 60e3, 15e3 * 2 ** (pend.tries - 1)); save(); return 'paid'; }
+  }
+  S.pending = S.pending.filter(p => p.id !== pend.id);
+  settleMelt(pend, 'done', 0);   // the fee now counts the change that came back
+  updTx(pend.txId, { changePending: false });
+  save();
+  return 'paid';
 }
 /* A payment's change (unused Lightning fee reserve) normally comes back with the mint's answer. If NUTCADE closed
    before that answer arrived, the change was still signed for this wallet's next counters: restore exactly those,
    keep what is unspent and not already held or sent in a token, so the fee recorded is what the payment really cost. */
+// a mint that doesn't answer at all counts as a failed attempt (retried later), so it can't hold up everything else
+const inTime = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("The mint didn't answer in time.")), ms))]);
+// Throws when the mint can't be asked (the caller retries later). Idempotent: change already credited to this payment
+// (pend.recovered) is never counted twice, and the change and the proofs are saved together.
 async function recoverChange(pend) {
   if (!pend.ctr || pend.changeDone) return 0;
   const w = await getWallet(pend.mint);
-  const r = await w.restore(pend.ctr.start, pend.ctr.n, { keysetId: pend.ctr.id });
-  const have = new Set((S.proofs[pend.mint] || []).map(p => p.secret));
+  const r = await inTime(w.restore(pend.ctr.start, pend.ctr.n, { keysetId: pend.ctr.id }), 30000);
+  const mine = new Set(pend.recovered || []), have = new Set((S.proofs[pend.mint] || []).map(p => p.secret));
   const sent = new Set(S.txs.flatMap(t => (t.sent || []).map(p => p.secret)).concat(S.pending.filter(p => p.id !== pend.id).flatMap(p => p.proofs.map(x => x.secret))));
-  let found = (r.proofs || []).filter(p => !have.has(p.secret) && !sent.has(p.secret));
-  if (found.length) { const st = await w.checkProofsStates(found); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
-  if (found.length) { addProofs(pend.mint, found); pend.change = (pend.change || 0) + sum(found); }
+  let found = (r.proofs || []).filter(p => !have.has(p.secret) && !sent.has(p.secret) && !mine.has(p.secret));
+  if (found.length) { const st = await inTime(w.checkProofsStates(found), 30000); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
+  if (found.length) {
+    pend.recovered = [...mine, ...found.map(p => p.secret)]; pend.change = (pend.change || 0) + sum(found);
+    addProofs(pend.mint, found);   // saves the proofs and this record together
+  }
   pend.changeDone = true; save();
   return sum(found);
 }
@@ -1722,7 +1757,7 @@ const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'G
 const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-about', 'About']];
 const toggle = (k, label, help) => `<label class="toggle set" for="p_${k}"><span><span class="tl">${label}</span>${help ? `<span class="th">${help}</span>` : ''}</span><input id="p_${k}" type="checkbox" data-act="pref" data-k="${k}" ${S.prefs[k] ? 'checked' : ''}></label>`;
 function viewSettings() {
-  const inflight = S.pending.length;
+  const inflight = S.pending.length;   // (a paid payment still waiting for its change counts: Check stuck payments retries it)
   return `<section class="screen settings">
     <h2 class="h2">Settings</h2>
     <nav class="set-index" aria-label="Settings sections">${SECTIONS.map(([id, l]) => `<button class="chip ecash" data-act="jump" data-id="${id}">${l}</button>`).join('')}</nav>
@@ -2024,7 +2059,7 @@ function liveSync() {
     const k = 'mq:' + q.quote; want.add(k);
     liveWatch(k, q.mint, 'bolt11_mint_quote', w => w.on.mintQuotePaid(q.quote, () => checkQuote(q).catch(() => {}), () => liveDrop(k)));
   }
-  for (const p of S.pending.filter(p => p.kind === 'ln')) {
+  for (const p of S.pending.filter(p => p.kind === 'ln' && !p.paid)) {
     const k = 'melt:' + p.quote; want.add(k);
     liveWatch(k, p.mint, 'bolt11_melt_quote', w => w.on.meltQuotePaid(p.quote, () => reconcile(p).then(r => { if (r === 'paid') { refresh(); toast('Payment confirmed', 'lime'); } }).catch(() => {}), () => liveDrop(k)));
   }
@@ -2714,6 +2749,7 @@ function openTx(id) {
   else if (t.status === 'pending' && t.type === 'in' && t.method === 'ln') extra = `<button class="btn block lime" data-act="resumeInvoice" data-id="${t.id}">Show invoice</button>`;
   else if (t.status === 'pending' && t.type === 'in' && t.method === 'onchain') extra = `<div class="row" style="flex-wrap:wrap"><button class="btn sm lime" data-act="resumeAddr" data-id="${t.id}">Show address</button><button class="btn sm red" data-act="stopWatch" data-id="${t.id}">Stop watching</button></div>`;
   else if (t.status === 'pending' && t.type === 'out') extra = `<button class="btn block violet" data-act="reconcileTx" data-id="${t.id}">Check payment</button>`;
+  else if (t.changePending && t.type === 'out') extra = `<div class="notice">This payment went through. Its change (the unused fee reserve) hasn't come back from the mint yet, so the fee shown is the most it can be. NUTCADE keeps trying, and the fee drops when the change is back.</div><button class="btn block violet" data-act="reconcileTx" data-id="${t.id}">Try now</button>`;
   openSheet(t.method === 'fee' ? 'Mint fee' : t.type === 'in' ? 'Received' : 'Sent', `
     <div class="credit-num${moved ? '' : ' void'}" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${moved ? (t.type === 'in' ? '+' : '-') : ''}${head ? fmt(head) : '…'}<small>${unitTag()}</small></div>
     <div class="field"><label for="noteEdit">Note</label><textarea id="noteEdit" class="inp" maxlength="500" placeholder="What was this for?">${esc(noteText(t.note))}</textarea></div>
@@ -2912,8 +2948,8 @@ const A = {
   resumeInvoice: b => { const t = txById(b.dataset.id); showInvoice(t); },
   resumeAddr: b => { const t = txById(b.dataset.id); showAddress(t); },
   stopWatch: b => { const t = txById(b.dataset.id); S.quotes = S.quotes.filter(q => q.quote !== t.quote); updTx(t.id, { status: 'expired' }); closeSheet(); refresh(); },
-  reconcileTx: b => run(b, 'CHECKING', async () => { const t = txById(b.dataset.id); const p = S.pending.find(x => x.txId === t.id); if (!p) { toast('Nothing pending for this one', 'cyan'); return; } const r = await reconcile(p); toast({ paid: 'Payment confirmed', returned: 'Payment failed. Sats returned.', pending: 'Still in flight' }[r], r === 'pending' ? 'gold' : 'lime'); closeSheet(); refresh(); }),
-  reconcileAll: b => run(b, '…', async () => { for (const p of [...S.pending]) await reconcile(p).catch(() => {}); refresh(); }),
+  reconcileTx: b => run(b, 'CHECKING', async () => { const t = txById(b.dataset.id); const p = S.pending.find(x => x.txId === t.id); if (!p) { toast('Nothing pending for this one', 'cyan'); return; } const r = await reconcile(p, { force: true }); const cp = (txById(t.id) || {}).changePending; toast(cp ? "Paid. Its change hasn't come back yet; NUTCADE keeps trying." : { paid: 'Payment confirmed', returned: 'Payment failed. Sats returned.', pending: 'Still in flight' }[r], r === 'pending' || cp ? 'gold' : 'lime'); closeSheet(); refresh(); }),
+  reconcileAll: b => run(b, '…', async () => { for (const p of [...S.pending]) await reconcile(p, { force: true }).catch(() => {}); refresh(); }),
   pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } refresh(); sfx('blip'); },
   backup: () => {
     const data = JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs });
@@ -3285,7 +3321,7 @@ async function backgroundTick(startup) {
     const qs = S.quotes.filter(q => q.kind === 'onchain' || now - (txById(q.txId)?.ts || 0) < maxAge);
     for (const q of qs) await checkQuote(q).catch(() => {});
   }
-  for (const p of [...S.pending]) await reconcile(p).catch(() => {});
+  for (const p of [...S.pending]) await reconcile(p, { force: !!startup }).catch(() => {});
   if (S.prefs.npc) await npcSync().catch(() => {});
   await claimSaved().catch(() => {});
   await refundExpiredGifts().catch(() => {});

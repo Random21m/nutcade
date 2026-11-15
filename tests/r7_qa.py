@@ -616,6 +616,75 @@ async def main():
         await w.until("Nutcade.S.txs[0].status==='done'", 30000); t7 = await w.ev("Nutcade.S.txs[0]")
         check('(fix 2) a payment whose answer was lost still records the real fee (its change restored), not the whole reserve', t7['amount'] == 700 and t7['status'] == 'done' and t7['fee'] <= 1 + mc and not e, (t7['status'], t7['fee'], e))
         await books(w, 'lost melt answer', broken)
+        CORS = {'access-control-allow-origin': '*', 'content-type': 'application/json'}
+        async def drop_answer(route):   # the mint pays, the answer never arrives
+            try: await route.fetch()
+            except Exception: pass
+            await route.abort()
+        def failing(n, status):   # the first n calls fail with this status, the rest go through
+            left = {'n': n}
+            async def h(route):
+                if left['n'] > 0: left['n'] -= 1; await route.fulfill(status=status, headers=CORS, body='{"detail":"test failure"}')
+                else: await route.continue_()
+            return h
+        PEND = "(t=>[t.status,t.fee,!!t.changePending,!!Nutcade.S.pending.find(p=>p.txId===t.id)])(Nutcade.S.txs[0])"
+        async def try_now():   # the payment's detail: Try now
+            await w.click('[data-act=tab][data-tab=history]'); await w.wait(200); await w.ev("document.querySelector('#txList .tx').click()"); await w.wait(250)
+            ok = await w.ev("!!document.querySelector('#layer [data-act=reconcileTx]')"); txt = await w.sheet_text()
+            if ok: await w.click('#layer [data-act=reconcileTx]')
+            await w.until("!Nutcade.S.txs[0].changePending", 20000); await w.ev("Nutcade.closeSheet()")
+            return ok, txt
+        # (round 2, item 1) the change recovery fails once (500 on restore, then 429 on the state check): the payment
+        # stays open with its counter range, says so, and the fee is only lowered by what really came back
+        for what, path, status in (('restore 500', '/v1/restore', 500), ('checkstate 429', '/v1/checkstate', 429)):
+            await w.pg.route(f'{A}/v1/melt/bolt11', drop_answer); await w.pg.route(f'{A}{path}', failing(1, status))
+            e, q = await w.pay_ln(invoice(800, B))
+            await w.pg.unroute(f'{A}/v1/melt/bolt11')
+            st = await w.ev(PEND)
+            check(f'(round 2, 1) {what} during change recovery: the payment is done, its change still pending, the record kept for a retry', st[0] == 'done' and st[2] and st[3] and st[1] >= 8, st)
+            await w.pg.unroute(f'{A}{path}')
+            ok, txt = await try_now(); st2 = await w.ev(PEND)
+            check(f'(round 2, 1) {what}: the payment says its change is still coming, and Try now recovers it: fee is the real one, record closed', ok and 'hasn\'t come back from the mint yet' in txt and not st2[2] and not st2[3] and st2[1] <= 1 + mc, (st2, txt[:160]))
+            await books(w, 'change recovery after ' + what, broken)
+        # three reloads in a row while the change is being recovered, then it comes back
+        hits = {'n': 0}
+        async def hold(route): hits['n'] += 1   # never answered: the tab is reloaded in the middle
+        await w.pg.route(f'{A}/v1/melt/bolt11', drop_answer); await w.pg.route(f'{A}/v1/restore', hold)
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=sendMethod][data-m=ln]'); await w.wait(100)
+        await w.fill('#destIn', invoice(900, B)); await w.click('[data-act=doMeltQuote]'); await w.until("!!document.querySelector('#payBtn')", 10000); await w.click('#payBtn')
+        for i in range(3):
+            n0 = hits['n']
+            for _ in range(80):
+                if hits['n'] > n0: break
+                await w.wait(250)
+            if i == 0: await w.pg.unroute(f'{A}/v1/melt/bolt11')
+            await w.pg.reload(); await w.wait(600)
+        st = await w.ev(PEND)
+        check('(round 2, 1) three reloads in a row during change recovery: the payment stays open with its change pending', st[0] == 'done' and st[2] and st[3], st)
+        await w.pg.unroute(f'{A}/v1/restore'); await w.pg.reload(); await w.wait(800)
+        await w.until("!Nutcade.S.txs[0].changePending", 30000); st = await w.ev(PEND)
+        check('(round 2, 1) after the reloads, the next start recovers the change: the real fee, record closed', not st[2] and not st[3] and st[1] <= 1 + mc, st)
+        await books(w, 'change recovery through reloads', broken)
+        # Find lost ecash credits found change to its payment instead of adding a "Recovered" line
+        await w.pg.route(f'{A}/v1/melt/bolt11', drop_answer); await w.pg.route(f'{A}/v1/restore', failing(1000, 500))
+        e, q = await w.pay_ln(invoice(600, B)); await w.pg.unroute(f'{A}/v1/melt/bolt11'); await w.pg.unroute(f'{A}/v1/restore')
+        RECA = "Nutcade.S.txs.filter(t=>t.note==='Recovered with recovery phrase'&&t.mint===" + json.dumps(A) + ").length"
+        nrec = await w.ev(RECA); tid = await w.ev("Nutcade.S.txs[0].id")
+        await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=findLost]'); await w.until(f"!(Nutcade.S.txs.find(t=>t.id==={json.dumps(tid)})||{{}}).changePending", 60000); await w.wait(500)
+        t9 = await w.ev(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(tid)})")
+        check('(round 2, 1) Find lost ecash credits the change to its payment (real fee), with no separate Recovered line', not t9.get('changePending') and t9['fee'] <= 1 + mc and await w.ev(RECA) == nrec, (t9['fee'], t9.get('changePending')))
+        await books(w, 'find lost credits change', broken)
+        # an interrupted deposit whose restore fails once: the quote is kept, then the ecash is credited to that deposit (no double line)
+        await w.pg.route(f'{B}/v1/restore', failing(1, 500))
+        await w.ev(f"""(async()=>{{ const S=Nutcade.S; const ws=new CashuLib.Wallet('{B}',{{unit:'sat',bip39seed:CashuLib.mnemonicToSeedSync(S.seed.mnemonic),counterInit:{{...S.counters}}}}); await ws.loadMint();
+            const q=await ws.createMintQuoteBolt11(640); const id='crash'+Date.now();
+            S.txs.unshift({{id,ts:Date.now(),note:'',status:'pending',fee:0,type:'in',method:'ln',amount:640,mint:'{B}',quote:q.quote,request:q.request}});
+            S.quotes.push({{kind:'bolt11',quote:q.quote,request:q.request,amount:640,mint:'{B}',txId:id}});
+            await new Promise(r=>setTimeout(r,1200)); await ws.mintProofsBolt11(640,q.quote); window.__crashTx=id; }})()""")
+        ok = await w.until("(Nutcade.S.txs.find(t=>t.id===window.__crashTx)||{}).status==='done'", 40000); await w.pg.unroute(f'{B}/v1/restore')
+        ct = await w.ev("Nutcade.S.txs.find(t=>t.id===window.__crashTx)")
+        check('(round 2, 1) an interrupted deposit whose recovery fails once is retried, then credited to the deposit itself', ok and ct['amount'] == 640 and not await w.ev("Nutcade.S.txs.some(t=>t.note==='Recovered with recovery phrase'&&t.mint===" + json.dumps(B) + "&&t.ts>Date.now()-60000)"), ct)
+        await books(w, 'interrupted deposit retried', broken)
         # a total budget, two payments racing for it: one goes through
         uri2 = await make_nwc(w, 'Racer', 'total', 500); await w.ev("Nutcade.closeSheet()")
         i1, i2 = invoice(300, B), invoice(300, B)
