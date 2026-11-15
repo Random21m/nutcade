@@ -3155,9 +3155,12 @@ const raw = {
 };
 const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc'];
 const vault = { on: raw.get('vault', null) != null, open: false, data: {}, dek: null, chain: Promise.resolve(), queued: false };
+// A tab paused because NUTCADE opened in another tab never writes the wallet again: work it still had in flight can't
+// overwrite what the active tab saved. (Counters still advance, so no secret is ever issued twice.)
+const writeGuard = { paused: false };
 const store = {
   get(k, d) { if (vault.on && VAULT_KEYS.includes(k)) return vault.open && vault.data[k] !== undefined ? vault.data[k] : d; return raw.get(k, d); },
-  set(k, v) { if (vault.on && VAULT_KEYS.includes(k)) { if (!vault.open) return false; vault.data[k] = v; queueVaultWrite(); return true; } return raw.set(k, v); }
+  set(k, v) { if (writeGuard.paused && k !== 'counters') return false; if (vault.on && VAULT_KEYS.includes(k)) { if (!vault.open) return false; vault.data[k] = v; queueVaultWrite(); return true; } return raw.set(k, v); }
 };
 const b64e = u8 => btoa(String.fromCharCode(...new Uint8Array(u8)));
 const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
@@ -3268,8 +3271,19 @@ function mergeMintSpellings() {
   for (const k of ['requests', 'extra', 'heirlooms', 'challenges', 'hunts', 'found', 'mintlog']) if (S[k] !== undefined) store.set(k, S[k]);
 }
 let storageOk = store.set('probe', 1);
+// every save stamps a generation number: a tab that sees someone else's stamp re-reads the wallet before working on it
+let myGen = raw.get('gen', 0);
 function save() {
+  if (writeGuard.paused) return;
   for (const k of ['mints', 'active', 'proofs', 'pending', 'txs', 'quotes', 'prefs']) storageOk = store.set(k, S[k]) && storageOk;
+  myGen = (raw.get('gen', 0) || 0) + 1; raw.set('gen', myGen);
+}
+async function syncIfStale() {
+  if ((raw.get('gen', 0) || 0) === myGen) return;
+  if (vault.on) { if (!vault.open || !vault.dek) return; await vault.chain; await openVault(vault.dek); const d = vault.data; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.txs = d.txs || []; S.quotes = d.quotes || []; }
+  else { S.proofs = raw.get('proofs', {}); S.pending = raw.get('pending', []); S.txs = raw.get('txs', []); S.quotes = raw.get('quotes', []); }
+  const c = raw.get('counters', {}); for (const k in c) S.counters[k] = Math.max(S.counters[k] || 0, c[k] || 0);
+  myGen = raw.get('gen', 0) || 0;
 }
 
 /* ---------- recovery phrase (NUT-13 deterministic secrets) ---------- */
@@ -3322,11 +3336,13 @@ async function secureAll(onStep) {
   S.seed.secured = true; store.set('seed', S.seed);
   return fees;
 }
-async function restoreFromMint(url, onStep, opts = {}) {
+function restoreFromMint(url, onStep, opts = {}) { url = normUrl(url); return single('restore:' + url, () => restoreFromMintNow(url, onStep, opts)); }
+async function restoreFromMintNow(url, onStep, opts) {
+  await syncIfStale();
   if (!S.mints.find(m => m.url === url)) await addMint(url);
   const w = await getWallet(url);
   // change of a payment that is still being recovered belongs to that payment: credit it there first (lowering its fee)
-  for (const p of S.pending.filter(p => p.mint === url && p.paid && p.ctr && !p.changeDone)) { await recoverChange(p); await finishPaid(p); }
+  for (const p of S.pending.filter(p => p.mint === url && p.paid && p.ctr && !p.changeDone)) { await reconcile(p, { force: true }); if (S.pending.includes(p)) throw new Error("The mint didn't answer. Try again in a moment."); }
   const keysets = w.keyChain.getKeysets().filter(k => k.unit === 'sat');
   let found = [];
   for (const k of keysets) {
@@ -3371,8 +3387,8 @@ try {
   chan.onmessage = e => {
     const m = e.data || {};
     if (m.t === 'hello' && !tabLocked) chan.postMessage({ t: 'busy', id: TAB_ID });
-    else if (m.t === 'busy' && m.id !== TAB_ID && !tabLocked && !booted) { tabLocked = true; render(); }
-    else if (m.t === 'takeover' && m.id !== TAB_ID) { tabLocked = true; closeSheet(); if (window.Arcade && window.Arcade.playing()) document.querySelector('[data-g=exit]')?.click(); render(); }
+    else if (m.t === 'busy' && m.id !== TAB_ID && !tabLocked && !booted) { tabLocked = true; writeGuard.paused = true; render(); }
+    else if (m.t === 'takeover' && m.id !== TAB_ID) { tabLocked = true; writeGuard.paused = true; closeSheet(); if (window.Arcade && window.Arcade.playing()) document.querySelector('[data-g=exit]')?.click(); render(); }
   };
   chan.postMessage({ t: 'hello', id: TAB_ID });
 } catch (e) { chan = null; }
@@ -3686,8 +3702,21 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {
     throw f;
   }
 }
+/* One at a time per record (a payment, a deposit, a mint's restore): every caller in this tab shares the run in
+   progress, and where the browser has Web Locks another tab waits for it too. */
+const flights = new Map();
+function single(key, fn) {
+  if (flights.has(key)) return flights.get(key);
+  const p = (async () => (navigator.locks && navigator.locks.request) ? navigator.locks.request('nutcade:' + key, () => fn()) : fn())().finally(() => flights.delete(key));
+  flights.set(key, p);
+  return p;
+}
 /* opts.force: try a waiting change recovery now (at startup, or when you ask), instead of waiting for its backoff */
-async function reconcile(pend, opts = {}) {
+function reconcile(pend, opts = {}) { return single('melt:' + pend.id, () => reconcileNow(pend.id, pend.txId, opts)); }
+async function reconcileNow(id, txId, opts) {
+  await syncIfStale();   // another tab may have settled it already
+  const pend = S.pending.find(p => p.id === id);
+  if (!pend) { const t = txById(txId); return !t || t.status === 'done' ? 'paid' : t.status === 'failed' ? 'returned' : 'pending'; }   // settled by an earlier run
   if (pend.paid) return finishPaid(pend, opts);   // the payment went through; only its change may still be at the mint
   const w = await getWallet(pend.mint);
   let qs = null;
@@ -3744,8 +3773,11 @@ async function recoverChange(pend) {
   const sent = new Set(S.txs.flatMap(t => (t.sent || []).map(p => p.secret)).concat(S.pending.filter(p => p.id !== pend.id).flatMap(p => p.proofs.map(x => x.secret))));
   let found = (r.proofs || []).filter(p => !have.has(p.secret) && !sent.has(p.secret) && !mine.has(p.secret));
   if (found.length) { const st = await inTime(w.checkProofsStates(found), 30000); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
+  // checked again right before crediting, with no wait in between: what is already held or credited adds nothing
+  const held = new Set((S.proofs[pend.mint] || []).map(p => p.secret)), credited = new Set(pend.recovered || []);
+  found = found.filter(p => !held.has(p.secret) && !credited.has(p.secret));
   if (found.length) {
-    pend.recovered = [...mine, ...found.map(p => p.secret)]; pend.change = (pend.change || 0) + sum(found);
+    pend.recovered = [...credited, ...found.map(p => p.secret)]; pend.change = (pend.change || 0) + sum(found);
     addProofs(pend.mint, found);   // saves the proofs and this record together
   }
   pend.changeDone = true; save();

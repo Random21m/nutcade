@@ -686,6 +686,47 @@ async def main():
         ct = await w.ev("Nutcade.S.txs.find(t=>t.id===window.__crashTx)")
         check('(round 2, 1) an interrupted deposit whose recovery fails once is retried, then credited to the deposit itself', ok and ct['amount'] == 640 and not await w.ev("Nutcade.S.txs.some(t=>t.note==='Recovered with recovery phrase'&&t.mint===" + json.dumps(B) + "&&t.ts>Date.now()-60000)"), ct)
         await books(w, 'interrupted deposit retried', broken)
+        # (round 2, item 4) a slow mint (800 ms on every call) and a reload mid-payment: the startup check and the live
+        # watch both reconcile the payment at once; its change is credited once, the fee is the real one (not 0)
+        async def slow(route):
+            await asyncio.sleep(0.8)
+            try: await route.continue_()
+            except Exception: pass
+        async def slow_drop(route):
+            await asyncio.sleep(0.8)
+            try: await route.fetch()
+            except Exception: pass
+            try: await route.abort()
+            except Exception: pass
+        for M, O in ((A, B), (B, A)):
+            await w.use(M); mcm = await w.ev(f"Nutcade.r7.meltCost({json.dumps(M)}, 700, 0).mintFee")
+            await w.pg.context.route(re.compile(re.escape(M) + r'/v1/(?!melt/bolt11$).*'), slow); await w.pg.context.route(f'{M}/v1/melt/bolt11', slow_drop)
+            await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=sendMethod][data-m=ln]'); await w.wait(100)
+            inv7 = invoice(700, O); await w.fill('#destIn', inv7); await w.click('[data-act=doMeltQuote]'); await w.until("!!document.querySelector('#payBtn')", 15000)
+            await w.click('#payBtn'); await w.until(f"Nutcade.S.txs.some(t=>t.request==={json.dumps(inv7)})", 15000); await w.wait(2500)
+            await w.pg.reload(); await w.wait(500)   # mid-payment: startup check and live watch both pick it up, on a slow mint
+            await w.until(f"(t=>t&&t.status==='done'&&!t.changePending)(Nutcade.S.txs.find(t=>t.request==={json.dumps(inv7)}))", 60000)
+            await w.pg.context.unroute(re.compile(re.escape(M) + r'/v1/(?!melt/bolt11$).*')); await w.pg.context.unroute(f'{M}/v1/melt/bolt11')
+            t7 = await w.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(inv7)})")
+            check(f'(round 2, 4) slow mint {M[-4:]} and a reload mid-payment, both checks racing: the change is credited once, the fee is the real one', t7['status'] == 'done' and 1 <= t7['fee'] <= 1 + mcm, (t7['fee'], mcm))
+            await books(w, 'slow mint, reload, racing ' + M[-4:], broken, (A, B, FM))
+        await w.use(A)
+        # two tabs: the first is mid-payment on a slow mint when the second takes over; both try to settle it
+        await w.pg.context.route(re.compile(re.escape(A) + r'/v1/(?!melt/bolt11$).*'), slow); await w.pg.context.route(f'{A}/v1/melt/bolt11', slow_drop)
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=sendMethod][data-m=ln]'); await w.wait(100)
+        invT = invoice(650, B); await w.fill('#destIn', invT); await w.click('[data-act=doMeltQuote]'); await w.until("!!document.querySelector('#payBtn')", 15000)
+        await w.click('#payBtn'); await w.until(f"Nutcade.S.txs.some(t=>t.request==={json.dumps(invT)})", 15000); await w.wait(2000)
+        pg2 = await w.pg.context.new_page(); t2 = W(pg2, 'tab2'); pg2.on('pageerror', lambda e: t2.errs.append(str(e)))
+        await pg2.goto(URL); await t2.until("!!document.querySelector('[data-act=takeover]')", 10000); await t2.click('[data-act=takeover]'); await pg2.wait_for_timeout(1500)
+        paused = await w.ev("!!document.querySelector('[data-act=takeover]')")
+        await t2.until(f"(t=>t&&t.status==='done'&&!t.changePending)(Nutcade.S.txs.find(t=>t.request==={json.dumps(invT)}))", 60000); await t2.wait(4000)
+        await w.pg.context.unroute(re.compile(re.escape(A) + r'/v1/(?!melt/bolt11$).*')); await w.pg.context.unroute(f'{A}/v1/melt/bolt11')
+        await pg2.reload(); await t2.wait(1500)   # what the storage holds now, after both tabs worked on it
+        tT = await t2.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(invT)})"); b2 = []
+        await books(t2, 'two tabs racing', b2, (A, B, FM))
+        check('(round 2, 4) two tabs racing on the same payment: the first pauses and writes nothing more, the change is credited once, the history equals the balance', paused and tT and tT['status'] == 'done' and 1 <= tT['fee'] <= 1 + mc and not b2, (paused, tT and tT['fee'], b2))
+        await pg2.close(); await w.pg.reload(); await w.wait(1200)
+        await books(w, 'after two tabs', broken, (A, B, FM))
         # (round 2, item 2) a scoped app asking to pay an invoice the user already paid learns nothing and pays nothing
         mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})
