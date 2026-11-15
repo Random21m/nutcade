@@ -3645,7 +3645,7 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {
   const { keep, send } = await withRepair(url, () => w.send(need, have, { includeFees: true })).catch(e => { throw shortOf(e, w, url, need, true); });
   const spent = sum(have) - sum(keep);   // what left the balance: the amount, the fee reserve and any swap fee
   // extra (who asked: a Wallet Connect app, a zap) is on the record before anything is sent, so a reload can't lose it
-  const tx = addTx(Object.assign({ type: 'out', method: kind, amount, fee: Math.max(0, spent - amount), mint: url, note, status: 'pending', request: dest, quote: mq.quote }, extra));
+  const tx = addTx(Object.assign({ type: 'out', method: kind, amount, fee: Math.max(0, spent - amount), mint: url, note, status: 'pending', request: dest, quote: mq.quote }, kind === 'ln' && mq.request && mq.request !== dest ? { invoice: String(mq.request) } : {}, extra));   // (a Lightning address payment keeps the invoice it paid, for its preimage)
   // where the mint's change will be signed (NUT-08 blank outputs, from this wallet's counters): after a reload it is
   // restored from exactly there. The library reports the range it reserved; until then, this is where it will start.
   let ksid = null; try { ksid = w.keysetId; } catch (e) {}

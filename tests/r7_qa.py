@@ -435,7 +435,7 @@ async def main():
         tot = re.search(r'Total, at most\n([\d,]+) SAT', q); mf = re.search(r'Mint fee, at most\n([\d,]+) SAT', q)
         check('(fix 4) pay screen on the fee mint: it shows the mint fee and the total at most, and the payment cost no more than that total', bool(tot and mf) and int(mf.group(1)) >= 1 and ba - await w.bal(A) <= int(tot.group(1).replace(',', '')), (q[:300], ba - await w.bal(A)))
         check('(fix 9) zap: the sheet said the zap is signed with this wallet\'s Nostr key and can be linked to you', 'signed with this wallet' in w.zap_pre and 'link it to you' in w.zap_pre, w.zap_pre[:400])
-        zp = await w.ev("Nutcade.S.txs[0].preimage"); zh = await w.ev("Nutcade.r7.decodeBolt11(Nutcade.S.txs[0].request).paymentHash")
+        zp = await w.ev("Nutcade.S.txs[0].preimage"); zh = await w.ev("Nutcade.r7.decodeBolt11(Nutcade.S.txs[0].invoice).paymentHash")
         check('(fix 5) zap: the payment preimage is stored, and it matches the invoice', bool(zp) and __import__('hashlib').sha256(bytes.fromhex(zp)).hexdigest() == zh, (zp, zh))
         # anonymous zap: a fresh one-time key signs it, tagged anon, and the receiver's endpoint still accepts it
         nz = len(mock('/test/state')['zaps'])
