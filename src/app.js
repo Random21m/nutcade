@@ -527,16 +527,19 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {
   const spent = sum(have) - sum(keep);   // what left the balance: the amount, the fee reserve and any swap fee
   // extra (who asked: a Wallet Connect app, a zap) is on the record before anything is sent, so a reload can't lose it
   const tx = addTx(Object.assign({ type: 'out', method: kind, amount, fee: Math.max(0, spent - amount), mint: url, note, status: 'pending', request: dest, quote: mq.quote }, extra));
-  // where the mint's change will be signed (NUT-08 blank outputs come from the next counters): after a reload it is restored from there
+  // where the mint's change will be signed (NUT-08 blank outputs, from this wallet's counters): after a reload it is
+  // restored from exactly there. The library reports the range it reserved; until then, this is where it will start.
   let ksid = null; try { ksid = w.keysetId; } catch (e) {}
-  const pend = { id: uid(), mint: url, proofs: plain(send), quote: mq.quote, kind, txId: tx.id, spent, amount, change: 0, ctr: ksid ? { id: ksid, start: S.counters[ksid] || 0, n: Math.max(1, Math.ceil(Math.log2(Math.max(1, num(mq.fee_reserve))))) } : null };
+  const over = BigInt(Math.max(0, sum(send) - amount));
+  const pend = { id: uid(), mint: url, proofs: plain(send), quote: mq.quote, kind, txId: tx.id, spent, amount, change: 0, ctr: ksid ? { id: ksid, start: S.counters[ksid] || 0, n: Math.max(over <= 1n ? 0 : (over - 1n).toString(2).length, 1) } : null };
+  const onCountersReserved = u => { if (u && u.count > 0) { pend.ctr = { id: u.keysetId, start: u.start, n: u.count }; save(); } };
   S.proofs[url] = plain(keep); S.pending.push(pend); save();
   try {
-    const res = await withRepair(url, () => kind === 'ln' ? w.meltProofsBolt11(mq, send) : w.meltProofsOnchain(mq, send, feeIndex));
+    const res = await withRepair(url, () => kind === 'ln' ? w.meltProofsBolt11(mq, send, { onCountersReserved }) : w.meltProofsOnchain(mq, send, feeIndex, { onCountersReserved }));
     const change = plain(res.change || []);
     if (change.length) { addProofs(url, change); pend.change = sum(change); }
-    pend.changeDone = true;
     const st = res.quote && res.quote.state;
+    if (change.length || st === 'PAID') pend.changeDone = true;   // still pending: its change comes later, recovered when it settles
     if (st === 'PAID') {
       S.pending = S.pending.filter(p => p.id !== pend.id);
       settleMelt(pend, 'done', 0); updTx(tx.id, { outpoint: res.quote.outpoint || null, preimage: res.quote.payment_preimage || null });
@@ -585,7 +588,7 @@ async function reconcile(pend) {
 async function recoverChange(pend) {
   if (!pend.ctr || pend.changeDone) return 0;
   const w = await getWallet(pend.mint);
-  const r = await w.restore(pend.ctr.start, pend.ctr.n + 8, { keysetId: pend.ctr.id });
+  const r = await w.restore(pend.ctr.start, pend.ctr.n, { keysetId: pend.ctr.id });
   const have = new Set((S.proofs[pend.mint] || []).map(p => p.secret));
   const sent = new Set(S.txs.flatMap(t => (t.sent || []).map(p => p.secret)).concat(S.pending.filter(p => p.id !== pend.id).flatMap(p => p.proofs.map(x => x.secret))));
   let found = (r.proofs || []).filter(p => !have.has(p.secret) && !sent.has(p.secret));
