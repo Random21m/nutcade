@@ -817,10 +817,15 @@ async function journaled(url, kind, info, run) {
         }
       }
     });
-  } catch (e) {
+  } catch (e0) {
+    let e = e0;
     opsRunning.delete(op.id);
     if (!op.ctr.length && !op.outs.length) { closeOp(op); save(); }   // never reached the mint: nothing to settle
     else setTimeout(() => settleOp(op.id).catch(() => {}), 0);   // asked, and the answer is an error or never came: the mint decides
+    if (op.outs.length) {   // the request went out: the mint may have done it, so nothing may act as if it hadn't (no offline fallback)
+      if (netErr(e)) { e = new Error("The mint didn't answer. Try again in a moment."); e.op = op; }
+      e.asked = true;
+    }
     throw e;
   } finally { opsRunning.delete(op.id); }
 }
@@ -829,7 +834,10 @@ const outRec = (o, send) => ({ a: num(String(o.blindedMessage.amount)), id: o.bl
 // a swap with its outputs on record: prepared (counters reserved), every output written down and stored, then asked
 async function askRecorded(w, op, prepared, privkey) {
   const p = await prepared;
-  if (op) { op.outs = (p.sendOutputs || []).map(o => outRec(o, true)).concat((p.keepOutputs || []).map(o => outRec(o, false))); await saveNow(); }
+  if (op) {
+    if (p.inputs && p.inputs.length) op.inputs = p.inputs.map(x => x.secret);   // exactly the coins this swap spends (they are busy until it settles)
+    op.outs = (p.sendOutputs || []).map(o => outRec(o, true)).concat((p.keepOutputs || []).map(o => outRec(o, false))); await saveNow();
+  }
   return w.completeSwap(p, privkey);
 }
 const rSend = (op, w, amount, proofs, cfg, outCfg) => askRecorded(w, op, w.prepareSwapToSend(amount, proofs, cfg, outCfg), cfg && cfg.privkey);
@@ -2704,11 +2712,12 @@ function offlineAmounts(proofs, amount) {
 }
 function sendOffline(amount, note, url = S.active) {
   piggyGuard(amount);
-  const have = S.proofs[url] || [];
+  const busy = new Set(S.ops.filter(o => o.mint === url).flatMap(o => o.inputs));   // coins a step still in flight may have spent
+  const have = (S.proofs[url] || []).filter(p => !busy.has(p.secret));
   const pick = pickExact(have, amount);
   if (!pick) { const near = offlineAmounts(have, amount); throw new Error(`Offline, NUTCADE can only send amounts made of the exact coins you hold.${near.length ? ` Try ${near.map(money).join(' or ')}.` : ''}`); }
   const ids = new Set(pick.map(p => p.secret));
-  S.proofs[url] = have.filter(p => !ids.has(p.secret));
+  S.proofs[url] = (S.proofs[url] || []).filter(p => !ids.has(p.secret));
   const token = L.getEncodedToken({ mint: url, proofs: pick, unit: 'sat' });
   save();
   return addTx({ type: 'out', method: 'ecash', amount, mint: url, note, status: 'pending', token, sent: plain(pick), offline: true });
@@ -3237,7 +3246,7 @@ const A = {
     }
     if (isOffline()) { holdIncoming(tok, val('noteIn').trim()); sfx('blip'); refresh(); setBody(`<div class="notice">You're offline, so this token is saved and will be claimed automatically when you're back online. Until then it isn't yours yet: the sender could still spend it.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
     let tx; try { tx = await receiveToken(tok, val('noteIn').trim()); }
-    catch (e) { if (!netErr(e)) throw e; holdIncoming(tok, val('noteIn').trim()); refresh(); setBody(`<div class="notice">The mint can't be reached right now, so the token is saved and will be claimed automatically when it can. Until then it isn't yours yet.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
+    catch (e) { if (!netErr(e) || e.asked) throw e; holdIncoming(tok, val('noteIn').trim()); refresh(); setBody(`<div class="notice">The mint can't be reached right now, so the token is saved and will be claimed automatically when it can. Until then it isn't yours yet.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
     sfx('coin'); showDone('in', tx.amount, 'Ecash');
   }),
   doSendEcash: b => run(b, 'MINTING TOKEN', async () => { const a = amt(), note = val('noteIn').trim(); let tx;
@@ -3252,7 +3261,7 @@ const A = {
       sfx('coin'); refresh(); showToken(txById(tx.id), sent); return;
     }
     if (isOffline()) tx = sendOffline(a, note);
-    else { try { tx = await sendEcash(a, note, null); } catch (e) { if (!netErr(e)) throw e; tx = sendOffline(a, note); } } sfx('coin'); refresh(); showToken(tx); }),
+    else { try { tx = await sendEcash(a, note, null); } catch (e) { if (!netErr(e) || e.asked) throw e; tx = sendOffline(a, note); } } sfx('coin'); refresh(); showToken(tx); }),
   doMeltQuote: b => run(b, 'QUOTING', async () => {
     const k = b.dataset.k; let dest = val('destIn').trim().replace(/^(lightning|bitcoin):/i, '').split('?')[0];
     const note = val('noteIn').trim();
