@@ -850,6 +850,38 @@ async def main():
         ok = await w.until("[410,333].every(a=>Nutcade.S.txs.some(t=>t.type==='in'&&t.method==='ln'&&t.amount===a&&t.status==='done'&&t.mint===" + json.dumps(B) + "))", 90000)
         check('(round 3, 2) two interrupted deposits (one while Find lost ran) each settle as themselves, with no Recovered line and no quote left', ok and await w.ev(RECB(B)) == nrec and await w.ev(f"Nutcade.S.quotes.filter(q=>q.mint==={json.dumps(B)}).length") == 0, (ok, await w.ev(RECB(B)) - nrec))
         await books(w, 'interrupted deposits', broken, (A, B, FM))
+        # (round 3, item 3) a reload while a token is being made on a slow mint: the step settles on the next start
+        await w.use(B); bB0 = await w.bal(B); await w.pg.route(f'{B}/v1/swap', held(4))
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '500'); await w.click('[data-act=doSendEcash]'); await w.wait(1500)
+        await w.pg.reload(); await w.wait(800); await w.pg.unroute(f'{B}/v1/swap')
+        ok = await w.until("Nutcade.S.ops.length===0", 40000); bB1 = await w.bal(B)
+        e, q = await w.pay_ln(invoice(300, A))
+        check('(round 3, 3) a reload during "make a token": the open step settles by itself, nothing is lost, the next payment works', ok and bB1 == bB0 and not e, (ok, bB1 - bB0, e))
+        await books(w, 'reload during make a token', broken, (A, B, FM))
+        # coins spent elsewhere (a stale copy): the payment drops them with a line, and explains instead of failing twice
+        fx = await wallet(b); await fx.create(); await fx.add_mint(B)
+        tokS, _ = await w.send_ecash(200, 'r3 stale')
+        await fx.receive_token(tokS)
+        await w.ev(f"(d=>{{Nutcade.S.proofs[{json.dumps(B)}].push(...d.proofs.map(p=>Object.assign({{}},p,{{amount:Number(p.amount)}})))}})(CashuLib.getDecodedToken({json.dumps(tokS)}))")   # as if the wallet never noticed
+        real = await w.bal(B) - 200
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', str(real + 100)); await w.click('[data-act=doSendEcash]'); await w.wait(4000)
+        er = await w.err(); await w.ev("Nutcade.closeSheet()")
+        check('(round 3, 3) "already spent": the spent coins are dropped with a line ("already spent elsewhere") and the error explains, it does not just repeat "already spent"', await w.ev("Nutcade.S.txs.some(t=>t.note==='Ecash already spent elsewhere'&&t.amount===200)") and 'already spent. proofs' not in er.lower(), er)
+        tok2b, e2b = await w.send_ecash(100)
+        check('(round 3, 3) after that, a payment from the same mint works', tok2b and not e2b, e2b)
+        await books(w, 'stale coins dropped', broken, (A, B, FM))
+        # the paused-tab rule: a token claim in flight in tab A when tab B takes over: tab B settles it and gets the sats
+        tokP, _ = await fx.send_ecash(111, 'for tab B')
+        await w.pg.route(f'{B}/v1/swap', held(6))
+        await w.home(); await w.click('[data-act=receive]'); await w.wait(150); await w.click('[data-act=recvMethod][data-m=ecash]'); await w.wait(100); await w.fill('#tokIn', tokP); await w.click('[data-act=doReceiveToken]'); await w.wait(1200)
+        hb = await w.bal(B)
+        pg3 = await w.pg.context.new_page(); t3 = W(pg3, 'tab3')
+        await pg3.goto(URL); await t3.until("!!document.querySelector('[data-act=takeover]')", 10000); await t3.click('[data-act=takeover]'); await pg3.wait_for_timeout(1500)
+        ok = await t3.until(f"Nutcade.S.ops.length===0 && Nutcade.S.txs.some(t=>t.type==='in'&&t.amount===111)", 60000); await w.pg.unroute(f'{B}/v1/swap')
+        await pg3.reload(); await t3.wait(1500); b3 = []
+        await books(t3, 'paused-tab claim', b3, (A, B, FM))
+        check('(round 3, 3) a claim in flight in a tab paused by a takeover: the new tab settles it, gets the 111 SAT once, books add up', ok and await t3.bal(B) == hb + 111 and not b3, (ok, await t3.bal(B) - hb, b3))
+        await pg3.close(); await w.pg.reload(); await w.wait(1500); await fx.pg.context.close()
         # (round 2, item 2) a scoped app asking to pay an invoice the user already paid learns nothing and pays nothing
         mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})

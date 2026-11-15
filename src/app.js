@@ -562,7 +562,7 @@ async function sendEcash(amount, note, lockTo, url = S.active, opts = {}) {
     try { return await journaled(url, 'send', { inputs: have }, cb => w.send(amount, have, { includeFees: true, onCountersReserved: cb }, outCfg)); }
     finally { if (all) w._selectProofs = pick; }
   };
-  const { r: { keep, send }, op } = await attempt().catch(e => { throw shortOf(e, w, url, amount, false); });
+  const { r: { keep, send }, op } = await spentRetry(url, attempt).catch(e => { throw shortOf(e, w, url, amount, false); });
   const used = new Set(have.map(p => p.secret));
   S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep));
   const token = L.getEncodedToken({ mint: url, proofs: send, unit: 'sat' });
@@ -605,7 +605,7 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {
   if (sum(have) < need) throw new Error(`Not enough funds. Need ${money(need)} including fees; this mint holds ${money(sum(have))}.`);
   piggyGuard(need);
   let inputs;
-  const { r: { keep, send }, op } = await (() => { inputs = [...(S.proofs[url] || [])]; return journaled(url, 'swap', { inputs }, cb => w.send(need, inputs, { includeFees: true, onCountersReserved: cb })); })().catch(e => { throw shortOf(e, w, url, need, true); });
+  const { r: { keep, send }, op } = await spentRetry(url, () => { inputs = [...(S.proofs[url] || [])]; return journaled(url, 'swap', { inputs }, cb => w.send(need, inputs, { includeFees: true, onCountersReserved: cb })); }).catch(e => { throw shortOf(e, w, url, need, true); });
   const spent = sum(inputs) - sum(keep);   // what left the balance: the amount, the fee reserve and any swap fee
   // extra (who asked: a Wallet Connect app, a zap) is on the record before anything is sent, so a reload can't lose it
   const tx = addTx(Object.assign({ type: 'out', method: kind, amount, fee: Math.max(0, spent - amount), mint: url, note, status: 'pending', request: dest, quote: mq.quote }, kind === 'ln' && mq.request && mq.request !== dest ? { invoice: String(mq.request) } : {}, extra));   // (a Lightning address payment keeps the invoice it paid, for its preimage)
@@ -795,6 +795,30 @@ async function settleOpNow(id) {
   closeOp(op); save();
   return 'settled';
 }
+/* Coins the mint says are already spent (spent elsewhere, or by a step that never recorded its result) are dropped
+   from the balance with a history line saying so, after any open record at that mint has been settled first. */
+async function pruneSpent(url) {
+  for (const o of S.ops.filter(o => o.mint === url)) await settleOp(o.id);
+  const w = await getWallet(url), ps = S.proofs[url] || []; if (!ps.length) return 0;
+  const st = await inTime(w.checkProofsStates(ps), 30000);
+  const gone = new Set(ps.filter((p, i) => st[i] && st[i].state === 'SPENT').map(p => p.secret)); if (!gone.size) return 0;
+  const removed = sum((S.proofs[url] || []).filter(p => gone.has(p.secret)));
+  S.proofs[url] = (S.proofs[url] || []).filter(p => !gone.has(p.secret));
+  if (removed) addTx({ type: 'out', method: 'ecash', amount: removed, mint: url, note: 'Ecash already spent elsewhere', status: 'done' });
+  save();
+  return removed;
+}
+const isSpentErr = e => /already spent|proofs? (are|is) spent|token.*spent/i.test(String((e && (e.raw || e.message)) || ''));
+// a payment that hit "already spent": settle what was left open, drop the spent coins (with a line), and try once more
+async function spentRetry(url, fn) {
+  try { return await fn(); }
+  catch (e) {
+    if (!isSpentErr(e)) throw e;
+    const dropped = await pruneSpent(url).catch(() => 0);
+    try { return await fn(); }
+    catch (e2) { if (!isSpentErr(e2)) throw e2; const f = new Error(`Some of this ecash was already spent. NUTCADE removed ${money(dropped)} of spent ecash from your balance (see your notes). Try again with what is left.`); f.keep = true; throw f; }
+  }
+}
 /* The history always adds up to the balance. A payment that went through records fee = what left the balance -
    amount - change. One that failed moved nothing, so it records no amount moved and no fee; but if getting the
    ecash ready cost a mint fee (a NUT-02 swap fee) that didn't come back, that cost is its own "Mint fee" line,
@@ -818,17 +842,11 @@ async function checkClaim(tx) {
   if (st.every(s => s.state === 'SPENT') && cur && cur.status === 'pending') { updTx(tx.id, { status: 'claimed' }); return true; }
   return false;
 }
+// Remove spent ecash: open steps are settled first, then spent coins are dropped with a history line (the history
+// always adds up to the balance)
 async function cleanWallet() {
   let removed = 0;
-  for (const m of S.mints) {
-    const ps = S.proofs[m.url] || []; if (!ps.length) continue;
-    const w = await getWallet(m.url);
-    const st = await w.checkProofsStates(ps);
-    const keep = ps.filter((p, i) => !st[i] || st[i].state !== 'SPENT');
-    removed += ps.length - keep.length;
-    S.proofs[m.url] = keep;
-  }
-  save();
+  for (const m of S.mints) { if (!(S.proofs[m.url] || []).length) continue; const before = (S.proofs[m.url] || []).length; await pruneSpent(m.url); removed += Math.max(0, before - (S.proofs[m.url] || []).length); }
   return removed;
 }
 
