@@ -7234,7 +7234,11 @@ async function extraTick() {
     const st = await (await getWallet(x.mint)).checkProofsStates(x.proofs).catch(() => null);
     if (st && st.length && st.every(s => s.state === 'SPENT')) {
       S.extra = null; saveExtra();
-      addTx({ type: 'out', method: 'ecash', amount: x.amount, mint: x.mint, note: `Extra Life passed to ${x.heir.name}`, status: 'done', extraLife: true, move: true, fx: null });
+      // the sats left the balance when the Extra Life was set up (its "Extra Life for" line): that line now says where
+      // they went, and comes to the top, so the history still adds up to the balance
+      const t0 = S.txs.find(t => t.extraLife && t.mint === x.mint && /^Extra Life for /.test(t.note || ''));
+      if (t0) { S.txs = [Object.assign(t0, { note: `Extra Life passed to ${x.heir.name}`, ts: Date.now(), passed: true })].concat(S.txs.filter(t => t !== t0)); save(); }
+      else addTx({ type: 'out', method: 'ecash', amount: 0, mint: x.mint, note: `Extra Life passed to ${x.heir.name}`, status: 'done', extraLife: true, move: true, fx: null });
       toast(`Your Extra Life passed to ${x.heir.name}`, 'gold'); refresh(); return;
     }
   }
