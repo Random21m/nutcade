@@ -515,7 +515,7 @@ async function meltQuote(kind, dest, amount) {
   if (kind === 'ln') return w.createMeltQuoteBolt11(dest);
   return w.createMeltQuoteOnchain(dest, amount);
 }
-async function payMelt(kind, mq, feeIndex, note, dest, url = S.active) {
+async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {}) {
   const w = await getWallet(url);
   const amount = num(mq.amount);
   const reserve = kind === 'ln' ? num(mq.fee_reserve) : num((mq.fee_options || []).find(f => f.fee_index === feeIndex)?.fee_reserve);
@@ -525,13 +525,17 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active) {
   piggyGuard(need);
   const { keep, send } = await withRepair(url, () => w.send(need, have, { includeFees: true })).catch(e => { throw shortOf(e, w, url, need, true); });
   const spent = sum(have) - sum(keep);   // what left the balance: the amount, the fee reserve and any swap fee
-  const tx = addTx({ type: 'out', method: kind, amount, fee: Math.max(0, spent - amount), mint: url, note, status: 'pending', request: dest, quote: mq.quote });
-  const pend = { id: uid(), mint: url, proofs: plain(send), quote: mq.quote, kind, txId: tx.id, spent, amount, change: 0 };
+  // extra (who asked: a Wallet Connect app, a zap) is on the record before anything is sent, so a reload can't lose it
+  const tx = addTx(Object.assign({ type: 'out', method: kind, amount, fee: Math.max(0, spent - amount), mint: url, note, status: 'pending', request: dest, quote: mq.quote }, extra));
+  // where the mint's change will be signed (NUT-08 blank outputs come from the next counters): after a reload it is restored from there
+  let ksid = null; try { ksid = w.keysetId; } catch (e) {}
+  const pend = { id: uid(), mint: url, proofs: plain(send), quote: mq.quote, kind, txId: tx.id, spent, amount, change: 0, ctr: ksid ? { id: ksid, start: S.counters[ksid] || 0, n: Math.max(1, Math.ceil(Math.log2(Math.max(1, num(mq.fee_reserve))))) } : null };
   S.proofs[url] = plain(keep); S.pending.push(pend); save();
   try {
     const res = await withRepair(url, () => kind === 'ln' ? w.meltProofsBolt11(mq, send) : w.meltProofsOnchain(mq, send, feeIndex));
     const change = plain(res.change || []);
     if (change.length) { addProofs(url, change); pend.change = sum(change); }
+    pend.changeDone = true;
     const st = res.quote && res.quote.state;
     if (st === 'PAID') {
       S.pending = S.pending.filter(p => p.id !== pend.id);
@@ -542,7 +546,9 @@ async function payMelt(kind, mq, feeIndex, note, dest, url = S.active) {
     save();
     return txById(tx.id);
   } catch (e) {
-    await reconcile(pend).catch(() => {});
+    // the mint's answer was lost (a dropped connection): ask the mint how it went before calling it a failure
+    const r = await reconcile(pend).catch(() => null);
+    if (r === 'paid') return txById(tx.id);
     const f = friendly(e, url), t = txById(tx.id);
     if (t && t.status === 'failed') f.also = t.cost ? `The ecash came back, except ${money(t.cost)} the mint kept as its fee.` : 'Nothing left your wallet.';
     throw f;
@@ -553,6 +559,7 @@ async function reconcile(pend) {
   let qs = null;
   try { qs = pend.kind === 'ln' ? await w.checkMeltQuoteBolt11(pend.quote) : await w.checkMeltQuoteOnchain(pend.quote); } catch (e) {}
   if (qs && qs.state === 'PAID') {
+    await recoverChange(pend).catch(() => 0);
     S.pending = S.pending.filter(p => p.id !== pend.id);
     settleMelt(pend, 'done', 0);
     updTx(pend.txId, { outpoint: qs.outpoint || null });
@@ -563,6 +570,7 @@ async function reconcile(pend) {
   const stillPending = states.some(s => s.state === 'PENDING');
   if (!stillPending) {
     if (unspent.length) addProofs(pend.mint, unspent);
+    if (!unspent.length) await recoverChange(pend).catch(() => 0);   // paid: its change may still be at the mint
     S.pending = S.pending.filter(p => p.id !== pend.id);
     const allSpent = unspent.length === 0;
     settleMelt(pend, allSpent ? 'done' : 'failed', sum(unspent));
@@ -570,6 +578,21 @@ async function reconcile(pend) {
     return allSpent ? 'paid' : 'returned';
   }
   return 'pending';
+}
+/* A payment's change (unused Lightning fee reserve) normally comes back with the mint's answer. If NUTCADE closed
+   before that answer arrived, the change was still signed for this wallet's next counters: restore exactly those,
+   keep what is unspent and not already held or sent in a token, so the fee recorded is what the payment really cost. */
+async function recoverChange(pend) {
+  if (!pend.ctr || pend.changeDone) return 0;
+  const w = await getWallet(pend.mint);
+  const r = await w.restore(pend.ctr.start, pend.ctr.n + 8, { keysetId: pend.ctr.id });
+  const have = new Set((S.proofs[pend.mint] || []).map(p => p.secret));
+  const sent = new Set(S.txs.flatMap(t => (t.sent || []).map(p => p.secret)).concat(S.pending.filter(p => p.id !== pend.id).flatMap(p => p.proofs.map(x => x.secret))));
+  let found = (r.proofs || []).filter(p => !have.has(p.secret) && !sent.has(p.secret));
+  if (found.length) { const st = await w.checkProofsStates(found); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
+  if (found.length) { addProofs(pend.mint, found); pend.change = (pend.change || 0) + sum(found); }
+  pend.changeDone = true; save();
+  return sum(found);
 }
 /* The history always adds up to the balance. A payment that went through records fee = what left the balance -
    amount - change. One that failed moved nothing, so it records no amount moved and no fee; but if getting the
@@ -2650,8 +2673,8 @@ function showMeltQuote(kind, mq, dest, note) {
     const mb = body.querySelector('#mppBtn'); if (mb) mb.onclick = () => openMultinut(mq.request, amount, dest, note);
     body.querySelector('#payBtn').onclick = e => run(e.currentTarget, 'PAYING', async () => {
       const fi = kind === 'onchain' ? parseInt((body.querySelector('input[name=fee]:checked') || {}).value || '0', 10) : 0;
-      const tx = await payMelt(kind, mq, fi, note, dest);
-      const zx = zapByQuote.get(mq.quote); if (zx) updTx(tx.id, zx);
+      const zx = zapByQuote.get(mq.quote);
+      const tx = await payMelt(kind, mq, fi, note, dest, S.active, zx || {});
       const isAddr = kind === 'ln' && /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(dest);
       const ct = isAddr && (S.contacts.find(c => c.ln === dest.toLowerCase()) || null);
       if (ct) updTx(tx.id, { contactId: ct.id, contactName: ct.name });

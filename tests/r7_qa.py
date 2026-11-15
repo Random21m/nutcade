@@ -507,6 +507,39 @@ async def main():
         sp = await w.ev("(c=>Nutcade.S.txs.filter(t=>t.nwc===c.id&&t.type==='out'&&t.status!=='failed').reduce((s,t)=>s+t.amount+(t.fee||0),0))(Nutcade.S.nwc.find(c=>c.name==='Tight'))")
         check('(fix 1) nwc: with the budget at the worst case it pays, and what it really cost stays within the budget', r['answer']['error'] is None and 10 < sp <= cost['total'], (r['answer'], sp, cost))
         await books(w, 'nwc tight budget', broken)
+        # (fix 2) reload while a Wallet Connect payment is in flight: it stays tagged, counts against the budget, and its change comes back
+        uriR = await make_nwc(w, 'Reloader', 'day', 1000); await w.ev("Nutcade.closeSheet()")
+        held = asyncio.Event()
+        async def hold_melt(route):   # the mint pays, but the answer (with the change) never reaches the page, which reloads
+            try: await route.fetch()
+            except Exception: pass
+            held.set()
+        await w.pg.route('http://127.0.0.1:3338/v1/melt/bolt11', hold_melt)
+        inv600 = invoice(600, B)
+        await asyncio.to_thread(mock, '/test/nwc', {'uri': uriR, 'method': 'pay_invoice', 'params': {'invoice': inv600}, 'nowait': True})
+        await asyncio.wait_for(held.wait(), 30); await w.wait(300)
+        pre_tag = await w.ev(f"(t=>t&&[t.nwc,t.status])(Nutcade.S.txs.find(t=>t.request==={json.dumps(inv600)}))")
+        await w.pg.unroute('http://127.0.0.1:3338/v1/melt/bolt11'); await w.pg.reload(); await w.wait(1500)
+        await w.until(f"(Nutcade.S.txs.find(t=>t.request==={json.dumps(inv600)})||{{}}).status==='done'", 40000)
+        t6 = await w.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(inv600)})")
+        mc = await w.ev(f"Nutcade.r7.meltCost({json.dumps(A)}, 600, 0).mintFee")
+        check('(fix 2) nwc: the payment is tagged with its app before it goes out, and still after a reload mid-payment', pre_tag and pre_tag[0] and t6.get('nwc') == pre_tag[0], (pre_tag, t6.get('nwc')))
+        check('(fix 2) after a reload mid-payment, the change comes back: the fee recorded is the real one, not the whole reserve', t6['status'] == 'done' and t6['fee'] <= 1 + mc, (t6['fee'], mc))
+        r = await nwc(w, uriR, 'pay_invoice', {'invoice': invoice(600, B)})
+        check('(fix 2) a second 600 SAT payment on the 1,000 SAT daily budget is refused after the reload', r['answer']['error'] and r['answer']['error']['code'] == 'QUOTA_EXCEEDED', r['answer'])
+        await books(w, 'nwc reload mid-payment', broken)
+        # the same lost answer on a plain payment (no reload): the change is recovered too
+        held2 = asyncio.Event()
+        async def drop_melt(route):
+            try: await route.fetch()
+            except Exception: pass
+            held2.set(); await route.abort()
+        await w.pg.route('http://127.0.0.1:3338/v1/melt/bolt11', drop_melt)
+        e, q = await w.pay_ln(invoice(700, B))
+        await w.pg.unroute('http://127.0.0.1:3338/v1/melt/bolt11')
+        await w.until("Nutcade.S.txs[0].status==='done'", 30000); t7 = await w.ev("Nutcade.S.txs[0]")
+        check('(fix 2) a payment whose answer was lost still records the real fee (its change restored), not the whole reserve', t7['amount'] == 700 and t7['status'] == 'done' and t7['fee'] <= 1 + mc and not e, (t7['status'], t7['fee'], e))
+        await books(w, 'lost melt answer', broken)
         # a total budget, two payments racing for it: one goes through
         uri2 = await make_nwc(w, 'Racer', 'total', 500); await w.ev("Nutcade.closeSheet()")
         i1, i2 = invoice(300, B), invoice(300, B)

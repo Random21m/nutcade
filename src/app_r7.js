@@ -497,16 +497,16 @@ const NWC = {
     if (left != null && need > left) { toast(`${c.name} asked to pay ${money(sats)}, more than its budget has left, so NUTCADE refused.`, 'gold'); throw nwcErr('QUOTA_EXCEEDED', `Over budget: this payment needs up to ${need} sat with its fee reserve, and ${left} sat of the budget is left.`); }
     if (!S.nwc.find(x => x.id === c.id)) throw nwcErr('UNAUTHORIZED', 'This connection was revoked.');
     let tx;
-    try { tx = await payMelt('ln', mq, 0, nwcNote(c), inv, url); }
+    // the payment carries the connection from the start (saved before anything is sent), so its cost counts against
+    // the budget while it is in flight and after a reload; only a confirmed failure gives it back
+    try { tx = await payMelt('ln', mq, 0, nwcNote(c), inv, url, { nwc: c.id, nwcName: c.name }); }
     catch (e) {
-      const t = S.txs.find(x => x.quote === mq.quote); if (t) updTx(t.id, { nwc: c.id, nwcName: c.name });
       refresh();
       if (e && e.piggy) throw nwcErr('RESTRICTED', 'This payment would dip into the piggy bank, which needs a countdown in NUTCADE.');
       const f = friendly(e, url);
       toast(`${c.name}'s payment of ${money(sats)} through Wallet Connect failed. ${f.also || f.message}`, 'red');
       throw nwcErr(/enough/i.test(f.message) ? 'INSUFFICIENT_BALANCE' : 'PAYMENT_FAILED', f.message + (f.also ? ' ' + f.also : ''));
     }
-    updTx(tx.id, { nwc: c.id, nwcName: c.name });
     for (let i = 0; i < 15 && tx.status === 'pending'; i++) { await sleep(2000); const pd = S.pending.find(x => x.txId === tx.id); if (pd) await reconcile(pd).catch(() => {}); tx = txById(tx.id); }
     sfx('coin'); refresh();
     if (tx.status === 'done') {
