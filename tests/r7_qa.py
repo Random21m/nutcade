@@ -1078,19 +1078,26 @@ async def main():
               ok and x and x['unspent'] and x['pub'] == mine_lock and x['until'] > x0['until'] and await t3.bal(B) == b0 and not b3, (ok, x, await t3.bal(B) - b0, b3))
         await back_to_a(pg3)
         # (round 4, 4) a takeover while a Lightning payment is getting its ecash ready: nothing is paid from the paused tab
+        mqs = {'on': False, 'ids': []}   # the melt quotes the paused tab asked for (the invoice's own mint quote is paid by the test mint itself)
+        async def mq_cap(r):
+            try:
+                if mqs['on'] and r.request.method == 'POST' and r.url.endswith('/v1/melt/quote/bolt11'): mqs['ids'].append((await r.json())['quote'])
+            except Exception: pass
+        w.pg.on('response', lambda r: asyncio.ensure_future(mq_cap(r)))
         for M, O in ((B, A), (A, B)):
-            inv, qid = quote_inv(321, O); b0, n0 = await w.bal(M), await w.ev("Nutcade.S.txs.length")
+            inv, qid = quote_inv(321, O); b0, n0 = await w.bal(M), await w.ev("Nutcade.S.txs.length"); mqs['on'] = True; mqs['ids'] = []
             await w.pg.route(f'{M}/v1/swap', held(6)); rec['on'] = True; rec['reqs'] = []
             await ln_pay_start(M, inv); await w.wait(1500)
             pg3, t3, tp = await take_over()
             await w.wait(9000); await w.pg.unroute(f'{M}/v1/swap')
             ok = await t3.until("Nutcade.S.ops.length===0", 60000); await t3.wait(1000)
             late = [r for r in rec['reqs'] if r[0] > tp + 0.5]; rec['on'] = False
-            st = quote_state(O, qid); b3 = []
+            mqs['on'] = False
+            st = [json.loads(urllib.request.urlopen(M + '/v1/melt/quote/bolt11/' + q, timeout=10).read()).get('state') for q in mqs['ids']]; b3 = []
             await books(t3, f'takeover during a payment {M[-4:]}', b3, (A, B, FM))
             lines = await t3.ev(f"Nutcade.S.txs.slice(0, Nutcade.S.txs.length-{n0}).map(t=>[t.note||t.method,t.amount,t.fee])")
-            check(f'(round 4, 4) {M[-4:]}: a takeover while a payment gets its ecash ready: the paused tab sends no request after it is paused, the invoice is not paid',
-                  not late and st == 'UNPAID', (late[:4], st))
+            check(f'(round 4, 4) {M[-4:]}: a takeover while a payment gets its ecash ready: the paused tab sends no request after it is paused, nothing is paid (its melt quote stays unpaid)',
+                  not late and st and all(x == 'UNPAID' for x in st), (late[:4], st))
             check(f'(round 4, 4) {M[-4:]}: and the tab in charge settles the prepared ecash: balance whole (less only the mint\'s swap fee), books add up, no payment line',
                   ok and b0 - (2 if M == A else 0) <= await t3.bal(M) <= b0 and not b3 and not any(l[0] == 'ln' for l in lines), (ok, await t3.bal(M) - b0, b3, lines))
             await back_to_a(pg3)
@@ -1112,11 +1119,11 @@ async def main():
         leaks['after reload, locked'] = await pw.pg.evaluate(LEAK_JS, sec)
         await unlock(pw); ok = await pw.until(f"Nutcade.S.ops.length===0 && Nutcade.S.extra && Nutcade.S.extra.until > {u0}", 60000); await pw.wait(800)
         sec = sorted(set(sec + await pw.ev(SECRETS_JS))); leaks['settled'] = await pw.pg.evaluate(LEAK_JS, sec)
-        x = await pw.ev(EXTRA_AT_MINT); pb = []
-        await books(pw, 'PIN CONTINUE', pb, (B,))
+        x = await pw.ev(EXTRA_AT_MINT); pinb = []
+        await books(pw, 'PIN CONTINUE', pinb, (B,))
         check('(round 4, 3) with a PIN, no plain spendable coins (or journal secrets) in any localStorage key: set up, swap on its way, reloaded and locked, settled',
               len(sec) > 5 and not any(leaks.values()), leaks)
-        check('(round 4, 3) and the interrupted CONTINUE finishes under the PIN: new date, valid at the mint, books add up', ok and x and x['unspent'] and not pb, (ok, x, pb))
+        check('(round 4, 3) and the interrupted CONTINUE finishes under the PIN: new date, valid at the mint, books add up', ok and x and x['unspent'] and not pinb, (ok, x, pinb))
         await pw.pg.context.close()
         # (round 4, 5) a mint past its time limit is named in the message, in your language, with no raw address
         async def hang_swap(route):
@@ -1166,8 +1173,9 @@ async def main():
         await w.wait(1500); x = await w.ev("Nutcade.S.extra")
         check('(round 3, two-step) an interrupted Extra Life cash-out settles after a reload: the sats are in your balance (one line), the Extra Life is closed',
               ok and x is None and await w.bal(B) >= bal0 + 396 and sum(1 for t in new if (t.get('note') or '').startswith('Extra Life cashed out')) == 1, (ok, x and x.get('amount'), await w.bal(B) - bal0, [(t.get('note'), t.get('amount')) for t in new]))
-        okh = await hr.until("Nutcade.S.heirlooms.length>0 && Nutcade.S.heirlooms.every(h=>h.state!=='waiting')", 30000)
-        check("(round 3, two-step) and the heir's copy is marked ended", okh, await hr.ev("Nutcade.S.heirlooms.map(h=>h.state)"))
+        wfrom = json.dumps(mine_lock[2:])   # (this wallet's copies only: the PIN wallet above has the same heir)
+        okh = await hr.until(f"(l=>l.length>0 && l.every(h=>h.state!=='waiting'))(Nutcade.S.heirlooms.filter(h=>h.from==={wfrom}))", 30000)
+        check("(round 3, two-step) and the heir's copy is marked ended", okh, await hr.ev("Nutcade.S.heirlooms.map(h=>[h.state,h.from.slice(0,8)])"))
         await w.wait(31000); await w.ev("window.dispatchEvent(new Event('online'))"); await w.wait(3000)
         check('(round 3, two-step) nothing later tries to continue it or shows its spent coins (after a background check)',
               await w.ev("!Nutcade.S.extra && Nutcade.S.ops.length===0 && !document.querySelector('[data-act=extraContinue]')"), await w.ev("Nutcade.S.extra"))
