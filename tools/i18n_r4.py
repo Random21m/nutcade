@@ -788,6 +788,8 @@ ROWS = [
 ("Not used yet", "Aún sin usar", "Ainda não usado", "Noch nicht genutzt", "Pas encore utilisée"),
 ("App", "App", "App", "App", "App"),
 ("This ecash was refused while its mint was blocked. The mint is unblocked now, so you can claim it.", "Este ecash se rechazó mientras su mint estaba bloqueado. El mint ya está desbloqueado, así que puedes reclamarlo.", "Este ecash foi recusado enquanto o mint dele estava bloqueado. O mint foi desbloqueado, então você pode resgatá-lo.", "Dieses Ecash wurde abgelehnt, während sein Mint gesperrt war. Der Mint ist jetzt entsperrt, du kannst es also einlösen.", "Cet ecash a été refusé pendant que son mint était bloqué. Le mint est débloqué, vous pouvez donc le réclamer."),
+("Mint fee, at most", "Comisión del mint, como máximo", "Taxa do mint, no máximo", "Mint-Gebühr, höchstens", "Frais du mint, au plus"),
+("Total, at most", "Total, como máximo", "Total, no máximo", "Gesamt, höchstens", "Total, au plus"),
 ]
 
 # Patterns for sentences that carry names or dates. $1, $2… are filled in (and translated again if they're known words).

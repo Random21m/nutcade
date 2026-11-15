@@ -2056,10 +2056,10 @@ function openMultinut(invoice, amount, dest, note) {
     let alive = true;
     planMultinut(invoice, amount, t => { const s = body.querySelector('.spinner'); if (s) s.textContent = t.toUpperCase(); }).then(parts => {
       if (!alive) return;
-      const fees = parts.reduce((t, p) => t + num(p.mq.fee_reserve), 0);
+      const fees = parts.reduce((t, p) => t + num(p.mq.fee_reserve), 0), mintFees = parts.reduce((t, p) => t + meltCost(p.c.url, p.mq.amount, p.mq.fee_reserve).mintFee, 0);
       setBody(`<p style="margin:0">NUTCADE will pay this ${money(amount)} invoice in ${parts.length} parts at once. The payment only completes if every part goes through; if one fails, all the sats come back.</p>
         <div class="txs">${parts.map((p, i) => `<div class="tx out" data-part="${i}"><span class="ico" aria-hidden="true">${i + 1}</span><span class="mid"><div class="note">${esc(p.c.name)}</div><div class="meta"><span>Fee reserve ${money(p.mq.fee_reserve)}</span><span>Holds ${money(p.c.bal)}</span></div></span><span class="amt">${fmt(p.mq.amount)}</span></div>`).join('')}</div>
-        <dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd><dt>Fee reserve</dt><dd>${money(fees)}</dd><dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd></dl>
+        <dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${costRows({ reserve: fees, mintFee: mintFees, total: amount + fees + mintFees })}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd></dl>
         <div class="tiny muted">Unused fee reserve comes back as change.</div>
         <button class="btn solid pink block" id="mppPay">Pay ${money(amount)}</button><div id="sheetErr"></div>`, b2 => {
         b2.querySelector('#mppPay').onclick = e => run(e.currentTarget, 'PAYING', async () => {
@@ -2639,11 +2639,12 @@ function showMeltQuote(kind, mq, dest, note) {
   const amount = num(mq.amount);
   const head = $('#layer .sheet-head h3'); if (head) { head.textContent = tr('Pay'); head.closest('.sheet').setAttribute('aria-label', tr('Pay')); }
   const opts = kind === 'onchain' ? (mq.fee_options || []) : [];
-  const feeRow = kind === 'ln' ? `<dt>Fee reserve</dt><dd>${money(mq.fee_reserve)}</dd>` : '';
+  const worst = kind === 'ln' ? meltCost(S.active, amount, mq.fee_reserve) : meltCost(S.active, amount, Math.max(0, ...(mq.fee_options || []).map(o => num(o.fee_reserve))));
+  const feeRow = kind === 'ln' ? costRows(worst) : worst.mintFee ? `<dt>Mint fee, at most</dt><dd>${money(worst.mintFee)}</dd>` : '';
   setBody(`<dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd ${AUTO_NOTE.test(note) ? '' : 'data-noi18n'}>${esc(note)}</dd>` : ''}</dl>
     ${opts.length ? `<div class="field"><label>Fee speed</label><div class="txs">${opts.map((o, i) => `<label class="tx out" style="cursor:pointer"><span class="ico"><input type="radio" name="fee" value="${o.fee_index}" ${i === 0 ? 'checked' : ''} style="accent-color:var(--pink)"></span><span class="mid"><div class="note">${esc(tr(`~${o.estimated_blocks} block${o.estimated_blocks === 1 ? '' : 's'}`))}</div><div class="meta">≈ ${Math.round(o.estimated_blocks * 10)} min</div></span><span class="amt">${fmt(o.fee_reserve)}</span></label>`).join('')}</div></div>` : ''}
     ${kind === 'ln' ? '<div class="tiny muted">Unused fee reserve comes back as change.</div>' : ''}
-    ${kind === 'ln' && balanceOf(S.active) < amount + num(mq.fee_reserve) ? `<div class="notice">${esc((activeMint() || {}).name || 'This mint')} holds ${money(balanceOf(S.active))}, not enough on its own.${S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? ' You can split the payment across your mints.' : ''}</div>` : ''}
+    ${kind === 'ln' && balanceOf(S.active) < worst.total ? `<div class="notice">${esc((activeMint() || {}).name || 'This mint')} holds ${money(balanceOf(S.active))}, not enough on its own.${S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? ' You can split the payment across your mints.' : ''}</div>` : ''}
     <button class="btn solid pink block" id="payBtn">Pay ${money(amount)}</button>
     ${kind === 'ln' && S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? `<button class="btn block violet" id="mppBtn">Pay from several mints</button>` : ''}<div id="sheetErr"></div>`, body => {
     const mb = body.querySelector('#mppBtn'); if (mb) mb.onclick = () => openMultinut(mq.request, amount, dest, note);

@@ -386,6 +386,8 @@ async def main():
         ev = z[0]['event'] if z else {}
         tags = {t[0]: t[1:] for t in (ev or {}).get('tags', [])}
         check('zap: the profile is fetched, the endpoint allows Nostr, and the quote shows the fee before paying', 'Fee reserve' in q and 'alice@lnurl.test' in q, q[:200])
+        tot = re.search(r'Total, at most\n([\d,]+) SAT', q); mf = re.search(r'Mint fee, at most\n([\d,]+) SAT', q)
+        check('(fix 4) pay screen on the fee mint: it shows the mint fee and the total at most, and the payment cost no more than that total', bool(tot and mf) and int(mf.group(1)) >= 1 and ba - await w.bal(A) <= int(tot.group(1).replace(',', '')), (q[:300], ba - await w.bal(A)))
         check("zap: the kind-9734 zap request is signed with the wallet's Nostr key and carries amount, p, lnurl, relays and the comment",
               len(z) == 1 and z[0]['valid'] and ev['pubkey'] == mynpub and tags.get('amount') == ['210000'] and tags.get('p') == [pa['pubkey']] and tags.get('lnurl', [''])[0].startswith('lnurl1') and tags.get('relays') and ev['content'] == 'gm from the arcade', z)
         zt = await w.ev("Nutcade.S.txs[0]")
