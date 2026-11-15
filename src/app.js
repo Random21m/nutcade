@@ -1300,7 +1300,13 @@ function closeSheet() {
   if (had && back && back.isConnected && (inLayer || document.activeElement === document.body)) { try { back.focus({ preventScroll: true }); } catch (e) {} }
 }
 const FOCUSABLE = 'button:not([disabled]),[href],input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
-function setBody(html, onOpen) { const b = $('#layer .sheet-body'); if (!b) return; if (typeof sheetCleanup === 'function') sheetCleanup(); b.innerHTML = html; enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; fitNums(b); }
+function setBody(html, onOpen) {
+  const b = $('#layer .sheet-body'); if (!b) return; if (typeof sheetCleanup === 'function') sheetCleanup();
+  const sheet = b.closest('.sheet'), a = document.activeElement, lost = !a || a === document.body || a === sheet || !sheet.contains(a) || b.contains(a);
+  b.innerHTML = html; enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; fitNums(b);
+  // the body was replaced (a lookup finished): the first field gets the focus, as when a sheet opens
+  if (lost && !matchMedia('(pointer:coarse)').matches) { const f = b.querySelector('input:not([type=file]):not([type=checkbox]):not([type=radio]),textarea'); if (f) f.focus({ preventScroll: true }); else { sheet.tabIndex = -1; sheet.focus({ preventScroll: true }); } }
+}
 const busyHTML = msg => `<div class="row" style="justify-content:center;padding:24px 0"><span class="spinner">${esc(msg)}</span></div>`;
 const errHTML = e => `<div class="notice red"${e && e.amount ? ' data-amount' : ''}>${esc(e && e.message || e)}${e && e.also ? `<div>${esc(e.also)}</div>` : ''}${e && e.raw ? `<div class="tiny muted raw" data-noi18n>${esc(e.raw)}</div>` : ''}${e && e.fix ? `<button class="btn sm gold" style="margin-top:8px" data-act="${esc(e.fix.act)}"${e.fix.a != null ? ` data-a="${esc(e.fix.a)}"` : ''}${e.fix.id ? ` data-id="${esc(e.fix.id)}"` : ''}>${esc(e.fix.label)}</button>` : ''}</div>`;
 

@@ -179,6 +179,14 @@ async def tour(b, pa, pb, pc, pd):
         await h.fill('#destIn', pd['npub']); await h.click('[data-act=doMeltQuote]'); await h.until("!!document.querySelector('[data-act=zapQuote]')", 10000); await h.fill('#amtIn', '30'); await h.click('[data-act=zapQuote]'); await h.wait(1500); await snap('zap_wrong_amount')
         # Wallet Connect
         await h.ev("Nutcade.closeSheet()"); await h.click('[data-act=tab][data-tab=settings]'); await h.wait(150)
+        if not mobile:   # (fix 10) a sheet that fills in after a lookup puts the focus in its amount field
+            mock('/test/lnurlw', {'id': vid + 'f', 'min': 1, 'max': 50})
+            await h.ev("Nutcade.closeSheet()"); await h.ev(f"Nutcade.handleScan('lnurlw://lnurl.test/lnurlw/{vid}f')"); await h.until("!!document.querySelector('[data-act=lnurlwGo]')", 8000); await h.wait(200)
+            f_v = await h.ev("document.activeElement.id")
+            await h.ev("Nutcade.closeSheet()"); await h.home(); await h.click('[data-act=send]'); await h.wait(150); await h.click('[data-act=sendMethod][data-m=ln]'); await h.wait(100)
+            await h.fill('#destIn', pa['npub']); await h.click('[data-act=doMeltQuote]'); await h.until("!!document.querySelector('[data-act=zapQuote]')", 10000); await h.wait(200)
+            f_z = await h.ev("document.activeElement.id"); await h.ev("Nutcade.closeSheet()"); await h.click('[data-act=tab][data-tab=settings]'); await h.wait(150)
+            check(f'(fix 10) focus {lang} {vw}: the voucher and zap sheets open with focus in the amount field', f_v == 'amtIn' and f_z == 'amtIn', (f_v, f_z))
         if not mobile:   # keyboard: focus lands in the new sheet and comes back to the button that opened it
             await h.pg.locator('#app [data-act=nwcNew]').focus(); await h.pg.keyboard.press('Enter'); await h.wait(300)
             f1 = await h.ev("document.activeElement.id")
