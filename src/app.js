@@ -392,9 +392,12 @@ async function onchainMintQuote(note) {
   return tx;
 }
 const busyQuotes = new Set();
-async function checkQuote(q) {
-  if (busyQuotes.has(q.quote)) return 'busy';
-  if (!S.quotes.some(x => x.quote === q.quote)) { const t = txById(q.txId); return t && t.status === 'done' ? 'paid' : 'gone'; }
+// one check per deposit at a time (shared by every caller, and locked across tabs), on the freshest copy of the record
+function checkQuote(q) { return single('quote:' + q.quote, () => checkQuoteNow(q.quote, q.txId)); }
+async function checkQuoteNow(id, txId) {
+  await syncIfStale();
+  const q = S.quotes.find(x => x.quote === id);
+  if (!q) { const t = txById(txId); return t && t.status === 'done' ? 'paid' : 'gone'; }
   busyQuotes.add(q.quote);
   try {
     const w = await getWallet(q.mint);
