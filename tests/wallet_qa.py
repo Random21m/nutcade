@@ -207,7 +207,7 @@ async def main():
         await carol.create(); await carol.click('[data-act=tab][data-tab=settings]'); await carol.wait(150)
         has=await carol.ev("!!document.querySelector('[data-act=restore]')"); check('JSON backup restore reachable', has)
         if has:
-            await carol.click('[data-act=restore]'); await carol.wait(150); await carol.pg.fill('#restoreIn', shown); await carol.click('[data-act=doRestore]'); await carol.wait(500)
+            await carol.click('[data-act=restore]'); await carol.wait(150); await carol.pg.fill('#restoreIn', shown); await carol.click('[data-act=doRestore]'); await carol.until("!document.querySelector('#restoreIn')", 30000); await carol.wait(300)
             check('JSON restore brings same balance', await carol.bal()==total_alice, (await carol.bal(), total_alice))
         # phrase restore in fresh Dave
         dave=await newwallet(b,'dave')

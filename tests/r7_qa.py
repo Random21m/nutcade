@@ -69,7 +69,7 @@ def error_strings():
             t = t.replace("\\'", "'").replace('\\"', '"')
             if re.match(r'^[A-Z][a-z]', t) and not t.endswith(': ') and not re.search(r"""nwcErr\(\s*'[A-Z_]+',\s*$""", s[max(0, m.start() - 40):m.start() + 7]):
                 out.add(t)
-    out |= {"Mint B didn't answer in time. Try again in a moment.", "The mint didn't answer in time. Try again in a moment.", 'Restore ecash from another phrase', 'NUTCADE is open in another tab.', "The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
+    out |= {"Couldn't reach Mint B to check the ecash in this backup. Nothing was imported. Try again when it answers.", 'Backup restored.', 'Restored from backup', "Mint B didn't answer in time. Try again in a moment.", "The mint didn't answer in time. Try again in a moment.", 'Restore ecash from another phrase', 'NUTCADE is open in another tab.', "The mint didn't answer in time.", "The mint didn't answer. Try again in a moment.", 'This invoice has expired. Nothing was received.',
             'This invoice is already paid. NUTCADE is collecting the ecash from the mint, and it shows here as soon as it is in.', 'COLLECTING',
             'Mint fee for moving ecash under your phrase', 'Mint fee for an interrupted step', 'Mint fee for keeping Extra Life going', 'Ecash already spent elsewhere',
             'Some of this ecash was already spent. NUTCADE removed 1,234 SAT of spent ecash from your balance (see your notes). Try again with what is left.'}
@@ -457,7 +457,7 @@ async def main():
         bk = json.loads(open(await (await dl.value).path()).read())
         check('block: the backup file includes the blocked list', any(x['url'] == B for x in bk.get('blocked', [])), bk.get('blocked'))
         nw = await wallet(b); await nw.create(); await nw.click('[data-act=tab][data-tab=settings]'); await nw.wait(100); await nw.click('[data-act=restore]'); await nw.wait(150)
-        await nw.pg.fill('#restoreIn', json.dumps({'app': 'nutcade', 'v': 2, 'blocked': bk['blocked'], 'mints': [], 'proofs': {}, 'txs': []})); await nw.click('[data-act=doRestore]'); await nw.wait(300)
+        await nw.pg.fill('#restoreIn', json.dumps({'app': 'nutcade', 'v': 2, 'blocked': bk['blocked'], 'mints': [], 'proofs': {}, 'txs': []})); await nw.click('[data-act=doRestore]'); await nw.until("!document.querySelector('#restoreIn')", 15000); await nw.wait(300)
         await nw.pg.reload(); await nw.wait(900)
         check('block: importing the backup restores the blocked list (and it survives a reload)', await nw.ev(f"Nutcade.r7.isBlocked({json.dumps(B)})"))
         await nw.pg.context.close()
@@ -1166,6 +1166,46 @@ async def main():
               sw and sw == sn and await w.bal(B) == await nb.bal(B), (len(sw or []), len(sn or []), await w.bal(B), await nb.bal(B)))
         await books(w, 'backup with an open step', broken, (A, B, FM))
         await nb.pg.context.close()
+        # (round 5, 1) importing a backup never puts a coin or a line in without the mint's word: an older backup (its
+        # coins partly spent since, its open step already settled here) imported into the wallet that made it, into a
+        # restored wallet, and the same file twice, on both mints: no spent coin comes back, no line is doubled,
+        # history = balance everywhere
+        async def import_into(wal, text):
+            await wal.ev("Nutcade.closeSheet()"); await wal.click('[data-act=tab][data-tab=settings]'); await wal.wait(150)
+            await wal.click('[data-act=restore]'); await wal.wait(150); await wal.pg.fill('#restoreIn', text); await wal.click('[data-act=doRestore]')
+            ok = await wal.until("!document.querySelector('#restoreIn')", 40000); t = await wal.toast(); await wal.wait(1500)
+            await wal.until("Nutcade.S.ops.length===0", 60000); await wal.wait(500)
+            return ok, t
+        GIFTS = "Nutcade.S.txs.filter(t=>t.amount===210&&t.token).length"
+        for M in (B, A):
+            await w.use(M); okey5 = await w.ev("(()=>{const k=crypto.getRandomValues(new Uint8Array(32)); return Array.from(CashuLib.getPubKeyFromPrivKey(k),x=>x.toString(16).padStart(2,'0')).join('')})()")
+            await w.pg.route(f'{M}/v1/swap', held(10))
+            await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.pg.check('#giftOn')
+            await w.ev("const s=document.querySelector('#giftTo'); if (s) { s.value=''; s.dispatchEvent(new Event('change',{bubbles:true})) }")
+            await w.fill('#giftKey', okey5); await w.fill('#amtIn', '210'); await w.click('[data-act=doSendEcash]'); await w.wait(2000)
+            await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
+            async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]')
+            old = open(await (await dl.value).path()).read()
+            await w.until(f"Nutcade.S.ops.length===0 && Nutcade.S.txs.filter(t=>t.amount===210&&t.token&&t.mint==={json.dumps(M)}).length===1", 60000); await w.pg.unroute(f'{M}/v1/swap'); await w.wait(500)
+            await w.send_ecash(150, 'spent after the backup'); await w.ev("Nutcade.closeSheet()")   # coins in the backup that are spent now
+            g0 = await w.ev(GIFTS); bw0, nw0 = await w.bal(), await w.ev("Nutcade.S.txs.length")
+            # the restored device, then the same file again
+            nr = await wallet(b); await nr.create()
+            ok1, t1 = await import_into(nr, old); rb = []
+            await books(nr, f'restored {M[-4:]}', rb, (A, B, FM)); g1 = await nr.ev(GIFTS); bn1, nn1 = await nr.bal(), await nr.ev("Nutcade.S.txs.length")
+            ok2, t2 = await import_into(nr, old)
+            await books(nr, f'restored, imported twice {M[-4:]}', rb, (A, B, FM))
+            check(f'(round 5, 1) {M[-4:]}: a backup with an open step restored on a new device: the step settles once, spent coins stay out (with a line), history = balance; the same file again changes nothing',
+                  ok1 and ok2 and not rb and await nr.ev(GIFTS) == g1 and await nr.bal() == bn1 and await nr.ev("Nutcade.S.txs.length") == nn1, (ok1, ok2, rb, g1, await nr.ev(GIFTS), await nr.bal() - bn1, await nr.ev("Nutcade.S.txs.length") - nn1))
+            check(f'(round 5, 1) {M[-4:]}: the toast just says the backup is restored (no instruction about a button that doesn\'t exist)', 'Backup restored' in t1 and 'Check proofs' not in t1, t1)
+            await nr.pg.context.close()
+            # the wallet that made it: the old backup (partly spent, its step settled here) adds nothing
+            ok3, t3 = await import_into(w, old); ow = []
+            await books(w, f'old backup into its own wallet {M[-4:]}', ow, (A, B, FM))
+            check(f'(round 5, 1) {M[-4:]}: an older backup imported into the wallet that made it: no spent coin comes back, its settled step isn\'t settled again (one gift line), no new line, history = balance',
+                  ok3 and not ow and await w.bal() == bw0 and await w.ev("Nutcade.S.txs.length") == nw0 and await w.ev(GIFTS) == g0, (ok3, ow, await w.bal() - bw0, await w.ev("Nutcade.S.txs.length") - nw0, g0, await w.ev(GIFTS)))
+            broken.extend(ow)
+        await w.use(B)
         # an interrupted cash-out: the Extra Life is closed when it settles, and the heir's copy is marked ended
         async def cash_start():
             await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')
