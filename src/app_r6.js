@@ -41,15 +41,24 @@ function shamirJoin(shares) {
 const huntBase = () => location.origin + location.pathname;
 const cardUrl = (pub, x, k, n, y) => `${huntBase()}#hunt=${pub}.${x}.${k}.${n}.${b64url(y)}`;
 async function huntKey(sk) { return crypto.subtle.importKey('raw', await crypto.subtle.digest('SHA-256', new TextEncoder().encode('nutcade-hunt:' + hex(sk))), 'AES-GCM', false, ['encrypt', 'decrypt']); }
+function huntWon(f, t) { const x = S.found[f.pub]; if (x && x.state !== 'won') { x.state = 'won'; if (t) x.amount = t.amount; saveFound(); } }
 async function makeHunt(amount, k, n, days, note, loaded) {
   if (!(n >= 1 && n <= 12 && k >= 1 && k <= n)) throw new Error('Pick 1 to 12 cards, and how many of them open the chest.');
   if (!(await mintCan(S.active, 11))) throw new Error(`${host(S.active)} can't lock ecash to a key (NUT-11). Pick another mint.`);
   // a fresh key whose public key starts with 02, so "02" + its Nostr key is its Cashu lock key too
   let sk; for (;;) { sk = rnd(32); try { if (hex(L.getPubKeyFromPrivKey(sk)).startsWith('02')) break; } catch (e) {} }
   const pub = L.nostrPub(sk), until = Math.floor(Date.now() / 1000 + days * 86400);
-  const tx = await sendEcash(amount, note || (loaded ? 'Loaded score card' : 'Treasure hunt'), '02' + pub, S.active, { locktime: until });
-  updTx(tx.id, { lockUntil: until * 1000, giftTo: loaded ? 'whoever scans the card' : 'the treasure hunters', hunt: pub });
-  // the prize waits on Nostr, encrypted with the key the cards rebuild, in an event that key signs
+  const txx = { lockUntil: until * 1000, giftTo: loaded ? 'whoever scans the card' : 'the treasure hunters', hunt: pub };
+  // the hunt's key and settings go on the swap's record (in the vault), so an interrupted one is still set up
+  const f = { k: 'hunt-make', sk: hex(sk), kk: k, n, amount, note: String(note || ''), until, loaded: !!loaded };
+  const tx = await sendEcash(amount, note || (loaded ? 'Loaded score card' : 'Treasure hunt'), '02' + pub, S.active, { locktime: until, txx, follow: f });
+  updTx(tx.id, txx);
+  return huntFinish(Object.assign({}, f, { txId: tx.id }));
+}
+// the prize waits on Nostr, encrypted with the key the cards rebuild, in an event that key signs
+async function huntFinish(f) {
+  const sk = L.hexToBytes(f.sk), pub = L.nostrPub(sk), k = f.kk, n = f.n, amount = f.amount, note = f.note, until = f.until, loaded = f.loaded, tx = { id: f.txId };
+  if (S.hunts.some(h => h.pub === pub)) return S.hunts.find(h => h.pub === pub);
   const iv = rnd(12), box = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await huntKey(sk), new TextEncoder().encode(txById(tx.id).token)));
   const content = JSON.stringify({ v: 1, k, n, amount, note: String(note || '').slice(0, 140), until: until * 1000, box: b64url(new Uint8Array([...iv, ...box])) });
   const ev = L.finalizeEvent({ kind: HUNT_KIND, created_at: Math.floor(Date.now() / 1000), tags: [['d', HUNT_D], ['t', 'nutcade-hunt'], ['expiration', String(until + 86400)]], content }, sk);
@@ -102,11 +111,12 @@ async function openChest(pub) {
     // the rebuilt key unlocks the prize; keep it with our other unlock keys
     const priv = hex(sk);
     if (!S.p2pk.find(x => x.priv === priv)) { S.p2pk.push({ pub: '02' + pub, priv, created: Date.now() }); store.set('p2pk', S.p2pk); }
-    const tx = await receiveToken(token, f.k === 1 && f.n === 1 ? 'Loaded score card' : `Treasure hunt: ${f.k} of ${f.n} clues`);
-    f.state = 'won'; f.amount = tx.amount; saveFound();
+    const tx = await receiveToken(token, f.k === 1 && f.n === 1 ? 'Loaded score card' : `Treasure hunt: ${f.k} of ${f.n} clues`, { follow: { k: 'hunt', pub } });
+    huntWon({ pub }, tx);
     sfx('levelup'); celebrate('in', tx.amount); toast(`Treasure! ${money(tx.amount)} is yours`, 'lime'); refresh();
   } catch (e) {
-    f.state = /spent/i.test(e.message || '') ? 'gone' : 'hunting'; saveFound();
+    if (f.state === 'won') return;
+    f.state = /spent/i.test(e.message || '') && !S.ops.some(o => o.follow && o.follow.k === 'hunt' && o.follow.pub === pub) ? 'gone' : 'hunting'; saveFound();
     if (f.state === 'gone') { sfx('err'); toast('Someone opened this chest first!', 'pink'); }
     else showErr(e);
   }

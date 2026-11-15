@@ -95,15 +95,16 @@ async function attachBounty(rec, bounty, signer, from) {
   sfx('levelup'); toast(`${nameFor(signer) || rec.by} put ${money(bo.amount)} on beating ${pad6(rec.score)} on ${gameById(rec.game).name}`, 'gold');
   if (tab === 'arcade' && !$('#layer .sheet')) refresh();
 }
+function bountyWon(f) { const rec = S.challenges.find(x => x.id === f.rec && x.dir === 'in'); if (rec && rec.bounty && rec.bounty.state !== 'won') { rec.bounty.state = 'won'; saveChallenges(); } }
 async function claimBounty(rec, pre, from) {
   const b = rec.bounty; if (!b || b.state === 'won' || from !== rec.pubkey) return;
   if (await sha256hex(L.hexToBytes(pre)) !== b.H) return;
   const d = await decodeTok(b.token);
   const unlocked = L.getEncodedToken({ mint: d.mint, unit: 'sat', proofs: d.proofs.map(p => Object.assign({}, p, { witness: JSON.stringify({ preimage: pre }) })) });
   const who = nameFor(rec.pubkey) || rec.by, g = gameById(rec.game);
-  try { await receiveToken(unlocked, `Bounty from ${who}: beat ${pad6(rec.score)} on ${g ? g.name : rec.game}`); }
-  catch (e) { if (/spent/i.test(e.message || '')) { b.state = 'gone'; saveChallenges(); } return; }
-  b.state = 'won'; saveChallenges();
+  try { await receiveToken(unlocked, `Bounty from ${who}: beat ${pad6(rec.score)} on ${g ? g.name : rec.game}`, { follow: { k: 'bounty-won', rec: rec.id } }); }
+  catch (e) { if (/spent/i.test(e.message || '') && b.state !== 'won') { b.state = 'gone'; saveChallenges(); } return; }
+  bountyWon({ rec: rec.id });
   sfx('levelup'); celebrate('in', b.amount); toast(`You won ${who}'s ${money(b.amount)} bounty!`, 'lime'); refresh();
 }
 
@@ -190,12 +191,17 @@ async function relockExtra(x, quiet) {
 }
 async function cashOutExtra() {
   const x = S.extra; if (!x) return;
-  const tx = await receiveToken(extraToken(), `Extra Life cashed out (was for ${x.heir.name})`, { own: true });
-  S.extra = null; saveExtra();
-  const k = S.contacts.find(c => c.pubkey === x.heir.pubkey);
-  const wrap = L.nip17.wrapEvent(nostrKey(), { publicKey: x.heir.pubkey }, JSON.stringify({ t: 'nutcade-extralife-end', v: 1 }));
-  relayPublish(wrap, 8000, [...new Set(((k && k.relays) || []).concat(relays()))].slice(0, 8)).catch(() => {});
+  const f = { k: 'extra-end', heir: x.heir, secrets: x.proofs.map(p => p.secret) };
+  const tx = await receiveToken(extraToken(), `Extra Life cashed out (was for ${x.heir.name})`, { own: true, follow: f });
+  extraEnded(f);
   return tx;
+}
+// the Extra Life these coins were is over: its record is closed (never a newer one), and the heir's copy is marked ended
+function extraEnded(f) {
+  if (S.extra && S.extra.proofs.some(p => f.secrets.includes(p.secret))) { S.extra = null; saveExtra(); }
+  const k = S.contacts.find(c => c.pubkey === f.heir.pubkey);
+  const wrap = L.nip17.wrapEvent(nostrKey(), { publicKey: f.heir.pubkey }, JSON.stringify({ t: 'nutcade-extralife-end', v: 1 }));
+  relayPublish(wrap, 8000, [...new Set(((k && k.relays) || []).concat(relays()))].slice(0, 8)).catch(() => {});
 }
 // opening NUTCADE counts as proof of life: with auto on, once half the time has passed it continues by itself
 async function extraTick() {
@@ -237,12 +243,13 @@ async function onExtraLife(p, from) {
   if (tab === 'wallet' && !$('#layer .sheet')) refresh();
 }
 const claimingHeir = new Set();
+function heirClaimed(f) { const h = S.heirlooms.find(x => x.token === f.token); if (h && h.state !== 'claimed') { h.state = 'claimed'; saveHeir(); } }
 async function claimHeirlooms() {
   for (const h of S.heirlooms.filter(x => x.state === 'waiting' && Date.now() > x.until + 30e3)) {
     if (claimingHeir.has(h.token)) continue;   // already being claimed: a second try would only find it spent
     claimingHeir.add(h.token);
-    try { await receiveToken(h.token, `Extra Life from ${h.name}`); h.state = 'claimed'; saveHeir(); sfx('coin'); toast(`${h.name}'s Extra Life passed to you: ${money(h.amount)}`, 'gold'); refresh(); }
-    catch (e) { if (/spent/i.test(e.message || '') && h.state === 'waiting') { h.state = 'ended'; saveHeir(); } }
+    try { await receiveToken(h.token, `Extra Life from ${h.name}`, { follow: { k: 'heir', token: h.token } }); heirClaimed({ token: h.token }); sfx('coin'); toast(`${h.name}'s Extra Life passed to you: ${money(h.amount)}`, 'gold'); refresh(); }
+    catch (e) { if (/spent/i.test(e.message || '') && h.state === 'waiting' && !S.ops.some(o => o.follow && o.follow.k === 'heir' && o.follow.token === h.token)) { h.state = 'ended'; saveHeir(); } }
     finally { claimingHeir.delete(h.token); }
   }
 }

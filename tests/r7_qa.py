@@ -924,10 +924,17 @@ async def main():
               (ok, outs, [(t.get('note'), t.get('amount'), t.get('bounty')) for t in new], sec and sec[0], cb2, hok))
         check('(round 3, locked) and its challenge still goes out to the friend (a relay took it)', okb, (cb, cb2))
         await books(w, 'interrupted bounty', broken, (A, B, FM))
-        async def extra_start():
+        # an heir with a real NUTCADE, to see their side of each step
+        hr = await wallet(b); await hr.create(); await hr.add_mint(B)
+        hr_addr = await hr.ev("CashuLib.nprofileEncode({pubkey: CashuLib.nostrPub(CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32)), relays:['ws://127.0.0.1:3350/relay']})")
+        hr_pub = await hr.ev("CashuLib.nostrPub(CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32))")
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(100); await w.click('[data-act=contactsOpen]'); await w.wait(150)
+        await w.click('[data-act=contactEdit]'); await w.wait(150); await w.fill('#cName', 'Heir R3'); await w.fill('#cNostr', hr_addr); await w.click('[data-act=contactSave]'); await w.wait(300); await w.ev("Nutcade.closeSheet()")
+        async def extra_start(amount='400', days=None):
             await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.until("!!document.querySelector('#xlTo')", 5000); await w.wait(150)
-            await w.ev("const s=document.querySelector('#xlTo'); s.value=[...s.options].find(o=>o.value).value; s.dispatchEvent(new Event('change',{bubbles:true}))")
-            await w.fill('#amtIn', '400'); await w.click('[data-act=extraStart]')
+            await w.ev("const s=document.querySelector('#xlTo'); s.value=[...s.options].find(o=>o.text==='Heir R3').value; s.dispatchEvent(new Event('change',{bubbles:true}))")
+            if days: await w.ev(f"const b=document.querySelector('[data-act=giftDays][data-days=\"90\"]'); b.dataset.days={days}/86400; b.click()")
+            await w.fill('#amtIn', amount); await w.click('[data-act=extraStart]')
         mine = await w.ev("'02'+CashuLib.nostrPub(CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32))")
         ok, outs, bal0, new = await interrupted(extra_start)
         x = await w.ev("Nutcade.S.extra && {amount:Nutcade.S.extra.amount, n:Nutcade.S.extra.proofs.length, until:Nutcade.S.extra.until, heir:Nutcade.S.extra.heir.name, unlocked:!!Nutcade.S.extra.unlocked, sec:JSON.parse(Nutcade.S.extra.proofs[0].secret)}")
@@ -936,6 +943,8 @@ async def main():
               ok and outs and x and x['amount'] == 400 and not x['unlocked'] and x['sec'][0] == 'P2PK' and x['sec'][1]['data'] == mine and x['until'] > 0 and not toks
               and any((t.get('note') or '').startswith('Extra Life for') and t.get('amount') == 400 for t in new), (ok, outs, x and {k: x[k] for k in ('amount', 'heir', 'unlocked')}, [(t.get('note'), t.get('amount')) for t in new]))
         await books(w, 'interrupted Extra Life', broken, (A, B, FM))
+        okh = await hr.until("Nutcade.S.heirlooms.some(h=>h.state==='waiting'&&h.amount===400)", 30000)
+        check("(round 3, locked) and the heir's NUTCADE gets its copy", okh, await hr.ev("Nutcade.S.heirlooms.map(h=>[h.state,h.amount])"))
         # an interrupted CONTINUE (its second swap, the new lock): the Extra Life continues with its new date
         u0 = await w.ev("Nutcade.S.extra && Nutcade.S.extra.until")
         swaps = {'n': 0}
@@ -952,11 +961,81 @@ async def main():
         check('(round 3, locked) an interrupted CONTINUE finishes after a reload: the Extra Life is locked again with a later date, nothing lost',
               ok and x and x['sec'] == 'P2PK' and x['amount'] >= 398, (ok, held_ops, x))
         await books(w, 'interrupted CONTINUE', broken, (A, B, FM))
-        bb = await w.bal(B)
-        await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')
-        ok2 = await w.until("!Nutcade.S.extra", 30000)
-        check('(round 3, locked) and it cashes out into your balance as usual', ok2 and await w.bal(B) >= bb + 396, (ok2, await w.bal(B) - bb))
-        await w.ev("Nutcade.closeSheet()"); await books(w, 'Extra Life cashed out', broken, (A, B, FM))
+        # an interrupted cash-out: the Extra Life is closed when it settles, and the heir's copy is marked ended
+        async def cash_start():
+            await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')
+        ok, outs, bal0, new = await interrupted(cash_start)
+        await w.wait(1500); x = await w.ev("Nutcade.S.extra")
+        check('(round 3, two-step) an interrupted Extra Life cash-out settles after a reload: the sats are in your balance (one line), the Extra Life is closed',
+              ok and x is None and await w.bal(B) >= bal0 + 396 and sum(1 for t in new if (t.get('note') or '').startswith('Extra Life cashed out')) == 1, (ok, x and x.get('amount'), await w.bal(B) - bal0, [(t.get('note'), t.get('amount')) for t in new]))
+        okh = await hr.until("Nutcade.S.heirlooms.length>0 && Nutcade.S.heirlooms.every(h=>h.state!=='waiting')", 30000)
+        check("(round 3, two-step) and the heir's copy is marked ended", okh, await hr.ev("Nutcade.S.heirlooms.map(h=>h.state)"))
+        await w.wait(31000); await w.ev("window.dispatchEvent(new Event('online'))"); await w.wait(3000)
+        check('(round 3, two-step) nothing later tries to continue it or shows its spent coins (after a background check)',
+              await w.ev("!Nutcade.S.extra && Nutcade.S.ops.length===0 && !document.querySelector('[data-act=extraContinue]')"), await w.ev("Nutcade.S.extra"))
+        await books(w, 'interrupted cash-out', broken, (A, B, FM))
+        # an interrupted heir claim: the heir's NUTCADE gets the sats once, and its heirloom says claimed
+        await extra_start('300', 20); await w.until("!!Nutcade.S.extra", 20000)
+        await w.ev("Nutcade.S.extra.auto=false; localStorage.setItem('nutcade:extra', JSON.stringify(Nutcade.S.extra))"); await w.ev("Nutcade.closeSheet()")
+        await hr.until("Nutcade.S.heirlooms.some(h=>h.state==='waiting'&&h.amount===300)", 30000)
+        hb0 = await hr.bal(B); await hr.pg.route(f'{B}/v1/swap', held(8))
+        okc = await hr.until("Nutcade.S.ops.some(o=>o.follow&&o.follow.k==='heir')", 120000)
+        await hr.wait(1200); await hr.pg.reload(); await hr.wait(800); await hr.pg.unroute(f'{B}/v1/swap')
+        ok = await hr.until("Nutcade.S.ops.length===0 && Nutcade.S.heirlooms.some(h=>h.amount===300&&h.state==='claimed')", 60000)
+        hb = []
+        await books(hr, 'interrupted heir claim', hb, (B,))
+        check("(round 3, two-step) an interrupted heir claim settles after a reload: the heir gets the 300 SAT once and the heirloom says claimed",
+              okc and ok and 296 <= await hr.bal(B) - hb0 <= 300 and not hb, (okc, ok, await hr.bal(B) - hb0, await hr.ev("Nutcade.S.heirlooms.map(h=>[h.state,h.amount])"), hb))
+        await w.until("!Nutcade.S.extra", 60000); await books(w, 'Extra Life passed on', broken, (A, B, FM))
+        # an interrupted take-back of a gift whose date passed, and of a bounty nobody won: each is marked back, once
+        async def take_back(tx_id):
+            await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=history]'); await w.wait(200)
+            await w.ev(f"document.querySelector('#txList [data-id=\"{tx_id}\"]').click()"); await w.wait(300); await w.click('#layer [data-act=giftTake]')
+        for kind in ('gift', 'bounty'):
+            if kind == 'gift':
+                okey2 = await w.ev("(()=>{const k=crypto.getRandomValues(new Uint8Array(32)); return Array.from(CashuLib.getPubKeyFromPrivKey(k),x=>x.toString(16).padStart(2,'0')).join('')})()")
+                await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.pg.check('#giftOn')
+                await w.ev("const s=document.querySelector('#giftTo'); if (s) { s.value=''; s.dispatchEvent(new Event('change',{bubbles:true})) }")
+                await w.fill('#giftKey', okey2); await w.ev("const b=document.querySelector('[data-act=giftDays][data-days=\"1\"]'); b.dataset.days=3/86400; b.click()")
+                await w.fill('#amtIn', '222'); await w.click('[data-act=doSendEcash]'); await w.until("Nutcade.S.txs[0].amount===222&&!!Nutcade.S.txs[0].lockUntil", 20000)
+            else:
+                await w.ev("window.__nutcadeTest={bountySecs:3}"); await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(200)
+                await w.ev("Nutcade.startChallenge({game:'flipper', seed:5151, score:900, by:'R3R'})"); await w.wait(300)
+                await w.fill('#bountyAmt', '222'); await w.click('[data-act=chalSend]'); await w.until("Nutcade.S.txs[0].amount===222&&!!Nutcade.S.txs[0].bounty", 20000); await w.ev("window.__nutcadeTest=null")
+            gid = await w.ev("Nutcade.S.txs[0].id"); await w.ev("Nutcade.closeSheet()"); await w.wait(4500)
+            ok, outs, bal0, new = await interrupted(lambda: take_back(gid))
+            st = await w.ev(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(gid)}).status")
+            check(f'(round 3, two-step) an interrupted take-back of a {kind} settles after a reload: marked back (not "claimed by them"), 222 SAT in your balance once',
+                  ok and st == 'reclaimed' and 218 <= await w.bal(B) - bal0 <= 222 and sum(1 for t in new if t.get('type') == 'in') == 1, (ok, st, await w.bal(B) - bal0, [(t.get('note'), t.get('amount')) for t in new]))
+            await books(w, f'interrupted {kind} take-back', broken, (A, B, FM))
+        # an interrupted bounty win: the friend's NUTCADE gets the sats once and the bounty says won
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(200)
+        await w.ev("Nutcade.startChallenge({game:'flipper', seed:6161, score:800, by:'R3W'})"); await w.wait(300)
+        await w.fill('#bountyAmt', '180'); await w.ev("[...document.querySelectorAll('#layer [data-act=chalSend]')].find(b=>b.textContent==='Heir R3').click()")
+        await w.until("Nutcade.S.challenges.some(c=>c.seed===6161&&(c.bounties||[]).length===1)", 20000); await w.ev("Nutcade.closeSheet()")
+        cw = await w.ev("(c=>({id:c.id, pre:c.bounties[0].pre}))(Nutcade.S.challenges.find(c=>c.seed===6161))")
+        okr = await hr.until(f"Nutcade.S.challenges.some(c=>c.dir==='in'&&c.id==={json.dumps(cw['id'][:24])}&&c.bounty)", 30000)
+        hb0 = await hr.bal(B); await hr.pg.route(f'{B}/v1/swap', held(8))
+        await w.pg.evaluate("""async ([pk, re, pre]) => { const sk = CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32);
+            const ev = CashuLib.nip17.wrapEvent(sk, { publicKey: pk }, JSON.stringify({ t: 'nutcade-bounty', re, pre }));
+            const ws = new WebSocket('ws://127.0.0.1:3350/relay'); await new Promise(r => { ws.onopen = r; }); ws.send(JSON.stringify(['EVENT', ev])); await new Promise(r => setTimeout(r, 800)); ws.close(); }""", [hr_pub, cw['id'][:24], cw['pre']])
+        okc = await hr.until("Nutcade.S.ops.some(o=>o.follow&&o.follow.k==='bounty-won')", 30000)
+        await hr.wait(1200); await hr.pg.reload(); await hr.wait(800); await hr.pg.unroute(f'{B}/v1/swap')
+        ok = await hr.until(f"Nutcade.S.ops.length===0 && Nutcade.S.challenges.some(c=>c.id==={json.dumps(cw['id'][:24])}&&c.bounty&&c.bounty.state==='won')", 60000)
+        hb = []; await books(hr, 'interrupted bounty win', hb, (B,))
+        check("(round 3, two-step) an interrupted bounty win settles after a reload: the friend gets the 180 SAT once and the bounty says won",
+              okr and okc and ok and 176 <= await hr.bal(B) - hb0 <= 180 and not hb, (okr, okc, ok, await hr.bal(B) - hb0, hb))
+        # a plain token reclaimed, interrupted: marked back once, never "claimed" later
+        tokR, _ = await w.send_ecash(160, 'r3 reclaim'); rid = await w.ev(f"Nutcade.S.txs.find(t=>t.token==={json.dumps(tokR)}).id")
+        async def reclaim_start():
+            await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=history]'); await w.wait(200)
+            await w.ev(f"document.querySelector('#txList [data-id=\"{rid}\"]').click()"); await w.wait(300); await w.click('#layer [data-act=reclaim]')
+        ok, outs, bal0, new = await interrupted(reclaim_start)
+        await w.ev("Nutcade.S.prefs.checkSent=true"); await w.wait(1000)
+        st = await w.ev(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(rid)}).status")
+        check('(round 3, two-step) an interrupted reclaim settles after a reload: the token is marked reclaimed, its 160 SAT back once', ok and st == 'reclaimed' and await w.bal(B) - bal0 == 160, (ok, st, await w.bal(B) - bal0))
+        await books(w, 'interrupted reclaim', broken, (A, B, FM))
+        await hr.pg.context.close()
         # (round 3, item 4) one mint that never answers doesn't stop the background check for the others
         async def hang(route):
             await asyncio.sleep(400)

@@ -523,7 +523,10 @@ async function receiveToken(token, note, opts = {}) {
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint);
   const w = await getWallet(meta.mint);
   let res;
-  try { const privs = allPrivs(); res = await journaled(meta.mint, 'receive', { amount: meta.amount, note: note || meta.memo }, (cb, o) => rRecv(o, w, token, Object.assign(privs.length ? { privkey: privs } : {}, { onCountersReserved: cb }))); }
+  // what this claim finishes is on its record too (a token of ours coming back, a gift, a bounty, an Extra Life...),
+  // so if its answer is lost, settling it later closes those records the same way
+  const own0 = S.txs.find(t => t.token === token && (t.status === 'pending' || t.status === 'claimed'));
+  try { const privs = allPrivs(); res = await journaled(meta.mint, 'receive', { amount: meta.amount, note: note || meta.memo, own: own0 && own0.id, follow: opts.follow || null }, (cb, o) => rRecv(o, w, token, Object.assign(privs.length ? { privkey: privs } : {}, { onCountersReserved: cb }))); }
   catch (e) { if (/witness|signature|p2pk|locked|locktime/i.test(e.message || '')) throw new Error("This ecash is locked to someone else's key, so this wallet can't claim it."); throw e; }
   const proofs = res.r, got = sum(proofs);
   addProofs(meta.mint, proofs);
@@ -533,6 +536,30 @@ async function receiveToken(token, note, opts = {}) {
   const tx = addTx({ type: 'in', method: 'ecash', amount: got, fee: Math.max(0, meta.amount - got), mint: meta.mint, note: note || meta.memo });
   closeOp(res.op); save();
   return tx;
+}
+/* A claim settled from its record (its answer was lost) finishes what the claim was for, exactly as the normal path
+   does: our own token is marked as back, and the feature's record is closed (Extra Life cashed out and its heir told,
+   a bounty won, an heirloom or a treasure claimed, a saved incoming token or a payment request settled). Each is
+   idempotent, and it overrides a "someone else got it" a retry may have written meanwhile. */
+function receiveDone(op, t) {
+  const own = op.own && txById(op.own); if (own && own.status !== 'reclaimed') updTx(own.id, { status: 'reclaimed' });
+  const f = op.follow || {};
+  if (f.k === 'extra-end') extraEnded(f);
+  else if (f.k === 'bounty-won') bountyWon(f);
+  else if (f.k === 'heir') heirClaimed(f);
+  else if (f.k === 'hunt') huntWon(f, t);
+  else if (f.k === 'incoming') incomingClaimed(f, t);
+  else if (f.k === 'req') reqPaid(f.reqId, t);
+}
+function incomingClaimed(f, t) {
+  S.txs = S.txs.filter(x => x.id !== f.txId);
+  if (f.reqId) reqPaid(f.reqId, t);
+  save();
+}
+function reqPaid(reqId, t) {
+  if (!reqId || !t) return;
+  updTx(t.id, { reqId });
+  const r = S.requests.find(x => x.id === reqId); if (r && !r.paid.includes(t.id)) { r.paid.push(t.id); store.set('requests', S.requests); }
 }
 
 /* ---------- SEND ---------- */
@@ -760,7 +787,7 @@ async function recoverChange(pend) {
 const opsRunning = new Set();
 const closeOp = op => { S.ops = S.ops.filter(o => o.id !== op.id); };
 async function journaled(url, kind, info, run) {
-  const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, follow: info.follow || null, created: Date.now(), ctr: [], outs: [] };
+  const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, follow: info.follow || null, own: info.own || null, created: Date.now(), ctr: [], outs: [] };
   S.ops.push(op); save();
   const onCountersReserved = u => { if (u && u.count > 0) { op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); save(); } };
   opsRunning.add(op.id);
@@ -846,7 +873,7 @@ async function settleOpNow(id) {
   S.proofs[op.mint] = cur.filter(p => !gone.has(p.secret)).concat(plain(fresh));
   const waitingTx = op.txId && (txById(op.txId) || {}).status === 'pending' ? op.txId : null;   // a deposit waiting for exactly this: it gets it
   if (op.kind === 'receive' && added && waitingTx) updTx(waitingTx, { status: 'done', amount: added, ts: Date.now() });
-  else if (op.kind === 'receive') { if (added) { addTx({ type: 'in', method: 'ecash', amount: added, fee: Math.max(0, op.amount - added), mint: op.mint, note: op.note || '', settled: true }); if (op.extra && S.extra) { S.extra = null; saveExtra(); } } }
+  else if (op.kind === 'receive') { if (added) { const t = addTx({ type: 'in', method: 'ecash', amount: added, fee: Math.max(0, op.amount - added), mint: op.mint, note: op.note || '', settled: true }); if (op.extra && S.extra) { S.extra = null; saveExtra(); } receiveDone(op, t); } }
   else if (lockedOut.length) {
     const ps = plain(lockedOut), amount = Math.min(op.amount || sum(ps), sum(ps)), fee = Math.max(0, removed - added - amount);
     const f = op.follow || {};
@@ -864,6 +891,8 @@ async function settleOpNow(id) {
     } else {
       const t = addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee, mint: op.mint, note: op.note || '', status: 'pending', token: L.getEncodedToken({ mint: op.mint, proofs: ps, unit: 'sat' }), sent: ps, settled: true }, op.tx || {}));
       if (f.k === 'bounty') bountyRecovered(f, t);   // a working bounty again: its secret is kept, the challenge is sent
+      else if (f.k === 'gift' && contactById(f.contact)) setTimeout(() => deliverToContact(contactById(f.contact), txById(t.id)).catch(() => {}), 0);   // and it still goes to the contact
+      else if (f.k === 'hunt-make') setTimeout(() => huntFinish(Object.assign({}, f, { txId: t.id })).catch(() => {}), 0);   // the treasure hunt is still set up
     }
     if (removed - added - amount < 0) addTx({ type: 'in', method: 'ecash', amount: amount + added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true });
   }
@@ -2481,9 +2510,9 @@ async function receivePayload(p, from) {
     return;
   }
   try {
-    const tx = await receiveToken(token, note);
+    const tx = await receiveToken(token, note, req ? { follow: { k: 'req', reqId: req.id } } : {});
     updTx(tx.id, { reqId: p.id || null });
-    if (req) { req.paid.push(tx.id); store.set('requests', S.requests); }
+    if (req) reqPaid(req.id, tx);
     sfx('coin'); refresh();
     if (!$('#layer .sheet')) celebrate('in', tx.amount);
     toast(`+${money(tx.amount)} received${req ? ' for your request' : ''}`, 'lime');
@@ -2679,7 +2708,7 @@ async function claimSavedNow() {
   if (isOffline()) return 0;
   let n = 0;
   for (const t of S.txs.filter(t => t.status === 'pending' && t.incoming && t.offline && S.mints.find(m => m.url === t.mint))) {
-    try { const nt = await receiveToken(t.incoming, t.note); S.txs = S.txs.filter(x => x.id !== t.id); save(); n += nt.amount; }
+    try { const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: t.id, reqId: t.reqId || null } }); incomingClaimed({ txId: t.id, reqId: t.reqId || null }, nt); n += nt.amount; }
     catch (e) { if (!netErr(e) && !e.blocked) { updTx(t.id, { status: 'failed', note: (t.note ? t.note + ' · ' : '') + 'already claimed by someone else' }); } }
   }
   if (n) { sfx('coin'); refresh(); toast(`Back online: claimed ${money(n)} you saved offline`, 'lime'); }
@@ -3494,9 +3523,8 @@ const A = {
   }),
   claimIncoming: b => run(b, 'CLAIMING', async () => {
     const t = txById(b.dataset.id); if (!t || !t.incoming) return;
-    const nt = await receiveToken(t.incoming, t.note);
-    S.txs = S.txs.filter(x => x.id !== t.id); updTx(nt.id, { reqId: t.reqId || null });
-    const r = t.reqId && S.requests.find(x => x.id === t.reqId); if (r) { r.paid.push(nt.id); store.set('requests', S.requests); }
+    const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: t.id, reqId: t.reqId || null } });
+    incomingClaimed({ txId: t.id, reqId: t.reqId || null }, nt);
     sfx('coin'); showDone('in', nt.amount, 'Ecash');
   }),
   nfcScan: async b => {

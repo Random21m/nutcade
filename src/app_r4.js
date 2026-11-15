@@ -141,7 +141,7 @@ function giftFields() {
 const fmtDay = ms => fmtDate(ms);
 async function sendGift(amount, note, opts) {
   const pub = opts.pubkey, secs = Math.floor(Date.now() / 1000 + opts.seconds);
-  const tx = await sendEcash(amount, note, pub, S.active, { locktime: secs, txx: { lockUntil: secs * 1000, giftTo: opts.name || '', contactId: opts.contactId || null, contactName: opts.name || '' } });
+  const tx = await sendEcash(amount, note, pub, S.active, { locktime: secs, txx: { lockUntil: secs * 1000, giftTo: opts.name || '', contactId: opts.contactId || null, contactName: opts.name || '' }, follow: opts.contactId ? { k: 'gift', contact: opts.contactId } : null });
   updTx(tx.id, { lockUntil: secs * 1000, giftTo: opts.name || '', contactId: opts.contactId || tx.contactId || null, contactName: opts.name || tx.contactName || '' });
   return txById(tx.id);
 }
