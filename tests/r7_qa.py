@@ -15,6 +15,13 @@ OVER_JS = """(()=>{const W=document.documentElement.clientWidth,out=[];for(const
   if(!e.getClientRects().length||e.closest('.sr'))continue;const r=e.getBoundingClientRect();if(r.right>W+1||r.left<-1)out.push((e.className||e.tagName)+':'+Math.round(r.left)+'..'+Math.round(r.right))}return out.slice(0,4)})()"""
 
 
+def change_ok(amount, tx):
+    """A settled Lightning payment on the test mints got back its whole fee reserve, max(2, 1%), minus their 1 SAT
+    Lightning fee. A lost change shows 0; a change credited twice breaks history == balance (checked after each)."""
+    reserve = max(2, -(-amount // 100))
+    return bool(tx) and tx.get('status') == 'done' and tx.get('change', 0) >= reserve - 1 and tx.get('fee', 0) >= 1
+
+
 def mock(path, data=None):
     req = urllib.request.Request(MOCK + path, data=(json.dumps(data).encode() if data is not None else None), method='POST' if data is not None else 'GET', headers={'Content-Type': 'application/json'})
     return json.loads(urllib.request.urlopen(req, timeout=40).read())
@@ -134,7 +141,7 @@ async def tour(b, pa, pb, pc, pd):
             await h.ev("(e=>e&&e.remove())(document.getElementById('fxLayer'))")   # no coin shower over the screenshot
             o = await h.ev(OVER_JS)
             if o: over.append((name, o))
-            ng = await h.ev("[...document.querySelectorAll('#layer .btn.solid')].filter(b=>!b.classList.contains('gold')&&!b.classList.contains('red')&&b.id!=='payBtn').map(b=>b.innerText)")
+            ng = await h.ev("[...document.querySelectorAll('#layer .btn.solid')].filter(b=>!b.classList.contains('gold')&&!b.classList.contains('red')&&b.id!=='payBtn'&&b.id!=='mppPay').map(b=>b.innerText)")
             if ng and name not in ('block_ln_refused',): notgold.append((name, ng))   # (that one is the existing Receive sheet)
             if shot_dir:
                 n[0] += 1; await h.pg.screenshot(path=os.path.join(shot_dir, f'{lang}_{n[0]:02d}_{name}.png'))
@@ -615,7 +622,7 @@ async def main():
         t6 = await w.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(inv600)})")
         mc = (await w.ev(f"Nutcade.r7.meltCostNow({json.dumps(A)}, 600, 0)"))['mintFee']
         check('(fix 2) nwc: the payment is tagged with its app before it goes out, and still after a reload mid-payment', pre_tag and pre_tag[0] and t6.get('nwc') == pre_tag[0], (pre_tag, t6.get('nwc')))
-        check('(fix 2) after a reload mid-payment, the change comes back: the fee recorded is the real one, not the whole reserve', t6['status'] == 'done' and t6['fee'] <= 1 + mc, (t6['fee'], mc))
+        check('(fix 2) after a reload mid-payment, the change comes back: the fee recorded is the real one, not the whole reserve', change_ok(600, t6), (t6['fee'], mc))
         r = await nwc(w, uriR, 'pay_invoice', {'invoice': invoice(600, B)})
         check('(fix 2) a second 600 SAT payment on the 1,000 SAT daily budget is refused after the reload', r['answer']['error'] and r['answer']['error']['code'] == 'QUOTA_EXCEEDED', r['answer'])
         await books(w, 'nwc reload mid-payment', broken)
@@ -629,7 +636,7 @@ async def main():
         e, q = await w.pay_ln(invoice(700, B))
         await w.pg.unroute('http://127.0.0.1:3338/v1/melt/bolt11')
         await w.until("Nutcade.S.txs[0].status==='done'", 30000); t7 = await w.ev("Nutcade.S.txs[0]")
-        check('(fix 2) a payment whose answer was lost still records the real fee (its change restored), not the whole reserve', t7['amount'] == 700 and t7['status'] == 'done' and t7['fee'] <= 1 + mc and not e, (t7['status'], t7['fee'], e))
+        check('(fix 2) a payment whose answer was lost still records the real fee (its change restored), not the whole reserve', t7['amount'] == 700 and change_ok(700, t7) and not e, (t7['status'], t7['fee'], e))
         await books(w, 'lost melt answer', broken)
         CORS = {'access-control-allow-origin': '*', 'content-type': 'application/json'}
         async def drop_answer(route):   # the mint pays, the answer never arrives
@@ -660,7 +667,7 @@ async def main():
             check(f'(round 2, 1) {what} during change recovery: the payment is done, its change still pending, the record kept for a retry', st[0] == 'done' and st[2] and st[3] and st[1] >= 8, st)
             await w.pg.unroute(f'{A}{path}')
             ok, txt = await try_now(); st2 = await w.ev(PEND)
-            check(f'(round 2, 1) {what}: the payment says its change is still coming, and Try now recovers it: fee is the real one, record closed', ok and 'hasn\'t come back from the mint yet' in txt and not st2[2] and not st2[3] and st2[1] <= 1 + mc, (st2, txt[:160]))
+            check(f'(round 2, 1) {what}: the payment says its change is still coming, and Try now recovers it: fee is the real one, record closed', ok and 'hasn\'t come back from the mint yet' in txt and not st2[2] and not st2[3] and change_ok(800, await w.ev('Nutcade.S.txs[0]')), (st2, txt[:160]))
             await books(w, 'change recovery after ' + what, broken)
         # three reloads in a row while the change is being recovered, then it comes back
         hits = {'n': 0}
@@ -679,7 +686,7 @@ async def main():
         check('(round 2, 1) three reloads in a row during change recovery: the payment stays open with its change pending', st[0] == 'done' and st[2] and st[3], st)
         await w.pg.unroute(f'{A}/v1/restore'); await w.pg.reload(); await w.wait(800); mc = (await w.ev(f"Nutcade.r7.meltCostNow({json.dumps(A)}, 800, 0)"))['mintFee']
         await w.until("!Nutcade.S.txs[0].changePending", 30000); st = await w.ev(PEND)
-        check('(round 2, 1) after the reloads, the next start recovers the change: the real fee, record closed', not st[2] and not st[3] and st[1] <= 1 + mc, st)
+        check('(round 2, 1) after the reloads, the next start recovers the change: the real fee, record closed', not st[2] and not st[3] and change_ok(900, await w.ev('Nutcade.S.txs[0]')), st)
         await books(w, 'change recovery through reloads', broken)
         # Find lost ecash credits found change to its payment instead of adding a "Recovered" line
         mc = (await w.ev(f"Nutcade.r7.meltCostNow({json.dumps(A)}, 800, 0)"))['mintFee']
@@ -689,7 +696,7 @@ async def main():
         nrec = await w.ev(RECA); tid = await w.ev("Nutcade.S.txs[0].id")
         await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=findLost]'); await w.until(f"!(Nutcade.S.txs.find(t=>t.id==={json.dumps(tid)})||{{}}).changePending", 60000); await w.wait(500)
         t9 = await w.ev(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(tid)})")
-        check('(round 2, 1) Find lost ecash credits the change to its payment (real fee), with no separate Recovered line', not t9.get('changePending') and t9['fee'] <= 1 + mc and await w.ev(RECA) == nrec, (t9['fee'], t9.get('changePending')))
+        check('(round 2, 1) Find lost ecash credits the change to its payment (real fee), with no separate Recovered line', not t9.get('changePending') and change_ok(600, t9) and await w.ev(RECA) == nrec, (t9['fee'], t9.get('changePending')))
         await books(w, 'find lost credits change', broken)
         # an interrupted deposit whose restore fails once: the quote is kept, then the ecash is credited to that deposit (no double line)
         await w.pg.route(f'{B}/v1/restore', failing(1, 500))
@@ -724,7 +731,7 @@ async def main():
             await w.until(f"(t=>t&&t.status==='done'&&!t.changePending)(Nutcade.S.txs.find(t=>t.request==={json.dumps(inv7)}))", 60000)
             await w.pg.context.unroute(re.compile(re.escape(M) + r'/v1/(?!melt/bolt11$).*')); await w.pg.context.unroute(f'{M}/v1/melt/bolt11')
             t7 = await w.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(inv7)})")
-            check(f'(round 2, 4) slow mint {M[-4:]} and a reload mid-payment, both checks racing: the change is credited once, the fee is the real one', t7['status'] == 'done' and 1 <= t7['fee'] <= 1 + mcm, (t7['fee'], mcm))
+            check(f'(round 2, 4) slow mint {M[-4:]} and a reload mid-payment, both checks racing: the change is credited once, the fee is the real one', change_ok(700, t7), (t7['fee'], mcm))
             await books(w, 'slow mint, reload, racing ' + M[-4:], broken, (A, B, FM))
         await w.use(A)
         # two tabs: the first is mid-payment on a slow mint when the second takes over; both try to settle it
@@ -741,7 +748,7 @@ async def main():
         await pg2.reload(); await t2.wait(1500)   # what the storage holds now, after both tabs worked on it
         tT = await t2.ev(f"Nutcade.S.txs.find(t=>t.request==={json.dumps(invT)})"); b2 = []
         await books(t2, 'two tabs racing', b2, (A, B, FM))
-        check('(round 2, 4) two tabs racing on the same payment: the first pauses and writes nothing more, the change is credited once, the history equals the balance', paused and tT and tT['status'] == 'done' and 1 <= tT['fee'] <= 1 + mcT and not b2, (paused, tT and tT['fee'], mcT, b2))
+        check('(round 2, 4) two tabs racing on the same payment: the first pauses and writes nothing more, the change is credited once, the history equals the balance', paused and tT and change_ok(650, tT) and not b2, (paused, tT and tT['fee'], mcT, b2))
         await pg2.close(); await w.pg.reload(); await w.wait(1200)
         await books(w, 'after two tabs', broken, (A, B, FM))
         # (round 2, C) reload mid-move, both ways, on a slow mint whose answer is lost: real fee, the deposit claimed, books add up
@@ -756,7 +763,7 @@ async def main():
             ok = await w.until("(o=>o&&o.status==='done'&&!o.changePending)(Nutcade.S.txs.find(t=>t.move&&t.type==='out')) && (i=>i&&i.status==='done')(Nutcade.S.txs.find(t=>t.move&&t.type==='in'))", 60000)
             await w.pg.context.unroute(re.compile(re.escape(M) + r'/v1/(?!melt/bolt11$).*')); await w.pg.context.unroute(f'{M}/v1/melt/bolt11')
             mo = await w.ev("[Nutcade.S.txs.find(t=>t.move&&t.type==='out'), Nutcade.S.txs.find(t=>t.move&&t.type==='in')]")
-            check(f'(round 2, C) reload mid-move {M[-4:]} to {O[-4:]} on a slow mint: the move settles with the real fee and the deposit is claimed', ok and mo[0]['mint'] == M and 1 <= mo[0]['fee'] <= 1 + mcm and mo[1]['mint'] == O and mo[1]['amount'] == 400, [(x['mint'][-4:], x['amount'], x['fee'], x['status']) for x in mo])
+            check(f'(round 2, C) reload mid-move {M[-4:]} to {O[-4:]} on a slow mint: the move settles with the real fee and the deposit is claimed', ok and mo[0]['mint'] == M and change_ok(400, mo[0]) and mo[1]['mint'] == O and mo[1]['amount'] == 400, [(x['mint'][-4:], x['amount'], x['fee'], x['status']) for x in mo])
             await books(w, 'reload mid-move ' + M[-4:], broken, (A, B, FM))
         # reload mid-payment for a payment split across both mints (multinut)
         ba_, bb_ = await w.bal(A), await w.bal(B); amtM = max(ba_, bb_) + min(ba_, bb_) // 3
@@ -770,7 +777,8 @@ async def main():
         ok = await w.until(f"{json.dumps(parts_note)}.every(id=>(t=>t&&t.status==='done'&&!t.changePending)(Nutcade.S.txs.find(t=>t.id===id)))", 60000)
         for M in (A, B): await w.pg.context.unroute(re.compile(re.escape(M) + r'/v1/(?!melt/bolt11$).*')); await w.pg.context.unroute(f'{M}/v1/melt/bolt11')
         pm = await w.ev(f"{json.dumps(parts_note)}.map(id=>Nutcade.S.txs.find(t=>t.id===id)).map(t=>[t.mint,t.amount,t.fee,t.status])")
-        check('(round 2, C) reload mid-payment split across two mints (multinut) on slow mints: both parts settle with real fees', ok and len(pm) == 2 and {p[0] for p in pm} == {A, B} and sum(p[1] for p in pm) == amtM and all(p[2] >= 1 and p[3] == 'done' for p in pm), pm)
+        pts = await w.ev(f"{json.dumps(parts_note)}.map(id=>Nutcade.S.txs.find(t=>t.id===id))")
+        check('(round 2, C) reload mid-payment split across two mints (multinut) on slow mints: both parts settle with real fees', ok and len(pm) == 2 and {p[0] for p in pm} == {A, B} and sum(p[1] for p in pm) == amtM and all(change_ok(t['amount'], t) for t in pts), pm)
         await books(w, 'reload mid-multinut', broken, (A, B, FM))
         await w.use(B); await w.receive_ln(4000); await w.use(A); await w.receive_ln(15000)   # (the split payment spent most of both mints)
         # restoring from the 12 words after all of the above finds nothing extra: every SAT is already accounted for

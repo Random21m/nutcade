@@ -3794,7 +3794,7 @@ function settleMelt(pend, status, returned) {
   const t = txById(pend.txId); if (!t) return;
   if (pend.spent == null) { updTx(t.id, { status }); return; }
   const out = pend.spent - returned - (pend.change || 0);   // what this attempt took from the balance in the end
-  if (status === 'done') { updTx(t.id, { status, fee: Math.max(0, out - t.amount) }); return; }
+  if (status === 'done') { updTx(t.id, { status, fee: Math.max(0, out - t.amount), change: pend.change || 0 }); return; }   // (change: what came back of the reserve)
   updTx(t.id, { status, fee: 0 });
   if (t.roundup && S.piggy) { S.piggy.saved = Math.max(0, num(S.piggy.saved) - t.roundup); store.set('piggy', S.piggy); updTx(t.id, { roundup: 0 }); }   // nothing was paid, so nothing to round up
   if (out > 0 && !t.costTx) {
