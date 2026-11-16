@@ -13,7 +13,10 @@ goes through every kind of record a backup can hold, and its backups are importe
 Invariants in every cell: balance == expected sats (the source wallet's coins, by secret), history adds up to the
 balance on both mints, no duplicate line / coin / token, fee lines only equal what the mint kept (the target books
 exactly the source's fees), nothing settles or is claimed twice, the journal is empty at the end; a 12-word restore
-finds nothing the wallet doesn't show (source wallet, and the fresh device from the 2nd-generation backup)."""
+finds nothing the wallet doesn't show (source wallet, and the fresh device from the 2nd-generation backup).
+
+1.12.1: a second device restored from a backup while the source keeps using the wallet (a refused claim books nothing;
+a deposit issued to the source is closed with no coins from a scan), and amount patterns in every language."""
 import asyncio, json, os, sys, time, urllib.request
 from playwright.async_api import async_playwright
 from wallet_qa import W, check, results, A, B, URL, invoice, outside_net
@@ -327,13 +330,80 @@ async def run_mint(b, M, O, which, pin_src):
     await e.pg.context.close()
 
 
+# ---- 1.12.1: a second device restored from a backup while the first one keeps using the wallet
+LINES = "Nutcade.S.txs.map(t=>[t.type,t.method,t.amount,t.fee||0,t.status,t.note||'',t.quote||'',t.reqId||''])"
+async def run_cross(b, M, O, which):
+    g = Grid(b, M, O, which); T = which + ' second device'
+    a = await g.fresh('xA'); await a.add_mint(M); await a.receive_ln(6000, 'fund')
+    bob = await g.fresh('xB'); await bob.add_mint(M); await bob.receive_ln(3000)
+    # (F) backup 1 while a 777 Lightning deposit waits unpaid (no counters on its record yet): the source doesn't hear
+    # it was paid until after the backup, then claims it
+    async def blind(route): await route.abort()
+    await a.pg.context.route(M + '/v1/mint/quote/bolt11/**', blind)
+    await a.home(); await a.click('[data-act=receive]'); await a.wait(150)
+    if await a.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await a.click('[data-act=recvMethod][data-m=ln]'); await a.wait(100)
+    await a.fill('#amtIn', '777'); await a.click('[data-act=doLnInvoice]'); await a.until("Nutcade.S.quotes.length===1", 15000); await a.wait(1500)
+    qid = await a.ev("Nutcade.S.quotes[0].quote"); B1 = await g.backup(a); j1 = json.loads(B1)
+    await a.pg.context.unroute(M + '/v1/mint/quote/bolt11/**', blind)
+    okd = await a.until("Nutcade.S.txs.some(t=>t.amount===777&&t.status==='done')&&Nutcade.S.quotes.length===0", 60000); await a.wait(1000)
+    check(f'{T}: setup: backup 1 holds the deposit unpaid with no counters; the source then claimed it', okd and any(q.get('quote') == qid and not q.get('ctr') for q in j1.get('quotes') or []), [(q.get('state'), q.get('ctr')) for q in j1.get('quotes') or []])
+    # (E) the source makes a payment request, bob pays it, the source claims it; backup 2; a fresh device imports it
+    await a.home(); await a.click('[data-act=receive]'); await a.wait(200); await a.click('[data-act=recvMethod][data-m=ecash]'); await a.wait(150)
+    await a.click('[data-act=reqOpen]'); await a.wait(250); await a.fill('#amtIn', '120'); await a.click('[data-act=reqCreate]'); await a.wait(900)
+    creq = await a.ev("Nutcade.S.requests[0].encoded"); await a.ev("Nutcade.closeSheet()")
+    b0 = await a.bal(M); await bob.ev(f"Nutcade.handleScan({json.dumps(creq)})"); await bob.until("!!document.querySelector('[data-act=payReq]')", 10000); await bob.click('[data-act=payReq]')
+    okr = await a.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0)>={b0 + 118}", 30000); await a.wait(1500)
+    B2 = await g.backup(a)
+    d = await g.fresh('xD'); er = await g.imp(d, B2); d0 = await g.snap(d); dl0 = await d.ev(LINES)
+    check(f'{T}: setup: bob paid the request, the source claimed it; a fresh device imported the backup', okr and not er and ledok(d0) and not d0['dup'], (okr, er, brief(d0)))
+    # the source makes a 900 token at the counters the second device also has, bob claims it
+    tok, e_ = await a.send_ecash(900); await bob.receive_token(tok); await bob.wait(800)
+    # the second device reloads: the relay gives it bob's payment again; the mint refuses its claim (already spent)
+    await d.pg.reload(); await d.wait(15000); await d.until("Nutcade.S.ops.length===0", 60000); await d.wait(3000)
+    d1 = await g.snap(d); dl1 = await d.ev(LINES); new = [x for x in dl1 if x not in dl0]
+    check(f'{T} (E): bob\'s payment seen again, the mint refused the claim: no line at all (no "Payment request 900", no spent-elsewhere), history = balance', not e_ and not new and d1['bal'] == d0['bal'] and ledok(d1) and not d1['dup'] and d1['ops'] == 0, (e_, new, brief(d1)))
+    reqp = await d.ev("Nutcade.S.requests.map(r=>r.paid.length)")
+    check(f'{T} (E): the request still shows one payment', reqp == [1], reqp)
+    await d.pg.context.close()
+    # (F) a fresh device imports only backup 1: the deposit was issued to the source, not to this device
+    c = await g.fresh('xC'); er = await g.imp(c, B1); await c.until("Nutcade.S.quotes.length===0", 40000); await c.wait(3000)
+    c1 = await g.snap(c); dep = await c.ev(f"Nutcade.S.txs.filter(t=>t.quote==={json.dumps(qid)}).map(t=>[t.status,t.amount])"); cl = await c.ev(LINES)
+    odd = [x for x in cl if x[5] == 'Recovered with recovery phrase']; an = await g.snap(a); held = {x[0] for x in an['secs']}
+    check(f'{T} (F): backup with an unpaid deposit, issued since to the source: the deposit is closed with no coins taken from a scan (no other amount, no Recovered line), only coins of the backup the source still holds, history = balance', not er and dep == [['done', 0]] and not odd and all(x[0] in held for x in c1['secs']) and ledok(c1) and not c1['dup'] and c1['q'] == 0, (er, dep, odd, brief(c1)))
+    await c.pg.context.close()
+    ok, info = await words_ok(a, [M]); check(f'{T}: END source: 12-word restore = balance', ok, info)
+    await a.pg.context.close(); await bob.pg.context.close()
+
+
+# ---- 1.12.1: amounts of 1,000 SAT or more are written the language's way ("2.500", "2 500"); the patterns still match
+I18N_AMOUNTS = [": {n} SAT bounty · open until 12/31/2026", ": {n} SAT bounty · expired, coming back to you", ": {n} SAT bounty · claimed", ": {n} SAT bounty · won with {n}",
+    "Challenge and {n} SAT bounty sent to Bo", "Bo beat {n} and won your {n} SAT bounty", "Bo put {n} SAT on beating {n} on NUT FLIPPER", "You won Bo's {n} SAT bounty!",
+    "Bo's Extra Life passed to you: {n} SAT", "Prize: {n} SAT", "Prize: {n} SAT · until 1/1/2027", "{n} SAT or {n} SAT", "Bounty from Bo: beat {n} on NUT FLIPPER",
+    "Loaded with {n} SAT. Whoever scans it first wins them. If nobody does by 1/1/2027, they come back to you.",
+    "No Nostr relay took the challenge. Your {n} SAT stay locked until 1/1/2027, then come back to you.",
+    "This puts {n} SAT back in your balance. Bo's copy stops working and they'll see the Extra Life has ended."]
+async def run_i18n(b):
+    for lang in ('de', 'es', 'pt', 'fr'):
+        ctx = await b.new_context(viewport={'width': 375, 'height': 667})
+        await ctx.add_init_script("localStorage.setItem('nutcade:prefs'," + json.dumps(json.dumps({'sound': False, 'music': False, 'lang': lang})) + ")")
+        pg = await ctx.new_page(); await pg.goto(URL); await pg.wait_for_timeout(600)
+        bad = await pg.evaluate("""S=>{const out=[];for(const n of [999,1000,2500,1234567]){const f=Nutcade.fmt(n);for(const s0 of S){const s=s0.split('{n}').join(f),t=Nutcade.tr(s);if(t===s||!t.includes(f))out.push([n,f,s,t])}}return out}""", I18N_AMOUNTS)
+        check(f'i18n {lang}: every amount pattern translates 999, 1,000, 2,500 and 1,234,567 written the {lang} way', not bad, bad[:3])
+        await ctx.close()
+
+
 async def main():
-    only = sys.argv[1:] or ['fee', 'nofee']
+    only = sys.argv[1:] or ['fee', 'nofee', 'cross', 'i18n']
     async with async_playwright() as p:
         b = await p.chromium.launch(executable_path=os.environ.get('CHROME') or None)
         t0 = time.time()
         if 'fee' in only: await run_mint(b, A, B, 'fee', pin_src=False)
         if 'nofee' in only: await run_mint(b, B, A, 'nofee', pin_src=True)
+        if 'cross' in only:
+            for M, O, which in ((A, B, 'fee'), (B, A, 'nofee')):
+                try: await run_cross(b, M, O, which)
+                except Exception as e: check(f'{which} second device: script error', False, repr(e)[:300])
+        if 'i18n' in only: await run_i18n(b)
         await b.close()
     n = len(results); ok = sum(1 for r in results if r[1])
     print(f'SUMMARY {ok}/{n} passed ({int(time.time() - t0)} s)')
