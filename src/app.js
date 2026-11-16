@@ -542,13 +542,16 @@ function dropQuote(q) { S.quotes = S.quotes.filter(x => x.quote !== q.quote); sa
 async function creditDepositRange(w, q) {
   const r = await inTime(w.restore(q.ctr.start, q.ctr.n, { keysetId: q.ctr.id }), 30000);
   const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
-  let found = (r.proofs || []).filter(p => !held.has(p.secret));
-  if (found.length) { const st = await inTime(w.checkProofsStates(found), 30000); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
+  let found = (r.proofs || []).filter(p => !held.has(p.secret)), away = [];
+  if (found.length) { const st = await inTime(w.checkProofsStates(found), 30000); away = found.filter((p, i) => st[i] && st[i].state === 'SPENT'); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
   const held2 = new Set((S.proofs[q.mint] || []).map(p => p.secret)); found = found.filter(p => !held2.has(p.secret));
-  if (!found.length && (q.empty = (q.empty || 0) + 1) < 3) { save(); return 0; }   // nothing there yet: it waits, it isn't closed at 0
+  // (deposit coins already spent: a device holding the same wallet got this deposit and spent it; it was received, and
+  // it left again: "already spent elsewhere".)
+  const sent = new Set(S.txs.flatMap(t => (t.sent || []).map(p => p.secret))); away = away.filter(p => !held2.has(p.secret) && !sent.has(p.secret));
+  if (!found.length && !away.length && (q.empty = (q.empty || 0) + 1) < 3) { save(); return 0; }   // nothing there yet: it waits, it isn't closed at 0
   const was = txById(q.txId), before = was && was.status === 'done' ? num(was.amount) : 0;
   S.proofs[q.mint] = (S.proofs[q.mint] || []).concat(plain(found));
-  updTx(q.txId, { status: 'done', amount: before + sum(found), ts: Date.now() });
+  updTx(q.txId, { status: 'done', amount: before + sum(found) + sum(away), ts: Date.now() }); spentElsewhere(q.mint, sum(away), q.impLine);
   S.quotes = S.quotes.filter(x => x.quote !== q.quote); save();
   return sum(found);
 }
@@ -834,13 +837,16 @@ async function recoverChange(pend) {
   const r = await inTime(w.restore(pend.ctr.start, pend.ctr.n, { keysetId: pend.ctr.id }), 30000);
   const mine = new Set(pend.recovered || []), have = new Set((S.proofs[pend.mint] || []).map(p => p.secret));
   const sent = new Set(S.txs.flatMap(t => (t.sent || []).map(p => p.secret)).concat(S.pending.filter(p => p.id !== pend.id).flatMap(p => p.proofs.map(x => x.secret))));
-  let found = (r.proofs || []).filter(p => !have.has(p.secret) && !sent.has(p.secret) && !mine.has(p.secret));
-  if (found.length) { const st = await inTime(w.checkProofsStates(found), 30000); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
+  let found = (r.proofs || []).filter(p => !have.has(p.secret) && !sent.has(p.secret) && !mine.has(p.secret)), spentAway = [];
+  // (change the mint signed that is spent already was spent by a device holding the same wallet: it came back, so it
+  // isn't fee, and it left again: "already spent elsewhere")
+  if (found.length) { const st = await inTime(w.checkProofsStates(found), 30000); spentAway = found.filter((p, i) => st[i] && st[i].state === 'SPENT'); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
   // checked again right before crediting, with no wait in between: what is already held or credited adds nothing
   const held = new Set((S.proofs[pend.mint] || []).map(p => p.secret)), credited = new Set(pend.recovered || []);
-  found = found.filter(p => !held.has(p.secret) && !credited.has(p.secret));
-  if (found.length) {
-    pend.recovered = [...credited, ...found.map(p => p.secret)]; pend.change = (pend.change || 0) + sum(found);
+  found = found.filter(p => !held.has(p.secret) && !credited.has(p.secret)); spentAway = spentAway.filter(p => !held.has(p.secret) && !credited.has(p.secret));
+  if (found.length || spentAway.length) {
+    pend.recovered = [...credited, ...found.map(p => p.secret), ...spentAway.map(p => p.secret)]; pend.change = (pend.change || 0) + sum(found) + sum(spentAway);
+    spentElsewhere(pend.mint, sum(spentAway), pend.impLine);
     addProofs(pend.mint, found);   // saves the proofs and this record together
   }
   pend.changeDone = true; save();
@@ -923,6 +929,14 @@ async function restoreRecorded(w, outs) {
   }
   return got;
 }
+// value that left this wallet because a device holding the same coins spent it: one line, or added to the line the same
+// import already wrote for that mint
+function spentElsewhere(url, v, into) {
+  if (!(v > 0)) return;
+  const l = into && txById(into);
+  if (l && l.note === 'Ecash already spent elsewhere' && l.mint === url && l.type === 'out' && l.status === 'done') updTx(l.id, { amount: num(l.amount) + v });
+  else addTx({ type: 'out', method: 'ecash', amount: v, mint: url, note: 'Ecash already spent elsewhere', status: 'done', settled: true });
+}
 async function settleOp(id) {
   for (let i = 0; i < 3; i++) {
     if (!S.ops.some(o => o.id === id)) return 'done';
@@ -950,18 +964,30 @@ async function settleOpNow(id) {
   const held = heldNow(); fresh = fresh.filter(p => !held.has(p.secret));
   // a locked token the step was making is shown again as that token (only its sender can see it); the rest is balance
   let lockedOut = op.kind === 'send' && op.locked ? fresh.filter(p => p._send) : [];
-  { const have = new Set(S.txs.flatMap(t => (t.sent || []).map(p => p.secret)).concat(S.extra ? S.extra.proofs.map(p => p.secret) : []));
-    if (lockedOut.some(p => have.has(p.secret))) { fresh = fresh.filter(p => !have.has(p.secret)); lockedOut = []; } }   // that token is already here (settled before): never a second line
+  const have = new Set(S.txs.flatMap(t => (t.sent || []).map(p => p.secret)).concat(S.extra ? S.extra.proofs.map(p => p.secret) : []));
+  if (lockedOut.some(p => have.has(p.secret))) { fresh = fresh.filter(p => !have.has(p.secret)); lockedOut = []; }   // that token is already here (settled before): never a second line
   if (lockedOut.length) fresh = fresh.filter(p => !p._send);
   for (const p of outs) delete p._send;
   const gone = new Set(spent.map(p => p.secret)), cur = (S.proofs[op.mint] || []).filter(p => held.has(p.secret));
   const removed = sum(cur.filter(p => gone.has(p.secret))), added = sum(fresh);
+  /* The mint kept as its fee only what the step's coins had beyond everything it signed for it. What it signed but
+     doesn't come in here was spent since by a device holding the same wallet (a backup restored elsewhere): that is
+     "already spent elsewhere", never a fee. Outputs already shown here as a token or as the Extra Life have
+     their line.
+     Nothing signed at all: the step's coins were spent by something else. */
+  const signed = sum(outs), inSet = new Set(fresh.map(p => p.secret));
+  const fee0 = signed ? Math.max(0, removed - signed) : 0, shown = sum(outs.filter(p => have.has(p.secret)));
+  const spentOut = sum(outs.filter(p => !held.has(p.secret) && !inSet.has(p.secret) && !have.has(p.secret)));
+  // (what the coins removed here paid for beyond the fee and this step's own line: outputs already shown here first, the rest left elsewhere)
+  const rest = r => { if (r > 0) spentElsewhere(op.mint, Math.max(0, r - shown), op.impLine); else if (r < 0) addTx({ type: 'in', method: 'ecash', amount: -r, mint: op.mint, note: 'Recovered with recovery phrase', settled: true }); };
   S.proofs[op.mint] = cur.filter(p => !gone.has(p.secret)).concat(plain(fresh));
   const waitingTx = op.txId && (txById(op.txId) || {}).status === 'pending' ? op.txId : null;   // a deposit waiting for exactly this: it gets it
-  if (op.kind === 'receive' && added && waitingTx) updTx(waitingTx, { status: 'done', amount: added, ts: Date.now() });
-  else if (op.kind === 'receive') { if (added) { const t = addTx({ type: 'in', method: 'ecash', amount: added, fee: Math.max(0, op.amount - added), mint: op.mint, note: op.note || '', settled: true }); if (op.extra && S.extra) { S.extra = null; saveExtra(); } receiveDone(op, t); } }
+  // a claim or deposit: the line is what was received (the token less the mint's fee), and what of it was spent since has its own line
+  if (op.kind === 'receive' && added + spentOut && waitingTx) { updTx(waitingTx, { status: 'done', amount: added + spentOut, ts: Date.now() }); spentElsewhere(op.mint, spentOut, op.impLine); }
+  else if (op.kind === 'receive') { if (added + spentOut) { const t = addTx({ type: 'in', method: 'ecash', amount: added + spentOut, fee: Math.max(0, op.amount - signed), mint: op.mint, note: op.note || '', settled: true }); spentElsewhere(op.mint, spentOut, op.impLine); if (op.extra && S.extra) { S.extra = null; saveExtra(); } receiveDone(op, t); } }
   else if (lockedOut.length) {
-    const ps = plain(lockedOut), amount = Math.min(op.amount || sum(ps), sum(ps)), fee = Math.max(0, removed - added - amount);
+    // (a token that carries the receiver's fee on top of its amount: that part is the sender's fee, as when nothing is interrupted)
+    const ps = plain(lockedOut), amount = Math.min(op.amount || sum(ps), sum(ps)), fee = fee0 + sum(ps) - amount;
     const f = op.follow || {};
     if (f.k === 'extra-renew' && S.extra && S.extra.mint === op.mint && S.extra.proofs.some(p => op.inputs.includes(p.secret))) {   // Extra Life continued: its new coins and date
       Object.assign(S.extra, { proofs: ps, until: f.until, renewed: Date.now(), amount: Math.min(S.extra.amount, sum(ps)) }); delete S.extra.unlocked; saveExtra();
@@ -980,11 +1006,12 @@ async function settleOpNow(id) {
       else if (f.k === 'gift' && contactById(f.contact)) setTimeout(() => deliverToContact(contactById(f.contact), txById(t.id)).catch(() => {}), 0);   // and it still goes to the contact
       else if (f.k === 'hunt-make') setTimeout(() => huntFinish(Object.assign({}, f, { txId: t.id })).catch(() => {}), 0);   // the treasure hunt is still set up
     }
-    if (removed - added - amount < 0) addTx({ type: 'in', method: 'ecash', amount: amount + added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true });
+    rest(removed - added - amount - fee);
   }
-  else if (added > removed) addTx({ type: 'in', method: 'ecash', amount: added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true });
-  else if (removed > added) addTx(added ? { type: 'out', method: 'fee', amount: 0, fee: removed - added, mint: op.mint, note: 'Mint fee for an interrupted step', status: 'done', settled: true }
-    : { type: 'out', method: 'ecash', amount: removed, mint: op.mint, note: 'Ecash already spent elsewhere', status: 'done', settled: true });
+  else {
+    if (fee0) addTx({ type: 'out', method: 'fee', amount: 0, fee: fee0, mint: op.mint, note: 'Mint fee for an interrupted step', status: 'done', settled: true });
+    rest(removed - added - fee0);
+  }
   closeOp(op); save();
   return 'settled';
 }
@@ -3292,9 +3319,15 @@ function opSettledHere(o) {
   const mine = new Set([].concat(Object.values(S.proofs).flat().map(p => p.secret), S.txs.flatMap(t => (t.sent || []).map(p => p.secret)), S.extra ? S.extra.proofs.map(p => p.secret) : []));
   return (o.outs || []).some(x => mine.has(outSecret(x)));
 }
+const uniqBy = (a, k) => { const seen = new Set(); return (a || []).filter(x => x && x[k] && !seen.has(x[k]) && seen.add(x[k])); };
+// coins this wallet already has at a mint: in the balance, in payments in flight, in tokens not yet claimed, in the Extra Life
+const heldHere = u => new Set((S.proofs[u] || []).map(p => p.secret).concat(S.pending.flatMap(p => p.proofs.map(x => x.secret)), S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.extra ? S.extra.proofs.map(p => p.secret) : []));
+// a backup's open deposit is new here only if this wallet isn't watching it already and its line is still waiting (a
+// Lightning deposit) or open (an on-chain address, which can be paid more than once): never one claimed or closed here
+const newQuote = q => !!q && (q.kind === 'bolt11' || q.kind === 'onchain') && typeof q.quote === 'string' && !S.quotes.some(x => x.quote === q.quote) && (t => !!t && (t.status === 'pending' || (q.kind === 'onchain' && t.status === 'done')))(txById(q.txId)) && !S.txs.some(t => t.quote === q.quote && t.id !== q.txId);
 S.imports = store.get('imports', []);   // parts of an imported backup waiting for their mint to answer: [{ id, mint, proofs, txs, pending, ops, extra, at }]
 const saveImports = () => store.set('imports', S.imports);
-const freshOps = ops => (ops || []).filter(o => o && o.id && typeof o.mint === 'string' && !S.ops.find(x => x.id === o.id)).map(o => Object.assign({ inputs: [], ctr: [], outs: [] }, o, { mint: normUrl(o.mint) })).filter(o => !opSettledHere(o));
+const freshOps = ops => (ops || []).filter(o => o && o.id && typeof o.mint === 'string' && !S.ops.find(x => x.id === o.id)).map(o => Object.assign({ inputs: [], ctr: [], outs: [] }, o, { mint: normUrl(o.mint), impLine: null })).filter(o => !opSettledHere(o));
 // a mint's part of a backup, checked at the mint: [unspent coins (and the coins of steps to settle here)] or null if it can't be asked
 async function checkImport(u, proofs, ops) {
   const opIn = new Set(ops.flatMap(o => o.inputs));
@@ -3303,23 +3336,37 @@ async function checkImport(u, proofs, ops) {
   catch (e) { return null; }
 }
 // a mint's part of a backup, written in one go: history lines it doesn't have, coins not held, one line, its open steps
-function applyImport(u, coins, txs, pending, ops) {
-  const ids = new Set(S.txs.map(t => t.id)), newTxs = txs.filter(t => !ids.has(t.id));
+function applyImport(u, coins, txs, pending, ops, quotes) {
+  const ids = new Set(S.txs.map(t => t.id)), newTxs = uniqBy(txs, 'id').filter(t => !ids.has(t.id));   // (each line once, however often the backup holds it)
   for (const t of newTxs) S.txs.push(t);
   S.txs.sort((a, b) => b.ts - a.ts);
-  for (const p of pending) if (!S.pending.find(x => x.id === p.id) && !ids.has(p.txId)) S.pending.push(p);   // (one whose payment this wallet already has was settled here)
-  const held = new Set((S.proofs[u] || []).map(p => p.secret).concat(S.pending.flatMap(p => p.proofs.map(x => x.secret)), S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret))));
+  const newPend = uniqBy(pending, 'id').filter(p => !S.pending.find(x => x.id === p.id) && !ids.has(p.txId)).map(p => Object.assign({}, p, { impLine: null }));   // (one whose payment this wallet already has was settled here)
+  for (const p of newPend) S.pending.push(p);
+  const held = heldHere(u);
   const inc = coins.filter(p => !held.has(p.secret));
   if (inc.length) addProofs(u, inc);
   const diff = sum(inc) - ledgerOf(newTxs, u);
+  let line = null;
   if (diff > 0) addTx({ type: 'in', method: 'ecash', amount: diff, mint: u, note: 'Restored from backup' });
-  else if (diff < 0) addTx({ type: 'out', method: 'ecash', amount: -diff, mint: u, note: 'Ecash already spent elsewhere', status: 'done' });
-  const fresh = ops.filter(o => !S.ops.find(x => x.id === o.id) && !opSettledHere(o));
+  else if (diff < 0) line = addTx({ type: 'out', method: 'ecash', amount: -diff, mint: u, note: 'Ecash already spent elsewhere', status: 'done' });
+  const fresh = uniqBy(ops, 'id').filter(o => !S.ops.find(x => x.id === o.id) && !opSettledHere(o));
   for (const o of fresh) S.ops.push(o);
-  return fresh;
+  // a deposit the backup was still waiting for (paid or not) comes back with its line, unless this wallet has it already
+  const newQ = uniqBy(quotes || [], 'quote').filter(q => newQuote(q)).map(q => Object.assign({}, q, { mint: u, impLine: null }));
+  for (const q of newQ) S.quotes.push(q);
+  // what these steps and deposits find spent since (on the device the backup came from) joins this import's line
+  if (line) for (const r of [].concat(fresh, newPend, newQ)) r.impLine = line.id;
+  return { ops: fresh, quotes: newQ, pending: newPend };
 }
-function settleImported(ops) {
-  if (ops.length) setTimeout(async () => { for (const o of ops) { if (!S.mints.find(m => m.url === o.mint)) await addMint(o.mint).catch(() => {}); await settleOp(o.id).catch(() => {}); } refresh(); }, 0);
+// the steps, deposits and payments a backup brought in are settled, checked and asked about right away (each the usual
+// single-flight way: one at a time, idempotent), not only at the next background check
+function settleImported({ ops, quotes, pending }) {
+  if (ops.length || quotes.length || pending.length) setTimeout(async () => {
+    for (const o of ops) { if (!S.mints.find(m => m.url === o.mint)) await addMint(o.mint).catch(() => {}); await settleOp(o.id).catch(() => {}); }
+    for (const q of quotes) { if (!S.mints.find(m => m.url === q.mint)) await addMint(q.mint).catch(() => {}); await checkQuote(q).catch(() => {}); }
+    for (const p of pending) await reconcile(p, { force: true }).catch(() => {});
+    refresh();
+  }, 0);
 }
 // the backup's Extra Life comes in when its coins are unspent, or when one of the steps coming in with it is the
 // CONTINUE that spent them (that step then finishes it here, with its new coins and date)
@@ -3334,30 +3381,49 @@ async function importBackup(d) {
   for (const k of d.p2pk || []) if (!S.p2pk.find(x => x.pub === k.pub)) S.p2pk.push(k); store.set('p2pk', S.p2pk);
   for (const m of d.mints || []) if (m && m.url && !S.mints.find(x => x.url === normUrl(m.url))) S.mints.push(Object.assign({}, m, { url: normUrl(m.url) }));
   // per mint: its coins, history lines, payments in flight and open steps (a backup's own waiting parts included)
-  const part = {}, P = u => part[u] || (part[u] = { proofs: [], txs: [], pending: [], ops: [] });
+  const part = {}, P = u => part[u] || (part[u] = { proofs: [], txs: [], pending: [], ops: [], quotes: [] });
   for (const [u0, ps] of Object.entries(d.proofs || {})) P(normUrl(u0)).proofs.push(...(Array.isArray(ps) ? ps : []));
   for (const t of d.txs || []) if (t && t.id) P(normUrl(t.mint || '')).txs.push(Object.assign({}, t, t.mint ? { mint: normUrl(t.mint) } : {}));
   for (const p of d.pending || []) if (p && p.id && p.mint) P(normUrl(p.mint)).pending.push(p);
   for (const o of d.ops || []) if (o && o.mint) P(normUrl(o.mint)).ops.push(o);
-  for (const r of Array.isArray(d.imports) ? d.imports : []) if (r && r.mint) { const q = P(normUrl(r.mint)); q.proofs.push(...(r.proofs || [])); q.txs.push(...(r.txs || [])); q.pending.push(...(r.pending || [])); q.ops.push(...(r.ops || [])); }
+  for (const x of Array.isArray(d.quotes) ? d.quotes : []) if (x && typeof x.mint === 'string') P(normUrl(x.mint)).quotes.push(x);
+  for (const r of Array.isArray(d.imports) ? d.imports : []) if (r && r.mint) { const q = P(normUrl(r.mint)); q.proofs.push(...(r.proofs || [])); q.txs.push(...(r.txs || []).map(t => Object.assign({}, t, { mint: normUrl(r.mint) }))); q.pending.push(...(r.pending || [])); q.ops.push(...(r.ops || [])); q.quotes.push(...(r.quotes || [])); }
   const checked = {}, waiting = [];
   for (const [u, q] of Object.entries(part)) {
-    const seen = new Set(); q.proofs = q.proofs.filter(p => p && p.secret && !seen.has(p.secret) && seen.add(p.secret)).map(p => Object.assign({}, p, { amount: num(p.amount) }));
-    q.ops = freshOps(q.ops);
+    // each coin, line, payment, step and deposit once (a backup's waiting parts repeat what it holds itself)
+    q.proofs = uniqBy(q.proofs, 'secret').map(p => Object.assign({}, p, { amount: num(p.amount) }));
+    q.txs = uniqBy(q.txs, 'id'); q.pending = uniqBy(q.pending, 'id'); q.quotes = uniqBy(q.quotes, 'quote');
+    q.ops = freshOps(uniqBy(q.ops, 'id'));
     const coins = u ? await checkImport(u, q.proofs, q.ops) : [];
     if (coins) checked[u] = coins; else waiting.push(u);
   }
   let extra = null, extraLater = null;
-  if (d.extra && !S.extra) {
-    const xu = normUrl(d.extra.mint || '');
-    if (renewOf(d.extra, (part[xu] || { ops: [] }).ops)) { if (waiting.includes(xu)) extraLater = d.extra; else extra = d.extra; }
-    else { const r = await extraIfUnspent(d.extra); if (r.ok) extra = d.extra; else if (!r.asked) extraLater = d.extra; }
+  // (the backup's Extra Life, or the one waiting aside in it for its mint: a backup made while waiting has it there)
+  const dx = d.extra || ((Array.isArray(d.imports) ? d.imports : []).find(r => r && r.extra && Array.isArray(r.extra.proofs)) || {}).extra || null;
+  if (dx && !S.extra) {
+    const xu = normUrl(dx.mint || '');
+    if (renewOf(dx, (part[xu] || { ops: [] }).ops)) { if (waiting.includes(xu)) extraLater = dx; else extra = dx; }
+    else { const r = await extraIfUnspent(dx); if (r.ok) extra = dx; else if (!r.asked) extraLater = dx; }
   }
   await syncIfStale();
-  let settle = [];
-  for (const u of Object.keys(checked)) { const q = part[u]; settle = settle.concat(applyImport(u, checked[u], q.txs, q.pending, q.ops)); }
-  for (const u of waiting) { const q = part[u]; S.imports.push({ id: uid(), mint: u, proofs: q.proofs, txs: q.txs, pending: q.pending, ops: q.ops, extra: extraLater && normUrl(extraLater.mint) === u ? extraLater : null, at: Date.now() }); }
+  const settle = { ops: [], quotes: [], pending: [] };
+  for (const u of Object.keys(checked)) { const q = part[u], r = applyImport(u, checked[u], q.txs, q.pending, q.ops, q.quotes); settle.ops.push(...r.ops); settle.quotes.push(...r.quotes); settle.pending.push(...r.pending); }
+  // a part that waits aside holds only what this wallet doesn't have yet (nothing at all: nothing waits), and a mint
+  // has one waiting part: a second import while it is still down joins it (a new record, so a check already under way
+  // for the old one finds it gone and leaves it), each coin, line and step once
+  const late = [];
+  for (const u of waiting) {
+    const q = part[u], held = heldHere(u), ids = new Set(S.txs.map(t => t.id)), x = extraLater && normUrl(extraLater.mint) === u ? extraLater : null;
+    const rec = { proofs: q.proofs.filter(p => !held.has(p.secret)), txs: q.txs.filter(t => !ids.has(t.id)), pending: q.pending.filter(p => !S.pending.find(y => y.id === p.id) && !ids.has(p.txId)), ops: q.ops, quotes: q.quotes.filter(y => !S.quotes.some(z => z.quote === y.quote)), extra: x };
+    const old = S.imports.find(r => r.mint === u);
+    if (old) for (const k of ['proofs', 'txs', 'pending', 'ops', 'quotes']) rec[k] = uniqBy((old[k] || []).concat(rec[k]), { proofs: 'secret', quotes: 'quote' }[k] || 'id');
+    if (old && !rec.extra) rec.extra = old.extra || null;
+    if (!rec.proofs.length && !rec.txs.length && !rec.pending.length && !rec.ops.length && !rec.quotes.length && !rec.extra) continue;
+    S.imports = S.imports.filter(r => r.mint !== u); S.imports.push(Object.assign({ id: uid(), mint: u, at: Date.now() }, rec)); late.push(u);
+  }
   if (waiting.length) saveImports();
+  for (const r of Array.isArray(d.requests) ? d.requests : []) if (r && r.id && !S.requests.find(x => x.id === r.id)) S.requests.push(r);   // payment requests still open: their payments are still listened for
+  if (Array.isArray(d.requests) && d.requests.length) { S.requests.sort((a, b) => (b.created || 0) - (a.created || 0)); S.requests = S.requests.slice(0, 30); store.set('requests', S.requests); }
   // Extra Life (only if its coins are still there), the copies we hold as an heir, and challenges (bounty secrets live there)
   if (extra) { S.extra = Object.assign({}, extra, { mint: normUrl(extra.mint) }); saveExtra(); }
   for (const h of d.heirlooms || []) if (!S.heirlooms.find(x => x.token === h.token)) S.heirlooms.push(h); saveHeir();
@@ -3368,7 +3434,7 @@ async function importBackup(d) {
   if (!S.active && S.mints[0]) S.active = S.mints[0].url;
   save();
   settleImported(settle);
-  return waiting;
+  return late;
 }
 // the parts waiting for their mint: checked again (background check, Check now); in once the mint answers, never dropped
 async function retryImports(url) {
@@ -3380,7 +3446,7 @@ async function retryImports(url) {
     if (ex && !ex.asked) continue;
     await mintLock(rec.mint, async () => {
       if (!S.imports.find(x => x.id === rec.id)) return;
-      const settle = applyImport(rec.mint, coins, rec.txs || [], rec.pending || [], ops);
+      const settle = applyImport(rec.mint, coins, rec.txs || [], rec.pending || [], ops, rec.quotes || []);
       if (ex && ex.ok && !S.extra) { S.extra = Object.assign({}, rec.extra, { mint: normUrl(rec.extra.mint) }); saveExtra(); }
       S.imports = S.imports.filter(x => x.id !== rec.id); saveImports(); save();
       settleImported(settle); done++;
@@ -3390,7 +3456,7 @@ async function retryImports(url) {
 }
 function importsPanel() {
   if (!S.imports.length) return '';
-  return S.imports.map(r => `<div class="panel"><span class="mid"><span class="h2">Waiting to check with <span data-noi18n>${esc((S.mints.find(m => m.url === r.mint) || {}).name || host(r.mint))}</span></span>
+  return S.imports.map(r => `<div class="panel imports-panel"><span class="mid"><span class="h2">Waiting to check with <span data-noi18n>${esc((S.mints.find(m => m.url === r.mint) || {}).name || host(r.mint))}</span></span>
     <span class="tiny">${money(sum(r.proofs || []))} from a backup</span><span class="tiny muted">It comes in once the mint answers and confirms it is unspent.</span></span>
     <button class="btn sm" data-act="importsRetry">Check now</button></div>`).join('');
 }
@@ -3398,7 +3464,7 @@ function importsPanel() {
    journal records: a step whose answer hasn't come yet (a gift, a bounty, Extra Life, a hunt...) keeps its saved
    outputs and secrets, so the wallet restored from this backup settles it there. Settling is by secret at the mint, so
    the same step settled on both devices gives the same coins, never two sets. */
-const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: S.imports }, null, 1);
+const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: S.imports, quotes: S.quotes, requests: S.requests }, null, 1);
 const A = {
   close: () => closeSheet(),
   tab: b => { if (tab === 'history' && b.dataset.tab !== 'history') { histFilter = 'all'; histQuery = ''; histTag = ''; } tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); sfx('blip'); },
