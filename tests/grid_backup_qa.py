@@ -34,6 +34,18 @@ SNAP = """((M,O)=>{const S=Nutcade.S,ps=u=>S.proofs[u]||[],sm=a=>a.reduce((t,p)=
   fees:S.txs.reduce((a,t)=>a+(t.status==='failed'||t.status==='expired'?0:(+t.fee||0)),0),
   se:S.txs.filter(t=>t.note===SE).map(t=>[t.mint===M?'M':'O',t.amount]),rec:S.txs.filter(t=>/^Recovered/.test(t.note||'')).length,
   row:!!document.querySelector('[data-act=importsRetry]')}})"""
+# every container that holds coins outside the balance and is still shown as holding them: none may hold coins the mint
+# reports spent (an Extra Life, a token not claimed yet, a copy held as an heir, a bounty offered to us)
+DEAD = """(async()=>{const S=Nutcade.S,out=[];const W={};const wal=async u=>{if(!W[u]){W[u]=new CashuLib.Wallet(u,{unit:'sat'});await W[u].loadMint()}return W[u]};
+ const sp=async(u,ps)=>{const st=await (await wal(u)).checkProofsStates(ps);return st.map(s=>s.state)};
+ const tok=async t=>{const m=CashuLib.getTokenMetadata(t).mint;const w=await wal(m);const d=w.decodeToken(t);return sp(m,d.proofs)};
+ if(S.extra){const s=await sp(S.extra.mint,S.extra.proofs);if(s.includes('SPENT'))out.push('extra')}
+ for(const t of S.txs.filter(t=>t.status==='pending'&&t.sent&&t.sent.length)){const s=await sp(t.mint,t.sent);if(s.every(x=>x==='SPENT'))out.push('token '+t.amount)}
+ for(const h of S.heirlooms.filter(h=>h.state==='waiting')){if((await tok(h.token)).includes('SPENT'))out.push('heirloom '+h.name)}
+ for(const c of S.challenges.filter(c=>c.dir==='in'&&c.bounty&&c.bounty.state==='open')){if((await tok(c.bounty.token)).includes('SPENT'))out.push('bounty '+c.id)}
+ return out})()"""
+HELD = "({h:Nutcade.S.heirlooms.map(h=>[h.name,h.state]).sort(),c:Nutcade.S.challenges.filter(c=>c.dir==='in'&&c.bounty).map(c=>[c.id,c.bounty.state]).sort(),offer:!!document.querySelector('[data-act=extraOpen]')&&!!Nutcade.S.extra})"
+def norm(lines): return sorted(l[:3] + ['pc' if l[3] in ('pending', 'claimed') else l[3]] + l[4:] for l in lines)
 ROW_STACK = """(()=>{const r=document.querySelector('[data-act=importsRetry]');if(!r)return 'no row';const mid=r.closest('.panel').querySelector('.mid');
  const k=[...mid.children].map(e=>e.getBoundingClientRect());for(let i=1;i<k.length;i++)if(k[i].top<k[i-1].bottom-1)return 'runs together';
  const p=r.closest('.panel').getBoundingClientRect();if(p.right>document.documentElement.clientWidth+1)return 'overflow';return 'ok'})()"""
@@ -60,14 +72,19 @@ class Grid:
     def __init__(s, b, M, O, which):
         s.b, s.M, s.O, s.which = b, M, O, which
 
-    async def snap(s, w): return await w.ev(SNAP + f"({json.dumps(s.M)},{json.dumps(s.O)})")
+    async def awake(s, w):   # a PIN wallet left alone (clicks from the script don't count as activity) locks itself
+        if await w.ev("Nutcade.vault.on && !Nutcade.vault.open && !!document.querySelector('[data-pinpad]')"): await unlock(w)
+
+    async def snap(s, w): await s.awake(w); return await w.ev(SNAP + f"({json.dumps(s.M)},{json.dumps(s.O)})")
 
     async def backup(s, w):
+        await s.awake(w)
         await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
         async with w.pg.expect_download() as d: await w.pg.evaluate("document.querySelector('[data-act=backupDownload]').click()")
         return open(await (await d.value).path()).read()
 
     async def imp(s, w, data, settle=True):
+        await s.awake(w)
         await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
         await w.click('[data-act=restore]'); await w.wait(250); await w.fill('#restoreIn', data); await w.click('[data-act=doRestore]')
         await w.until("!document.querySelector('#restoreIn')", 90000); er = await w.err(); await w.wait(600)
@@ -245,24 +262,41 @@ async def run_mint(b, M, O, which, pin_src):
     await e.pg.context.close()
 
     # ---- partly spent elsewhere: the source spends most of its coins (a token bob claims), then the old backups
-    tok, e_ = await a.send_ecash(aF['bal'] * 6 // 10); await bob.receive_token(tok); await a.wait(1000)
+    tok, e_ = await a.send_ecash(aF['bal'] * 6 // 10)
+    # a backup with that token not claimed yet, holding (as an heir's copy and as a bounty offered to us) a token that
+    # gets spent and one that stays unspent (an open gift of the source's)
+    hs = json.loads(await g.backup(a)); live = await a.ev("Nutcade.S.txs.find(t=>t.status==='pending'&&t.token&&t.amount===300).token")
+    far = int(time.time() * 1000) + 10**10
+    hs['heirlooms'] = (hs.get('heirlooms') or []) + [{'from': 'ab' * 32, 'name': 'Dead', 'token': tok, 'amount': 1, 'mint': M, 'until': far, 'state': 'waiting', 'at': 1}, {'from': 'ac' * 32, 'name': 'Live', 'token': live, 'amount': 1, 'mint': M, 'until': far, 'state': 'waiting', 'at': 1}]
+    hs['challenges'] = (hs.get('challenges') or []) + [{'dir': 'in', 'id': cid, 'game': 'flipper', 'seed': 5, 'score': 100, 'by': 'GRD', 'pubkey': 'ab' * 32, 'at': 1, 'best': None, 'bounty': {'token': tk, 'amount': 1, 'mint': M, 'H': '00' * 32, 'until': far, 'state': 'open', 'game': 'flipper'}} for cid, tk in (('gdead', tok), ('glive', live))]
+    snaps['sent'] = (json.dumps(hs), await g.snap(a))
+    await bob.receive_token(tok); await a.wait(1000)
+    # and the source continues its Extra Life again: the CONTINUE record in the cont backup now renews spent coins
+    x0 = (await g.snap(a))['x']; await a.home(); await a.click('[data-act=extraOpen]'); await a.wait(300); await a.click('[data-act=extraContinue]')
+    await a.until(f"Nutcade.S.extra && JSON.stringify(Nutcade.S.extra.proofs.map(p=>p.secret).sort())!=={json.dumps(json.dumps(x0, separators=(',', ':')))}", 30000); await a.wait(1500); await a.ev("Nutcade.closeSheet()")
     an = await g.snap(a); now = {s for s, _ in an['secs']}
-    check(f'{T} stale setup: bob claimed the source\'s token', not e_ and an['bal'] < aF['bal'] // 2, (e_, an['bal']))
-    for k in ('before', 'deposit', 'make', 'gift', 'claim', 'pay'):
+    check(f'{T} stale setup: bob claimed the source\'s token, the source continued its Extra Life again', not e_ and an['bal'] < aF['bal'] // 2 and an['x'] and an['x'] != x0, (e_, an['bal'], an['x'] != x0))
+    for k in ('before', 'deposit', 'make', 'gift', 'claim', 'pay', 'cont', 'sent'):
         H, ak = snaps[k]
         exp = sorted(x for x in ak['secs'] if x[0] in now)
-        d_ = await g.fresh('gD' + k, pin=(k == 'gift')); er = await g.imp(d_, H)
+        pin = k == 'gift' or (k == 'cont') == (which == 'fee') and k in ('cont', 'sent')
+        d_ = await g.fresh('gD' + k, pin=pin); er = await g.imp(d_, H)
         if k == 'deposit': await d_.until("Nutcade.S.quotes.length===0", 40000); await d_.wait(500)
         d1 = await g.snap(d_)
-        lbl = f'{T} stale backup ({k}{": record open" if k != "before" else ""}) after its coins were partly spent elsewhere, into a fresh device{" (PIN)" if k == "gift" else ""}'
+        lbl = f'{T} stale backup ({k}{": record open" if k not in ("before", "sent") else ""}) after its coins were partly spent elsewhere, into a fresh device{" (PIN)" if pin else ""}'
         check(f'{lbl}: exactly the coins still unspent ({sum(x[1] for x in exp)} SAT), history = balance, journal empty', not er and d1['secs'] == exp and good(d1), (er, brief(d1), sum(x[1] for x in exp)))
-        check(f'{lbl}: fees = what the mint kept (as on the source), no fake fee line; one spent-elsewhere line', d1['fees'] == ak['fees'] and d1['lines'] == ak['lines'] and len(d1['se']) <= 1, (d1['fees'], ak['fees'], d1['se'], [x for x in d1['lines'] if x not in ak['lines']], [x for x in ak['lines'] if x not in d1['lines']]))
+        check(f'{lbl}: fees = what the mint kept (as on the source), no fake fee line; one spent-elsewhere line', d1['fees'] == ak['fees'] and norm(d1['lines']) == norm(ak['lines']) and len(d1['se']) <= 1, (d1['fees'], ak['fees'], d1['se'], [x for x in d1['lines'] if x not in ak['lines']], [x for x in ak['lines'] if x not in d1['lines']]))
+        await d_.wait(2500); dead = await d_.ev(DEAD); dh = await d_.ev(HELD)
+        check(f'{lbl}: nothing still shown as holding coins the mint says are spent (Extra Life, unclaimed token, heir copy, bounty), live ones kept', not dead and (d1['x'] is None or d1['x'] == an['x']) and (k != 'sent' or (dh['h'] == [['Dead', 'ended'], ['Live', 'waiting']] and dh['c'] == [['gdead', 'gone'], ['glive', 'open']])) and (k != 'cont' or not dh['offer']), (dead, dh, d1['x'] is None))
         er = await g.imp(d_, H); d2 = await g.snap(d_)
         check(f'{lbl}: same file twice: nothing changes', same(d2, d1) and d2['n'] == d1['n'] and good(d2), brief(d2))
         await d_.pg.context.close()
         er = await g.imp(a, H); a4 = await g.snap(a)
         check(f'{T} stale backup ({k}) into the wallet that made it: nothing changes', not er and same(a4, an) and a4['n'] == an['n'] and good(a4), brief(a4))
-    ok, info = await words_ok(a, [M, O]); check(f'{T} END source wallet: 12-word restore = balance', ok, info)
+        if k == 'sent':
+            await a.wait(2500); ah = await a.ev(HELD)
+            check(f'{T} stale backup (sent) into the wallet that made it: the spent heir copy and bounty it brings are closed, the live ones kept, its Extra Life untouched', ah['h'] == [['Dead', 'ended'], ['Live', 'waiting']] and ah['c'] == [['gdead', 'gone'], ['glive', 'open']] and (await g.snap(a))['x'] == an['x'], ah)
+    await g.awake(a); ok, info = await words_ok(a, [M, O]); check(f'{T} END source wallet: 12-word restore = balance', ok, info)
 
     # ---- deposit paid but never claimed (the claim never reaches the mint), then the device is lost
     hold['lost'] = True; hold['hit'] = False
