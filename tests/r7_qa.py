@@ -1391,6 +1391,17 @@ async def main():
         check('(round 5, 3) with Web Locks refused: a deposit, a payment, a token sent and one claimed all work, history = balance, no page error, said once in the console',
               dep and tokL and not eL and not eC and not eP and not lb and not lk.errs and len(warns) == 1, (dep, bool(tokL), eL, eC, eP, lb, lk.errs[:3], len(warns), st[:6]))
         await lk.pg.context.close()
+        # (round 5, 4) a wallet with a long history (a vault of several hundred KB) can set a PIN, and keeps saving under it
+        bv = await wallet(b); await bv.create(); await bv.add_mint(B); await bv.use(B); await bv.receive_ln(500)
+        await bv.ev("for (let i=0;i<1500;i++) Nutcade.S.txs.push({id:'old'+i, type:'out', method:'ecash', amount:1, mint:'https://old.example', status:'failed', ts:1e12+i, note:'an old line from a long history '+'x'.repeat(120)})")
+        await set_pin(bv); on = await bv.ev("Nutcade.vault.on && Nutcade.vault.open")
+        size = await bv.ev("(localStorage.getItem('nutcade:vault')||'').length")
+        await bv.receive_ln(200); await bv.pg.reload(); await bv.wait(800); await unlock(bv)
+        kept = (await bv.ev("Nutcade.S.txs.length"), await bv.bal(B)); bvb = []
+        await books(bv, 'big vault', bvb, (B,))
+        check('(round 5, 4) a wallet with a long history can set a PIN (its vault is several hundred KB) and keeps saving under it: after a reload and unlock everything is there',
+              on and size > 200000 and kept[0] >= 1502 and kept[1] == 700 and not bvb, (on, size, kept, bvb))
+        await bv.pg.context.close()
         # (round 5, 2) French says "vous" throughout: no "tu" form anywhere in its dictionary or patterns
         frv = await w.ev("[...Object.values(NUTCADE_I18N.fr.t), ...(NUTCADE_I18N.fr.re||[]).map(r=>String(r[1]))]")
         tu = [v for v in frv if re.search(r"(^|[^\w-])(tu|ton|ta|tes|toi|Encaisse-la)(?![\w-])|(^|[.!?]\s+)Réessaie(?!\w)", v, re.I)]

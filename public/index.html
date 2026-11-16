@@ -3181,7 +3181,8 @@ const store = {
   get(k, d) { if (vault.on && VAULT_KEYS.includes(k)) return vault.open && vault.data[k] !== undefined ? vault.data[k] : d; return raw.get(k, d); },
   set(k, v) { if (writeGuard.paused && k !== 'counters') return false; if (vault.on && VAULT_KEYS.includes(k)) { if (!vault.open) return false; vault.data[k] = v; queueVaultWrite(); return true; } return raw.set(k, v); }
 };
-const b64e = u8 => btoa(String.fromCharCode(...new Uint8Array(u8)));
+// (in slices: spreading a large buffer into one call overflows the stack, and the vault holds the whole wallet)
+const b64e = u8 => { const a = new Uint8Array(u8); let s = ''; for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
 const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const rnd = n => crypto.getRandomValues(new Uint8Array(n));
 const PBKDF2_ITER = 600000;
