@@ -277,9 +277,11 @@ async function restoreFromMintNow(url, onStep, opts) {
     }
   }
   // interrupted deposits from before their counters were recorded (issued by the mint, never stored) get what was
-  // found first, each up to its amount; their quotes are then done
+  // found first, each up to its amount; their quotes are then done. Only a deposit made on this device before 1.12
+  // can be one: any other deposit without counters never asked the mint for its coins here, so what a scan finds
+  // isn't its (it was issued to another device holding this wallet).
   const waiting = [];
-  for (const q of S.quotes.filter(q => q.mint === url && !q.ctr && q.kind === 'bolt11')) {
+  for (const q of S.quotes.filter(q => q.mint === url && q.kind === 'bolt11' && legacyQuote(q))) {
     if ((restoreDeposits[url] || new Set()).has(q.quote) || (opts.deposits || []).some(x => x.quote === q.quote)) { waiting.push(q); continue; }
     const st = await inTime(w.checkMintQuoteBolt11(q.quote), 30000).catch(() => null); if (st && st.state === 'ISSUED') waiting.push(q);
   }
@@ -320,6 +322,8 @@ async function restoreFromMintNow(url, onStep, opts) {
 
 /* Same phrase used on another device can leave our counters behind: the mint answers 11003.
    Catch up by rescanning that mint (which also recovers anything new), then retry once. */
+/* A mint that answers a request with an error code (NUT-00) did none of it: it signed nothing for that request. */
+const isRefusal = e => !!e && (e.name === 'MintOperationError' || (e.status >= 400 && e.status < 500 && typeof e.code === 'number'));
 const isDupOutputs = e => e && (e.code === 11003 || /already signed/i.test(String(e.message || '')));
 async function withRepair(url, fn, ropts) {
   try { const r = await fn(); opMark(url, true); return r; }
@@ -453,7 +457,7 @@ async function lnMintQuote(amount, note, url = S.active) {
   const w = await getWallet(url);
   const q = await w.createMintQuoteBolt11(amount);
   const tx = addTx({ type: 'in', method: 'ln', amount, mint: url, note, status: 'pending', request: q.request, quote: q.quote });
-  S.quotes.push({ kind: 'bolt11', quote: q.quote, request: q.request, amount, mint: url, txId: tx.id, expiry: q.expiry || null });
+  S.quotes.push({ kind: 'bolt11', quote: q.quote, request: q.request, amount, mint: url, txId: tx.id, expiry: q.expiry || null, rec: 1 });
   save();
   return tx;
 }
@@ -480,6 +484,7 @@ async function checkQuoteNow(id, txId) {
     if (q.kind === 'bolt11') {
       const r = await w.checkMintQuoteBolt11(q.quote);
       if (q.state !== r.state) { q.state = r.state; save(); }   // a paid invoice is never offered for paying again
+      if ((r.state === 'UNPAID' || r.state === 'PAID') && !q.rec) { q.rec = 1; save(); }   // seen not issued yet: if it is issued later, only from counters on its record
       if (r.state === 'PAID') {
         let cfg;
         if (r.pubkey) {   // NUT-20 locked quote (npub.cash can lock payments to your Nostr key)
@@ -489,7 +494,9 @@ async function checkQuoteNow(id, txId) {
         }
         // the counters the new coins are signed for are on the deposit's record before the mint is asked
         const onCountersReserved = u => { if (u && u.count > 0) { q.ctr = { id: u.keysetId, start: u.start, n: u.count }; save(); } };
-        const proofs = await withRepair(q.mint, () => w.mintProofsBolt11(q.amount, r, Object.assign({}, cfg, { onCountersReserved })), { except: q.quote });
+        let proofs;
+        try { proofs = await withRepair(q.mint, () => w.mintProofsBolt11(q.amount, r, Object.assign({}, cfg, { onCountersReserved })), { except: q.quote }); }
+        catch (e) { if (isRefusal(e) && q.ctr) { delete q.ctr; save(); } throw e; }   // (refused: nothing was signed at those counters for it)
         const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
         S.proofs[q.mint] = (S.proofs[q.mint] || []).concat(plain(proofs).filter(p => !held.has(p.secret)));
         updTx(q.txId, { status: 'done', ts: Date.now() });
@@ -504,10 +511,14 @@ async function checkQuoteNow(id, txId) {
         // from exactly the counters on its record and credited to this deposit. A record from before 1.12 has none: then
         // the mint is scanned, and the scan credits what it finds to waiting deposits first. If the mint can't be asked
         // now, the deposit stays and this is tried again later; it never becomes a separate "Recovered" line.
+        // Any other deposit without counters (one from a backup, or one this device never asked the mint for) was
+        // issued to another device holding this wallet: it is closed here with nothing, and no coin found by a scan
+        // is taken for it.
         let got = 0;
         try {
           if (q.ctr) got = await creditDepositRange(w, q);
-          else { await restoreFromMint(q.mint, null, { deposits: [q] }); got = num((txById(q.txId) || {}).amount); }
+          else if (legacyQuote(q)) { await restoreFromMint(q.mint, null, { deposits: [q] }); got = num((txById(q.txId) || {}).amount); }
+          else closeDepositEmpty(q);
         } catch (e) { return 'waiting'; }
         if (S.quotes.some(x => x.quote === q.quote)) return 'waiting';
         refresh();
@@ -538,9 +549,22 @@ async function checkQuoteNow(id, txId) {
   } finally { busyQuotes.delete(q.quote); }
 }
 function dropQuote(q) { S.quotes = S.quotes.filter(x => x.quote !== q.quote); save(); }
+// a deposit with no counters on record made on this device before 1.12 (only then could the mint have issued it to
+// this record without them); not one from a backup, nor one made or seen waiting by 1.12.1 or later
+const legacyQuote = q => !q.ctr && !q.rec && !Object.prototype.hasOwnProperty.call(q, 'impLine');
+// issued, but not to this record: closed with what it already had (nothing), never with another step's coins
+function closeDepositEmpty(q) {
+  const was = txById(q.txId);
+  updTx(q.txId, { status: 'done', amount: was && was.status === 'done' ? num(was.amount) : 0, ts: Date.now() });
+  S.quotes = S.quotes.filter(x => x.quote !== q.quote); save();
+}
 // an interrupted deposit with its counters on record: exactly its coins, credited to it, in one write
 async function creditDepositRange(w, q) {
   const r = await inTime(w.restore(q.ctr.start, q.ctr.n, { keysetId: q.ctr.id }), 30000);
+  // the mint signs a deposit's amount exactly; other coins at these counters were signed for another request (by a
+  // device holding this wallet): not this deposit's, so it is closed with nothing
+  const all = sum(r.proofs || []);
+  if (all && q.amount != null && all !== num(q.amount)) { closeDepositEmpty(q); return 0; }
   const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
   let found = (r.proofs || []).filter(p => !held.has(p.secret)), away = [];
   if (found.length) { const st = await inTime(w.checkProofsStates(found), 30000); away = found.filter((p, i) => st[i] && st[i].state === 'SPENT'); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
@@ -792,7 +816,10 @@ async function reconcileNow(id, txId, opts) {
   const unspent = pend.proofs.filter((p, i) => states[i] && states[i].state === 'UNSPENT');
   const stillPending = states.some(s => s.state === 'PENDING');
   if (!stillPending) {
-    if (!unspent.length) { markPaid(pend, null); return finishPaid(pend, opts); }   // every coin spent: it was paid
+    // every coin spent: it was paid, unless the mint says this payment wasn't made (its coins were spent by
+    // something else, a device holding this wallet): then nothing was paid and nothing came back
+    if (!unspent.length && qs && qs.state === 'UNPAID') { S.pending = S.pending.filter(p => p.id !== pend.id); settleMelt(pend, 'failed', sum(pend.proofs)); spentElsewhere(pend.mint, sum(pend.proofs), pend.impLine); save(); return 'returned'; }
+    if (!unspent.length) { markPaid(pend, null); return finishPaid(pend, opts); }
     addProofs(pend.mint, unspent);
     S.pending = S.pending.filter(p => p.id !== pend.id);
     settleMelt(pend, 'failed', sum(unspent));
@@ -890,6 +917,7 @@ async function journaled(url, kind, info, run) {
   } catch (e0) {
     let e = e0;
     opsRunning.delete(op.id);
+    if (isRefusal(e) && (op.ctr.length || op.outs.length)) { op.refused = 1; save(); }   // the mint refused it: it signed nothing for it
     if (!op.ctr.length && !op.outs.length) { closeOp(op); save(); }   // never reached the mint: nothing to settle
     else setTimeout(() => settleOp(op.id).catch(() => {}), 0);   // asked, and the answer is an error or never came: the mint decides
     if (op.outs.length) {   // the request went out: the mint may have done it, so nothing may act as if it hadn't (no offline fallback)
@@ -921,12 +949,16 @@ async function restoreRecorded(w, outs) {
   const res = await inTime(w.mint.restore({ outputs: outs.map(bm) }), 30000);
   await w._ensureKeysetsForSignatures(res.signatures);
   const sig = {}; (res.outputs || []).forEach((x, i) => { sig[x.B_] = res.signatures[i]; });
-  const got = [];
+  const got = []; let n = 0, odd = false;
   for (const o of outs) {
     const g = sig[o.B]; if (!g || g.amount.isZero()) continue;
+    if (num(o.a) > 0) { n++; if (num(g.amount) !== num(o.a)) odd = true; }
     const d = new OutputDataClass(bm(o), BigInt('0x' + o.r), L.hexToBytes(o.s), o.e || undefined);
     got.push(Object.assign(d.toProof(g, w.keysetForSignature(g.id)), { _send: o.send }));   // (toProof checks the DLEQ proof when the mint sent one)
   }
+  // signed for another amount than this step asked, or only some of its outputs signed: the mint signed these for
+  // another request (a device holding this wallet used the same counters), never for this step
+  got.foreign = odd || (n > 0 && n < outs.filter(o => num(o.a) > 0).length);
   return got;
 }
 // value that left this wallet because a device holding the same coins spent it: one line, or added to the line the same
@@ -951,9 +983,17 @@ async function settleOpNow(id) {
   const op = S.ops.find(o => o.id === id); if (!op || opsRunning.has(id)) return 'done';
   if (!op.ctr.length && !(op.outs || []).length) { closeOp(op); save(); return 'done'; }
   const w = await getWallet(op.mint);
-  let outs = await restoreRecorded(w, op.outs || []);
-  for (const c of op.ctr) { const r = await inTime(w.restore(c.start, c.n, { keysetId: c.id }), 30000); outs = outs.concat(r.proofs || []); }
+  const rec = op.outs || [], recS = new Set(rec.map(outSecret));
+  let outs = await restoreRecorded(w, rec), foreign = !!outs.foreign || !!op.refused;
+  for (const c of op.ctr) { const r = await inTime(w.restore(c.start, c.n, { keysetId: c.id }), 30000); if (rec.length && (r.proofs || []).some(p => !recS.has(p.secret))) foreign = true; outs = outs.concat(r.proofs || []); }
   { const seen = new Set(); outs = outs.filter(p => !seen.has(p.secret) && seen.add(p.secret)); }
+  // (a deposit's coins come to exactly its amount)
+  if (op.kind === 'receive' && !rec.length && op.amount && sum(outs) && sum(outs) !== num(op.amount)) foreign = true;
+  /* Only what the mint signed for THIS step is its: never coins at its counters the mint refused it (it answered
+     with an error) or signed for another request (a device holding this wallet used the same counters). Those
+     count as nothing signed here: a claim or deposit received nothing, and coins of ours it spent were spent by
+     something else. (Unspent coins of the wallet's phrase are still found by a restore.) */
+  if (foreign) outs = [];
   const unspent = async ps => { if (!ps.length) return []; const st = await inTime(w.checkProofsStates(ps), 30000); return ps.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); };
   const heldNow = () => new Set((S.proofs[op.mint] || []).map(p => p.secret));
   let fresh = await unspent(outs.filter(p => !heldNow().has(p.secret)));
@@ -2180,7 +2220,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.12.1';
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
 const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
 const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-about', 'About']];

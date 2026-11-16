@@ -995,6 +995,12 @@ RE = [
 
 LANGS = ['es', 'pt', 'de', 'fr']
 
+# Numbers on screen are already written the language's way ("2,500" en, "2.500" de/es/pt, "2 500" fr with a narrow
+# no-break space), so a pattern's number matches any of them: digits with , . or a (narrow) no-break space between.
+NUM = r'\d(?:[\d,.\u00a0\u202f]*\d)?'
+def numpat(p):
+    return p.replace(r'[\d,]+', NUM).replace(r'\d+', NUM)
+
 if __name__ == '__main__':
     import json, os
     seen = set()
@@ -1007,7 +1013,7 @@ if __name__ == '__main__':
     js = ['/* NUTCADE Round 4 translations, generated from i18n_r4.py: added to the dictionaries in i18n.js */', '(() => { const D = window.NUTCADE_I18N || {};']
     for i, l in enumerate(LANGS):
         t = {r[0]: r[i + 1] for r in ROWS}
-        pats = ', '.join('[new RegExp(%s), %s]' % (json.dumps(p[0]), json.dumps(p[i + 1], ensure_ascii=False)) for p in RE)
+        pats = ', '.join('[new RegExp(%s), %s]' % (json.dumps(numpat(p[0])), json.dumps(p[i + 1], ensure_ascii=False)) for p in RE)
         js.append('  if (D.%s) { Object.assign(D.%s.t, %s); D.%s.re = [%s].concat(D.%s.re || []); }' % (l, l, json.dumps(t, ensure_ascii=False), l, pats, l))
     js.append('})();')
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "i18n_r4.js")
