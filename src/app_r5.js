@@ -202,6 +202,13 @@ function extraEnded(f) {
   const wrap = L.nip17.wrapEvent(nostrKey(), { publicKey: f.heir.pubkey }, JSON.stringify({ t: 'nutcade-extralife-end', v: 1 }));
   relayPublish(wrap, 8000, [...new Set(((k && k.relays) || []).concat(relays()))].slice(0, 8)).catch(() => {});
 }
+// the sats left the balance when the Extra Life was set up (its "Extra Life for" line): that line now says where they
+// went, and comes to the top, so the history still adds up to the balance
+function extraPassed(x) {
+  const t0 = S.txs.find(t => t.extraLife && t.mint === x.mint && /^Extra Life for /.test(t.note || ''));
+  if (t0) { S.txs = [Object.assign(t0, { note: `Extra Life passed to ${x.heir.name}`, ts: Date.now(), passed: true })].concat(S.txs.filter(t => t !== t0)); save(); }
+  else addTx({ type: 'out', method: 'ecash', amount: 0, mint: x.mint, note: `Extra Life passed to ${x.heir.name}`, status: 'done', extraLife: true, move: true, fx: null });
+}
 // opening NUTCADE counts as proof of life: with auto on, once half the time has passed it continues by itself
 async function extraTick() {
   const x = S.extra; if (!x) return;
@@ -211,12 +218,7 @@ async function extraTick() {
     // the date passed: if the heir already claimed, the Extra Life is over; if not, it's still ours to continue
     const st = await (await getWallet(x.mint)).checkProofsStates(x.proofs).catch(() => null);
     if (st && st.length && st.every(s => s.state === 'SPENT')) {
-      S.extra = null; saveExtra();
-      // the sats left the balance when the Extra Life was set up (its "Extra Life for" line): that line now says where
-      // they went, and comes to the top, so the history still adds up to the balance
-      const t0 = S.txs.find(t => t.extraLife && t.mint === x.mint && /^Extra Life for /.test(t.note || ''));
-      if (t0) { S.txs = [Object.assign(t0, { note: `Extra Life passed to ${x.heir.name}`, ts: Date.now(), passed: true })].concat(S.txs.filter(t => t !== t0)); save(); }
-      else addTx({ type: 'out', method: 'ecash', amount: 0, mint: x.mint, note: `Extra Life passed to ${x.heir.name}`, status: 'done', extraLife: true, move: true, fx: null });
+      S.extra = null; saveExtra(); extraPassed(x);
       toast(`Your Extra Life passed to ${x.heir.name}`, 'gold'); refresh(); return;
     }
   }

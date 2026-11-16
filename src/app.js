@@ -960,6 +960,9 @@ async function settleOpNow(id) {
   const mine = (S.proofs[op.mint] || []).filter(p => op.inputs.includes(p.secret));
   let spent = [];
   if (mine.length) { const st = await inTime(w.checkProofsStates(mine), 30000); spent = mine.filter((p, i) => st[i] && st[i].state === 'SPENT'); }
+  // (the Extra Life a CONTINUE was renewing: are its coins spent? asked now, before the one write below)
+  const xr = op.follow && op.follow.k === 'extra-renew' && S.extra && S.extra.mint === op.mint && S.extra.proofs.some(p => op.inputs.includes(p.secret)) ? S.extra : null;
+  let xGone = false; if (xr) { const st = await inTime(w.checkProofsStates(xr.proofs), 30000); xGone = st.length > 0 && st.every(s => s && s.state === 'SPENT'); }
   // one write: spent coins out, new coins in (never one already held), the history line, the record closed
   const held = heldNow(); fresh = fresh.filter(p => !held.has(p.secret));
   // a locked token the step was making is shown again as that token (only its sender can see it); the rest is balance
@@ -1009,6 +1012,10 @@ async function settleOpNow(id) {
     rest(removed - added - amount - fee);
   }
   else {
+    // a CONTINUE whose new Extra Life coins were spent since (continued again, cashed out, or claimed by the heir, on a
+    // device holding this wallet): the Extra Life it was renewing is over here. Its sats left the balance when it was set
+    // up, so no line for them; past its date it passed to the heir, as when the heir claims it.
+    if (xr && xGone && S.extra === xr) { S.extra = null; saveExtra(); if (Date.now() > num((op.follow || {}).until)) extraPassed(xr); }
     if (fee0) addTx({ type: 'out', method: 'fee', amount: 0, fee: fee0, mint: op.mint, note: 'Mint fee for an interrupted step', status: 'done', settled: true });
     rest(removed - added - fee0);
   }
@@ -1059,8 +1066,24 @@ async function checkClaim(tx) {
   const w = await getWallet(tx.mint);
   const st = await w.checkProofsStates(tx.sent);
   const cur = txById(tx.id);
-  if (st.every(s => s.state === 'SPENT') && cur && cur.status === 'pending') { updTx(tx.id, { status: 'claimed' }); return true; }
+  if (st.every(s => s.state === 'SPENT') && cur && cur.status === 'pending') {
+    updTx(tx.id, { status: 'claimed' });
+    // an open bounty on it is over too (spent before anyone was sent the secret: taken back on a device holding this wallet)
+    for (const c of S.challenges.filter(c => c.dir === 'out')) for (const b of c.bounties || []) if (b.txId === tx.id && b.state === 'open') { b.state = 'claimed'; saveChallenges(); }
+    return true;
+  }
   return false;
+}
+/* After an import, what it brought in that holds coins the mint reports spent (spent since on a device holding the same
+   wallet) is closed, never shown as holding sats or offered to take back, claim or continue. None of these coins were
+   counted in the balance, so no line is added: a token not claimed yet (a gift, bounty, treasure hunt or plain token,
+   counted out when it was made) becomes claimed, a copy held as someone's heir has ended, a bounty offered to us is gone. */
+async function closeSpentImported({ txs = [], heirlooms = [], chals = [] }) {
+  const spentAll = async (u, ps) => { try { const st = await inTime((await getWallet(u)).checkProofsStates(ps), 30000); return ps.length > 0 && st.every(s => s && s.state === 'SPENT'); } catch (e) { return false; } };
+  const tokSpent = async tok => { try { const d = await decodeTok(tok); return await spentAll(normUrl(d.mint), d.proofs); } catch (e) { return false; } };
+  for (const id of txs) { const t = txById(id); if (t && t.status === 'pending' && t.sent && t.sent.length) await checkClaim(t).catch(() => {}); }
+  for (const tok of heirlooms) { const h = S.heirlooms.find(x => x.token === tok && x.state === 'waiting'); if (h && await tokSpent(h.token) && h.state === 'waiting') { h.state = 'ended'; saveHeir(); } }
+  for (const id of chals) { const c = S.challenges.find(x => x.id === id && x.dir === 'in'), b = c && c.bounty; if (b && b.state === 'open' && await tokSpent(b.token) && b.state === 'open') { b.state = 'gone'; saveChallenges(); } }
 }
 // Remove spent ecash: open steps are settled first, then spent coins are dropped with a history line (the history
 // always adds up to the balance)
@@ -3356,15 +3379,16 @@ function applyImport(u, coins, txs, pending, ops, quotes) {
   for (const q of newQ) S.quotes.push(q);
   // what these steps and deposits find spent since (on the device the backup came from) joins this import's line
   if (line) for (const r of [].concat(fresh, newPend, newQ)) r.impLine = line.id;
-  return { ops: fresh, quotes: newQ, pending: newPend };
+  return { ops: fresh, quotes: newQ, pending: newPend, txs: newTxs.filter(t => t.status === 'pending' && t.sent && t.sent.length).map(t => t.id) };
 }
 // the steps, deposits and payments a backup brought in are settled, checked and asked about right away (each the usual
 // single-flight way: one at a time, idempotent), not only at the next background check
-function settleImported({ ops, quotes, pending }) {
-  if (ops.length || quotes.length || pending.length) setTimeout(async () => {
+function settleImported({ ops, quotes, pending, txs = [], heirlooms = [], chals = [] }) {
+  if (ops.length || quotes.length || pending.length || txs.length || heirlooms.length || chals.length) setTimeout(async () => {
     for (const o of ops) { if (!S.mints.find(m => m.url === o.mint)) await addMint(o.mint).catch(() => {}); await settleOp(o.id).catch(() => {}); }
     for (const q of quotes) { if (!S.mints.find(m => m.url === q.mint)) await addMint(q.mint).catch(() => {}); await checkQuote(q).catch(() => {}); }
     for (const p of pending) await reconcile(p, { force: true }).catch(() => {});
+    await closeSpentImported({ txs, heirlooms, chals }).catch(() => {});
     refresh();
   }, 0);
 }
@@ -3406,8 +3430,8 @@ async function importBackup(d) {
     else { const r = await extraIfUnspent(dx); if (r.ok) extra = dx; else if (!r.asked) extraLater = dx; }
   }
   await syncIfStale();
-  const settle = { ops: [], quotes: [], pending: [] };
-  for (const u of Object.keys(checked)) { const q = part[u], r = applyImport(u, checked[u], q.txs, q.pending, q.ops, q.quotes); settle.ops.push(...r.ops); settle.quotes.push(...r.quotes); settle.pending.push(...r.pending); }
+  const settle = { ops: [], quotes: [], pending: [], txs: [], heirlooms: [], chals: [] };
+  for (const u of Object.keys(checked)) { const q = part[u], r = applyImport(u, checked[u], q.txs, q.pending, q.ops, q.quotes); settle.ops.push(...r.ops); settle.quotes.push(...r.quotes); settle.pending.push(...r.pending); settle.txs.push(...r.txs); }
   // a part that waits aside holds only what this wallet doesn't have yet (nothing at all: nothing waits), and a mint
   // has one waiting part: a second import while it is still down joins it (a new record, so a check already under way
   // for the old one finds it gone and leaves it), each coin, line and step once
@@ -3426,8 +3450,8 @@ async function importBackup(d) {
   if (Array.isArray(d.requests) && d.requests.length) { S.requests.sort((a, b) => (b.created || 0) - (a.created || 0)); S.requests = S.requests.slice(0, 30); store.set('requests', S.requests); }
   // Extra Life (only if its coins are still there), the copies we hold as an heir, and challenges (bounty secrets live there)
   if (extra) { S.extra = Object.assign({}, extra, { mint: normUrl(extra.mint) }); saveExtra(); }
-  for (const h of d.heirlooms || []) if (!S.heirlooms.find(x => x.token === h.token)) S.heirlooms.push(h); saveHeir();
-  for (const c of d.challenges || []) if (!S.challenges.find(x => x.id === c.id && x.dir === c.dir)) S.challenges.push(c); saveChallenges();
+  for (const h of d.heirlooms || []) if (h && h.token && !S.heirlooms.find(x => x.token === h.token)) { S.heirlooms.push(h); if (h.state === 'waiting') settle.heirlooms.push(h.token); } saveHeir();
+  for (const c of d.challenges || []) if (c && !S.challenges.find(x => x.id === c.id && x.dir === c.dir)) { S.challenges.push(c); if (c.dir === 'in' && c.bounty) settle.chals.push(c.id); } saveChallenges();
   for (const h of d.hunts || []) if (!S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
   for (const k in d.found || {}) if (!S.found[k]) S.found[k] = d.found[k]; saveFound();
   for (const x of Array.isArray(d.blocked) ? d.blocked : []) if (x && typeof x.url === 'string' && /^https?:/i.test(x.url) && !isBlocked(x.url)) S.blocked.push({ url: normUrl(x.url), name: String(x.name || host(x.url)).slice(0, 60), at: +x.at || Date.now() }); saveBlocked();
