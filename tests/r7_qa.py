@@ -1152,7 +1152,7 @@ async def main():
         async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]')
         bk = open(await (await dl.value).path()).read(); bkd = json.loads(bk)
         nb = await wallet(b); await nb.create(); await nb.click('[data-act=tab][data-tab=settings]'); await nb.wait(150)
-        await nb.click('[data-act=restore]'); await nb.wait(150); await nb.pg.fill('#restoreIn', bk); await nb.click('[data-act=doRestore]')
+        await nb.click('[data-act=restore]'); await nb.wait(150); await nb.pg.wait_for_selector('#restoreIn', timeout=60000); await nb.pg.evaluate("v => { const t = document.querySelector('#restoreIn'); t.value = v; t.dispatchEvent(new Event('input', {bubbles: true})) }", bk); await nb.click('[data-act=doRestore]')
         okn = await nb.until("Nutcade.S.ops.length===0 && Nutcade.S.txs.some(t=>t.amount===333&&t.token&&t.status==='pending')", 60000); await nb.wait(800)
         await w.until("Nutcade.S.ops.length===0 && Nutcade.S.txs.some(t=>t.amount===333&&t.token)", 60000); await w.pg.unroute(f'{B}/v1/swap'); await w.wait(800)
         nbb = []; await books(nb, 'restored backup with an open step', nbb, (A, B, FM))
@@ -1174,7 +1174,7 @@ async def main():
         async def import_into(wal, text):
             await wal.ev("Nutcade.closeSheet()"); await wal.click('[data-act=tab][data-tab=settings]'); await wal.wait(150)
             await wal.ev("window.__toasts=[]; window.__tobs&&window.__tobs.disconnect(); window.__tobs=new MutationObserver(()=>{const t=document.querySelector('#toast:not([hidden])'); if(t&&t.innerText&&window.__toasts.slice(-1)[0]!==t.innerText) window.__toasts.push(t.innerText)}); window.__tobs.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true})")
-            await wal.click('[data-act=restore]'); await wal.wait(150); await wal.pg.fill('#restoreIn', text); await wal.click('[data-act=doRestore]')
+            await wal.click('[data-act=restore]'); await wal.wait(150); await wal.pg.wait_for_selector('#restoreIn', timeout=60000); await wal.pg.evaluate("v => { const t = document.querySelector('#restoreIn'); t.value = v; t.dispatchEvent(new Event('input', {bubbles: true})) }", text); await wal.click('[data-act=doRestore]')
             ok = await wal.until("!document.querySelector('#restoreIn')", 40000); await wal.wait(300); t = ' | '.join(await wal.ev("window.__toasts")); await wal.wait(1200)
             await wal.until("Nutcade.S.ops.length===0", 60000); await wal.wait(500)
             return ok, t

@@ -86,7 +86,7 @@ class Grid:
     async def imp(s, w, data, settle=True):
         await s.awake(w)
         await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
-        await w.click('[data-act=restore]'); await w.wait(250); await w.fill('#restoreIn', data); await w.click('[data-act=doRestore]')
+        await w.click('[data-act=restore]'); await w.wait(250); await w.pg.wait_for_selector('#restoreIn', timeout=60000); await w.pg.evaluate("v => { const t = document.querySelector('#restoreIn'); t.value = v; t.dispatchEvent(new Event('input', {bubbles: true})) }", data); await w.click('[data-act=doRestore]')
         await w.until("!document.querySelector('#restoreIn')", 90000); er = await w.err(); await w.wait(600)
         if settle: await w.until("Nutcade.S.ops.length===0&&Nutcade.S.pending.length===0", 90000); await w.wait(1500)
         await w.ev("Nutcade.closeSheet()"); return er
