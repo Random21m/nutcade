@@ -62,12 +62,28 @@ async function huntFinish(f) {
   const iv = rnd(12), box = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await huntKey(sk), new TextEncoder().encode(txById(tx.id).token)));
   const content = JSON.stringify({ v: 1, k, n, amount, note: String(note || '').slice(0, 140), until: until * 1000, box: b64url(new Uint8Array([...iv, ...box])) });
   const ev = L.finalizeEvent({ kind: HUNT_KIND, created_at: Math.floor(Date.now() / 1000), tags: [['d', HUNT_D], ['t', 'nutcade-hunt'], ['expiration', String(until + 86400)]], content }, sk);
-  const ok = await relayPublish(ev, 8000);
-  if (!ok) throw new Error(`No Nostr relay took the prize. Your ${money(amount)} stay locked until ${fmtDay(until * 1000)}, then come back to you.`);
+  // the hunt is kept, with its prize message, before it is sent: if no relay takes it now, the same message is sent
+  // again on later starts and checks until one does (one message, so never a second prize)
   const cards = shamirSplit(sk, n, k).map(s => cardUrl(pub, s.x, k, n, s.y));
-  const h = { pub, k, n, amount, note: String(note || ''), txId: tx.id, until: until * 1000, created: Date.now(), cards, loaded: !!loaded };
-  S.hunts.unshift(h); saveHunts();
+  const h = { pub, k, n, amount, note: String(note || ''), txId: tx.id, until: until * 1000, created: Date.now(), cards, loaded: !!loaded, unpub: ev };
+  S.hunts.unshift(h); saveHunts(); await saveNow();
+  if (!(await publishHunt(h))) throw new Error(`No Nostr relay took the prize. Your ${money(amount)} stay locked until ${fmtDay(until * 1000)}, then come back to you.`);
   return h;
+}
+function publishHunt(h0) {
+  return single('huntpub:' + h0.pub, async () => {
+    const h = S.hunts.find(x => x.pub === h0.pub); if (!h || !h.unpub) return true;
+    if (!(await relayPublish(h.unpub, 8000))) return false;
+    delete h.unpub; saveHunts(); return true;
+  });
+}
+// a hunt whose prize no relay took yet: tried again until one does (while its chest can still be opened)
+async function retryHunts() {
+  for (const h of S.hunts.filter(x => x.unpub)) {
+    const t = txById(h.txId);
+    if (Date.now() > h.until || (t && t.status !== 'pending')) { delete h.unpub; saveHunts(); continue; }
+    await publishHunt(h).catch(() => {});
+  }
 }
 // a scanned clue card (or a loaded score card)
 function readCard(str) {
@@ -176,7 +192,7 @@ async function loadCard(amount) {
 function huntsPanel() {
   const mine = S.hunts.filter(h => !h.loaded).slice(0, 4), found = Object.entries(S.found).filter(([, f]) => f.state === 'hunting' || f.state === 'opening').slice(0, 4);
   if (!mine.length && !found.length) return '';
-  const st = h => { const t = txById(h.txId); return !t ? '' : t.status === 'claimed' ? '<span class="chip ecash">OPENED</span>' : t.status === 'reclaimed' ? '<span class="chip claimed">CAME BACK</span>' : `<span class="chip pending">${h.k} OF ${h.n}</span>`; };
+  const st = h => { const t = txById(h.txId); return !t ? '' : h.unpub && t.status === 'pending' ? '<span class="chip pending">WAITING FOR A RELAY</span>' : t.status === 'claimed' ? '<span class="chip ecash">OPENED</span>' : t.status === 'reclaimed' ? '<span class="chip claimed">CAME BACK</span>' : `<span class="chip pending">${h.k} OF ${h.n}</span>`; };
   return `<div class="panel"><span class="h2">Treasure hunts</span><div class="txs">
     ${mine.map(h => `<button class="tx out" data-act="huntCards" data-pub="${h.pub}"><span class="ico" aria-hidden="true">✦</span><span class="mid"><div class="note">${esc(tr('Your hunt'))}</div><div class="meta">${st(h)}</div></span><span class="amt">${fmt(h.amount)}</span></button>`).join('')}
     ${found.map(([pub, f]) => `<button class="tx in" data-act="huntShow" data-pub="${pub}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note">${esc(tr('Hunting'))}</div><div class="meta"><span class="chip ln">CLUE ${Object.keys(f.shares).length}/${f.k}</span></div></span><span class="amt">${f.amount ? fmt(f.amount) : '???'}</span></button>`).join('')}

@@ -12,25 +12,34 @@ function bountyField() {
     <div class="th">The mint locks them so only the friend you send to can win them, and only by beating your score within ${BOUNTY_DAYS} days. If they don't, the sats come back to you.</div></div>`;
 }
 // with a bounty the message is sealed with our own key, so Robin's NUTCADE can tell the sats really come from the challenger
-function publishChallenge(c, k, bounty) {
-  const wrap = L.nip17.wrapEvent(bounty ? nostrKey() : rnd(32), { publicKey: k.pubkey }, JSON.stringify(Object.assign({ t: 'nutcade-challenge', ev: c.ev }, bounty ? { bounty } : {}, c.replay ? { replay: c.replay } : {})));
-  return relayPublish(wrap, 8000, [...new Set((k.relays || []).concat(relays()))].slice(0, 8));
+const challengeWrap = (c, k, bounty) => L.nip17.wrapEvent(bounty ? nostrKey() : rnd(32), { publicKey: k.pubkey }, JSON.stringify(Object.assign({ t: 'nutcade-challenge', ev: c.ev }, bounty ? { bounty } : {}, c.replay ? { replay: c.replay } : {})));
+function publishChallenge(c, k, bounty, wrap) {
+  return relayPublish(wrap || challengeWrap(c, k, bounty), 8000, [...new Set((k.relays || []).concat(relays()))].slice(0, 8));
 }
 // a bounty whose swap was interrupted, settled from its record: it becomes the bounty it was going to be, and its
-// challenge goes out (now, or from the background check until a relay takes it)
-function bountyRecovered(f, tx) {
+// challenge goes out (now, or from the background check until a relay takes it). Its message goes out at most once:
+// it is made once and kept, so sending it again (a retry, the background check) is the same message, and it is marked
+// sent when a relay takes it. A record that came in with a backup doesn't send it from here: the device that made the
+// bounty does (the sats still come back after its date if nobody wins).
+function bountyRecovered(f, tx, imported) {
   const c = S.challenges.find(x => x.id === f.chal && x.dir === 'out'); if (!c) return;
   if ((c.bounties || []).some(b => b.txId === tx.id || b.H === f.b.H)) return;
-  const b = Object.assign({}, f.b, { txId: tx.id, state: 'open', unsent: f.contact || true });
+  const b = Object.assign({}, f.b, { txId: tx.id, state: 'open' }, imported ? {} : { unsent: f.contact || true });
   c.bounties = (c.bounties || []).concat([b]); updTx(tx.id, { bounty: c.id }); saveChallenges();
-  setTimeout(() => sendRecoveredBounty(c, b).catch(() => {}), 0);
+  if (!imported) setTimeout(() => sendRecoveredBounty(c, b).catch(() => {}), 0);
 }
-async function sendRecoveredBounty(c, b) {
-  const k = contactById(b.unsent) || S.contacts.find(x => x.pubkey === b.to), tx = txById(b.txId);
-  if (!k || !tx || tx.status !== 'pending' || !tx.token) return false;
-  if (!(await publishChallenge(c, k, { token: tx.token, amount: b.amount, until: b.until }))) return false;
-  delete b.unsent; c.sentTo = [...new Set((c.sentTo || []).concat(k.id))]; saveChallenges();
-  return true;
+function sendRecoveredBounty(c0, b0) {
+  return single('bsend:' + b0.H, async () => {
+    await syncIfStale();
+    const c = S.challenges.find(x => x.id === c0.id && x.dir === 'out'), b = c && (c.bounties || []).find(x => x.H === b0.H);
+    if (!b || !b.unsent || b.state !== 'open') return false;   // sent already (here, or by another tab)
+    const k = contactById(b.unsent) || S.contacts.find(x => x.pubkey === b.to), tx = txById(b.txId);
+    if (!k || !tx || tx.status !== 'pending' || !tx.token) return false;
+    if (!b.wrap) { b.wrap = challengeWrap(c, k, { token: tx.token, amount: b.amount, until: b.until }); saveChallenges(); await saveNow(); }
+    if (!(await publishChallenge(c, k, null, b.wrap))) return false;
+    delete b.unsent; delete b.wrap; c.sentTo = [...new Set((c.sentTo || []).concat(k.id))]; saveChallenges();
+    return true;
+  });
 }
 async function createBounty(c, k, amount) {
   if (!k.pubkey) throw new Error('Bounties need a contact with a Nostr address.');

@@ -825,6 +825,9 @@ ROWS = [
 ("This invoice is already paid. NUTCADE is collecting the ecash from the mint, and it shows here as soon as it is in.", "Esta factura ya está pagada. NUTCADE está recogiendo el ecash del mint, y aparece aquí en cuanto llegue.", "Esta fatura já está paga. O NUTCADE está buscando o ecash no mint, e ele aparece aqui assim que chegar.", "Diese Rechnung ist schon bezahlt. NUTCADE holt das Ecash vom Mint ab, und es erscheint hier, sobald es da ist.", "Cette facture est déjà payée. NUTCADE récupère l'ecash auprès du mint, et il apparaît ici dès qu'il est arrivé."),
 ("COLLECTING", "RECOGIENDO", "BUSCANDO", "HOLE AB", "RÉCUPÉRATION"),
 ("This invoice has expired. Nothing was received.", "Esta factura ha caducado. No se recibió nada.", "Esta fatura expirou. Nada foi recebido.", "Diese Rechnung ist abgelaufen. Es wurde nichts empfangen.", "Cette facture a expiré. Rien n'a été reçu."),
+# 1.12.1
+("Payment request couldn't be delivered: the sats came back", "No se pudo entregar el pago de la solicitud: los sats volvieron", "Não foi possível entregar o pagamento do pedido: os sats voltaram", "Die Zahlung an die Anfrage konnte nicht zugestellt werden: die Sats sind zurück", "Le paiement de la demande n'a pas pu être livré : les sats sont revenus"),
+("WAITING FOR A RELAY", "ESPERANDO UN RELAY", "AGUARDANDO UM RELAY", "WARTET AUF EIN RELAY", "EN ATTENTE D'UN RELAIS"),
 ]
 
 # Patterns for sentences that carry names or dates. $1, $2… are filled in (and translated again if they're known words).

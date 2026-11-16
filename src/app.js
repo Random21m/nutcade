@@ -625,8 +625,14 @@ function receiveDone(op, t) {
   else if (f.k === 'incoming') incomingClaimed(f, t);
   else if (f.k === 'req') reqPaid(f.reqId, t);
 }
+// a token saved offline that this wallet claimed on another device (its line came in with a backup): the saved one goes
+function dropClaimedIncoming() {
+  const got = new Set(S.txs.map(t => t.fromIncoming).filter(Boolean)); if (!got.size) return;
+  const n = S.txs.length; S.txs = S.txs.filter(t => !(t.incoming && (t.status === 'pending' || t.status === 'failed') && got.has(t.id))); if (S.txs.length !== n) save();
+}
 function incomingClaimed(f, t) {
   S.txs = S.txs.filter(x => x.id !== f.txId);
+  if (t && f.txId) updTx(t.id, { fromIncoming: f.txId });   // (a copy of this wallet still holding the saved token knows it was claimed here)
   if (f.reqId) reqPaid(f.reqId, t);
   save();
 }
@@ -1006,7 +1012,7 @@ async function settleOpNow(id) {
   // one write: spent coins out, new coins in (never one already held), the history line, the record closed
   const held = heldNow(); fresh = fresh.filter(p => !held.has(p.secret));
   // a locked token the step was making is shown again as that token (only its sender can see it); the rest is balance
-  let lockedOut = op.kind === 'send' && op.locked ? fresh.filter(p => p._send) : [];
+  let lockedOut = op.kind === 'send' && (op.locked || (op.follow && op.follow.k === 'reqpay')) ? fresh.filter(p => p._send) : [];   // (a request payment: the same coins go to the payee)
   const have = new Set(S.txs.flatMap(t => (t.sent || []).map(p => p.secret)).concat(S.extra ? S.extra.proofs.map(p => p.secret) : []));
   if (lockedOut.some(p => have.has(p.secret))) { fresh = fresh.filter(p => !have.has(p.secret)); lockedOut = []; }   // that token is already here (settled before): never a second line
   if (lockedOut.length) fresh = fresh.filter(p => !p._send);
@@ -1045,9 +1051,10 @@ async function settleOpNow(id) {
       setTimeout(() => sendHeirCopy().catch(() => {}), 0);
     } else {
       const t = addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee, mint: op.mint, note: op.note || '', status: 'pending', token: L.getEncodedToken({ mint: op.mint, proofs: ps, unit: 'sat' }), sent: ps, settled: true }, op.tx || {}));
-      if (f.k === 'bounty') bountyRecovered(f, t);   // a working bounty again: its secret is kept, the challenge is sent
+      if (f.k === 'bounty') bountyRecovered(f, t, Object.prototype.hasOwnProperty.call(op, 'impLine'));   // a working bounty again: its secret is kept, the challenge is sent
       else if (f.k === 'gift' && contactById(f.contact)) setTimeout(() => deliverToContact(contactById(f.contact), txById(t.id)).catch(() => {}), 0);   // and it still goes to the contact
       else if (f.k === 'hunt-make') setTimeout(() => huntFinish(Object.assign({}, f, { txId: t.id })).catch(() => {}), 0);   // the treasure hunt is still set up
+      else if (f.k === 'reqpay') setTimeout(() => deliverReqPays().catch(() => {}), 0);   // and the payment still goes to the request
     }
     rest(removed - added - amount - fee);
   }
@@ -1107,7 +1114,7 @@ async function checkClaim(tx) {
   const st = await w.checkProofsStates(tx.sent);
   const cur = txById(tx.id);
   if (st.every(s => s.state === 'SPENT') && cur && cur.status === 'pending') {
-    updTx(tx.id, { status: 'claimed' });
+    updTx(tx.id, Object.assign({ status: 'claimed' }, tx.reqPay ? { delivered: true } : {}));   // (a request payment the payee claimed was delivered)
     // an open bounty on it is over too (spent before anyone was sent the secret: taken back on a device holding this wallet)
     for (const c of S.challenges.filter(c => c.dir === 'out')) for (const b of c.bounties || []) if (b.txId === tx.id && b.state === 'open') { b.state = 'claimed'; saveChallenges(); }
     return true;
@@ -1118,12 +1125,20 @@ async function checkClaim(tx) {
    wallet) is closed, never shown as holding sats or offered to take back, claim or continue. None of these coins were
    counted in the balance, so no line is added: a token not claimed yet (a gift, bounty, treasure hunt or plain token,
    counted out when it was made) becomes claimed, a copy held as someone's heir has ended, a bounty offered to us is gone. */
+// (what couldn't be checked because its mint didn't answer is checked again by the background check until it answers)
 async function closeSpentImported({ txs = [], heirlooms = [], chals = [] }) {
-  const spentAll = async (u, ps) => { try { const st = await inTime((await getWallet(u)).checkProofsStates(ps), 30000); return ps.length > 0 && st.every(s => s && s.state === 'SPENT'); } catch (e) { return false; } };
-  const tokSpent = async tok => { try { const d = await decodeTok(tok); return await spentAll(normUrl(d.mint), d.proofs); } catch (e) { return false; } };
+  const spentAll = async (u, ps) => { try { const st = await inTime((await getWallet(u)).checkProofsStates(ps), 30000); return ps.length > 0 && st.every(s => s && s.state === 'SPENT'); } catch (e) { return null; } };
+  const tokSpent = async tok => { try { const d = await decodeTok(tok); return await spentAll(normUrl(d.mint), d.proofs); } catch (e) { return null; } };
+  const later = { heirlooms: [], chals: [] };
   for (const id of txs) { const t = txById(id); if (t && t.status === 'pending' && t.sent && t.sent.length) await checkClaim(t).catch(() => {}); }
-  for (const tok of heirlooms) { const h = S.heirlooms.find(x => x.token === tok && x.state === 'waiting'); if (h && await tokSpent(h.token) && h.state === 'waiting') { h.state = 'ended'; saveHeir(); } }
-  for (const id of chals) { const c = S.challenges.find(x => x.id === id && x.dir === 'in'), b = c && c.bounty; if (b && b.state === 'open' && await tokSpent(b.token) && b.state === 'open') { b.state = 'gone'; saveChallenges(); } }
+  for (const tok of heirlooms) { const h = S.heirlooms.find(x => x.token === tok && x.state === 'waiting'); if (!h) continue; const sp = await tokSpent(h.token); if (sp === null) later.heirlooms.push(tok); else if (sp && h.state === 'waiting') { h.state = 'ended'; saveHeir(); } }
+  for (const id of chals) { const c = S.challenges.find(x => x.id === id && x.dir === 'in'), b = c && c.bounty; if (!(b && b.state === 'open')) continue; const sp = await tokSpent(b.token); if (sp === null) later.chals.push(id); else if (sp && b.state === 'open') { b.state = 'gone'; saveChallenges(); } }
+  const r = store.get('recheck', { heirlooms: [], chals: [] });
+  store.set('recheck', { heirlooms: [...new Set(r.heirlooms.filter(x => !heirlooms.includes(x)).concat(later.heirlooms))], chals: [...new Set(r.chals.filter(x => !chals.includes(x)).concat(later.chals))] });
+}
+async function recheckImported() {
+  const r = store.get('recheck', null);
+  if (r && (r.heirlooms.length || r.chals.length)) await single('recheck', () => closeSpentImported({ heirlooms: r.heirlooms, chals: r.chals }));
 }
 // Remove spent ecash: open steps are settled first, then spent coins are dropped with a history line (the history
 // always adds up to the balance)
@@ -2705,7 +2720,7 @@ function decodeRequest(enc) {
   let pr; try { pr = L.decodePaymentRequest(String(enc).trim().replace(/^cashu:/i, '')); } catch (e) { throw new Error("That payment request can't be read."); }
   return pr;
 }
-async function deliverPayment(pr, payload) {
+async function deliverPayment(pr, payload, wrap) {
   const tr = (pr.transport || []).find(t => t.type === 'nostr') || (pr.transport || []).find(t => t.type === 'post');
   if (!tr) return false;
   if (tr.type === 'post') {
@@ -2720,20 +2735,56 @@ async function deliverPayment(pr, payload) {
   const theirs = (d.type === 'nprofile' && d.data.relays) || [];
   const list = [...new Set(theirs.filter(u => /^wss?:\/\//.test(u)).concat(relays()))].slice(0, 8);
   // A fresh one-time key signs the message, so the payment isn't linked to your Nostr identity.
-  const ev = L.nip17.wrapEvent(rnd(32), { publicKey: to }, JSON.stringify(payload));
+  const ev = wrap || L.nip17.wrapEvent(rnd(32), { publicKey: to }, JSON.stringify(payload));
   const ok = await relayPublish(ev, 8000, list);
   if (!ok) throw new Error('No Nostr relay accepted the payment.');
   return true;
 }
-async function payRequest(pr, amount, url, note) {
+/* A payment to a payment request is made once (one swap, its record in the journal) and its line keeps the request,
+   so that if the app stops before the payee has it (a reload, a closed tab, a swap whose answer was lost), the SAME
+   coins are delivered once the wallet is back: the Nostr message is made once and kept, so sending it again is the
+   same message (relays and the payee see it once). If the payee already has the coins (spent), the line is closed;
+   if it can't be delivered after several tries, the coins come back with a line that says so. */
+const reqPayload = (pr, url, proofs) => Object.assign({ id: pr.id, mint: url, unit: 'sat', proofs }, pr.description ? { memo: pr.description } : {});
+function reqWrap(pr, payload) {
+  const tr = (pr.transport || []).find(t => t.type === 'nostr'); if (!tr) return null;
+  try { const d = L.nip19decode(tr.target); const to = d.type === 'nprofile' ? d.data.pubkey : d.type === 'npub' ? d.data : null; return to ? L.nip17.wrapEvent(rnd(32), { publicKey: to }, JSON.stringify(payload)) : null; } catch (e) { return null; }
+}
+async function payRequest(pr, amount, url, note, enc) {
   const lock = pr.nut10 && pr.nut10.kind === 'P2PK' && validPub(pr.nut10.data) ? pr.nut10.data : null;
-  const tx = await sendEcash(amount, note, lock, url);
-  const payload = { id: pr.id, mint: url, unit: 'sat', proofs: tx.sent };
-  if (pr.description) payload.memo = pr.description;
+  const rq = enc && (pr.transport || []).length ? { reqPay: { req: enc } } : {};
+  const tx = await sendEcash(amount, note, lock, url, rq.reqPay ? { txx: rq, follow: { k: 'reqpay' } } : {});
+  const payload = reqPayload(pr, url, tx.sent), wrap = rq.reqPay ? reqWrap(pr, payload) : null;
+  if (wrap) { updTx(tx.id, { reqPay: Object.assign({}, rq.reqPay, { ev: wrap }) }); await saveNow(); }   // (kept before it is sent)
   let sent = false, why = '';
-  try { sent = await deliverPayment(pr, payload); } catch (e) { why = e.message; }
+  try { sent = await deliverPayment(pr, payload, wrap); } catch (e) { why = e.message; }
   if (sent) updTx(tx.id, { delivered: true });
+  else if (rq.reqPay) updTx(tx.id, { reqPay: Object.assign({}, txById(tx.id).reqPay, { shown: 1 }) });   // (you were shown the token: it is yours to pass on)
   return { tx, sent, why };
+}
+const REQ_TRIES = 6;
+async function deliverReqPays() {
+  for (const t0 of S.txs.filter(t => t.reqPay && !t.reqPay.shown && !t.delivered && t.status === 'pending' && t.sent && t.sent.length)) {
+    if (t0.reqPay.next && Date.now() < t0.reqPay.next) continue;
+    await single('reqpay:' + t0.id, async () => {
+      await syncIfStale();
+      const t = txById(t0.id); if (!t || !t.reqPay || t.reqPay.shown || t.delivered || t.status !== 'pending') return;
+      // the payee already has it: closed, never sent again
+      const w = await getWallet(t.mint); const st = await inTime(w.checkProofsStates(t.sent), 30000);
+      if (st.length && st.every(x => x && x.state === 'SPENT')) { updTx(t.id, { delivered: true, status: 'claimed' }); return; }
+      let pr = null; try { pr = decodeRequest(t.reqPay.req); } catch (e) {}
+      let ok = false; const ev = t.reqPay.ev || (pr ? reqWrap(pr, reqPayload(pr, t.mint, t.sent)) : null);
+      if (pr && ev && !t.reqPay.ev) { updTx(t.id, { reqPay: Object.assign({}, t.reqPay, { ev }) }); await saveNow(); }
+      if (pr) { try { ok = await deliverPayment(pr, reqPayload(pr, t.mint, t.sent), ev); } catch (e) { ok = false; } }
+      if (ok) { updTx(t.id, { delivered: true }); return; }
+      const tries = (t.reqPay.tries || 0) + 1;
+      if (tries < REQ_TRIES && pr) { updTx(t.id, { reqPay: Object.assign({}, t.reqPay, { tries, next: Date.now() + Math.min(30 * 60e3, 30e3 * 2 ** (tries - 1)) }) }); return; }
+      // it can't be delivered: the coins come back, with a line saying so
+      updTx(t.id, { reqPay: Object.assign({}, t.reqPay, { shown: 1 }) });
+      await receiveToken(t.token, "Payment request couldn't be delivered: the sats came back", { own: true }).catch(() => {});
+      refresh();
+    });
+  }
 }
 
 /* ---------- NFC (Web NFC: Chrome on Android) ---------- */
@@ -2892,8 +2943,13 @@ async function claimSavedNow() {
   let n = 0;
   for (const t of S.txs.filter(t => t.status === 'pending' && t.incoming && t.offline && S.mints.find(m => m.url === t.mint))) {
     try { const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: t.id, reqId: t.reqId || null } }); incomingClaimed({ txId: t.id, reqId: t.reqId || null }, nt); n += nt.amount; }
-    catch (e) { if (!netErr(e) && !e.blocked) { updTx(t.id, { status: 'failed', note: (t.note ? t.note + ' · ' : '') + 'already claimed by someone else' }); } }
+    catch (e) {
+      if (netErr(e) || e.blocked) continue;
+      if (S.txs.some(x => x.fromIncoming === t.id)) { S.txs = S.txs.filter(x => x.id !== t.id); save(); continue; }   // claimed by this wallet (another device): its line is here already
+      updTx(t.id, { status: 'failed', note: (t.note ? t.note + ' · ' : '') + 'already claimed by someone else' });
+    }
   }
+  dropClaimedIncoming();
   if (n) { sfx('coin'); refresh(); toast(`Back online: claimed ${money(n)} you saved offline`, 'lime'); }
   return n;
 }
@@ -3402,6 +3458,7 @@ async function checkImport(u, proofs, ops) {
 function applyImport(u, coins, txs, pending, ops, quotes) {
   const ids = new Set(S.txs.map(t => t.id)), newTxs = uniqBy(txs, 'id').filter(t => !ids.has(t.id));   // (each line once, however often the backup holds it)
   for (const t of newTxs) S.txs.push(t);
+  dropClaimedIncoming();
   S.txs.sort((a, b) => b.ts - a.ts);
   const newPend = uniqBy(pending, 'id').filter(p => !S.pending.find(x => x.id === p.id) && !ids.has(p.txId)).map(p => Object.assign({}, p, { impLine: null }));   // (one whose payment this wallet already has was settled here)
   for (const p of newPend) S.pending.push(p);
@@ -3491,7 +3548,8 @@ async function importBackup(d) {
   // Extra Life (only if its coins are still there), the copies we hold as an heir, and challenges (bounty secrets live there)
   if (extra) { S.extra = Object.assign({}, extra, { mint: normUrl(extra.mint) }); saveExtra(); }
   for (const h of d.heirlooms || []) if (h && h.token && !S.heirlooms.find(x => x.token === h.token)) { S.heirlooms.push(h); if (h.state === 'waiting') settle.heirlooms.push(h.token); } saveHeir();
-  for (const c of d.challenges || []) if (c && !S.challenges.find(x => x.id === c.id && x.dir === c.dir)) { S.challenges.push(c); if (c.dir === 'in' && c.bounty) settle.chals.push(c.id); } saveChallenges();
+  // (a bounty whose challenge the backup's device hadn't sent yet is sent from here only as the very message it kept)
+  for (const c of d.challenges || []) if (c && !S.challenges.find(x => x.id === c.id && x.dir === c.dir)) { for (const x of c.bounties || []) if (x && x.unsent && !x.wrap) delete x.unsent; S.challenges.push(c); if (c.dir === 'in' && c.bounty) settle.chals.push(c.id); } saveChallenges();
   for (const h of d.hunts || []) if (!S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
   for (const k in d.found || {}) if (!S.found[k]) S.found[k] = d.found[k]; saveFound();
   for (const x of Array.isArray(d.blocked) ? d.blocked : []) if (x && typeof x.url === 'string' && /^https?:/i.test(x.url) && !isBlocked(x.url)) S.blocked.push({ url: normUrl(x.url), name: String(x.name || host(x.url)).slice(0, 60), at: +x.at || Date.now() }); saveBlocked();
@@ -3852,7 +3910,7 @@ const A = {
     const a = pr.amount ? num(pr.amount) : amt();
     const url = val('reqMint'); if (!url) throw new Error('Pick a mint to pay from.');
     if (balanceOf(url) < a) throw new Error(`Not enough funds. That mint holds ${money(balanceOf(url))}.`);
-    const { tx, sent, why } = await payRequest(pr, a, url, val('noteIn').trim() || pr.description || 'Payment request');
+    const { tx, sent, why } = await payRequest(pr, a, url, val('noteIn').trim() || pr.description || 'Payment request', b.dataset.req);
     sfx('coin'); refresh();
     if (sent) return showDone('out', a, 'Payment request');
     if (!(pr.transport || []).length) return showToken(tx);
@@ -3996,7 +4054,10 @@ async function tickBody(startup) {
     claimSaved().catch(() => {}),
     refundExpiredGifts().catch(() => {}),
     (async () => { await extraTick().catch(() => {}); await claimHeirlooms().catch(() => {}); })(),
-    retryBounties().catch(() => {})
+    retryBounties().catch(() => {}),
+    retryHunts().catch(() => {}),
+    deliverReqPays().catch(() => {}),
+    recheckImported().catch(() => {})
   ]);
   if (S.prefs.nostrBackup && S.mints.length && S.prefs.mintBackupList !== S.mints.map(m => m.url).join(' ') && Date.now() - mintBackupTry > 10 * 60e3) scheduleMintBackup(startup ? 4000 : 0);
 }
