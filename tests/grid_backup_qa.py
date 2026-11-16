@@ -392,8 +392,101 @@ async def run_i18n(b):
         await ctx.close()
 
 
+# ---- 1.12.1: steps that must reach someone else once (a request payment, a treasure hunt's prize, a bounty's challenge),
+# and parts of a backup checked again later
+def relay_events(pred):
+    st = json.loads(urllib.request.urlopen('http://127.0.0.1:3350/test/state', timeout=10).read())
+    return [e for e in st['events'] if pred(e)]
+def to_pub(pub): return lambda e: e.get('kind') == 1059 and ['p', pub] in (e.get('tags') or [])
+async def run_once(b, M, O):
+    g = Grid(b, M, O, 'once'); T = 'once'
+    a = await g.fresh('oA'); await a.add_mint(M); await a.receive_ln(4000, 'fund')
+    bob = await g.fresh('oB'); await bob.add_mint(M); await bob.receive_ln(3000)
+    # (G1) bob pays a's payment request; his swap's answer is lost; he reloads: the same coins reach the request once
+    await a.home(); await a.click('[data-act=receive]'); await a.wait(200); await a.click('[data-act=recvMethod][data-m=ecash]'); await a.wait(150)
+    await a.click('[data-act=reqOpen]'); await a.wait(250); await a.fill('#amtIn', '120'); await a.click('[data-act=reqCreate]'); await a.wait(900)
+    creq = await a.ev("Nutcade.S.requests[0].encoded"); await a.ev("Nutcade.closeSheet()")
+    rpub = await a.ev(f"(()=>{{const t=CashuLib.decodePaymentRequest({json.dumps(creq)}).transport.find(x=>x.type==='nostr');const d=CashuLib.nip19decode(t.target);return d.type==='nprofile'?d.data.pubkey:d.data}})()")
+    n0 = len(relay_events(to_pub(rpub))); a0 = await a.bal(M); b0 = await bob.bal(M)
+    drop = {'on': True}
+    async def lost(route):
+        try:
+            if drop['on'] and route.request.method == 'POST': drop['on'] = False; await route.fetch(); return await route.abort()
+            await route.continue_()
+        except Exception: pass
+    await bob.pg.context.route(M + '/v1/swap', lost)
+    await bob.ev(f"Nutcade.handleScan({json.dumps(creq)})"); await bob.until("!!document.querySelector('[data-act=payReq]')", 10000); await bob.click('[data-act=payReq]')
+    await bob.until("!!(document.querySelector('#sheetErr')||{}).innerText", 30000); await bob.wait(500)
+    await bob.pg.context.unroute(M + '/v1/swap', lost); await bob.pg.reload(); await bob.wait(1500)
+    oka = await a.until(f"(Nutcade.S.proofs[{json.dumps(M)}]||[]).reduce((t,p)=>t+p.amount,0)>={a0 + 120}", 60000); await bob.until("Nutcade.S.ops.length===0", 30000); await a.wait(3000); await bob.wait(2000)
+    sb = await g.snap(bob); bl = await bob.ev("Nutcade.S.txs.filter(t=>t.type==='out').map(t=>[t.amount,t.status,!!t.delivered])"); n1 = len(relay_events(to_pub(rpub)))
+    check(f'{T} (G1) a request payment whose swap answer was lost is delivered after a reload: the payee gets 120 once, the payer pays once (one line), one message', oka and await a.bal(M) - a0 == 120 and b0 - sb['bal'] == 120 and len(bl) == 1 and bl[0][2] and n1 - n0 == 1 and ledok(sb) and sb['ops'] == 0, (oka, await a.bal(M) - a0, b0 - sb['bal'], bl, n1 - n0, brief(sb)))
+    # the app stops right after the relay took it, before it wrote that down: the payee already has the coins, so it is closed, not sent again
+    await bob.ev("(()=>{const T=JSON.parse(localStorage.getItem('nutcade:txs'));const t=T.find(t=>t.reqPay);if(t){t.delivered=false;t.status='pending';delete t.reqPay.shown}localStorage.setItem('nutcade:txs',JSON.stringify(T));localStorage.setItem('nutcade:gen',String(+(localStorage.getItem('nutcade:gen')||0)+1))})()")
+    await bob.pg.reload(); await bob.wait(12000); bl2 = await bob.ev("Nutcade.S.txs.filter(t=>t.type==='out').map(t=>[t.amount,t.status,!!t.delivered])"); n2 = len(relay_events(to_pub(rpub)))
+    reqp = await a.ev("Nutcade.S.requests.map(r=>r.paid.length)")
+    check(f'{T} (G1) delivered but not written down: the payee already has it, so it is closed (claimed), never sent twice, the request paid once', [x[:2] for x in bl2] == [[120, 'claimed']] and n2 == n1 and reqp == [1] and await a.bal(M) - a0 == 120, (bl2, n2 - n1, reqp))
+    # (G2) a treasure hunt no relay takes: kept, and its prize is published once a relay answers (one event)
+    await a.ev("Nutcade.S.prefs.relays=['ws://127.0.0.1:3359/relay']")
+    await a.home(); await a.click('[data-act=huntNew]'); await a.wait(200); await a.fill('#amtIn', '300'); await a.click('[data-act=huntCreate]')
+    await a.until("!!(document.querySelector('#sheetErr')||{}).innerText", 40000); er = await a.err(); await a.ev("Nutcade.closeSheet()")
+    hp = await a.ev("(Nutcade.S.hunts[0]||{}).pub||''")
+    await a.ev("Nutcade.S.prefs.relays=['ws://127.0.0.1:3350/relay']; localStorage.setItem('nutcade:prefs', JSON.stringify(Nutcade.S.prefs))")
+    await a.pg.reload(); await a.wait(1500)   # (the working relay again)
+    okh = await a.until("Nutcade.S.hunts.length>0&&!Nutcade.S.hunts[0].unpub", 40000); await a.wait(1000)
+    hp = hp or await a.ev("(Nutcade.S.hunts[0]||{}).pub||''"); he = relay_events(lambda e: e.get('kind') == 30078 and e.get('pubkey') == hp) if hp else []
+    await a.pg.reload(); await a.wait(6000); he2 = relay_events(lambda e: e.get('kind') == 30078 and e.get('pubkey') == hp) if hp else []
+    check(f'{T} (G2) a treasure hunt no relay took is kept and published on a later start: one prize event, not sent again after', 'No Nostr relay' in er and okh and len(he) == 1 and len(he2) == 1, (er[:60], okh, len(he), len(he2)))
+    # (G3) a bounty whose swap answer is held; a backup taken meanwhile is restored on a device that has the same
+    # contact: the friend gets the challenge once (from the device that made it)
+    fk = await a.ev("(()=>{const k=crypto.getRandomValues(new Uint8Array(32));return CashuLib.nostrPub(k)})()")
+    fprof = await a.ev(f"CashuLib.nprofileEncode({{pubkey:{json.dumps(fk)}, relays:['ws://127.0.0.1:3350/relay']}})")
+    async def contact(w):
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.click('[data-act=contactsOpen]'); await w.wait(150); await w.click('[data-act=contactEdit]'); await w.wait(150)
+        await w.fill('#cName', 'Friend Q'); await w.fill('#cNostr', fprof); await w.click('[data-act=contactSave]'); await w.wait(300); await w.ev("Nutcade.closeSheet()")
+    await contact(a)
+    hold = {'on': True, 'hit': False, 'go': asyncio.Event()}
+    async def h(route):
+        try:
+            if hold['on'] and route.request.method == 'POST': hold['on'] = False; await route.fetch(); hold['hit'] = True; await hold['go'].wait(); return await route.abort()
+            await route.continue_()
+        except Exception: pass
+    await a.pg.context.route(M + '/v1/swap', h)
+    await a.ev("Nutcade.closeSheet()"); await a.click('[data-act=tab][data-tab=arcade]'); await a.wait(200)
+    await a.ev("Nutcade.startChallenge({game:'flipper', seed:4777, score:1200, by:'GRD'})"); await a.wait(300); await a.fill('#bountyAmt', '250'); await a.click('[data-act=chalSend]')
+    for _ in range(120):
+        if hold['hit']: break
+        await asyncio.sleep(0.25)
+    H = await g.backup(a)
+    c = await g.fresh('oC'); await contact(c); er = await g.imp(c, H); await c.wait(8000)
+    hold['go'].set(); await a.until("Nutcade.S.ops.length===0", 60000); await a.wait(12000)
+    await a.pg.context.unroute(M + '/v1/swap', h)
+    ne = len(relay_events(to_pub(fk))); ab = await a.ev("Nutcade.S.challenges.filter(c=>c.dir==='out').flatMap(c=>c.bounties||[]).map(b=>[b.amount,b.state,!!b.unsent])")
+    check(f'{T} (G3) a bounty recovered on the device that made it and restored on another: the friend gets its challenge once', hold['hit'] and ne == 1 and ab == [[250, 'open', False]], (hold['hit'], ne, ab))
+    await c.pg.context.close()
+    # an heir's copy whose mint is down when the backup comes in: checked again once the mint answers
+    tok, _ = await a.send_ecash(50); await bob.receive_token(tok); await bob.wait(800)
+    hs = json.loads(await g.backup(a)); hs['heirlooms'] = (hs.get('heirlooms') or []) + [{'from': 'ab' * 32, 'name': 'DeadQ', 'token': tok, 'amount': 50, 'mint': M, 'until': int(time.time() * 1000) + 10**10, 'state': 'waiting', 'at': 1}]
+    e = await g.fresh('oE'); await g.down(e, M); await g.imp(e, json.dumps(hs), settle=False); await e.wait(1500)
+    st0 = await e.ev("Nutcade.S.heirlooms.map(h=>h.state)"); await g.up(e, M); await g.retry(e); await e.pg.reload(); await e.wait(1500)
+    oke = await e.until("Nutcade.S.heirlooms.every(h=>h.state==='ended')", 40000)
+    check(f'{T} an heir\'s copy whose mint was down at import is checked again later: spent, so it ends', st0 == ['waiting'] and oke, (st0, await e.ev("Nutcade.S.heirlooms.map(h=>h.state)")))
+    await e.pg.context.close()
+    # a token saved offline, claimed since by the device it was saved on: the restored device ends with that one line
+    gtok, _ = await bob.send_ecash(200, 'cash'); ctx = a.pg.context
+    await ctx.set_offline(True); await a.wait(200)
+    await a.home(); await a.click('[data-act=receive]'); await a.wait(150); await a.click('[data-act=recvMethod][data-m=ecash]'); await a.wait(100); await a.fill('#tokIn', gtok); await a.click('[data-act=doReceiveToken]'); await a.wait(800); await a.ev("Nutcade.closeSheet()")
+    B1 = await g.backup(a); a1 = await a.bal(M)
+    await ctx.set_offline(False); oko = await a.until(f"(Nutcade.S.proofs[{json.dumps(M)}]||[]).reduce((t,p)=>t+p.amount,0)>={a1 + 200}", 30000); await a.wait(1500)
+    B2 = await g.backup(a)
+    d = await g.fresh('oD'); await g.imp(d, B1); await d.pg.reload(); await d.wait(9000); await g.imp(d, B2); await d.wait(2000); sd = await g.snap(d)
+    inl = await d.ev("Nutcade.S.txs.filter(t=>t.amount===200&&t.type==='in').map(t=>[t.status,!!t.incoming])")
+    check(f'{T} a token saved offline and claimed since by the device it was saved on: the restored device shows the one received line (no "failed", nothing waiting), history = balance', oko and inl == [['done', False]] and ledok(sd) and not sd['dup'], (oko, inl, brief(sd)))
+    await d.pg.context.close(); await a.pg.context.close(); await bob.pg.context.close()
+
+
 async def main():
-    only = sys.argv[1:] or ['fee', 'nofee', 'cross', 'i18n']
+    only = sys.argv[1:] or ['fee', 'nofee', 'cross', 'i18n', 'once']
     async with async_playwright() as p:
         b = await p.chromium.launch(executable_path=os.environ.get('CHROME') or None)
         t0 = time.time()
@@ -404,6 +497,9 @@ async def main():
                 try: await run_cross(b, M, O, which)
                 except Exception as e: check(f'{which} second device: script error', False, repr(e)[:300])
         if 'i18n' in only: await run_i18n(b)
+        if 'once' in only:
+            try: await run_once(b, B, A)
+            except Exception as e: check(f'once: script error', False, repr(e)[:300])
         await b.close()
     n = len(results); ok = sum(1 for r in results if r[1])
     print(f'SUMMARY {ok}/{n} passed ({int(time.time() - t0)} s)')
