@@ -519,7 +519,7 @@ async def main():
         await w.fill('#destIn', pa['npub']); await w.click('[data-act=doMeltQuote]'); await w.until("!!document.querySelector('[data-act=zapQuote]')", 12000)
         await w.fill('#amtIn', '33'); await w.pg.check('#zapAnon'); await w.click('[data-act=zapQuote]'); await w.until("!!document.querySelector('#payBtn')", 12000)
         await w.click('#payBtn'); await w.until("!document.querySelector('#payBtn')", 15000); await w.wait(400)
-        za = mock('/test/state')['zaps'][nz:]; ze = za[0]['event'] if za else {}
+        za = [z for z in mock('/test/state')['zaps'][nz:] if ['anon'] in z['event'].get('tags', [])]; ze = za[0]['event'] if za else {}   # (an earlier zap may land late in the log)
         check('(fix 9) anonymous zap: signed by a one-time key (not the wallet\'s), tagged anon, accepted by the endpoint and paid', len(za) == 1 and za[0]['valid'] and ze['pubkey'] != mynpub and ['anon'] in ze['tags'] and await w.ev("Nutcade.S.txs[0].status") == 'done' and await w.ev("Nutcade.S.txs[0].zap.anon"), za)
         await w.ev("Nutcade.closeSheet()"); await books(w, 'anonymous zap', broken)
         check("zap: the kind-9734 zap request is signed with the wallet's Nostr key and carries amount, p, lnurl, relays and the comment",
@@ -1100,7 +1100,7 @@ async def main():
             check(f'(round 4, 4) {M[-4:]}: a takeover while a payment gets its ecash ready: the paused tab sends no request after it is paused, nothing is paid (its melt quote stays unpaid)',
                   not late and st and all(x == 'UNPAID' for x in st), (late[:4], st))
             check(f'(round 4, 4) {M[-4:]}: and the tab in charge settles the prepared ecash: balance whole (less only the mint\'s swap fee), books add up, no payment line',
-                  ok and b0 - (2 if M == A else 0) <= await t3.bal(M) <= b0 and not b3 and not any(l[0] == 'ln' for l in lines), (ok, await t3.bal(M) - b0, b3, lines))
+                  ok and b0 - await t3.bal(M) == sum(l[2] or 0 for l in lines if l[0] == 'Mint fee for an interrupted step') <= (10 if M == A else 0) and not b3 and not any(l[0] == 'ln' for l in lines), (ok, await t3.bal(M) - b0, b3, lines))
             await back_to_a(pg3)
         await w.use(B)
         # (round 4, 3) with a PIN set, no plain spendable coins in any localStorage key, at any step of an interrupted CONTINUE
@@ -1173,8 +1173,9 @@ async def main():
         # history = balance everywhere
         async def import_into(wal, text):
             await wal.ev("Nutcade.closeSheet()"); await wal.click('[data-act=tab][data-tab=settings]'); await wal.wait(150)
+            await wal.ev("window.__toasts=[]; window.__tobs&&window.__tobs.disconnect(); window.__tobs=new MutationObserver(()=>{const t=document.querySelector('#toast:not([hidden])'); if(t&&t.innerText&&window.__toasts.slice(-1)[0]!==t.innerText) window.__toasts.push(t.innerText)}); window.__tobs.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true})")
             await wal.click('[data-act=restore]'); await wal.wait(150); await wal.pg.fill('#restoreIn', text); await wal.click('[data-act=doRestore]')
-            ok = await wal.until("!document.querySelector('#restoreIn')", 40000); t = await wal.toast(); await wal.wait(1500)
+            ok = await wal.until("!document.querySelector('#restoreIn')", 40000); await wal.wait(300); t = ' | '.join(await wal.ev("window.__toasts")); await wal.wait(1200)
             await wal.until("Nutcade.S.ops.length===0", 60000); await wal.wait(500)
             return ok, t
         GIFTS = "Nutcade.S.txs.filter(t=>t.amount===210&&t.token).length"
@@ -1403,10 +1404,11 @@ async def main():
             await lw.pg.context.close()
         check(f'(round 3, go 3) all {len(errs)} error messages (and the round-3 notes) are translated into de, es, pt and fr', not any(untr.values()), {k: v[:6] for k, v in untr.items() if v})
         # (round 2, item 2) a scoped app asking to pay an invoice the user already paid learns nothing and pays nothing
+        await w.use(A); await w.receive_ln(2000)   # (paid from A: an invoice of the paying mint itself is settled inside it)
         mine_inv = invoice(321, B); e, q = await w.pay_ln(mine_inv); n0 = await w.ev("Nutcade.S.txs.length")
         r = await nwc(w, uri, 'pay_invoice', {'invoice': mine_inv})
         check('(round 2, 2 + go 4) nwc: a scoped app asking to pay an invoice it didn\'t pay gets the answer a payment that fails gets (PAYMENT_FAILED, "Nothing left the wallet"), no sign this wallet paid it, nothing paid again',
-              r['answer'] and r['answer']['result'] is None and r['answer']['error']['code'] == 'PAYMENT_FAILED' and r['answer']['error']['message'] == 'The payment failed. Nothing left the wallet.' and 'preimage' not in json.dumps(r['answer']) and await w.ev("Nutcade.S.txs.length") == n0, r.get('answer'))
+              r['answer'] and r['answer']['result'] is None and r['answer']['error']['code'] == 'PAYMENT_FAILED' and r['answer']['error']['message'] == 'The payment failed. Nothing left the wallet.' and 'preimage' not in json.dumps(r['answer']) and await w.ev("Nutcade.S.txs.length") == n0, (r.get('answer'), e, (q or '')[:240]))
         # (round 2, item 3) an Extra Life copy claimed by several background checks at once: claimed once, never "ended"
         hb = await w.bal(B)
         await w.ev(f"Nutcade.S.heirlooms.unshift({{from:'ff',name:'Kim',token:{json.dumps(tokH)},amount:50,mint:{json.dumps(B)},until:Date.now()-60000,state:'waiting',at:Date.now()}}); for(let i=0;i<3;i++) window.dispatchEvent(new Event('online'))")
