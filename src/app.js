@@ -29,21 +29,34 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 /* Storage. When a PIN is set, the sensitive keys live only inside an encrypted vault:
    AES-GCM with a random data key, which is wrapped by a PIN-derived key (PBKDF2) and,
    optionally, by a passkey PRF secret (Face ID / fingerprint). */
-/* With the duress PIN's wallet open (see "duress PIN" in app_r8.js), everything except what belongs to the device
-   (the vault record itself, wrong-PIN tries, the arcade's tables and pad) is read from and written to that wallet's
-   own encrypted part of the vault: it never reads or writes the real wallet's storage. */
-const DEVICE_KEYS = new Set(['vault', 'pinfails', 'gen', 'probe', 'pad', 'initials', 'priceRange']);
+/* With a PIN set, plain storage holds only what belongs to the device, never to a wallet: the vault record itself,
+   wrong-PIN tries and PIN changes, the display settings, the arcade's tables and pad. Everything of a wallet (its mint
+   list, counters, settings like the Lightning address, trophies, logs...) is read from and written to the encrypted
+   part of the vault that is open (the real wallet's, or the duress PIN's: see "duress PIN" in app_r8.js), and while
+   it is locked nothing of a wallet is read or written at all. So storage looks the same whichever wallet is open, and
+   with or without a duress PIN. */
+const DEVICE_KEYS = new Set(['vault', 'pinfails', 'pinchg', 'gen', 'probe', 'pad', 'initials', 'priceRange']);
 const devKey = k => DEVICE_KEYS.has(k) || /^scores:/.test(k);
+const lsGet = (k, d) => { try { const v = localStorage.getItem('nutcade:' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem('nutcade:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } };
+const lsDel = k => { try { localStorage.removeItem('nutcade:' + k); } catch (e) {} };
+// the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep'];
+const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
+const walletPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
+const inVault = k => vault.on && !devKey(k);
 const raw = {
   get(k, d) {
-    if (vault.decoy && !devKey(k)) { const v = vault.data[k]; return v === undefined || v === null ? d : JSON.parse(JSON.stringify(v)); }
-    try { const v = localStorage.getItem('nutcade:' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; }
+    if (k === 'prefs' && vault.on) return Object.assign(devPrefs(lsGet('prefs', {})), vault.open ? JSON.parse(JSON.stringify(vault.data.prefs || {})) : {});
+    if (inVault(k)) { const v = vault.open ? vault.data[k] : undefined; return v === undefined || v === null ? d : JSON.parse(JSON.stringify(v)); }
+    return lsGet(k, d);
   },
   set(k, v) {
-    if (vault.decoy && !devKey(k)) { vault.data[k] = v === undefined ? null : JSON.parse(JSON.stringify(v)); queueVaultWrite(); return true; }
-    try { localStorage.setItem('nutcade:' + k, JSON.stringify(v)); return true; } catch (e) { return false; }
+    if (k === 'prefs' && vault.on) { if (writeGuard.paused) return false; if (vault.open) { vault.data.prefs = walletPrefs(v); queueVaultWrite(); } return lsSet('prefs', devPrefs(v)); }
+    if (inVault(k)) { if (!vault.open || writeGuard.paused) return false; vault.data[k] = v === undefined ? null : JSON.parse(JSON.stringify(v)); queueVaultWrite(); return true; }
+    return lsSet(k, v);
   },
-  del(k) { if (vault.decoy && !devKey(k)) { delete vault.data[k]; queueVaultWrite(); return; } try { localStorage.removeItem('nutcade:' + k); } catch (e) {} }
+  del(k) { if (inVault(k)) { if (vault.open && !writeGuard.paused) { delete vault.data[k]; queueVaultWrite(); } return; } lsDel(k); }
 };
 // everything that holds ecash, keys or anything that can spend: with a PIN, only inside the encrypted vault
 const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc', 'ops', 'extra', 'hunts', 'found', 'imports', 'limits'];
@@ -75,7 +88,6 @@ const store = {
   set(k, v) {
     if (writeGuard.paused && k !== 'counters') return false;
     if (vault.on && VAULT_KEYS.includes(k)) { if (!vault.open) return false; vault.data[k] = v; queueVaultWrite(); return true; }
-    if (k === 'prefs' && vault.decoy) return splitPrefs(v);   // (the device's settings stay the device's)
     return raw.set(k, v);
   }
 };
@@ -113,7 +125,7 @@ async function openVault(dek) {
 async function createVault(pin) {
   const dek = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
   const salt = rnd(16), kek = await kekFromPin(pin, salt, PBKDF2_ITER);
-  vault.data = {}; for (const k of VAULT_KEYS) vault.data[k] = S[k] !== undefined ? S[k] : null;
+  vault.data = plainWalletData(); for (const k of VAULT_KEYS) vault.data[k] = S[k] !== undefined ? S[k] : null;
   vault.dek = dek;
   if (!raw.set('vault', { v: 1, kdf: { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(salt) }, pin: await wrapDek(dek, kek), slot: fillerSlot() })) throw new Error("This browser won't save data.");
   await sealData();
@@ -121,7 +133,20 @@ async function createVault(pin) {
   const check = await unwrapDek(raw.get('vault').pin, kek); const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(raw.get('vault').data.iv) }, check, b64d(raw.get('vault').data.ct));
   if (JSON.parse(new TextDecoder().decode(pt)).seed?.mnemonic !== S.seed?.mnemonic) throw new Error('Encryption check failed. Your wallet was not changed.');
   vault.on = true; vault.open = true;
-  for (const k of VAULT_KEYS) raw.del(k);
+  clearPlainWallet();
+  if (lsGet('pinchg', null) == null) lsSet('pinchg', []);
+}
+// every record of the wallet kept in plain storage (no PIN), and clearing them once they are in the vault
+function plainWalletData() {
+  const d = {};
+  for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (!key || !key.startsWith('nutcade:')) continue; const k = key.slice(8); if (devKey(k) || k === 'prefs') continue; d[k] = lsGet(k, null); }
+  d.prefs = walletPrefs(lsGet('prefs', {}));
+  return d;
+}
+function clearPlainWallet() {
+  const ks = []; for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (key && key.startsWith('nutcade:') && !devKey(key.slice(8)) && key !== 'nutcade:prefs') ks.push(key.slice(8)); }
+  for (const k of ks) lsDel(k);
+  lsSet('prefs', devPrefs(lsGet('prefs', {})));
 }
 // the data key of the wallet that is open (the real one, or the duress PIN's), from its PIN
 async function pinToDek(pin) {
@@ -133,6 +158,7 @@ async function pinToDek(pin) {
 async function changePin(oldPin, newPin) {
   const dek = await pinToDek(oldPin); if (!dek) throw new Error('Current PIN is wrong.');
   if (!vault.decoy && await slotOpens(newPin)) throw new Error("Pick a PIN that isn't your duress PIN.");
+  if (vault.decoy && await realOpens(newPin)) throw pinChangeRefuse();   // (never a PIN of the thief's choosing that opens the real wallet)
   const salt = rnd(16), kek = await kekFromPin(newPin, salt, PBKDF2_ITER);
   const rec = raw.get('vault'), part = vault.decoy ? rec.slot : rec;
   part.kdf = { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(salt) }; part.pin = await wrapDek(dek, kek);
@@ -140,12 +166,15 @@ async function changePin(oldPin, newPin) {
 }
 async function removeVault(pin) {
   const dek = await pinToDek(pin); if (!dek) throw new Error('PIN is wrong.');
-  if (vault.decoy) throw new Error("NUTCADE couldn't remove the PIN. Your wallet was not changed.");   // (that would mean writing over the device's storage)
+  if (vault.decoy) throw pinChangeRefuse();   // (that would mean writing over the device's storage)
   if (vault.data.duress) await duressOff().catch(() => 0);   // the duress PIN's wallet lives inside the vault: its sats come back here first
   await vault.chain;
   delete vault.data.duress;
-  for (const k of VAULT_KEYS) if (vault.data[k] != null) raw.set(k, vault.data[k]);
-  raw.del('vault'); vault.on = false; vault.open = false; vault.dek = null; vault.data = {};
+  const d = vault.data;
+  vault.on = false; vault.open = false; vault.dek = null; vault.data = {};
+  for (const k of Object.keys(d)) { if (k === 'prefs' || d[k] == null) continue; lsSet(k, d[k]); }
+  lsSet('prefs', Object.assign(devPrefs(lsGet('prefs', {})), walletPrefs(d.prefs || {})));
+  lsDel('vault');
 }
 const pinFails = () => raw.get('pinfails', { n: 0, until: 0 });
 function notePinFail() { const f = pinFails(); f.n++; if (f.n >= 5) f.until = Date.now() + Math.min(15 * 60e3, 30e3 * 2 ** (f.n - 5)); raw.set('pinfails', f); return f; }
@@ -227,7 +256,7 @@ function persistCounters() {
   if (!store.set('counters', S.counters)) throw new Error("This browser won't save data, so NUTCADE stopped before using your recovery phrase. Open it in a normal browser tab.");
 }
 // (the duress PIN's wallet keeps its counters inside its encrypted part: written before anything goes to a mint)
-const persistCountersNow = async () => { persistCounters(); if (vault.decoy) await vault.chain; };
+const persistCountersNow = async () => { persistCounters(); if (vault.on) await vault.chain; };
 const counterSource = {
   async reserve(id, n) { const start = S.counters[id] || 0; if (n > 0) { S.counters[id] = start + n; await persistCountersNow(); } return { start, count: n }; },
   async reserveAt(id, start, count) { const cur = S.counters[id] || 0; if (start < cur) throw new Error('Counter range already used.'); S.counters[id] = start + count; await persistCountersNow(); return { start, count }; },
@@ -623,7 +652,7 @@ function peekToken(t) {
 }
 function receiveToken(token, note, opts = {}) {
   let mint = null; try { mint = normUrl(peekToken(cleanToken(token)).mint); } catch (e) {}
-  return mint ? mintLock(mint, () => receiveTokenNow(token, note, opts)) : receiveTokenNow(token, note, opts);
+  return mint ? tooManyRetry(mint, () => mintLock(mint, () => receiveTokenNow(token, note, opts))) : receiveTokenNow(token, note, opts);
 }
 async function receiveTokenNow(token, note, opts = {}) {
   token = cleanToken(token);
@@ -715,16 +744,16 @@ function shortOf(e, w, url, want, melt) {
   if (max > 0) f.fix = { act: 'sendMax', a: max, label: $('#layer [data-act=doSendEcash]') ? `Send ${money(max)}` : `Use ${money(max)}` };
   return f;
 }
-function sendEcash(amount, note, lockTo, url = S.active, opts = {}) { return mintLock(url, () => sendEcashNow(amount, note, lockTo, url, opts)); }
+function sendEcash(amount, note, lockTo, url = S.active, opts = {}) { return tooManyRetry(url, () => mintLock(url, () => sendEcashNow(amount, note, lockTo, url, opts))); }
 async function sendEcashNow(amount, note, lockTo, url, opts) {
   piggyGuard(amount);
   const w = await getWallet(url);
   if (sum(S.proofs[url] || []) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
   const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}) }, keep: w.defaultOutputType() } : undefined;
-  if (smallMint(url) && !opts.noBatch) return sendBatched(w, amount, note, lockTo, url, opts, outCfg);   // a mint that takes only a few items per request (NUT-06)
   // the spending limit, with the most this can take: the swap's own numbers, fees included
   const plan = swapPlan(w, S.proofs[url] || [], amount, outCfg && outCfg.send);
-  const hold = limitGate(plan ? plan.spend : feeMax(w, S.proofs[url] || [], amount), { free: opts.noLimit, grant: opts.grant });
+  if (plan && !opts.noBatch && overLimit(w, url, plan)) return sendBatched(w, amount, note, lockTo, url, opts, outCfg);   // more coins in or out than the mint takes in one request (NUT-06): in steps
+  const hold = limitGate(plan ? plan.spend : feeMax(w, S.proofs[url] || [], amount), { free: opts.noLimit, grant: opts.grant, approved: opts.approved });
   try { return await withPick(w, plan && plan.sel, () => sendEcashSwap(w, amount, note, lockTo, url, opts, outCfg, hold)); }
   finally { hold.release(); }
 }
@@ -778,7 +807,7 @@ async function meltQuote(kind, dest, amount) {
 async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {}) {
   const { grant, noLimit, ...txExtra } = extra || {};
   const w = await getWallet(url);
-  const c = await mintLock(url, () => payPrep(w, kind, mq, feeIndex, note, dest, url, txExtra, { grant, free: noLimit, auto: !!txExtra.nwc }));
+  const c = await tooManyRetry(url, () => mintLock(url, () => payPrep(w, kind, mq, feeIndex, note, dest, url, txExtra, { grant, free: noLimit, auto: !!txExtra.nwc })));
   try {
     if (writeGuard.paused) throw pausedErr();   // (paused in between: the tab in charge settles the prepared ecash)
     return await single('melt:' + c.pend.id, () => meltNow(w, kind, mq, feeIndex, url, c.tx, c.pend, c.spent, c.amount, c.onCountersReserved));
@@ -790,18 +819,20 @@ async function payPrep(w, kind, mq, feeIndex, note, dest, url, extra, lim = {}) 
   const need = amount + reserve;
   const have = S.proofs[url] || [];
   // the most this payment can take: the amount, the fee reserve and the mint's fees to spend the ecash
-  const pm = smallMint(url) ? planMelt(w, url, need) : null, plan = smallMint(url) ? null : swapPlan(w, have, need);
+  // (more coins than the mint takes in one request, for the swap or for the payment itself: in steps, NUT-06)
+  let plan = swapPlan(w, have, need); const steps = plan && mintMax(url) && (overLimit(w, url, plan) || bitsOf(plan.h) > mintMax(url));
+  const pm = steps ? planMelt(w, url, need) : null; if (steps) plan = null;
   const most = pm ? pm.T + pm.fees : plan ? plan.spend : meltCost(url, amount, reserve).total;
   if (sum(have) < most) throw new Error(`Not enough funds. Need ${money(most)} including fees; this mint holds ${money(sum(have))}.`);
   piggyGuard(need);
   const hold = limitGate(most, lim);
-  try { return await withPick(w, plan && plan.sel, () => payPrepSwap(w, kind, mq, note, dest, url, extra, amount, need, hold)); }
+  try { return await withPick(w, plan && plan.sel, () => payPrepSwap(w, kind, mq, note, dest, url, extra, amount, need, hold, !!pm)); }
   catch (e) { hold.release(); throw e; }
 }
-async function payPrepSwap(w, kind, mq, note, dest, url, extra, amount, need, hold) {
+async function payPrepSwap(w, kind, mq, note, dest, url, extra, amount, need, hold, steps) {
   let inputs;
   const lim = limRec(hold);
-  const ready = smallMint(url) ? () => meltInputsBatched(w, url, need) : () => spentRetry(url, () => { inputs = [...(S.proofs[url] || [])]; return journaled(url, 'swap', { inputs, lim }, (cb, o) => rSend(o, w, need, inputs, { includeFees: true, onCountersReserved: cb })); });
+  const ready = steps ? () => meltInputsBatched(w, url, need) : () => spentRetry(url, () => { inputs = [...(S.proofs[url] || [])]; return journaled(url, 'swap', { inputs, lim }, (cb, o) => rSend(o, w, need, inputs, { includeFees: true, onCountersReserved: cb })); });
   const got = await ready().catch(e => { throw shortOf(e, w, url, need, true); });
   if (got.inputs) inputs = got.inputs;
   const { r: { keep, send }, op } = got;
@@ -813,7 +844,7 @@ async function payPrepSwap(w, kind, mq, note, dest, url, extra, amount, need, ho
   let ksid = null; try { ksid = w.keysetId; } catch (e) {}
   const over = BigInt(Math.max(0, sum(send) - amount));
   const pend = { id: uid(), mint: url, proofs: plain(send), quote: mq.quote, kind, txId: tx.id, spent, amount, change: 0, ctr: ksid ? { id: ksid, start: S.counters[ksid] || 0, n: Math.max(over <= 1n ? 0 : (over - 1n).toString(2).length, 1) } : null };
-  { const sm = smallMint(url), over = sum(send) - amount; if (sm && Math.max(over <= 1 ? 0 : (over - 1).toString(2).length, 1) > sm) { pend.noChange = true; pend.ctr = null; } }   // (more change outputs than the mint takes: paid without them; what it keeps is the fee)
+  { const sm = mintMax(url), over = sum(send) - amount; if (sm && Math.max(over <= 1 ? 0 : (over - 1).toString(2).length, 1) > sm) { if (kind === 'ln') pend.cap = sm; else { pend.noChange = true; pend.ctr = null; } } }   // (more change outputs than the mint takes: only as many as it takes; it returns the change in those, the most it can, and what it keeps is its fee)
   const onCountersReserved = u => { if (u && u.count > 0) { pend.ctr = { id: u.keysetId, start: u.start, n: u.count }; save(); } };
   const used = new Set(inputs.map(p => p.secret));
   S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep)); S.pending.push(pend); if (op) closeOp(op); save();   // (the payment record takes over the coins from the swap's)
@@ -823,7 +854,8 @@ async function meltNow(w, kind, mq, feeIndex, url, tx, pend, spent, amount, onCo
   const send = pend.proofs;
   try {
     const mo = Object.assign({ onCountersReserved }, pend.noChange ? { nut08Change: false } : {});
-    const res = await withRepair(url, () => kind === 'ln' ? w.meltProofsBolt11(mq, send, mo) : w.meltProofsOnchain(mq, send, feeIndex, mo), { except: pend.id });
+    const capped = async () => { const pr = await w.prepareMelt('bolt11', mq, send, mo); pr.outputData = pr.outputData.slice(0, pend.cap); return w.completeMelt(pr); };
+    const res = await withRepair(url, () => kind === 'ln' ? (pend.cap ? capped() : w.meltProofsBolt11(mq, send, mo)) : w.meltProofsOnchain(mq, send, feeIndex, mo), { except: pend.id });
     const change = plain(res.change || []);
     if (change.length) { addProofs(url, change); pend.change = sum(change); }
     const st = res.quote && res.quote.state;
@@ -2183,9 +2215,7 @@ const PIN_MIN = 6, PIN_MAX = 12;
 function hydrateFromVault() {
   const d = vault.data;
   // keys that joined the vault in a later version (the Extra Life, treasure hunts) move in from plain storage
-  let moved = false;
-  if (!vault.decoy) for (const k of VAULT_KEYS) { const v = raw.get(k, undefined); if (v !== undefined) { if (d[k] === undefined || d[k] === null) d[k] = v; raw.del(k); moved = true; } }
-  if (moved) queueVaultWrite();
+  loadWalletState();
   S.limits = d.limits || null;
   S.hunts = d.hunts || []; S.found = d.found || {}; S.imports = d.imports || [];
   S.seed = d.seed || null; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || []; S.nwc = d.nwc || []; S.ops = d.ops || []; S.extra = d.extra || null;
@@ -2255,14 +2285,14 @@ async function pinSubmit() {
         <button class="btn solid gold block" data-act="close">Done</button></div>`);
       refresh(); return;
     }
-    if (m === 'changeOld') { busy('CHECKING…'); if (!(await pinToDek(v))) return pinError('That PIN is wrong.'); pinUI.old = v; nextPad('changeNew'); setBody(padHTML('NEW PIN', `Choose a new PIN (${PIN_MIN} to ${PIN_MAX} digits).`) + '<div id="sheetErr"></div>'); return; }
+    if (m === 'changeOld') { busy('CHECKING…'); if (!(await pinToDek(v))) { notePinFail(); return pinError('That PIN is wrong.'); } pinChangeCheck(); pinUI.old = v; nextPad('changeNew'); setBody(padHTML('NEW PIN', `Choose a new PIN (${PIN_MIN} to ${PIN_MAX} digits).`) + '<div id="sheetErr"></div>'); return; }
     if (m === 'changeNew') { pinUI.first = v; nextPad('changeConfirm'); setBody(padHTML('CONFIRM NEW PIN', 'Enter it again.') + '<div id="sheetErr"></div>'); return; }
     if (m === 'changeConfirm') {
       if (v !== pinUI.first) { nextPad('changeNew'); setBody(padHTML('NEW PIN', "Those didn't match. Start again.") + '<div id="sheetErr"></div>'); return; }
-      busy('ENCRYPTING…'); await changePin(pinUI.old, v); pinUI.old = pinUI.first = ''; sfx('coin'); closeSheet(); toast('PIN changed', 'lime'); return;
+      busy('ENCRYPTING…'); pinChangeCheck(); await changePin(pinUI.old, v); pinChangeUse(); pinUI.old = pinUI.first = ''; sfx('coin'); closeSheet(); toast('PIN changed', 'lime'); return;
     }
-    if (m === 'remove') { busy('CHECKING…'); await removeVault(v).catch(e => { throw e; }); sfx('blip'); closeSheet(); refresh(); toast('PIN removed. Your wallet is no longer encrypted.', 'gold'); return; }
-    if (m === 'bioVerify') { busy('CHECKING…'); const dek = await pinToDek(v); if (!dek) return pinError('That PIN is wrong.'); await enableBio(); closeSheet(); refresh(); toast('Face ID / fingerprint unlock is on', 'lime'); return; }
+    if (m === 'remove') { busy('CHECKING…'); if (!(await pinToDek(v))) { notePinFail(); return pinError('That PIN is wrong.'); } pinChangeCheck(); if (vault.decoy) throw pinChangeRefuse(); await removeVault(v); pinChangeUse(); sfx('blip'); closeSheet(); refresh(); toast('PIN removed. Your wallet is no longer encrypted.', 'gold'); return; }
+    if (m === 'bioVerify') { busy('CHECKING…'); const dek = await pinToDek(v); if (!dek) { notePinFail(); return pinError('That PIN is wrong.'); } pinChangeCheck(); if (vault.decoy) throw pinChangeRefuse(); pinChangeUse(); await enableBio(); closeSheet(); refresh(); toast('Face ID / fingerprint unlock is on', 'lime'); return; }
   } catch (e) { pinError(e.message || 'Something went wrong.'); }
 }
 
@@ -3846,8 +3876,9 @@ const A = {
   bioStart: () => openPinSheet('bioVerify', 'Face ID / fingerprint', { title: 'ENTER PIN', text: 'Confirm your PIN, then your device will ask for Face ID or your fingerprint.' }),
   bioEnable: b => run(b, 'WAITING', async () => { await enableBio(); closeSheet(); refresh(); toast('Face ID / fingerprint unlock is on', 'lime'); }),
   bioDisable: () => { const rec = raw.get('vault'); delete rec.bio; raw.set('vault', rec); refresh(); toast('Face ID / fingerprint unlock is off. Use your PIN.', 'gold'); },
+  // (Face ID / fingerprint opens the real wallet only)
   bioUnlock: async b => {
-    try { b.disabled = true; const dek = await bioToDek(); try { await openPart(dek, false); } catch (x) { await openPart(dek, true); } hydrateFromVault(); pinUI.mode = null; sfx('start'); render(); armAutoLock(); setTimeout(() => backgroundTick(true).then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 300); }
+    try { b.disabled = true; const dek = await bioToDek(); await openPart(dek, false); hydrateFromVault(); pinUI.mode = null; sfx('start'); render(); armAutoLock(); setTimeout(() => backgroundTick(true).then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 300); }
     catch (e) { b.disabled = false; pinError(/NotAllowed|abort/i.test(e.name + e.message) ? 'Face ID / fingerprint was cancelled. Use your PIN.' : (e.message || "Couldn't unlock. Use your PIN.")); }
   },
   lockNow: () => { sfx('blip'); lockNow(); },
@@ -3925,6 +3956,7 @@ const A = {
     <button class="btn solid red block" data-act="doReset">Reset wallet</button><div id="sheetErr"></div>`),
   doReset: () => {
     if (val('confirmWord').trim().toUpperCase() !== 'RESET') { showErr(new Error('Type RESET to confirm.')); return; }
+    if (vault.on && vault.open && vault.decoy) { resetPart().then(() => location.reload(), e => showErr(e)); return; }   // (the duress PIN's wallet is emptied; the real wallet is never touched)
     try { for (const k of Object.keys(localStorage)) if (/^nutcade:(seed|counters|mints|active|proofs|pending|txs|quotes|p2pk|requests|contacts|dmseen|vault|pinfails|piggy|challenges|nwc|nwcseen|blocked|lnurlwUsed|ops|opsdone|imports|gen)$/.test(k)) localStorage.removeItem(k); } catch (e) {}
     try { npcSocketStop(); dmStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
     location.reload();

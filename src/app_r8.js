@@ -63,10 +63,10 @@ function limitGate(spend, opts = {}) {
   if (opts.free) return none;
   if (opts.grant) return { id: opts.grant.id, part: true, release() {} };
   if (!limitsOn()) return none;
-  const ok = !opts.auto && limitOK && limitOK.until > Date.now();   // (an app paying through Wallet Connect never uses a PIN you entered here)
+  const ok = opts.approved || (!opts.auto && limitOK && limitOK.until > Date.now());   // (an app paying through Wallet Connect never uses a PIN you entered here)
   if (ok) limitOK = null;   // the PIN was for this one payment
   else {
-    if (S.limits.per > 0 && spend > S.limits.per) throw limitErr('per', spend);
+    if (S.limits.per > 0 && spend > S.limits.per) throw limitErr('per', spend);   // (Wallet Connect too: it can't ask for the PIN, so it is refused, and nothing is booked to its budget)
     if (S.limits.day > 0 && limitUsed() + spend > S.limits.day) throw limitErr('day', spend);
   }
   const id = uid(); limHolds.set(id, { a: spend, at: Date.now() });
@@ -84,7 +84,7 @@ function swapPlan(w, have, amount, sendOT) {
     const ks = w.getOutputKeyset(), ot = w.configureOutputs(w.parseAmount(amount, 'limit'), ks, sendOT || w.defaultOutputType(), true);
     const h = num(w.preparedTotal(ot)), sel = w.selectProofsToSend(have, L.Amount.from(h), true);
     if (!sel.send.length) return null;
-    return { spend: h + num(w.getFeesForProofs(sel.send)), sel };
+    return { spend: h + num(w.getFeesForProofs(sel.send)), sel, h };
   } catch (e) { return null; }
 }
 // until the swap: the library's own pick, so the swap spends exactly the coins the check counted
@@ -121,8 +121,9 @@ function openLimits() {
     <button class="btn solid gold block" data-act="limSave">Save</button><div id="sheetErr"></div>`);
 }
 function readLimit(id) {
-  const el = $('#' + id); if (!el || el.disabled) return 0;
+  const el = $('#' + id); if (!el) return 0;
   const s = String(el.value || '').trim(); if (!s) return 0;
+  if (el.disabled) throw new Error('Set a PIN first to use the limit for one payment.');   // (never dropped without a word)
   const n = parseSat(s); if (!(n > 0)) throw new Error('Type a limit above 0, or leave the box empty to turn it off.');
   return n;
 }
@@ -162,15 +163,19 @@ function limitClose() { document.getElementById('limitLayer')?.remove(); limitRe
    duress wallet's data key, so only the real PIN can set, change or remove the duress PIN. What it can't hide: see
    "Duress PIN" in the README (someone reading the browser's storage directly sees how big each part is, and the
    real wallet's plain settings such as its mint list). */
-const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep'];
-const lsGet = (k, d) => { try { const v = localStorage.getItem('nutcade:' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
-const lsSet = (k, v) => { try { localStorage.setItem('nutcade:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } };
-function splitPrefs(v) {
-  const dev = lsGet('prefs', {}), own = {};
-  for (const k of Object.keys(v || {})) { if (WALLET_PREFS.includes(k)) own[k] = v[k]; else dev[k] = v[k]; }
-  vault.data.prefs = own; queueVaultWrite();
-  return lsSet('prefs', dev);
-}
+/* PIN changes (changing the PIN, setting, changing or turning off a duress PIN, removing the PIN) share one small
+   allowance: 3 in any 24 hours, kept for the device (the same in every wallet, and not reset by unlocking). Past it,
+   or for a step the open wallet can't take (inside the duress PIN's wallet: a new PIN that would open another part of
+   the vault, a duress PIN of its own, removing the PIN, setting up Face ID), the answer is the same sentence, and the
+   allowance is used up, so it reads exactly as when the allowance has run out. */
+const PIN_CHANGES = 3;
+const pinChanges = () => (lsGet('pinchg', []) || []).filter(t => t > Date.now() - DAY_MS);
+const pinChangeLeft = () => PIN_CHANGES - pinChanges().length;
+const pinChangeErr = () => { const e = new Error("PIN changes aren't available right now. Try again later."); e.keep = true; return e; };
+function pinChangeCheck() { if (pinChangeLeft() <= 0) throw pinChangeErr(); }
+function pinChangeUse(all) { const l = pinChanges(); do l.push(Date.now()); while (all && l.length < PIN_CHANGES); lsSet('pinchg', l); }
+function pinChangeRefuse() { pinChangeUse(true); return pinChangeErr(); }
+async function realOpens(pin) { const rec = raw.get('vault', {}); try { await unwrapDek(rec.pin, await kekFromPin(pin, b64d(rec.kdf.salt), rec.kdf.iter)); return true; } catch (e) { return false; } }
 const randBox = n => ({ iv: b64e(rnd(12)), ct: b64e(rnd(n)) });
 // an unused second part: random bytes shaped like a real one (salt, wrapped key, a small wallet's data)
 function fillerSlot() { return { kdf: { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(rnd(16)) }, pin: randBox(48), data: randBox(1800 + Math.floor(Math.random() * 2400)) }; }
@@ -188,22 +193,36 @@ async function slotOpens(pin) {
 async function openPart(dek, decoy) {
   vault.decoy = !!decoy;
   try { await openVault(dek); } catch (e) { vault.decoy = false; vault.open = false; vault.data = {}; throw e; }
-  if (decoy) { enterDecoyState(); return; }
-  const rec = raw.get('vault'); if (!rec.slot) { rec.slot = fillerSlot(); raw.set('vault', rec); }   // (a vault from before 1.13 gets its second part)
+  if (!decoy) {
+    const rec = raw.get('vault'); if (!rec.slot) { rec.slot = fillerSlot(); raw.set('vault', rec); }   // (a vault from before 1.13 gets its second part)
+    // records a vault from before 1.13 left in plain storage (the mint list, counters, logs, settings) move in
+    const plain = plainWalletData(), d = vault.data; let moved = false;
+    for (const [k, v] of Object.entries(plain)) {
+      if (v == null || (k === 'prefs' && !Object.keys(v).length)) continue;
+      moved = true;
+      if (k === 'counters') { d.counters = d.counters || {}; for (const id in v) d.counters[id] = Math.max(d.counters[id] || 0, v[id] || 0); }
+      else if (k === 'prefs') d.prefs = Object.assign({}, v, d.prefs || {});
+      else if (d[k] === undefined || d[k] === null) d[k] = v;
+    }
+    if (moved) { queueVaultWrite(); await vault.chain; clearPlainWallet(); }
+  }
+  if (lsGet('pinchg', null) == null) lsSet('pinchg', []);
 }
-// everything NUTCADE loaded from storage before the PIN, read again from the duress PIN's wallet
-function enterDecoyState() {
+// everything NUTCADE loaded from storage before the PIN, read again from the wallet that was opened
+function loadWalletState() {
   const d = vault.data;
+  for (const k in wallets) delete wallets[k];
   S.mints = d.mints || []; S.active = d.active || null; S.counters = d.counters || {}; S.opsdone = d.opsdone || [];
   for (const k of WALLET_PREFS) delete S.prefs[k];
   Object.assign(S.prefs, d.prefs || {});
+  for (const k of WALLET_PREFS) if (S.prefs[k] === undefined && PREF_DEFAULTS[k] !== undefined) S.prefs[k] = PREF_DEFAULTS[k];   // (as a new wallet has them: the same screens either way)
   S.piggy = d.piggy || { saved: 0 }; S.mintlog = d.mintlog || {}; S.heirlooms = d.heirlooms || []; S.challenges = d.challenges || []; S.blocked = d.blocked || [];
   seenWraps.clear(); for (const x of d.dmseen || []) seenWraps.add(x);
   nwcSeen.clear(); for (const x of d.nwcseen || []) nwcSeen.add(x);
   myGen = raw.get('gen', 0);
   if (window.Trophies && window.Trophies.reload) window.Trophies.reload();
 }
-const duressOn = () => !!(vault.open && (vault.decoy ? vault.data.fakeDuress : vault.data.duress));
+const duressOn = () => !!(vault.open && !vault.decoy && vault.data.duress);
 function duressPanel() {
   if (!vault.on) return '';
   return `<div class="row between tiny"><span>Duress PIN</span><span style="color:${duressOn() ? 'var(--lime)' : 'var(--dim)'}">${duressOn() ? 'ON' : 'OFF'}</span></div>
@@ -232,14 +251,12 @@ async function sealBox(key, obj) { const iv = rnd(12); const ct = await crypto.s
 async function openBox(key, box) { return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(box.iv) }, key, b64d(box.ct)))); }
 // set it up: the sats for it leave this wallet as a token, which the other wallet claims the first time it opens
 async function makeDuress(pin, amount) {
-  if (vault.decoy) {   // (in the duress PIN's wallet this looks and works the same, but sets up nothing)
-    if (amount > 0) await sendEcash(amount, '', null, S.active);
-    vault.data.fakeDuress = true; queueVaultWrite(); await vault.chain; return;
-  }
+  if (vault.decoy) throw pinChangeRefuse();
   if (vault.data.duress) throw new Error('A duress PIN is already set.');
+  pinChangeCheck();
   const url = S.active, m = activeMint(); if (amount > 0 && !m) throw new Error('Add a mint first.');
   let token = null;
-  if (amount > 0) { const tx = await sendEcash(amount, 'Sats for the duress PIN wallet', null, url); token = tx.token; updTx(tx.id, { duressFund: true }); }
+  if (amount > 0) { const tx = await sendEcash(amount, 'Sats for the duress PIN wallet', null, url, { approved: true }); token = tx.token; updTx(tx.id, { duressFund: true }); }   // (it counts toward the spending limit; the PIN just entered lets it through)
   const created = Date.now(), dek = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
   const data = { seed: { mnemonic: newMnemonic(), backedUp: true, created, secured: true }, mints: m ? [JSON.parse(JSON.stringify(m))] : [], active: m ? url : null, proofs: {}, pending: [], quotes: [], ops: [], opsdone: [], counters: {},
     txs: token ? [{ id: uid(), ts: created, type: 'in', method: 'ecash', amount, mint: url, note: '', status: 'pending', incoming: cleanToken(token), offline: true, fee: 0 }] : [], prefs: {}, requests: [], contacts: [], nwc: [] };
@@ -248,9 +265,10 @@ async function makeDuress(pin, amount) {
   vault.data.duress = { dek: b64e(await crypto.subtle.exportKey('raw', dek)), at: created };
   queueVaultWrite(); await vault.chain;
   const rec = raw.get('vault'); rec.slot = slot; if (!raw.set('vault', rec)) throw new Error("This browser won't save data.");
+  pinChangeUse();
 }
 async function changeDuress(pin) {
-  if (vault.decoy) { vault.data.fakeDuress = true; queueVaultWrite(); return; }
+  if (vault.decoy) throw pinChangeRefuse();
   const dek = await decoyKey(), salt = rnd(16), kek = await kekFromPin(pin, salt, PBKDF2_ITER);
   const rec = raw.get('vault'); rec.slot.kdf = { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(salt) }; rec.slot.pin = await wrapDek(dek, kek);
   raw.set('vault', rec);
@@ -259,7 +277,7 @@ async function changeDuress(pin) {
 // be claimed, in the same vault), then its part becomes random bytes again, then they are claimed: an interruption at
 // any point loses nothing.
 async function duressOff() {
-  if (vault.decoy) { delete vault.data.fakeDuress; queueVaultWrite(); return 0; }
+  if (vault.decoy) throw pinChangeRefuse();
   if (!vault.data.duress) return 0;
   const rec = raw.get('vault'); let d = null;
   try { d = await openBox(await decoyKey(), rec.slot.data); } catch (e) {}
@@ -279,17 +297,25 @@ async function duressOff() {
   for (const id of ids) { const t = txById(id); if (!t) continue; try { const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: id, reqId: null } }); incomingClaimed({ txId: id, reqId: null }, nt); back += num(nt.amount); } catch (e) {} }
   return back;
 }
+// Reset wallet, inside the duress PIN's wallet: that wallet starts over empty (still opened by its PIN); the rest of
+// the vault, the real wallet included, is left exactly as it was
+async function resetPart() { npcSocketStop(); dmStop(); vault.data = {}; queueVaultWrite(); await vault.chain; }
 // the PIN of the wallet that is open, for the steps that need it (a limit, the duress PIN)
 async function pinMore(m, v, busy) {
   const f = pinFails(); if (f.until > Date.now()) return pinError(`Wait ${Math.ceil((f.until - Date.now()) / 1000)}s before trying again.`);
   const check = async () => { busy('CHECKING…'); if (await pinToDek(v)) { raw.del('pinfails'); return true; } notePinFail(); pinError('That PIN is wrong.'); return false; };
   if (m === 'limitOK') { if (!(await check())) return; limitOK = { until: Date.now() + 120e3 }; const r = limitRetry; limitClose(); sfx('coin'); if (r) r(); return; }
   if (m === 'limitSave') { if (!(await check())) return; applyLimits(limWant.v); return; }
-  if (m === 'duressOld') { if (!(await check())) return; duressUI.old = v; if (duressOn()) duressMenu(); else duressNewPad(); return; }
+  if (m === 'duressOld') {
+    if (!(await check())) return; duressUI.old = v;
+    try { pinChangeCheck(); if (vault.decoy) throw pinChangeRefuse(); } catch (e) { return pinError(e.message); }   // (the duress PIN's wallet has no room for a duress PIN of its own)
+    if (duressOn()) duressMenu(); else duressNewPad(); return;
+  }
   if (m === 'duressNew') { if (v === duressUI.old) return pinError('Your duress PIN has to differ from your PIN.'); duressUI.pin = v; nextPad('duressConfirm'); setBody(padHTML('CONFIRM DURESS PIN', 'Type the same duress PIN again.') + '<div id="sheetErr"></div>'); return; }
   if (m === 'duressConfirm') {
     if (v !== duressUI.pin) { duressNewPad(); return pinError("Those didn't match. Start again."); }
-    if (duressUI.change) { busy('ENCRYPTING…'); await changeDuress(v); duressUI.pin = duressUI.old = ''; closeSheet(); refresh(); sfx('coin'); toast('Duress PIN changed', 'lime'); return; }
+    if (await realOpens(v)) { duressNewPad(); return pinError('Your duress PIN has to differ from your PIN.'); }
+    if (duressUI.change) { busy('ENCRYPTING…'); pinChangeCheck(); await changeDuress(v); pinChangeUse(); duressUI.pin = duressUI.old = ''; closeSheet(); refresh(); sfx('coin'); toast('Duress PIN changed', 'lime'); return; }
     pinUI.mode = null; duressFund(); return;
   }
 }
@@ -303,12 +329,29 @@ async function pinMore(m, v, busy) {
    between steps leaves only finished swaps (their coins are in the balance) and at most one open record, which
    settles like any other. A token with more coins than the mint takes is claimed in parts, each saved first. A mint
    without the field keeps the old behaviour. */
-const SMALL_MAX = 128;
+// the limit the mint advertises (0: it says none), as it says it (a whole number from 1 to 10,000)
 function mintMax(url) {
   const w = (wallets[normUrl(url)] || {}).ready; if (!w) return 0;
-  try { const i = w.getMintInfo(), v = i && i._mintInfo && i._mintInfo.max_array_length; return v == null ? 0 : Math.max(1, Math.min(10000, Math.floor(num(i.maxArrayLength)) || 0)); } catch (e) { return 0; }
+  try { const i = w.getMintInfo(), v = i && i._mintInfo ? i._mintInfo.max_array_length : null; if (v == null) return 0; const n = Math.floor(num(v)); return n >= 1 ? Math.min(n, 10000) : 0; } catch (e) { return 0; }
 }
-const smallMint = url => { const m = mintMax(url); return m > 0 && m < SMALL_MAX ? m : 0; };
+const smallMint = mintMax;   // (any advertised limit is honoured; the steps below are only taken when a request would go over it)
+const outsOf = (w, plan, amount) => { const s = sum(plan.sel.send) - num(w.getFeesForProofs(plan.sel.send)) - plan.h; return bitsOf(plan.h) + bitsOf(Math.max(0, s)); };
+// would this swap's one request go over the mint's limit (coins in, or coins out)?
+function overLimit(w, url, plan) { const m = mintMax(url); if (!m) return false; if (!plan) return true; try { return plan.sel.send.length > m || outsOf(w, plan) > m; } catch (e) { return true; } }
+// "too many items" from a mint that started enforcing a limit after NUTCADE read its info
+const isTooMany = e => (e && e.status === 422) || /at most \d+ item|too many (items|inputs|outputs)|max(imum)?[ _]?(array|request)[ _]?length|should have at most/i.test(String((e && (e.raw || e.message)) || '') + ' ' + String(e && e.detail || ''));
+async function refreshMint(url) { url = normUrl(url); delete wallets[url]; await getWallet(url); return mintMax(url); }
+// once: a request refused for being too long settles its record (the mint signed nothing), the mint's info is read
+// again, and the step is tried again in pieces that fit
+async function tooManyRetry(url, fn) {
+  try { return await fn(); }
+  catch (e) {
+    if (!isTooMany(e)) throw e;
+    if (!(await refreshMint(url).catch(() => 0))) throw e;   // (no limit after all: some other refusal)
+    if (e.op) await settleOp(e.op.id).catch(() => {});   // (asked in pieces the mint takes, now that its limit is known)
+    return fn();
+  }
+}
 const bitsOf = n => { let c = 0; for (let x = n; x > 0; x = Math.floor(x / 2)) c += x % 2; return c; };
 const splitAmt = n => { const out = []; for (let b = 2 ** 52; b >= 1; b /= 2) if (n >= b) { out.push(b); n -= b; } return out; };
 const lowBit = n => { let b = 1; while (n % (b * 2) === 0) b *= 2; return b; };
@@ -326,20 +369,22 @@ async function restoreRange(w, url, start, n, keysetId) {
 /* Coins I (at most m) for a step that makes `target` in coins of its own plus change in at most `maxOut` coins:
    the fewest coins and the least change. Small searches only: m is small here. */
 function pickInputs(w, free, target, m, maxOut) {
-  const cand = free.slice().sort((a, b) => num(b.amount) - num(a.amount)).slice(0, 40), n = cand.length;
+  const desc = free.slice().sort((a, b) => num(b.amount) - num(a.amount));
   let best = null;
   const tryIt = I => { const s = I.reduce((t, p) => t + num(p.amount), 0), c = s - feeOfPs(w, I) - target; if (c < 0 || bitsOf(c) > maxOut) return; if (!best || I.length < best.I.length || (I.length === best.I.length && c < best.c)) best = { I, c }; };
-  for (let a = 0; a < n; a++) { tryIt([cand[a]]); if (m < 2) continue; for (let b = a + 1; b < n; b++) { tryIt([cand[a], cand[b]]); if (m < 3) continue; for (let c = b + 1; c < n; c++) tryIt([cand[a], cand[b], cand[c]]); } }
-  if (!best && m > 3) { for (let k = 4; k <= Math.min(m, n); k++) { tryIt(cand.slice(0, k)); tryIt(cand.slice(n - k)); } }   // (bigger limits: largest or smallest first)
+  if (m <= 3) {   // (a tiny limit: every pick of up to 3 of the 40 biggest coins)
+    const cand = desc.slice(0, 40), n = cand.length;
+    for (let a = 0; a < n; a++) { tryIt([cand[a]]); if (m < 2) continue; for (let b = a + 1; b < n; b++) { tryIt([cand[a], cand[b]]); if (m < 3) continue; for (let c = b + 1; c < n; c++) tryIt([cand[a], cand[b], cand[c]]); } }
+  } else for (let k = 1; k <= Math.min(m, desc.length) && !best; k++) tryIt(desc.slice(0, k));   // (bigger limits: biggest coins first)
   return best && best.I;
 }
 // a step that only merges coins: at most m in, fewer out (never more than m)
 function pickMerge(w, free, m) {
-  const cand = free.slice().sort((a, b) => num(a.amount) - num(b.amount)).slice(0, 40), n = cand.length;
+  const cand = free.slice().sort((a, b) => num(a.amount) - num(b.amount)).slice(0, m > 3 ? m : 40), n = cand.length;
   let best = null;
   const tryIt = I => { const s = I.reduce((t, p) => t + num(p.amount), 0) - feeOfPs(w, I); if (s <= 0) return; const out = bitsOf(s), gain = I.length - out; if (gain <= 0 || out > m) return; if (!best || gain > best.gain || (gain === best.gain && s > best.s)) best = { I, gain, s }; };
-  for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) { if (m >= 2) tryIt([cand[a], cand[b]]); if (m >= 3) for (let c = b + 1; c < n; c++) tryIt([cand[a], cand[b], cand[c]]); }
-  if (!best && m > 3) for (let k = Math.min(m, n); k >= 2; k--) tryIt(cand.slice(0, k));
+  if (m <= 3) { for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) { if (m >= 2) tryIt([cand[a], cand[b]]); if (m >= 3) for (let c = b + 1; c < n; c++) tryIt([cand[a], cand[b], cand[c]]); } }
+  else for (let k = Math.min(m, n); k >= 2 && !best; k--) tryIt(cand.slice(0, k));   // (as many of the smallest coins as the mint takes)
   return best && best.I;
 }
 // the next step toward holding coins of exactly the amounts in D, from the coins `held` (reserved: already set aside)
@@ -409,7 +454,7 @@ async function sendBatched(w, amount, note, lockTo, url, opts, outCfg) {
   if (!lockTo) {
     const rfee = rfeeFor(w, amount, kid), D = splitAmt(amount + rfee), sim = simulateCoins(w, held, D, m);
     if (!sim) throw new Error(`${host(url)} takes at most ${m} coins per request, and the coins here can't be split that way for ${money(amount)}. Try a smaller amount.`);
-    const hold = limitGate(amount + rfee + sim.fees, { free: opts.noLimit, grant: opts.grant });
+    const hold = limitGate(amount + rfee + sim.fees, { free: opts.noLimit, grant: opts.grant, approved: opts.approved });
     try {
       const coins = await makeCoins(w, url, D, m, { limId: hold.id });
       const ids = new Set(coins.map(p => p.secret));
@@ -426,7 +471,7 @@ async function sendBatched(w, amount, note, lockTo, url, opts, outCfg) {
   if (!T) { const near = fitAmounts(amount, Math.max(1, m - 1)); throw new Error(`${host(url)} takes at most ${m} coins per request, so locked ecash there can be made of at most ${m} coin sizes. Try ${near.map(money).join(' or ')}.`); }
   const D = splitAmt(T), sim = simulateCoins(w, held, D, m);
   if (!sim) throw new Error(`${host(url)} takes at most ${m} coins per request, and the coins here can't be split that way for ${money(amount)}. Try a smaller amount.`);
-  const hold = limitGate(T + sim.fees, { free: opts.noLimit, grant: opts.grant });
+  const hold = limitGate(T + sim.fees, { free: opts.noLimit, grant: opts.grant, approved: opts.approved });
   try {
     const coins = await makeCoins(w, url, D, m, { limId: hold.id });
     return await withPick(w, { send: coins }, () => sendEcashSwap(w, amount, note, lockTo, url, opts, outCfg, hold));
@@ -473,16 +518,28 @@ async function receiveInParts(w, meta, token, note, parts) {
    is paused (as when you switch apps), and a payment or anything else in progress carries on underneath. */
 const UPRIGHT_SVG = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges"><path d="M5 1h6v1h1v12h-1v1H5v-1H4V2h1zm0 2v9h6V3zm2 10v1h2v-1z"/></svg>';
 function uprightSetup() {
-  const isPhone = () => { try { const coarse = matchMedia('(pointer:coarse)').matches, side = Math.min(screen.width || innerWidth, screen.height || innerHeight); return coarse && side <= 500; } catch (e) { return false; } };
-  const el = document.createElement('div'); el.id = 'upright'; el.setAttribute('role', 'alert');
+  // a phone: a touch screen whose short side is a phone's; turned: what the screen itself says (its orientation, or
+  // iOS's window.orientation), never the size of the page, which a keyboard opening also shrinks
+  const isPhone = () => { try { return matchMedia('(pointer:coarse)').matches && Math.min(screen.width || 9999, screen.height || 9999) <= 500; } catch (e) { return false; } };
+  const turned = () => {
+    try {
+      const t = screen.orientation && screen.orientation.type; if (t) return /^landscape/.test(t);
+      if (typeof window.orientation === 'number') return Math.abs(window.orientation) === 90;
+      return screen.width > screen.height;
+    } catch (e) { return false; }
+  };
+  const typing = () => { const a = document.activeElement; return !!(a && a.matches && a.matches('input:not([type=checkbox]):not([type=radio]),textarea,select,[contenteditable]')); };
+  const el = document.createElement('div'); el.id = 'upright'; el.setAttribute('role', 'alert'); el.hidden = true;
   const fill = () => { el.innerHTML = `${UPRIGHT_SVG}<div class="up-h">TURN YOUR PHONE UPRIGHT</div><div class="up-t">NUTCADE works held upright. Anything in progress keeps going; a game waits for you.</div>`; if (LANG !== 'en') trNode(el); };
   fill(); document.body.appendChild(el);
   let was = false;
   const check = () => {
-    document.documentElement.classList.toggle('phone', isPhone());
-    const on = getComputedStyle(el).display !== 'none';
+    const on = isPhone() && turned() && !typing();
+    document.documentElement.classList.toggle('upright-on', on); el.hidden = !on;
     if (on && !was) { fill(); if (window.Arcade && window.Arcade.playing()) window.dispatchEvent(new Event('blur')); }   // (the game pauses, as when you switch apps)
     was = on;
   };
-  window.addEventListener('resize', check); window.addEventListener('orientationchange', check); check();
+  window.addEventListener('resize', check); window.addEventListener('orientationchange', check); document.addEventListener('focusin', check); document.addEventListener('focusout', () => setTimeout(check, 50));
+  try { if (screen.orientation) screen.orientation.addEventListener('change', check); } catch (e) {}
+  check();
 }

@@ -92,6 +92,12 @@ async def settled(w):
     await w.until("Nutcade.S.pending.length===0 && !document.querySelector('#layer .spinner')", 30000); await w.wait(600); await w.ev("Nutcade.closeSheet()"); await w.wait(200)
 
 
+# everything in plain storage except the vault record itself (with a PIN: only the device's own settings)
+PLAIN_JS = "Object.keys(localStorage).filter(k=>k!=='nutcade:vault').map(k=>k+'='+localStorage.getItem(k)).join('\\n')"
+OKKEY_JS = "(()=>{const k=[...document.querySelectorAll('[data-pinpad] [data-k=ok]')].pop(); if(!k) return false; const r=k.getBoundingClientRect(); return r.top>=0 && r.bottom<=innerHeight})()"
+NOALLOW = "localStorage.setItem('nutcade:pinchg','[]')"   # (a test resets the device's PIN-change allowance between steps)
+
+
 async def layer_pin(w, pin=PIN):
     await pad(w, pin, '#limitLayer [data-pinpad]')
     await w.until("!document.querySelector('#limitLayer')", 20000)
@@ -157,7 +163,15 @@ def ways(w, mint, fr=None, ctx=None):
         await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(100); await w.click('[data-act=contactsOpen]'); await w.wait(150)
         await w.ev("document.querySelector('[data-act=payContact]').click()"); await w.until("!!document.querySelector('[data-act=contactEcash]')", 5000)
         await w.fill('#amtIn', str(a)); await w.click('[data-act=contactEcash]')
-    return {'ln': ln, 'ecash': ecash, 'gift': gift, 'reqpay': reqpay, 'bounty': bounty, 'extra': extra, 'move': move, 'zap': zap, 'lnaddr': lnaddr, 'contact': contact}
+    async def hunt(a):
+        await w.home(); await w.ev("document.querySelector('[data-act=huntNew]').click()"); await w.until("!!document.querySelector('[data-act=huntCreate]')", 5000)
+        await w.fill('#amtIn', str(a)); await w.click('[data-act=huntCreate]')
+    async def split(a):   # a friend's bill split (a payment request for each share), paid here
+        await fr.home(); await fr.click('[data-act=splitOpen]'); await fr.wait(150)
+        await fr.fill('#amtIn', str(a * 2)); await fr.fill('#splitN', '2'); await fr.fill('#memoIn', 'Pizza night'); await fr.click('[data-act=splitCreate]'); await fr.wait(400)
+        enc = await fr.ev("Nutcade.S.requests[0].encoded"); await fr.ev("Nutcade.closeSheet()")
+        await w.home(); await w.ev(f"Nutcade.handleScan({json.dumps(enc)})"); await w.wait(300); await w.click('[data-act=payReq]')
+    return {'ln': ln, 'ecash': ecash, 'gift': gift, 'reqpay': reqpay, 'bounty': bounty, 'extra': extra, 'move': move, 'zap': zap, 'lnaddr': lnaddr, 'contact': contact, 'hunt': hunt, 'split': split}
 
 
 async def section(name, fn):
@@ -208,6 +222,11 @@ async def main():
             for v, why in [('-5', 'negative'), ('0', 'zero'), ('1.5', 'decimal'), ('1e3', 'exponent'), ('99999999999999999999', 'huge'), ('abc', 'junk'), ('12abc', 'junk after a number'), ('2,5', 'a comma not grouping thousands')]:
                 e, _ = await set_limits(w, '', v)
                 check(f'limit input: {why} ({v!r}) is refused with a message and nothing is saved', bool(e) and 'undefined' not in e and not await w.ev("!!(Nutcade.S.limits&&Nutcade.S.limits.day)"), e)
+            await settings(w); await w.click('[data-act=limOpen]'); await w.wait(200)
+            hint = await w.sheet_text()
+            await w.ev("const e=document.querySelector('#limPer'); e.value='500'; e.dispatchEvent(new Event('input',{bubbles:true}))"); await w.click('[data-act=limSave]'); await w.wait(300)
+            e6 = await w.err(); await w.ev("Nutcade.closeSheet()")
+            check('limit input: without a PIN, a per-payment amount is refused with a message (never dropped with "off")', 'PIN first' in e6 and 'Set a PIN first to use this one' in hint and not await w.ev("!!(Nutcade.S.limits&&Nutcade.S.limits.per)"), (e6, hint[-120:]))
             check('limit input: without a PIN the per-payment box is off (it needs a PIN to ask for)', await w.ev("(()=>{Nutcade.closeSheet(); document.querySelector('[data-act=limOpen]').click(); const d=document.querySelector('#limPer').disabled; Nutcade.closeSheet(); return d})()"))
             e, t = await set_limits(w, '', '2,500')
             check("limit input: '2,500' in English is 2,500 SAT", not e and await w.ev("Nutcade.S.limits.day===2500 && !Nutcade.S.limits.per"), (e, await w.ev("Nutcade.S.limits")))
@@ -217,7 +236,7 @@ async def main():
             check('limit input: empty = off', not e and await w.ev("!Nutcade.S.limits || (!Nutcade.S.limits.per && !Nutcade.S.limits.day)"), (e, t))
             for lang, txt in [('de', '2.500'), ('fr', '2 500'), ('es', '2.500'), ('pt', '2.500')]:
                 await set_lang(w, lang)
-                e, t = await set_limits(w, txt, txt)
+                e, t = await set_limits(w, '', txt)
                 check(f"limit input: {txt!r} in {lang} is 2,500 SAT", not e and await w.ev("Nutcade.S.limits.day===2500"), (e, await w.ev("Nutcade.S.limits")))
                 await settings(w); st = await w.ev("(document.querySelector('#set-security')||{}).innerText||''")
                 check(f'limit settings in {lang}: the limit is shown the {lang} way', ('2.500' if lang != 'fr' else '2 500') in st or ('2 500' in st and lang == 'fr'), st[-200:])
@@ -335,7 +354,7 @@ async def main():
             # under -> goes through without asking
             await w.use(A)
             wy = ways(w, A, fr)
-            for way, amt in [('gift', 200), ('reqpay', 200), ('bounty', 200), ('extra', 200), ('move', 300), ('zap', 210), ('lnaddr', 220), ('contact', 150)]:
+            for way, amt in [('gift', 200), ('reqpay', 200), ('bounty', 200), ('extra', 200), ('move', 300), ('zap', 210), ('lnaddr', 220), ('contact', 150), ('hunt', 210), ('split', 130)]:
               start = lambda: wy[way](amt)
               try:
                 await set_limits(w, '100', '', PIN)
@@ -360,7 +379,10 @@ async def main():
             await w.ev("Nutcade.closeSheet()")
             await set_limits(w, '100', '', PIN)
             ans = lambda r: (r or {}).get('answer') or r or {}
+            bal_app = ((ans(await nwc(w, uri, 'get_balance')).get('result')) or {}).get('balance')
             r = ans(await nwc(w, uri, 'pay_invoice', {'invoice': invoice(300, B)}))
+            bal_app2 = ((ans(await nwc(w, uri, 'get_balance')).get('result')) or {}).get('balance')
+            check("Wallet Connect: a payment refused for the wallet's limit pays nothing and takes nothing from the app's budget", bal_app is not None and bal_app == bal_app2 and not await w.ev("Nutcade.S.txs.some(t=>t.nwc&&t.type==='out')"), (bal_app, bal_app2))
             check('Wallet Connect: over the wallet limit (inside the app budget) is refused with QUOTA_EXCEEDED and says why', (r.get('error') or {}).get('code') in ('QUOTA_EXCEEDED', 'RESTRICTED') and 'limit' in ((r.get('error') or {}).get('message') or '').lower(), r)
             await set_limits(w, '', str(await w.ev("Nutcade.r8.spentDay()") + 250), PIN)
             r = ans(await nwc(w, uri, 'pay_invoice', {'invoice': invoice(300, B)}))
@@ -391,6 +413,22 @@ async def main():
             await w.pg.context.set_offline(False); await w.wait(300)
             await set_limits(w, '', '', PIN)
         await section('multi-mint and offline', multi_offline)
+
+        async def frees():
+            # the day frees what came back: a token taken back (only its fee stays), a failed payment (only what the mint kept)
+            await w.use(B); u0 = await w.ev("Nutcade.r8.spentDay()")
+            tok, e = await w.send_ecash(300); u1 = await w.ev("Nutcade.r8.spentDay()")
+            t0 = await w.ev("Nutcade.S.txs.find(t=>t.token&&t.amount===300&&t.status==='pending').id")
+            await w.click('[data-act=tab][data-tab=history]'); await w.wait(150); await w.ev(f"Nutcade.closeSheet(); document.querySelector('[data-act=tx][data-id=\"{t0}\"]')?.click()"); await w.wait(300)
+            await w.ev("document.querySelector('[data-act=reclaim]')?.click()"); await w.until(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(t0)}).status==='reclaimed'", 20000); await w.ev("Nutcade.closeSheet()")
+            u2 = await w.ev("Nutcade.r8.spentDay()")
+            check('frees: a token sent counts, and taken back frees its amount (no-fee mint: back to where it was)', u1 - u0 == 300 and u2 == u0, (u0, u1, u2))
+            fm = 'http://127.0.0.1:3340'; await w.add_mint(fm); await w.use(fm); await w.receive_ln(500)
+            u3 = await w.ev("Nutcade.r8.spentDay()"); await w.pay_ln(invoice(200, B)); await w.wait(1500)
+            u4 = await w.ev("Nutcade.r8.spentDay()")
+            check('frees: a payment that fails and comes back counts nothing (no fee on this mint)', u4 == u3 and await w.ev("Nutcade.S.txs.some(t=>t.mint==='http://127.0.0.1:3340'&&t.type==='out'&&t.status==='failed')"), (u3, u4))
+            await w.use(B)
+        await section('frees', frees)
 
         async def incoming_free():
             # what comes in is never limited: claiming a token, and swapping a token from another mint into yours
@@ -439,10 +477,17 @@ async def main():
             await set_pin(d)
             ref = await wallet(b); await ref.create(); await ref.add_mint(B); await set_pin(ref)
             check('duress: a wallet with only a PIN already has the same vault fields (the second part is always there)', await ref.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault'))).sort()") == await d.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault'))).sort()"))
+            ref_names = await ref.ev("Object.keys(localStorage).sort()")
+            await settings(ref); ref_acts = await ref.ev("[...document.querySelectorAll('#app [data-act]')].map(e=>e.dataset.act).filter(a=>!/^(tab|jump|copy)$/.test(a)).sort()")
             await ref.pg.context.close()
+            check('PIN set: storage names are only the device\'s own (the same in any wallet with a PIN)', await d.ev("Object.keys(localStorage).sort()") == ref_names, (await d.ev("Object.keys(localStorage).sort()"), ref_names))
+            plain = await d.ev(PLAIN_JS)
+            kids = await d.ev("Object.keys(Nutcade.S.counters)")
+            check('PIN set: plain storage has none of the wallet (no mint, keyset, counter, log or trophy)', not any(x in plain for x in [A, B, '3338', '3339'] + kids) and not re.search(r'counters|mintlog|opsdone|trophies|"mints"', plain), plain[:300])
             ref_keys = await d.ev("Object.keys(localStorage).sort()"); ref_vault = await d.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault'))).sort()")
             ref_slot = await d.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault')).slot||{}).sort()")
             real_hist = await d.ev("Nutcade.S.txs.map(t=>t.id)"); real_bal = await d.bal()
+            spent0 = await d.ev("Nutcade.r8.spentDay()"); await set_limits(d, '', str(spent0 + 100))
             # set: needs the real PIN, must differ from it
             await settings(d); await d.click('[data-act=duressOpen]'); await d.wait(250)
             await pad(d, '000000'); await d.wait(800)
@@ -455,12 +500,21 @@ async def main():
             await d.ev("Nutcade.closeSheet()")
             real_after = await d.bal(); real_vault_ct = await d.ev("(async()=>{await Nutcade.vault.chain; return JSON.parse(localStorage.getItem('nutcade:vault')).data.ct})()")
             check('duress: setting it adds no storage names', await d.ev("Object.keys(localStorage).sort()") == ref_keys, (await d.ev("Object.keys(localStorage).sort()"), ref_keys))
+            check('duress: the 300 SAT for it count toward the spending limit (the PIN just entered lets them through)', await d.ev("Nutcade.r8.spentDay()") >= 300 + spent0, (spent0, await d.ev("Nutcade.r8.spentDay()")))
             check("duress: the vault record keeps the same fields, and its second part the same shape", await d.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault'))).sort()") == ref_vault and ref_slot == await d.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault')).slot||{}).sort()") and ref_slot)
-            # open with the duress PIN
+            # open with the duress PIN (and watch every request: nothing may go to the real wallet's own mint, Mint A)
             await d.pg.reload(); await d.wait(700)
+            plain = await d.ev(PLAIN_JS); check('locked: plain storage has none of the wallet', not any(x in plain for x in [A, B] + kids))
+            to_a = []
+            d.pg.on('request', lambda r: to_a.append(r.url) if r.url.startswith(A) and getattr(d, 'decoy_on', False) else None)
+            d.decoy_on = True
             t_dur = await unlock(d, DPIN)
             await d.until("Object.values(Nutcade.S.proofs).flat().length>0", 30000); await d.wait(800)
             dw = await d.ev("Nutcade.S.seed && Nutcade.S.seed.mnemonic")
+            tro = await d.ev("Object.keys(Nutcade.S && window.Trophies ? window.Trophies.got() : {})")
+            check("duress PIN: its trophies are its own (none of the real wallet's, like LIGHTNING ROD)", 'lightning' not in tro, tro)
+            await settings(d); dec_acts = await d.ev("[...document.querySelectorAll('#app [data-act]')].map(e=>e.dataset.act).filter(a=>!/^(tab|jump|copy)$/.test(a)).sort()")
+            check('duress PIN: its Settings has the same buttons as a wallet with only a PIN (mint list backup included)', dec_acts == ref_acts, (sorted(set(ref_acts) ^ set(dec_acts))))
             check('duress PIN: opens a different wallet (its own 12 words)', dw and dw != real_words)
             check('duress PIN: its balance is the decoy\'s (about 300 SAT), not the real one', 280 <= await d.bal() <= 300, await d.bal())
             check('duress PIN: none of the real history is there', not await d.ev(f"Nutcade.S.txs.some(t=>{json.dumps(real_hist)}.includes(t.id))"))
@@ -476,7 +530,10 @@ async def main():
             # the decoy is a working wallet: it can spend its sats
             tok, e = await d.send_ecash(100); check('duress PIN: the decoy can spend its own sats', tok and not e, e)
             dec_keys = await d.ev("Object.keys(localStorage).sort()")
-            check('duress PIN: no new storage names while the decoy is open', set(dec_keys) <= set(ref_keys), (set(dec_keys) - set(ref_keys)))
+            check('duress PIN: storage names are exactly those of a wallet with only a PIN while the decoy is open', dec_keys == ref_names, (dec_keys, ref_names))
+            plain = await d.ev(PLAIN_JS); check('duress PIN: plain storage shows nothing of the real wallet while the decoy is open', not any(x in plain for x in [A] + kids))
+            check("duress PIN: no request goes to the real wallet's own mint while the decoy is open", not to_a, to_a[:3])
+            d.decoy_on = False
             check('duress PIN: the real wallet\'s encrypted data is untouched', await d.ev("(async()=>{await Nutcade.vault.chain; return JSON.parse(localStorage.getItem('nutcade:vault')).data.ct})()") == real_vault_ct)
             check('duress PIN: the decoy never reads or writes the plain mint list of the real wallet', await d.ev("JSON.stringify(Nutcade.S.mints.map(m=>m.url))") != json.dumps([A, B]).replace(' ', ''))
             # a backup made in the decoy is the decoy's only
@@ -492,6 +549,7 @@ async def main():
             bk = await d.ev("Nutcade.r8.backupData()")
             check('real PIN: a backup of the real wallet has no trace of the decoy', dw not in bk)
             # change the real PIN: the duress PIN still opens the decoy
+            await d.ev(NOALLOW); await set_limits(d, '', '', PIN); await d.ev(NOALLOW)
             await settings(d); await d.click('[data-act=pinChange]'); await d.wait(200); await pad(d, PIN); await d.wait(800); await pad(d, '111333'); await d.wait(300); await pad(d, '111333'); await d.wait(2500)
             await d.pg.reload(); await d.wait(700); await unlock(d, DPIN)
             check('change real PIN: the duress PIN still opens the decoy', await d.ev("Nutcade.S.seed.mnemonic") == dw)
@@ -511,7 +569,7 @@ async def main():
             check('lockout: after 5 wrong tries the duress PIN waits too (same lockout)', not await d.ev("Nutcade.vault.open") and await d.ev("/Wait/.test(document.body.innerText)"))
             await d.ev("localStorage.removeItem('nutcade:pinfails')")
             # turn it off (needs the real PIN): the duress PIN is just a wrong PIN, storage names the same
-            await d.pg.reload(); await d.wait(700); await unlock(d, '111333')
+            await d.ev(NOALLOW); await d.pg.reload(); await d.wait(700); await unlock(d, '111333')
             await settings(d); await d.click('[data-act=duressOpen]'); await d.wait(250); await pad(d, '111333'); await d.until("!!document.querySelector('[data-act=duressOff]')", 8000)
             bal_on = await d.bal(); await d.click('[data-act=duressOff]'); await d.wait(300)
             if await d.ev("!!document.querySelector('[data-act=duressOffGo]')"): await d.click('[data-act=duressOffGo]'); await d.until("!document.querySelector('[data-act=duressOffGo]')", 30000); await d.wait(1500)
@@ -522,7 +580,44 @@ async def main():
             await d.ev("localStorage.removeItem('nutcade:pinfails')")
             await d.pg.reload(); await d.wait(700); await unlock(d, '111333')
             check('duress off: the real wallet is unchanged', await d.ev("Nutcade.S.seed.mnemonic") == real_words)
+            check("duress off: the sats that came back have a history note saying where from", await d.ev("Nutcade.S.txs.some(t=>t.type==='in'&&/duress PIN's wallet/.test(t.note||''))"))
             await books(d, 'duress real', broken, (A, B))
+            # PIN changes share one allowance: 3 in 24 hours, then the same answer everywhere (also after a reload)
+            await d.ev(NOALLOW)
+            async def change_pin(old, new):
+                await settings(d); await d.click('[data-act=pinChange]'); await d.wait(200); await pad(d, old); await d.wait(900)
+                e1 = await d.ev("(document.querySelector('#pinErr')||{}).innerText||''")
+                if 'available' in e1: await d.ev("Nutcade.closeSheet()"); return e1
+                await pad(d, new); await d.wait(300); await pad(d, new); await d.wait(2500)
+                e2 = await d.ev("(document.querySelector('#pinErr')||{}).innerText||''"); t = await d.toast(); await d.ev("Nutcade.closeSheet()"); return e2 or t
+            r = [await change_pin('111333', '333555'), await change_pin('333555', '444666'), await change_pin('444666', '555777'), await change_pin('555777', '666888')]
+            check('PIN changes: 3 in 24 hours go through, the 4th gets "not available right now"', all('available' not in x and 'wrong' not in x.lower() for x in r[:3]) and "aren't available" in r[3], r)
+            await d.pg.reload(); await d.wait(700); await unlock(d, '555777')
+            check('PIN changes: the allowance is not reset by unlocking again', "aren't available" in await change_pin('555777', '666888'))
+            await d.ev(NOALLOW)
+            # inside the duress wallet: a new PIN that is the real PIN is refused (never an oracle), no duress PIN of its own, no Remove PIN, no Face ID
+            await settings(d); await d.click('[data-act=duressOpen]'); await d.wait(250); await pad(d, '555777'); await d.wait(900); await pad(d, DPIN); await d.wait(300); await pad(d, DPIN)
+            await d.until("!!document.querySelector('#duressAmt')", 8000); await d.click('[data-act=duressMake]'); await d.until("/READY/.test(document.body.innerText)", 30000); await d.ev("Nutcade.closeSheet()")
+            await d.ev(NOALLOW); await d.pg.reload(); await d.wait(700); await unlock(d, DPIN)
+            r1 = await change_pin(DPIN, '555777')
+            check('in the duress wallet: changing its PIN to the real PIN is refused with the neutral answer', "aren't available" in r1, r1)
+            check('in the duress wallet: and that uses up the allowance, so it reads as an allowance run out', await d.ev("JSON.parse(localStorage.getItem('nutcade:pinchg')).length") >= 3)
+            await d.ev(NOALLOW)
+            await settings(d); await d.click('[data-act=duressOpen]'); await d.wait(250); await pad(d, DPIN); await d.wait(900)
+            r2 = await d.ev("(document.querySelector('#pinErr')||{}).innerText||''"); await d.ev("Nutcade.closeSheet()")
+            check('in the duress wallet: setting a duress PIN of its own gets the same neutral answer (no pretend success)', "aren't available" in r2, r2)
+            await d.ev(NOALLOW)
+            await settings(d); await d.click('[data-act=pinRemove]'); await d.wait(200); await pad(d, DPIN); await d.wait(1500)
+            r3 = await d.ev("(document.querySelector('#pinErr')||{}).innerText||''"); await d.ev("Nutcade.closeSheet()")
+            check('in the duress wallet: Remove PIN gets the same neutral answer and changes nothing', "aren't available" in r3 and await d.ev("!!localStorage.getItem('nutcade:vault')"), r3)
+            await d.ev(NOALLOW); await d.pg.reload(); await d.wait(700); await unlock(d, '555777')
+            check('after all that: the real PIN still opens the real wallet, untouched', await d.ev("Nutcade.S.seed.mnemonic") == real_words)
+            # Reset wallet inside the duress wallet: only that wallet starts over; the real one survives
+            rb = await d.bal(); await d.pg.reload(); await d.wait(700); await unlock(d, DPIN)
+            await settings(d); await d.click('[data-act=resetAsk]'); await d.wait(200); await d.fill('#confirmWord', 'RESET'); await d.click('[data-act=doReset]'); await d.wait(2500)
+            check('reset inside the duress wallet: the vault is still there (no plain wallet next to it)', await d.ev("!!localStorage.getItem('nutcade:vault') && !localStorage.getItem('nutcade:seed') && !localStorage.getItem('nutcade:proofs')"))
+            await unlock(d, '555777')
+            check('reset inside the duress wallet: the real wallet is all there', await d.ev("Nutcade.S.seed.mnemonic") == real_words and await d.bal() == rb, (await d.bal(), rb))
             await d.pg.context.close()
         await section('duress', duress)
 
@@ -613,6 +708,52 @@ async def main():
             await n.pg.context.close()
         await section('nut06', nut06)
 
+        CF, CM = 'http://127.0.0.1:3343', 'http://127.0.0.1:3344'   # 3 items per request with input fees; 150 items per request
+        def size_watch(seen):
+            async def watch(route):
+                try:
+                    body = json.loads(route.request.post_data or '{}')
+                    for k in ('inputs', 'outputs', 'Ys'):
+                        if isinstance(body.get(k), list): p = route.request.url.split('/v1/')[-1]; seen[p] = max(seen.get(p, 0), len(body[k]))
+                except Exception: pass
+                await route.fallback()
+            return watch
+        async def nut06_more():
+            # a fee mint with a limit of 3: each step pays its own input fee, and the history and "Need" show the real total
+            seen = {}; f = await wallet(b); await f.create(); await f.add_mint(CF); await f.use(CF); await f.pg.route(f'{CF}/v1/**', size_watch(seen))
+            for _ in range(8): await f.receive_ln(7)
+            b0 = await f.bal(CF); tok, e = await f.send_ecash(10)
+            l, pp = await f.ev(LEDGER + f"({json.dumps(CF)})")
+            fees = await f.ev(f"Nutcade.S.txs.filter(t=>t.mint==={json.dumps(CF)}&&t.type==='out').reduce((a,t)=>a+(t.fee||0),0)")
+            check('NUT-06 fee mint (3 per request): a send works in steps, no request over 3 items', tok and not e and max(seen.values() or [0]) <= 3, (e, seen))
+            check('NUT-06 fee mint: every step paid its own fee, and the history shows them all (history = balance, fees = what left beyond the 10)', l == pp and b0 - pp == 10 + fees, (b0, pp, fees))
+            e2, txt = await f.pay_ln(invoice(5, B))
+            l, pp = await f.ev(LEDGER + f"({json.dumps(CF)})")
+            check('NUT-06 fee mint: a Lightning payment works in steps, no request over 3 items, history = balance', not e2 and max(seen.values() or [0]) <= 3 and l == pp, (e2, seen, l, pp))
+            e3, q3 = await f.pay_ln(invoice(await f.bal(CF) - 3, B))
+            m3 = re.search(r'Need ([\d,]+) SAT including fees', e3 or '')
+            check('NUT-06 fee mint: "Need X including fees" counts the fees of every step', m3 and int(m3.group(1).replace(',', '')) > await f.bal(CF), (e3, await f.bal(CF)))
+            await f.pg.context.close()
+            # a limit between 128 and 999: 160 coins, a send that needs more than 150 of them
+            seen = {}; g = await wallet(b); await g.create(); await g.add_mint(CM); await g.use(CM); await g.pg.route(f'{CM}/v1/**', size_watch(seen))
+            for _ in range(16): await g.receive_ln(1023)
+            n = await g.ev(f"Nutcade.S.proofs[{json.dumps(CM)}].length")
+            tok, e = await g.send_ecash(16000)
+            check('NUT-06 limit 150: a send that needs over 150 coins is made in steps, no request over 150 items', n >= 160 and tok and not e and max(seen.values() or [0]) <= 150, (n, e, seen))
+            l, pp = await g.ev(LEDGER + f"({json.dumps(CM)})"); check('NUT-06 limit 150: history = balance', l == pp, (l, pp))
+            await g.pg.context.close()
+            # a mint that starts enforcing its limit after NUTCADE read its info: refused once, info read again, done in steps
+            async def hide(route):
+                r = await route.fetch(); j = await r.json(); j.pop('max_array_length', None); await route.fulfill(response=r, body=json.dumps(j))
+            h = await wallet(b); await h.pg.route(f'{C}/v1/info', hide); await h.create(); await h.add_mint(C); await h.use(C)
+            for _ in range(6): await h.receive_ln(7)
+            known = await h.ev(f"Nutcade.r8.mintMax({json.dumps(C)})"); await h.pg.unroute(f'{C}/v1/info')
+            tok, e = await h.send_ecash(30)
+            l, pp = await h.ev(LEDGER + f"({json.dumps(C)})")
+            check('NUT-06: a mint enforcing a limit NUTCADE didn\'t know: refused once, info read again, sent in steps, nothing lost', known == 0 and tok and not e and l == pp and await h.ev("Nutcade.S.ops.length===0"), (known, e, l, pp))
+            await h.pg.context.close()
+        await section('nut06more', nut06_more)
+
         # ======================= stay upright =======================
         IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
         IPAD = 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
@@ -629,6 +770,10 @@ async def main():
                 await u.pg.set_viewport_size({'width': 390, 'height': 844}); await u.wait(300)
                 check(f'upright {lang}: gone again when held upright', not await u.ev(vis))
                 await u.pg.context.close()
+            u = await wallet(b, 320, 568, 'en', ua=IPHONE); await u.create(); await u.home(); await u.ev("document.querySelector('[data-act=pickMint]').click()"); await u.wait(300)
+            await u.pg.focus('#mintUrl'); await u.pg.set_viewport_size({'width': 320, 'height': 280}); await u.wait(500)
+            check('upright: a keyboard shrinking a portrait phone (320x280) never brings up the card over the form', not await u.ev("(()=>{const e=document.querySelector('#upright'); return !!e && getComputedStyle(e).display!=='none' && e.getBoundingClientRect().width>0})()"))
+            await u.pg.context.close()
             for name, ua, vw, vh, mob in [('iPad', IPAD, 1180, 820, True), ('desktop', None, 1440, 900, False)]:
                 u = await wallet(b, vw, vh, 'en', mobile=mob, ua=ua); await u.create()
                 check(f'upright: a {name} in landscape is left alone', not await u.ev("(()=>{const e=document.querySelector('#upright'); return !!e && getComputedStyle(e).display!=='none' && e.getBoundingClientRect().width>0})()"))
@@ -748,6 +893,19 @@ async def main():
                 check(f'looks {lang}: none of them is wider than 320 px', not wide, wide)
                 await k.pg.context.close()
         await section('looks', looks)
+
+        async def okkey():
+            k = await wallet(b, 320, 568); await k.create(); await k.add_mint(B); await k.use(B); await k.receive_ln(2000); await set_pin(k)
+            res = {}
+            await settings(k); await k.click('[data-act=limOpen]'); await k.wait(200)
+            await k.ev("const e=document.querySelector('#limPer'); e.value='100'; e.dispatchEvent(new Event('input',{bubbles:true}))"); await k.click('[data-act=limSave]'); await k.wait(300)
+            res['limit save'] = await k.ev(OKKEY_JS); await pad(k, PIN, '#layer [data-pinpad]'); await k.wait(1500)
+            n0 = await k.ev("Nutcade.S.txs.length"); await ways(k, B)['ecash'](300); await outcome(k, n0); res['over the limit'] = await k.ev(OKKEY_JS)
+            await k.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
+            await settings(k); await k.click('[data-act=duressOpen]'); await k.wait(200); res['duress PIN'] = await k.ev(OKKEY_JS); await pad(k, PIN); await k.wait(900); res['duress choose'] = await k.ev(OKKEY_JS)
+            check('looks 320x568: the PIN pad\'s OK key is on screen without scrolling (limit save, over the limit, duress)', all(res.values()), res)
+            await k.pg.context.close()
+        await section('okkey', okkey)
 
         check('round 8: the books add up everywhere (history = balance)', not broken, broken)
         print('SUMMARY', sum(1 for r in results if r[1]), 'passed,', sum(1 for r in results if not r[1]), 'failed')

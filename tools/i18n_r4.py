@@ -829,6 +829,8 @@ ROWS = [
 ("Payment request couldn't be delivered: the sats came back", "No se pudo entregar el pago de la solicitud: los sats volvieron", "Não foi possível entregar o pagamento do pedido: os sats voltaram", "Die Zahlung an die Anfrage konnte nicht zugestellt werden: die Sats sind zurück", "Le paiement de la demande n'a pas pu être livré : les sats sont revenus"),
 ("WAITING FOR A RELAY", "ESPERANDO UN RELAY", "AGUARDANDO UM RELAY", "WARTET AUF EIN RELAY", "EN ATTENTE D'UN RELAIS"),
 # --- round 8 (1.13): spending limit, duress PIN, stay upright, report a problem ---
+("PIN changes aren't available right now. Try again later.", "Los cambios de PIN no están disponibles ahora. Inténtalo más tarde.", "Mudanças de PIN não estão disponíveis agora. Tente mais tarde.", "PIN-Änderungen sind gerade nicht möglich. Versuch es später noch einmal.", "Les changements de PIN ne sont pas disponibles pour le moment. Réessayez plus tard."),
+("Set a PIN first to use the limit for one payment.", "Pon primero un PIN para usar el límite por pago.", "Defina um PIN primeiro para usar o limite por pagamento.", "Lege zuerst eine PIN fest, um das Limit pro Zahlung zu nutzen.", "Définissez d'abord un PIN pour utiliser la limite par paiement."),
 ("Spending limit", "Límite de gasto", "Limite de gastos", "Ausgabenlimit", "Limite de dépenses"),
 ("PIN above {#} SAT", "PIN por encima de {#} SAT", "PIN acima de {#} SAT", "PIN über {#} SAT", "PIN au-delà de {#} SAT"),
 ("{#} SAT a day", "{#} SAT al día", "{#} SAT por dia", "{#} SAT pro Tag", "{#} SAT par jour"),
