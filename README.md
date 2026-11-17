@@ -16,6 +16,24 @@ A Cashu ecash wallet with a 1980s arcade built in.
 
 NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a text message. It works in any modern browser on phone or desktop, with nothing to install, and keeps your wallet protected by a standard 12-word recovery phrase.
 
+## Get NUTCADE: add it to your home screen
+
+**The only real address is https://random21m.github.io/nutcade/** · There's no app-store app; anything else calling itself NUTCADE isn't us.
+
+Adding it to your home screen makes NUTCADE open full-screen like an app and work offline. **On iPhone it also keeps your wallet safe:** Safari can clear the storage of websites you haven't opened in a while, but a Home Screen app keeps it.
+
+| Device | Steps |
+|---|---|
+| **iPhone / iPad** (Safari) | 1. Open the link above in **Safari**. 2. Tap **Share** (the square with an arrow; on newer iOS, tap **•••** first). 3. Tap **Add to Home Screen**, then **Add**. 4. From now on, open NUTCADE from the new icon. |
+| **Android** (Chrome) | 1. Open the link in **Chrome**. 2. Tap **⋮** (top right). 3. Tap **Install app** or **Add to Home screen**, then **Install**. 4. Open it from the new icon. |
+| **Computer** (Chrome or Edge) | Open the link and click the **install icon** at the right end of the address bar (or **⋮ → Install NUTCADE**). It opens in its own window. |
+| **Mac** (Safari) | Open the link, then **File → Add to Dock**. |
+
+**Good to know**
+- Each browser and each icon keeps its own wallet. Set it up once in the place you'll use it.
+- Write down your **12 words** when you create the wallet. They're the only way back if the phone is lost or the browser data is cleared.
+- Updates arrive by themselves: the next time you open NUTCADE, it loads the new version.
+
 <p align="center"><a href="https://x.com/Random21m/status/2121716082323165262"><img src="docs/screens/video-poster.jpg" alt="Watch the NUTCADE video on X" width="720"></a><br><sub>▶ Click to watch the NUTCADE video (1 minute, sound on)</sub></p>
 
 <table>
@@ -101,7 +119,7 @@ Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons
 
 ## Getting started
 
-1. Open https://random21m.github.io/nutcade/. On iPhone, tap Share → **Add to Home Screen** first and open NUTCADE from that icon, so Safari keeps your wallet.
+1. Open https://random21m.github.io/nutcade/ and add it to your home screen ([how, for every device](#get-nutcade-add-it-to-your-home-screen)). Then open NUTCADE from that icon.
 2. Tick the box to say you understand, then tap **Create a new wallet**.
 3. Write your **12 words** on paper, in order. Then type back the three words NUTCADE asks for.
 4. Set a PIN when NUTCADE offers it (recommended).
