@@ -904,6 +904,135 @@ async def main():
             await k.pg.context.close()
         await section('okkey', okkey)
 
+        # ======================= fix round 2 (the 1.13.0 recheck) =======================
+        async def r2_reset():
+            # Reset wallet with a PIN (and with a duress PIN) leaves no vault: the start screen, as in 1.12.1
+            for duress in (False, True):
+                z = await wallet(b); await z.create(); await z.add_mint(B); await z.use(B); await z.receive_ln(500); await set_pin(z)
+                if duress:
+                    await settings(z); await z.click('[data-act=duressOpen]'); await z.wait(250); await pad(z, PIN); await z.wait(900); await pad(z, DPIN); await z.wait(300); await pad(z, DPIN)
+                    await z.until("!!document.querySelector('#duressAmt')", 8000); await z.click('[data-act=duressMake]'); await z.until("/READY/.test(document.body.innerText)", 30000); await z.ev("Nutcade.closeSheet()")
+                await settings(z); await z.click('[data-act=resetAsk]'); await z.wait(200); await z.fill('#confirmWord', 'RESET'); await z.click('[data-act=doReset]'); await z.wait(2500)
+                tag = 'PIN and duress PIN' if duress else 'PIN'
+                check(f'reset with a {tag}: no vault left, the start screen (not a dead lock screen)', await z.ev("!localStorage.getItem('nutcade:vault') && !!document.querySelector('[data-act=gateCreate]') && !document.querySelector('[data-pinpad]')"), await z.ev("[Object.keys(localStorage), document.body.innerText.slice(0,80)]"))
+                await z.pg.context.close()
+            # Remove PIN: no vault comes back afterwards
+            z = await wallet(b); await z.create(); await z.add_mint(B); await set_pin(z)
+            await settings(z); await z.click('[data-act=pinRemove]'); await z.wait(200); await pad(z, PIN); await z.wait(2500); await z.ev("Nutcade.S.prefs.theme='amber'; Nutcade.render()"); await z.ev("document.querySelector('[data-act=setTheme][data-t=neon]')?.click()"); await z.wait(1500)
+            check('remove PIN: the vault is gone and stays gone after a settings change', await z.ev("!localStorage.getItem('nutcade:vault') && !Nutcade.vault.on"))
+            await z.pg.context.close()
+        await section('r2reset', r2_reset)
+
+        async def r2_mints():
+            seen = {}
+            z = await wallet(b); await z.create(); await z.add_mint(B); await z.add_mint(C); await z.use(B); await z.receive_ln(2000)
+            await z.pg.route(f'{C}/v1/**', size_watch(seen))
+            # a move INTO a mint that takes 3 coins per request: refused before anything is paid
+            b0 = await z.bal(B)
+            await z.ev("Nutcade.closeSheet()"); await z.click('[data-act=tab][data-tab=mints]'); await z.wait(200); await z.click('#app [data-act=moveOpen]'); await z.wait(250)
+            await z.ev(f"(()=>{{const f=document.querySelector('#mvFrom'), t=document.querySelector('#mvTo'); if(f){{f.value={json.dumps(B)}; f.dispatchEvent(new Event('change',{{bubbles:true}}))}} if(t){{t.value={json.dumps(C)}; t.dispatchEvent(new Event('change',{{bubbles:true}}))}}}})()")
+            await z.fill('#amtIn', '300'); await z.click('[data-act=moveQuote]'); await z.wait(2500)
+            e = await z.err(); await z.ev("document.querySelector('#mvGo')?.click()"); await z.wait(2500); await z.ev("Nutcade.closeSheet()")
+            check('move into a 3-coins-per-request mint: 300 (4 coin sizes) is refused before anything is paid, with the Receive screen\'s message', 'coin sizes' in e and await z.bal(B) == b0 and not await z.ev(f"Nutcade.S.quotes.some(q=>q.mint==={json.dumps(C)})"), (e, b0 - await z.bal(B)))
+            # a token from another mint swapped into it: refused before anything is paid
+            fz = await wallet(b); await fz.create(); await fz.add_mint(A); await fz.use(A); await fz.receive_ln(2000); tok, _ = await fz.send_ecash(1000); await fz.pg.context.close()   # (about 990 arrives: far more than 3 coin sizes)
+            await z.use(C); n0 = await z.ev("Nutcade.S.txs.length")
+            await z.home(); await z.click('[data-act=receive]'); await z.wait(150); await z.click('[data-act=recvMethod][data-m=ecash]'); await z.wait(100)
+            await z.ev(f"(()=>{{const t=document.querySelector('#tokIn'); t.value={json.dumps(tok)}; t.dispatchEvent(new Event('input',{{bubbles:true}}))}})()"); await z.wait(300)
+            await z.click('[data-act=doReceiveToken]'); await z.until("!!document.querySelector('[data-act=swapToken]')", 8000)
+            await z.ev("document.querySelector('[data-act=swapToken]')?.click()"); await z.until("!!((document.querySelector('#sheetErr')||{}).innerText||'').trim() || /SWAPPED|received/i.test((document.querySelector('.sheet-body')||{}).innerText||'')", 30000)
+            r = await z.err(); await z.ev("Nutcade.closeSheet()")
+            check('a token from another mint swapped into a 3-coins-per-request mint is refused before anything is paid', 'coin sizes' in r and not await z.ev(f"Nutcade.S.quotes.some(q=>q.mint==={json.dumps(C)})"), r)
+            await z.pg.context.close()
+        await section('r2mints', r2_mints)
+
+        async def r2_reclaim():
+            for M, tag in ((C, 'no-fee'), (CF, 'fee')):
+                seen = {}
+                z = await wallet(b); words = await z.create(); await z.add_mint(M); await z.use(M); await z.pg.route(f'{M}/v1/**', size_watch(seen))
+                for a in (7, 7, 7, 56, 448, 3584, 14, 112, 896, 3584, 448, 56): await z.receive_ln(a)
+                b0 = await z.bal(M); tok, e = await z.send_ecash(5000); b1 = await z.bal(M)
+                t0 = await z.ev("(Nutcade.S.txs.find(t=>t.amount===5000&&t.token)||{}).id")
+                n = await z.ev(f"(Nutcade.S.txs.find(t=>t.id==={json.dumps(t0)})||{{sent:[]}}).sent.length")
+                # another wallet claims it in parts (on the fee mint too)
+                o = await wallet(b); await o.create(); await o.add_mint(M); await o.use(M); seen2 = {}; await o.pg.route(f'{M}/v1/**', size_watch(seen2))
+                _, e2, _ = await o.receive_token(tok); await o.until(f"(Nutcade.S.proofs[{json.dumps(M)}]||[]).reduce((t,p)=>t+p.amount,0)>4900", 30000)
+                got = await o.bal(M); fee_o = await o.ev("Nutcade.S.txs.reduce((a,t)=>a+(t.fee||0),0)")
+                check(f'{tag} 3-coin mint: a {n}-coin token of 5,000 is claimed by another wallet in parts (each part pays the mint\'s real fee), never a request over 3', got >= 4990 and max(seen2.values() or [0]) <= 3, (e2, got, fee_o, seen2))
+                await o.pg.context.close()
+                # and a second token, never claimed, is taken back in parts
+                tok2, e3 = await z.send_ecash(3000); b2 = await z.bal(M); t2 = await z.ev("(Nutcade.S.txs.find(t=>t.amount===3000&&t.token)||{}).id")
+                await z.click('[data-act=tab][data-tab=history]'); await z.wait(150); await z.ev(f"Nutcade.closeSheet(); document.querySelector('[data-act=tx][data-id=\"{t2}\"]')?.click()"); await z.wait(300)
+                await z.ev("document.querySelector('[data-act=reclaim]')?.click()"); await z.until(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(t2)}).status==='reclaimed'", 40000); await z.wait(1500)
+                back = await z.bal(M) - b2; er = await z.err(); await z.ev("Nutcade.closeSheet()")
+                l, pp = await z.ev(LEDGER + f"({json.dumps(M)})")
+                check(f'{tag} 3-coin mint: an unclaimed token is taken back in parts (never a request over 3), history = balance', back >= 2990 and max(seen.values() or [0]) <= 3 and l == pp, (back, er[:120], seen, l, pp))
+                notes = await z.ev("Nutcade.S.txs.map(t=>t.note||'').filter(n=>/part \\d/.test(n))")
+                check(f'{tag} 3-coin mint: notes of parts have no leading space', all(not n.startswith(' ') for n in notes), notes[:3])
+                await z.pg.context.close()
+        await section('r2reclaim', r2_reclaim)
+
+        async def r2_melt():
+            for M, tag, coins, pay in ((C, 'no-fee', (4096,), 2100), (CF, 'fee', (1024,), 700), (C, 'no-fee', (3584, 448, 56), 3900)):
+                seen = {}
+                z = await wallet(b); await z.create(); await z.add_mint(M); await z.use(M); await z.pg.route(f'{M}/v1/**', size_watch(seen))
+                for a in coins: await z.receive_ln(a)
+                await z.home(); await z.click('[data-act=send]'); await z.wait(150); await z.click('[data-act=sendMethod][data-m=ln]'); await z.wait(100)
+                await z.fill('#destIn', invoice(pay, B)); await z.click('[data-act=doMeltQuote]'); await z.until("!!document.querySelector('#payBtn')", 15000); await z.wait(300)
+                sheet = await z.sheet_text()
+                check(f'{tag} 3-coin mint: the pay sheet does not promise the unused reserve back, and says part of the change may be kept', 'comes back as change' not in sheet and re.search(r'kept by the mint|may keep', sheet), sheet[-260:])
+                tot = re.search(r'Total, at most\s*([\d,]+)', sheet); b0 = await z.bal(M)
+                await z.click('#payBtn'); r = await outcome(z, await z.ev("Nutcade.S.txs.length") - 1, 40000); await settled(z)
+                ok = await z.ev(f"Nutcade.S.txs.some(t=>t.type==='out'&&t.method==='ln'&&t.amount==={pay}&&t.status==='done')")
+                l, pp = await z.ev(LEDGER + f"({json.dumps(M)})")
+                check(f'{tag} 3-coin mint: paying {pay} from {"+".join(map(str, coins))} works in steps, never a request over 3, cost within "Total, at most", history = balance', ok and max(seen.values() or [0]) <= 3 and l == pp and tot and b0 - pp <= int(tot.group(1).replace(',', '')), (r[0], seen, l, pp, tot and tot.group(1), b0 - pp))
+                await z.pg.context.close()
+        await section('r2melt', r2_melt)
+
+        async def r2_multi():
+            seen = {}
+            z = await wallet(b); await z.create(); await z.add_mint(B); await z.add_mint(C); await z.pg.route(f'{C}/v1/**', size_watch(seen))
+            await z.use(C)
+            for a in (7, 7, 7, 56, 448, 3584, 14, 112, 896): await z.receive_ln(a)
+            await z.use(B); await z.receive_ln(1500)
+            amt = await z.bal(C) + 800
+            await z.home(); await z.click('[data-act=send]'); await z.wait(150); await z.click('[data-act=sendMethod][data-m=ln]'); await z.wait(100)
+            await z.fill('#destIn', invoice(amt, 'http://127.0.0.1:3340')); await z.click('[data-act=doMeltQuote]'); await z.until("!!document.querySelector('#mppBtn')", 20000); await z.wait(300)
+            await z.click('#mppBtn'); await z.until("!!document.querySelector('#mppPay') || !!document.querySelector('#layer .notice.red')", 40000); await z.wait(300)
+            if await z.ev("!!document.querySelector('#mppPay')"): await z.click('#mppPay')
+            await z.until("!document.querySelector('#mppPay')", 60000); await z.wait(4000)
+            txt = await z.sheet_text(); st = await z.ev("Nutcade.S.txs.filter(t=>/part \\d of/.test(t.note||'')).map(t=>t.status)")
+            words_ok = not ('came back' in txt and 'done' in st and 'went through' not in txt)
+            check('multi-mint with a 3-coin mint as one part: never a request over 3, and the sheet says what was booked', max(seen.values() or [0]) <= 3 and words_ok, (seen, st, txt[:200]))
+            await books(z, 'r2 multi', broken, (B, C)); await z.pg.context.close()
+        await section('r2multi', r2_multi)
+
+        async def r2_decoy():
+            # the sats put in the duress wallet are its own coins at once: the real words never find them
+            d = await wallet(b); words = await d.create(); await d.add_mint(B); await d.use(B); await d.receive_ln(3000); await set_pin(d)
+            await settings(d); await d.click('[data-act=duressOpen]'); await d.wait(250); await pad(d, PIN); await d.wait(900); await pad(d, DPIN); await d.wait(300); await pad(d, DPIN)
+            await d.until("!!document.querySelector('#duressAmt')", 8000); await d.fill('#duressAmt', '300'); await d.click('[data-act=duressMake]'); await d.until("/READY/.test(document.body.innerText)", 30000); await d.ev("Nutcade.closeSheet()")
+            real = await d.bal()
+            r = await wallet(b); await r.ev("Nutcade.closeSheet()"); await r.pg.check('#ack'); await r.click('[data-act=gateRestore]'); await r.until("!!document.querySelector('#phraseIn')", 5000)
+            await r.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); const x=document.querySelector('#rmExtra'); x.value={json.dumps(B)}}})()")
+            await r.click('[data-act=doRestorePhrase]'); await r.until("/SCAN COMPLETE/.test(document.body.innerText) || Object.values(Nutcade.S.proofs).flat().length>0", 120000); await r.wait(3000)
+            found = await r.bal(); await r.pg.context.close()
+            check('duress set-up: the real words find exactly the real balance (the duress wallet\'s sats are its own coins at once)', found == real, (found, real))
+            await d.pg.reload(); await d.wait(700); await unlock(d, DPIN)
+            check('duress set-up: the duress wallet holds its sats as its own coins from the start (nothing left to claim)', await d.bal() == 300 and not await d.ev("Nutcade.S.txs.some(t=>t.incoming&&t.status==='pending')"), (await d.bal(), await d.ev("Nutcade.S.txs.map(t=>[t.status,t.amount])")))
+            # Change PIN to the real PIN inside the duress wallet: refused at the same step, with the same words, as when the allowance is used up
+            async def refusal_step(new):
+                await settings(d); await d.click('[data-act=pinChange]'); await d.wait(200); await pad(d, DPIN); await d.wait(900)
+                e1 = await d.ev("(document.querySelector('#pinErr')||{}).innerText||''")
+                if e1: await d.ev("Nutcade.closeSheet()"); return ('after current PIN', e1)
+                await pad(d, new); await d.wait(300); await pad(d, new); await d.wait(2500)
+                e2 = await d.ev("(document.querySelector('#pinErr')||{}).innerText||''"); await d.ev("Nutcade.closeSheet()"); return ('after new PIN', e2)
+            await d.ev(NOALLOW); a1 = await refusal_step(PIN)
+            await d.ev("localStorage.setItem('nutcade:pinchg', JSON.stringify([Date.now(),Date.now(),Date.now()]))"); a2 = await refusal_step('777999')
+            check('duress wallet: "change PIN to the real PIN" is refused at the same step and with the same words as a used-up allowance', a1 == a2 and "aren't available" in a1[1], (a1, a2))
+            await d.ev(NOALLOW); await d.pg.context.close()
+        await section('r2decoy', r2_decoy)
+
         check('round 8: the books add up everywhere (history = balance)', not broken, broken)
         print('SUMMARY', sum(1 for r in results if r[1]), 'passed,', sum(1 for r in results if not r[1]), 'failed')
         await b.close()

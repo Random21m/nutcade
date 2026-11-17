@@ -3240,7 +3240,8 @@ async function unwrapDek(w, kek) { return crypto.subtle.unwrapKey('raw', b64d(w.
 async function sealData() {
   const iv = rnd(12);
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, vault.dek, new TextEncoder().encode(JSON.stringify(vault.data)));
-  const rec = raw.get('vault', {}), box = { iv: b64e(iv), ct: b64e(ct) };
+  const rec = raw.get('vault', null), box = { iv: b64e(iv), ct: b64e(ct) };
+  if (!rec) return;   // (the vault was removed, by Remove PIN or a reset: a write still queued never brings it back)
   if (vault.decoy) { if (!rec.slot) throw new Error("This browser won't save data."); rec.slot.data = box; } else rec.data = box;
   if (!raw.set('vault', rec)) throw new Error("This browser won't save data.");
 }
@@ -9573,7 +9574,10 @@ const A = {
   doReset: () => {
     if (val('confirmWord').trim().toUpperCase() !== 'RESET') { showErr(new Error('Type RESET to confirm.')); return; }
     if (vault.on && vault.open && vault.decoy) { resetPart().then(() => location.reload(), e => showErr(e)); return; }   // (the duress PIN's wallet is emptied; the real wallet is never touched)
-    try { for (const k of Object.keys(localStorage)) if (/^nutcade:(seed|counters|mints|active|proofs|pending|txs|quotes|p2pk|requests|contacts|dmseen|vault|pinfails|piggy|challenges|nwc|nwcseen|blocked|lnurlwUsed|ops|opsdone|imports|gen)$/.test(k)) localStorage.removeItem(k); } catch (e) {}
+    // the vault is closed first, so nothing written below can land in it (or bring it back); then every record of the
+    // wallet goes, with the PIN, its tries and changes, and only the device's own settings and arcade tables stay
+    vault.on = false; vault.open = false; vault.decoy = false; vault.dek = null; vault.data = {};
+    try { for (const k of Object.keys(localStorage)) { if (!k.startsWith('nutcade:')) continue; const n = k.slice(8); if (n === 'prefs' || (devKey(n) && !/^(vault|pinfails|pinchg|gen)$/.test(n))) continue; localStorage.removeItem(k); } } catch (e) {}
     try { npcSocketStop(); dmStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
     location.reload();
   },
