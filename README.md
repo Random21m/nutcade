@@ -144,7 +144,7 @@ Your own **ecash address** is under Receive → Ecash. Friends can send ecash to
 
 ### Sending by sound
 
-On a token, payment request or invoice screen, tap **Play as sound**. On the other phone, tap **Listen** on the wallet screen (or in the scanner, or under Receive → Ecash) and hold the phones close. The code plays on a loop until you stop it, so a block missed on one pass is picked up on the next; a typical token takes 10 to 20 seconds a pass. Turn the volume up and keep the room fairly quiet. Anyone close enough to hear it could catch a token, the same as photographing its QR code, so play tokens only near the person you're paying. Sound works between NUTCADE wallets only.
+On a token, payment request or invoice screen, tap **Play as sound**. On the other phone, tap **Listen** on the wallet screen (or in the scanner, or under Receive → Ecash) and hold the phones close. The code plays on a loop until you stop it, so a block missed on one pass is picked up on the next; a pass takes about 4 seconds for a small token and up to about 20 seconds for a large one. Turn the volume up and keep the room fairly quiet. Anyone close enough to hear it could catch a token, the same as photographing its QR code, so play tokens only near the person you're paying. Sound works between NUTCADE wallets only.
 
 The format is open: see [docs/SOUND-SPEC.md](docs/SOUND-SPEC.md). Other wallets are welcome to implement it.
 
