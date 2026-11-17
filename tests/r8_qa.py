@@ -1,0 +1,717 @@
+"""Round 8 (1.13): the wallet-wide spending limit, the duress PIN, NUT-06 request-size limits (a mint that takes at
+most 3 items per request), "stay upright", the problem-report form, pinned GitHub Actions, and the 1.12.1 recheck's
+polish. Uses the local mints (3338 fee, 3339 no fee, 3342 no fee with max_array_length 3) and mock_nostr.py.
+
+The spending-limit grid: every way sats leave (Lightning, ecash, payment request, gift, bounty, Extra Life, move
+between mints, Wallet Connect, zap, Lightning address, contact over Nostr, multi-mint, offline, a Numo-style checkout)
+x under / exactly at / over / over-then-PIN, on a fee and a no-fee mint, with and without a PIN, two taps and two
+tabs at once, after a reload and across the 24-hour window (clock moved forward)."""
+import asyncio, json, os, re, time, urllib.request
+from playwright.async_api import async_playwright
+from wallet_qa import W, check, results, A, B, URL, invoice, outside_net
+from r7_qa import mock, forward, LEDGER, OVER_JS, nwc, make_nwc, zap_to, books
+
+C = 'http://127.0.0.1:3342'   # max_array_length 3, no fee
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+PIN, DPIN = '135791', '246802'
+LANGS = ['en', 'es', 'pt', 'de', 'fr']
+
+
+async def wallet(b, vw=375, vh=667, lang='en', mobile=True, init=None, ctx=None, ua=None):
+    if ctx is None:
+        kw = dict(viewport={'width': vw, 'height': vh}, device_scale_factor=1, is_mobile=mobile, has_touch=mobile, accept_downloads=True)
+        if ua: kw['user_agent'] = ua
+        ctx = await b.new_context(**kw)
+        prefs = {'sound': False, 'music': False, 'crt': True, 'lang': lang, 'relays': ['ws://127.0.0.1:3350/relay'], 'npcHost': 'http://127.0.0.1:3350'}
+        if init: await ctx.add_init_script(init)
+        await ctx.add_init_script("window.__i18nMiss=new Set(); if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs'," + json.dumps(json.dumps(prefs)) + ")")
+        await ctx.route('https://lnurl.test/**', forward)
+    pg = await ctx.new_page(); w = W(pg, 'r8')
+    pg.on('pageerror', lambda e: w.errs.append('PAGEERROR ' + str(e)))
+    pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and not outside_net(m.text) and 'lnurl.test' not in m.text else None)
+    await pg.goto(URL); await pg.wait_for_timeout(700)
+    return w
+
+
+async def pad(w, pin, root='[data-pinpad]'):
+    for k in pin: await w.click(f'{root} [data-k="{k}"]')
+    await w.click(f'{root} [data-k=ok]')
+
+
+async def set_pin(w, pin=PIN):
+    await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=pinSet]'); await w.wait(200)
+    await pad(w, pin); await w.wait(300); await pad(w, pin)
+    await w.until("Nutcade.vault.on && Nutcade.vault.open", 20000); await w.wait(500); await w.ev("Nutcade.closeSheet()")
+
+
+async def unlock(w, pin=PIN, wait=True):
+    await w.until("!!document.querySelector('[data-pinpad]')", 8000)
+    t0 = time.time(); await pad(w, pin)
+    if wait: await w.until("Nutcade.vault.open", 20000)
+    else: await w.until("/Wrong PIN|Wait/.test((document.querySelector('#pinErr')||{}).innerText||'')", 20000)
+    dt = time.time() - t0; await w.wait(800); return dt
+
+
+async def set_lang(w, lang):
+    await settings(w)
+    await w.ev(f"(()=>{{const s=document.querySelector('#p_lang'); s.value={json.dumps(lang)}; s.dispatchEvent(new Event('change',{{bubbles:true}}))}})()"); await w.wait(300)
+
+
+async def settings(w):
+    await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
+
+
+async def set_limits(w, per, day, pin=PIN):
+    """Settings -> Security -> Spending limit; returns (error text, toast)"""
+    await settings(w); await w.click('[data-act=limOpen]'); await w.until("!!document.querySelector('#limDay')", 5000)
+    await w.ev(f"(()=>{{for(const [id,v] of [['limPer',{json.dumps(per)}],['limDay',{json.dumps(day)}]]){{const e=document.querySelector('#'+id);e.value=v;e.dispatchEvent(new Event('input',{{bubbles:true}}))}}}})()")
+    await w.click('[data-act=limSave]'); await w.wait(400)
+    if pin and await w.ev("!!document.querySelector('#layer [data-pinpad]')"):
+        await pad(w, pin, '#layer [data-pinpad]'); await w.until("!document.querySelector('#layer [data-pinpad]') || /wrong/i.test((document.querySelector('#pinErr')||{}).innerText||'')", 20000); await w.wait(300)
+    e = await w.err(); t = await w.toast(); pinerr = await w.ev("(document.querySelector('#pinErr')||{}).innerText||''")
+    await w.ev("Nutcade.closeSheet()")
+    return e or pinerr, t
+
+
+async def outcome(w, n0, ms=30000):
+    """after a spend was started: ('limit', text) when the over-the-limit screen shows, ('err', text) for an error,
+    ('ok', tx) when a new outgoing line is in the history"""
+    js = f"""(()=>{{const L=document.querySelector('#limitLayer'); if(L) return ['limit', L.innerText];
+      const e=(document.querySelector('#sheetErr')||{{}}).innerText||''; if(e.trim()) return ['err', e];
+      const n=Nutcade.S.txs.length-{n0}; if(n>0){{const t=Nutcade.S.txs.slice(0,n).find(t=>t.type==='out'&&t.status!=='failed'&&t.method!=='fee'); if(t) return ['ok', t];}}
+      return null}})()"""
+    for _ in range(ms // 250):
+        r = await w.ev(js)
+        if r: return r
+        await w.wait(250)
+    return ['timeout', await w.sheet_text()]
+
+
+async def layer_pin(w, pin=PIN):
+    await pad(w, pin, '#limitLayer [data-pinpad]')
+    await w.until("!document.querySelector('#limitLayer')", 20000)
+
+
+async def spend_estimate(w, start):
+    """the app's own number for a spend (amount + fees, at most), read from the over-the-limit screen with a 1 SAT
+    per-payment limit; the screen is then dismissed"""
+    n0 = await w.ev("Nutcade.S.txs.length"); await start(); r = await outcome(w, n0)
+    txt = r[1] if r[0] in ('limit', 'err') else ''
+    m = re.search(r'This payment is ([\d,]+) SAT', txt or '')
+    await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); document.querySelector('#limitLayer')?.remove(); Nutcade.closeSheet()"); await w.wait(200)
+    return int(m.group(1).replace(',', '')) if m else None, r
+
+
+# ---------- the ways sats leave (each starts the spend in the UI and returns; outcome() reads what happened) ----------
+def ways(w, mint, fr=None, ctx=None):
+    async def ln(a):
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=sendMethod][data-m=ln]'); await w.wait(100)
+        # (another mint's invoice: the test mints mark their own invoices paid after 0.5 s)
+        await w.fill('#destIn', invoice(a, A if mint == B else B)); await w.click('[data-act=doMeltQuote]'); await w.until("!!document.querySelector('#payBtn') || !!(document.querySelector('#sheetErr')||{}).innerText", 15000)
+        if await w.ev("!!document.querySelector('#payBtn')"): await w.wait(300); await w.click('#payBtn')
+    async def ecash(a):
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', str(a)); await w.click('[data-act=doSendEcash]')
+    async def gift(a):
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.pg.check('#giftOn')
+        await w.ev("const s=document.querySelector('#giftTo'); if (s) { s.value=''; s.dispatchEvent(new Event('change',{bubbles:true})) }")
+        k = await w.ev("(()=>{const k=crypto.getRandomValues(new Uint8Array(32)); return Array.from(CashuLib.getPubKeyFromPrivKey(k),x=>x.toString(16).padStart(2,'0')).join('')})()")
+        await w.fill('#giftKey', k); await w.fill('#amtIn', str(a)); await w.click('[data-act=doSendEcash]')
+    async def reqpay(a):
+        enc = await fr.ev(f"Nutcade.r8.newRequest({a}, 'Numo checkout').encoded")
+        await w.home(); await w.ev(f"Nutcade.handleScan({json.dumps(enc)})"); await w.wait(300); await w.click('[data-act=payReq]')
+    async def bounty(a):
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(200)
+        await w.ev(f"Nutcade.startChallenge({{game:'flipper', seed:{int(time.time()*1000) % 100000}, score:1200, by:'R8B'}})"); await w.wait(300)
+        await w.fill('#bountyAmt', str(a)); await w.click('[data-act=chalSend]')
+    async def extra(a):
+        if await w.ev("!!Nutcade.S.extra"):
+            await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(100); await w.click('[data-act=extraOpen]'); await w.wait(200)
+            await w.click('[data-act=extraCash]'); await w.wait(150); await w.click('[data-act=extraCashGo]'); await w.until("!Nutcade.S.extra", 20000); await w.wait(300)
+        await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.until("!!document.querySelector('#xlTo')", 5000); await w.wait(150)
+        await w.ev("const s=document.querySelector('#xlTo'); s.value=[...s.options].find(o=>o.text==='Heir R8').value; s.dispatchEvent(new Event('change',{bubbles:true}))")
+        await w.fill('#amtIn', str(a)); await w.click('[data-act=extraStart]')
+    async def move(a):
+        await w.use(mint); await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=mints]'); await w.wait(200); await w.click('#app [data-act=moveOpen]'); await w.wait(250)
+        other = A if mint == B else B
+        await w.ev(f"(()=>{{const f=document.querySelector('#mvFrom'), t=document.querySelector('#mvTo'); if(f){{f.value={json.dumps(mint)}; f.dispatchEvent(new Event('change',{{bubbles:true}}))}} if(t){{t.value={json.dumps(other)}; t.dispatchEvent(new Event('change',{{bubbles:true}}))}}}})()")
+        await w.fill('#amtIn', str(a)); await w.click('[data-act=moveQuote]'); await w.until("!!document.querySelector('#mvGo') || !!(document.querySelector('#sheetErr')||{}).innerText", 15000)
+        if await w.ev("!!document.querySelector('#mvGo')"): await w.wait(300); await w.click('#mvGo')
+    async def zap(a):
+        mock('/test/lnurlp', {'name': 'zed', 'zap': True}); p = mock('/test/profile', {'name': 'zed', 'lud16': 'zed@lnurl.test'})
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=sendMethod][data-m=ln]'); await w.wait(100)
+        await w.fill('#destIn', p['npub']); await w.click('[data-act=doMeltQuote]'); await w.until("!!document.querySelector('[data-act=zapQuote]')", 12000)
+        await w.fill('#amtIn', str(a)); await w.click('[data-act=zapQuote]'); await w.until("!!document.querySelector('#payBtn')", 12000); await w.wait(300); await w.click('#payBtn')
+    async def lnaddr(a):
+        await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=sendMethod][data-m=ln]'); await w.wait(100)
+        mock('/test/lnurlp', {'name': 'payee8', 'zap': False})
+        await w.fill('#destIn', 'payee8@lnurl.test'); await w.click('[data-act=doMeltQuote]'); await w.until("!!document.querySelector('#amtIn') && !!document.querySelector('[data-act=lnurlQuote], [data-act=zapQuote]')", 12000)
+        await w.fill('#amtIn', str(a)); await w.ev("document.querySelector('[data-act=lnurlQuote], [data-act=zapQuote]').click()")
+        await w.until("!!document.querySelector('#payBtn') || !!(document.querySelector('#sheetErr')||{}).innerText", 12000)
+        if await w.ev("!!document.querySelector('#payBtn')"): await w.wait(300); await w.click('#payBtn')
+    async def contact(a):
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(100); await w.click('[data-act=contactsOpen]'); await w.wait(150)
+        await w.ev("document.querySelector('[data-act=payContact]').click()"); await w.until("!!document.querySelector('[data-act=contactEcash]')", 5000)
+        await w.fill('#amtIn', str(a)); await w.click('[data-act=contactEcash]')
+    return {'ln': ln, 'ecash': ecash, 'gift': gift, 'reqpay': reqpay, 'bounty': bounty, 'extra': extra, 'move': move, 'zap': zap, 'lnaddr': lnaddr, 'contact': contact}
+
+
+async def section(name, fn):
+    only = [x for x in os.environ.get('R8_ONLY', '').split(',') if x]
+    if only and not any(name.startswith(x) for x in only): return
+    try: await fn()
+    except Exception as e:
+        check(f'{name}: ran to the end', False, repr(e)[:300])
+
+
+async def main():
+    async with async_playwright() as p:
+        b = await p.chromium.launch(**({'executable_path': os.environ['CHROME']} if os.environ.get('CHROME') else {}))
+        broken = []
+
+        # ======================= files: upright manifest, the issue form, pinned actions =======================
+        async def files():
+            man = json.load(open(os.path.join(ROOT, 'public', 'manifest.webmanifest')))
+            check('upright: the manifest asks for portrait', man.get('orientation') == 'portrait', man.get('orientation'))
+            bug = os.path.join(ROOT, '.github', 'ISSUE_TEMPLATE', 'bug.yml'); cfg = os.path.join(ROOT, '.github', 'ISSUE_TEMPLATE', 'config.yml')
+            t = open(bug).read() if os.path.exists(bug) else ''
+            check('report a problem: .github/ISSUE_TEMPLATE/bug.yml and config.yml exist', bool(t) and os.path.exists(cfg))
+            for k in ('What happened', 'Steps', 'Device', 'NUTCADE version'):
+                check(f'report a problem: the form asks for "{k}"', k.lower() in t.lower())
+            check('report a problem: the form warns never to paste the 12 words, the PIN or tokens', all(x in t.lower() for x in ('12 words', 'pin', 'token')) and 'never' in t.lower())
+            check('report a problem: no tracking (no links to analytics, no images)', not re.search(r'analytics|track|pixel|\.png|\.gif|utm_', t, re.I))
+            rd = open(os.path.join(ROOT, 'README.md')).read()
+            check('report a problem: README links the form', 'issues/new?template=bug.yml' in rd or 'issues/new/choose' in rd)
+            wf = open(os.path.join(ROOT, '.github', 'workflows', 'test-and-deploy.yml')).read()
+            uses = re.findall(r'uses:\s*(\S+)(.*)', wf)
+            want = {'actions/checkout': 'v4', 'actions/upload-artifact': 'v4', 'actions/configure-pages': 'v5', 'actions/upload-pages-artifact': 'v3', 'actions/deploy-pages': 'v4'}
+            for name, ver in want.items():
+                u = [x for x in uses if x[0].startswith(name + '@')]
+                check(f'pinned actions: {name} is pinned to a full commit SHA with {ver} in a comment', bool(u) and all(re.fullmatch(name + r'@[0-9a-f]{40}', x[0]) and re.search(r'#\s*' + ver + r'\b', x[1]) for x in u), u)
+            check('pinned actions: every action in the workflow is pinned to a SHA', uses and all(re.search(r'@[0-9a-f]{40}$', x[0]) for x in uses), uses)
+        await section('files', files)
+
+        # ======================= spending limit: settings, inputs, vault =======================
+        w = await wallet(b); await w.create(); await w.add_mint(A); await w.add_mint(B)
+        fr = await wallet(b); await fr.create(); await fr.add_mint(A); await fr.add_mint(B)
+        await w.use(A); await w.receive_ln(30000); await w.use(B); await w.receive_ln(30000); await w.use(A)
+        fr_addr = await fr.ev("CashuLib.nprofileEncode({pubkey: CashuLib.nostrPub(CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32)), relays:['ws://127.0.0.1:3350/relay']})")
+        await settings(w); await w.click('[data-act=contactsOpen]'); await w.wait(150)
+        await w.click('[data-act=contactEdit]'); await w.wait(150); await w.fill('#cName', 'Heir R8'); await w.fill('#cNostr', fr_addr); await w.click('[data-act=contactSave]'); await w.wait(300); await w.ev("Nutcade.closeSheet()")
+
+        async def inputs():
+            # no PIN: limits are kept in plain storage, and survive a reload
+            for v, why in [('-5', 'negative'), ('0', 'zero'), ('1.5', 'decimal'), ('1e3', 'exponent'), ('99999999999999999999', 'huge'), ('abc', 'junk'), ('12abc', 'junk after a number'), ('2,5', 'a comma not grouping thousands')]:
+                e, _ = await set_limits(w, '', v)
+                check(f'limit input: {why} ({v!r}) is refused with a message and nothing is saved', bool(e) and 'undefined' not in e and not await w.ev("!!(Nutcade.S.limits&&Nutcade.S.limits.day)"), e)
+            check('limit input: without a PIN the per-payment box is off (it needs a PIN to ask for)', await w.ev("(()=>{Nutcade.closeSheet(); document.querySelector('[data-act=limOpen]').click(); const d=document.querySelector('#limPer').disabled; Nutcade.closeSheet(); return d})()"))
+            e, t = await set_limits(w, '', '2,500')
+            check("limit input: '2,500' in English is 2,500 SAT", not e and await w.ev("Nutcade.S.limits.day===2500 && !Nutcade.S.limits.per"), (e, await w.ev("Nutcade.S.limits")))
+            e, t = await set_limits(w, '', '  ')
+            check('limit input: spaces only = off', not e and await w.ev("!Nutcade.S.limits || !Nutcade.S.limits.day"), (e, await w.ev("Nutcade.S.limits")))
+            e, t = await set_limits(w, '', '')
+            check('limit input: empty = off', not e and await w.ev("!Nutcade.S.limits || (!Nutcade.S.limits.per && !Nutcade.S.limits.day)"), (e, t))
+            for lang, txt in [('de', '2.500'), ('fr', '2 500'), ('es', '2.500'), ('pt', '2.500')]:
+                await set_lang(w, lang)
+                e, t = await set_limits(w, txt, txt)
+                check(f"limit input: {txt!r} in {lang} is 2,500 SAT", not e and await w.ev("Nutcade.S.limits.day===2500"), (e, await w.ev("Nutcade.S.limits")))
+                await settings(w); st = await w.ev("(document.querySelector('#set-security')||{}).innerText||''")
+                check(f'limit settings in {lang}: the limit is shown the {lang} way', ('2.500' if lang != 'fr' else '2 500') in st or ('2 500' in st and lang == 'fr'), st[-200:])
+            await set_lang(w, 'en')
+            await w.pg.reload(); await w.wait(900)
+            check('limit: survives a reload', await w.ev("Nutcade.S.limits && Nutcade.S.limits.day===2500"), await w.ev("Nutcade.S.limits"))
+            e, t = await set_limits(w, '', ''); check('limit: turned off again', not e)
+        await section('limit inputs', inputs)
+
+        async def grid_core():
+            for mint, tag in [(A, 'fee mint'), (B, 'no-fee mint')]:
+                await w.use(mint); wy = ways(w, mint, fr)
+                for way, amt in [('ecash', 300), ('ln', 300)]:
+                    start = lambda: wy[way](amt)
+                    await set_limits(w, '1', '')
+                    est, r = await spend_estimate(w, start)
+                    check(f'{way} {tag}: over the per-payment limit shows the over-the-limit screen with the amount and fees', est and est >= amt and r[0] == 'limit' and 'SAT' in r[1], r)
+                    if not est: continue
+                    # exactly at: passes with no PIN asked
+                    await set_limits(w, str(est), '')
+                    n0 = await w.ev("Nutcade.S.txs.length"); bal0 = await w.bal(mint); await start(); r = await outcome(w, n0); await w.wait(800)
+                    cost = bal0 - await w.bal(mint)
+                    check(f'{way} {tag}: exactly at the per-payment limit ({est} SAT with fees) goes through without asking', r[0] == 'ok' and cost <= est, (r[0], cost, est))
+                    await w.ev("Nutcade.closeSheet()")
+                    # one SAT over: asks, PIN once lets it through
+                    await set_limits(w, str(est - 1), '')
+                    n0 = await w.ev("Nutcade.S.txs.length"); bal0 = await w.bal(mint); await start(); r = await outcome(w, n0)
+                    nothing = await w.bal(mint) == bal0 and not await w.ev(f"Nutcade.S.ops.length || Nutcade.S.pending.some(p=>p.mint==={json.dumps(mint)})")
+                    check(f'{way} {tag}: one SAT over the per-payment limit is held: nothing leaves, the screen says the amount', r[0] == 'limit' and f'{est:,}' in r[1] and nothing, (r, nothing))
+                    if r[0] == 'limit':
+                        await layer_pin(w); r2 = await outcome(w, n0)
+                        check(f'{way} {tag}: the PIN lets it through once', r2[0] == 'ok', r2)
+                        await w.ev("Nutcade.closeSheet()"); n1 = await w.ev("Nutcade.S.txs.length"); await start(); r3 = await outcome(w, n1)
+                        check(f'{way} {tag}: the next one over asks again (the PIN was for one payment)', r3[0] == 'limit', r3)
+                        b1 = await w.bal(mint); await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click()"); await w.wait(400)
+                        check(f'{way} {tag}: Cancel on the over-the-limit screen leaves everything as it was', not await w.ev("!!document.querySelector('#limitLayer')") and await w.ev("Nutcade.S.txs.length") == n1 and await w.bal(mint) == b1)
+                    await w.ev("Nutcade.closeSheet()")
+                await books(w, f'core grid {tag}', broken, (A, B))
+            await set_limits(w, '', '')
+        await set_pin(w)
+        await section('core grid (PIN on)', grid_core)
+
+        async def daily():
+            # the daily limit: rolling 24 hours, fees count, reload, the window moving on, two taps, two tabs
+            await w.use(B)
+            used0 = await w.ev("Nutcade.r8.spentDay()")
+            e, _ = await set_limits(w, '', str(used0 + 1000), PIN)
+            check('daily: with a PIN, changing the limit asks for the PIN', not e and await w.ev(f"Nutcade.S.limits.day==={used0 + 1000}"), e)
+            check('daily: with a PIN, the limit is inside the vault, not in plain storage', await w.ev("localStorage.getItem('nutcade:limits')===null && !Object.keys(localStorage).some(k=>/limit/i.test(k))"))
+            wy = ways(w, B, fr)
+            n0 = await w.ev("Nutcade.S.txs.length"); await wy['ecash'](600); r = await outcome(w, n0); await w.ev("Nutcade.closeSheet()")
+            check('daily: 600 of 1,000 goes through', r[0] == 'ok', r)
+            n0 = await w.ev("Nutcade.S.txs.length"); await wy['ecash'](500); r = await outcome(w, n0)
+            check('daily: the next 500 is held, the screen says how much is left and when it frees up', r[0] == 'limit' and '400' in r[1] and re.search(r'\d{1,2}:\d{2}|tomorrow|in \d+ h', r[1], re.I), r)
+            await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
+            n0 = await w.ev("Nutcade.S.txs.length"); await wy['ecash'](400); r = await outcome(w, n0); await w.ev("Nutcade.closeSheet()")
+            check('daily: exactly the 400 left goes through', r[0] == 'ok', r)
+            await w.pg.reload(); await w.wait(700); await unlock(w)
+            n0 = await w.ev("Nutcade.S.txs.length"); await wy['ecash'](1); r = await outcome(w, n0)
+            check('daily: after a reload the day is still used up (1 SAT more is held)', r[0] == 'limit', r)
+            await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
+            # fees count: on the fee mint a payment that fits only without its fee is held
+            await w.use(A); e, _ = await set_limits(w, '', str(await w.ev("Nutcade.r8.spentDay()") + 300), PIN)
+            n0 = await w.ev("Nutcade.S.txs.length"); await ways(w, A)['ecash'](300); r = await outcome(w, n0)
+            check('daily: fees count (300 SAT with a 300 SAT day left on a fee mint is held)', r[0] == 'limit', r)
+            await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
+            # the window moves on: 24 hours later the same payment goes through
+            await w.ev("(()=>{const real=Date.now.bind(Date); Date.now=()=>real()+86400e3+60e3})()")
+            n0 = await w.ev("Nutcade.S.txs.length"); await ways(w, A)['ecash'](300); r = await outcome(w, n0); await w.ev("Nutcade.closeSheet()")
+            check('daily: 24 hours later (clock moved on) the day is free again', r[0] == 'ok', r)
+            await w.pg.reload(); await w.wait(700); await unlock(w)
+            # two taps at once (two payments started together, on two mints): only what fits goes through
+            await w.ev("Nutcade.closeSheet()")
+            e, _ = await set_limits(w, '', str(await w.ev("Nutcade.r8.spentDay()") + 1000), PIN)
+            res = await w.ev("""(async()=>{const r=await Promise.allSettled([Nutcade.r8.sendEcash(600,'tap 1',null,'http://127.0.0.1:3339'), Nutcade.r8.sendEcash(600,'tap 2',null,'http://127.0.0.1:3338'), Nutcade.r8.sendEcash(600,'tap 3',null,'http://127.0.0.1:3339')]);
+              return r.map(x=>x.status==='fulfilled'?'ok':(x.reason&&x.reason.limit?'limit':String(x.reason&&x.reason.message)))})()""")
+            check('two taps: three 600 SAT payments started at once under a 1,000 SAT day: exactly one goes through', sorted(res) == ['limit', 'limit', 'ok'], res)
+            # two tabs: a payment in flight in one tab counts in the other
+            await w.use(B); left = await w.ev("Nutcade.r8.limitLeft()")
+            held = {'n': 0}
+            async def hold_melt(route):
+                held['n'] += 1; await asyncio.sleep(6)
+                try: await route.continue_()
+                except Exception: pass
+            e, _ = await set_limits(w, '', str(await w.ev("Nutcade.r8.spentDay()") + 1000), PIN)
+            await w.pg.route(f'{B}/v1/melt/bolt11', hold_melt)
+            n0 = await w.ev("Nutcade.S.txs.length"); await ways(w, B)['ln'](700); await w.until("Nutcade.S.pending.length>0", 10000)
+            w2 = await wallet(b, ctx=w.pg.context); await w2.wait(500)
+            if await w2.ev("!!document.querySelector('[data-act=takeover]')"): await w2.click('[data-act=takeover]'); await w2.wait(800)
+            if await w2.ev("!!document.querySelector('[data-pinpad]')"): await unlock(w2)
+            n2 = await w2.ev("Nutcade.S.txs.length"); await w2.use(B); await ways(w2, B)['ecash'](400); r = await outcome(w2, n2)
+            check('two tabs: a payment still in flight in one tab counts in the other (700 in flight + 400 > 1,000 is held)', r[0] == 'limit', r)
+            await w2.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
+            await w.pg.unroute(f'{B}/v1/melt/bolt11'); await w2.until("Nutcade.S.pending.length===0", 40000)
+            await books(w2, 'daily two tabs', broken, (A, B))
+            e, _ = await set_limits(w2, '', '', PIN)
+            check('daily: removing the limit needs the PIN too, and works', not e and await w2.ev("!Nutcade.S.limits || !Nutcade.S.limits.day"), e)
+            await w.pg.close()
+            return w2
+        w2 = None
+        async def daily_run():
+            nonlocal w2
+            w2 = await daily()
+        await section('daily limit', daily_run)
+        if w2: w = w2
+
+        async def wrong_pin():
+            e, _ = await set_limits(w, '100', '', '000000')
+            check('limit: a wrong PIN changes nothing', await w.ev("!Nutcade.S.limits || !Nutcade.S.limits.per"), e)
+            await w.ev("Nutcade.closeSheet()")
+        await section('limit wrong PIN', wrong_pin)
+
+        async def every_way():
+            # every way sats leave: over the per-payment limit -> held with the amount, nothing leaves; PIN -> goes through;
+            # under -> goes through without asking
+            await w.use(A)
+            wy = ways(w, A, fr)
+            for way, amt in [('gift', 200), ('reqpay', 200), ('bounty', 200), ('extra', 200), ('move', 300), ('zap', 210), ('lnaddr', 220), ('contact', 150)]:
+              start = lambda: wy[way](amt)
+              try:
+                await set_limits(w, '100', '', PIN)
+                n0 = await w.ev("Nutcade.S.txs.length"); bal0 = await w.bal(); await start(); r = await outcome(w, n0)
+                check(f'{way}: over the per-payment limit is held with the amount on screen, nothing leaves', r[0] == 'limit' and re.search(r'\d', r[1] or '') and await w.bal() == bal0, (r[0], (r[1] or '')[:160], await w.bal() - bal0))
+                if r[0] == 'limit':
+                    await layer_pin(w); r2 = await outcome(w, n0, 40000)
+                    check(f'{way}: the PIN lets it through', r2[0] == 'ok', r2[:1] + [str(r2[1])[:160]])
+                await w.ev("Nutcade.closeSheet()"); await w.wait(500)
+                await set_limits(w, '100000', '', PIN)
+                n0 = await w.ev("Nutcade.S.txs.length"); await start(); r = await outcome(w, n0, 40000)
+                check(f'{way}: under the limit goes through without asking', r[0] == 'ok', r[:1] + [str(r[1])[:160]])
+                await w.ev("Nutcade.closeSheet()"); await w.wait(400)
+                await books(w, f'way {way}', broken, (A, B))
+              except Exception as ex:
+                check(f'{way}: ran to the end', False, repr(ex)[:200]); await w.ev("document.querySelector('#limitLayer')?.remove(); Nutcade.closeSheet()")
+            await set_limits(w, '', '', PIN)
+        await section('every way', every_way)
+
+        async def nwc_way():
+            uri = await make_nwc(w, 'Limit app', 'day', 5000)
+            await w.ev("Nutcade.closeSheet()")
+            await set_limits(w, '100', '', PIN)
+            ans = lambda r: (r or {}).get('answer') or r or {}
+            r = ans(await nwc(w, uri, 'pay_invoice', {'invoice': invoice(300, B)}))
+            check('Wallet Connect: over the wallet limit (inside the app budget) is refused with QUOTA_EXCEEDED and says why', (r.get('error') or {}).get('code') in ('QUOTA_EXCEEDED', 'RESTRICTED') and 'limit' in ((r.get('error') or {}).get('message') or '').lower(), r)
+            await set_limits(w, '', str(await w.ev("Nutcade.r8.spentDay()") + 250), PIN)
+            r = ans(await nwc(w, uri, 'pay_invoice', {'invoice': invoice(300, B)}))
+            check('Wallet Connect: over the daily limit is refused too', (r.get('error') or {}).get('code') in ('QUOTA_EXCEEDED', 'RESTRICTED'), r)
+            await set_limits(w, '', '', PIN)
+            r = ans(await nwc(w, uri, 'pay_invoice', {'invoice': invoice(300, B)}))
+            check('Wallet Connect: with no wallet limit, the app budget alone decides (paid)', bool(r.get('result')) and not r.get('error'), r)
+        await section('nwc', nwc_way)
+
+        async def multi_offline():
+            # multi-mint: the per-payment limit counts the whole payment, not each part
+            await set_limits(w, '5000', '', PIN)
+            amt = max(await w.bal(A), await w.bal(B)) + 1000
+            await w.use(A); await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=sendMethod][data-m=ln]'); await w.wait(100)
+            await w.fill('#destIn', invoice(amt, 'http://127.0.0.1:3340')); await w.click('[data-act=doMeltQuote]'); await w.until("!!document.querySelector('#mppBtn')", 20000)
+            await w.click('#mppBtn'); await w.until("!!document.querySelector('#mppPay') || !!document.querySelector('#limitLayer')", 40000)
+            if await w.ev("!!document.querySelector('#mppPay')"): await w.click('#mppPay')
+            n0 = await w.ev("Nutcade.S.txs.length"); r = await outcome(w, n0)
+            check('multi-mint: a payment split over two mints is held when the whole is over the per-payment limit (each part alone is under)', r[0] == 'limit', r[:1] + [str(r[1])[:160]])
+            await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
+            await set_limits(w, '', '', PIN)
+            # offline: the ecash you hand over offline counts too
+            await set_limits(w, '50', '', PIN)
+            await w.use(B); await w.pg.context.set_offline(True); await w.wait(300)
+            n0 = await w.ev("Nutcade.S.txs.length"); await ways(w, B)['ecash'](64); r = await outcome(w, n0)
+            check('offline: sending ecash offline over the limit is held too', r[0] == 'limit', r[:1] + [str(r[1])[:160]])
+            await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
+            await w.pg.context.set_offline(False); await w.wait(300)
+            await set_limits(w, '', '', PIN)
+        await section('multi-mint and offline', multi_offline)
+
+        async def incoming_free():
+            # what comes in is never limited: claiming a token, and swapping a token from another mint into yours
+            await set_limits(w, '1', '1', PIN)
+            await fr.use(A); tok, e = await fr.send_ecash(200)
+            await w.use(B); await w.home(); _, e, txt = await w.receive_token(tok)
+            check('incoming: a 1 SAT limit never blocks receiving', not e and not await w.ev("!!document.querySelector('#limitLayer')"), e)
+            await set_limits(w, '', '', PIN)
+        await section('incoming', incoming_free)
+
+        async def numo():
+            # a Numo-style checkout: a Lightning invoice and a Cashu payment request for the same sale
+            await set_limits(w, '400', '', PIN)
+            wy = ways(w, A, fr); await w.use(A)
+            for way in ('ln', 'reqpay'):
+                n0 = await w.ev("Nutcade.S.txs.length"); await wy[way](300); r = await outcome(w, n0)
+                check(f'Numo checkout ({way}): 300 SAT under a 400 SAT limit is paid', r[0] == 'ok', r[:1] + [str(r[1])[:120]])
+                await w.ev("Nutcade.closeSheet()")
+                n0 = await w.ev("Nutcade.S.txs.length"); await wy[way](500); r = await outcome(w, n0)
+                check(f'Numo checkout ({way}): 500 SAT over a 400 SAT limit is held', r[0] == 'limit', r[:1] + [str(r[1])[:120]])
+                await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
+            await set_limits(w, '', '', PIN)
+            await books(w, 'numo', broken, (A, B))
+        await section('numo', numo)
+
+        async def no_pin():
+            # without a PIN: the limit holds the payment and says to change it in Settings (no PIN to go over)
+            n = await wallet(b); await n.create(); await n.add_mint(B); await n.use(B); await n.receive_ln(3000)
+            e, t = await set_limits(n, '', '500')
+            check('no PIN: a daily limit can be set (kept in plain storage)', not e and await n.ev("Nutcade.S.limits.day===500"), e)
+            n0 = await n.ev("Nutcade.S.txs.length"); await ways(n, B)['ecash'](600); r = await outcome(n, n0)
+            check('no PIN: over the limit is refused with the amount and where to change it, no PIN pad', r[0] in ('err', 'limit') and 'Settings' in r[1] and '600' in r[1] and not await n.ev("!!document.querySelector('#limitLayer [data-pinpad]')"), r)
+            await n.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
+            n0 = await n.ev("Nutcade.S.txs.length"); await ways(n, B)['ln'](300); r = await outcome(n, n0)
+            check('no PIN: under the limit goes through', r[0] == 'ok', r)
+            await set_pin(n)
+            check('no PIN -> PIN: setting a PIN moves the limit into the vault', await n.ev("localStorage.getItem('nutcade:limits')===null && Nutcade.S.limits.day===500"))
+            await n.pg.context.close()
+        await section('no PIN', no_pin)
+        await w.pg.context.close(); await fr.pg.context.close()
+
+        # ======================= duress PIN =======================
+        async def duress():
+            d = await wallet(b); real_words = await d.create(); await d.add_mint(A); await d.add_mint(B)
+            await d.use(A); await d.receive_ln(5000); await d.use(B); await d.receive_ln(7000)
+            await set_pin(d)
+            ref = await wallet(b); await ref.create(); await ref.add_mint(B); await set_pin(ref)
+            check('duress: a wallet with only a PIN already has the same vault fields (the second part is always there)', await ref.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault'))).sort()") == await d.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault'))).sort()"))
+            await ref.pg.context.close()
+            ref_keys = await d.ev("Object.keys(localStorage).sort()"); ref_vault = await d.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault'))).sort()")
+            ref_slot = await d.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault')).slot||{}).sort()")
+            real_hist = await d.ev("Nutcade.S.txs.map(t=>t.id)"); real_bal = await d.bal()
+            # set: needs the real PIN, must differ from it
+            await settings(d); await d.click('[data-act=duressOpen]'); await d.wait(250)
+            await pad(d, '000000'); await d.wait(800)
+            check('duress: setting it up starts with the real PIN (a wrong one is refused)', await d.ev("/wrong/i.test((document.querySelector('#pinErr')||{}).innerText||'')"))
+            await pad(d, PIN); await d.wait(800); await pad(d, PIN); await d.wait(600)
+            check('duress: the duress PIN must differ from the real PIN', await d.ev("/differ|same as/i.test((document.querySelector('#pinErr')||document.querySelector('#layer')||{}).innerText||'')"))
+            await pad(d, DPIN); await d.wait(300); await pad(d, DPIN); await d.until("!!document.querySelector('#duressAmt')", 8000)
+            await d.fill('#duressAmt', '300'); await d.click('[data-act=duressMake]'); await d.until("/READY/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 30000)
+            check('duress: set up, with 300 SAT for the decoy', await d.ev("/READY/.test((document.querySelector('.sheet-body')||{}).innerText||'')"), await d.sheet_text())
+            await d.ev("Nutcade.closeSheet()")
+            real_after = await d.bal(); real_vault_ct = await d.ev("(async()=>{await Nutcade.vault.chain; return JSON.parse(localStorage.getItem('nutcade:vault')).data.ct})()")
+            check('duress: setting it adds no storage names', await d.ev("Object.keys(localStorage).sort()") == ref_keys, (await d.ev("Object.keys(localStorage).sort()"), ref_keys))
+            check("duress: the vault record keeps the same fields, and its second part the same shape", await d.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault'))).sort()") == ref_vault and ref_slot == await d.ev("Object.keys(JSON.parse(localStorage.getItem('nutcade:vault')).slot||{}).sort()") and ref_slot)
+            # open with the duress PIN
+            await d.pg.reload(); await d.wait(700)
+            t_dur = await unlock(d, DPIN)
+            await d.until("Object.values(Nutcade.S.proofs).flat().length>0", 30000); await d.wait(800)
+            dw = await d.ev("Nutcade.S.seed && Nutcade.S.seed.mnemonic")
+            check('duress PIN: opens a different wallet (its own 12 words)', dw and dw != real_words)
+            check('duress PIN: its balance is the decoy\'s (about 300 SAT), not the real one', 280 <= await d.bal() <= 300, await d.bal())
+            check('duress PIN: none of the real history is there', not await d.ev(f"Nutcade.S.txs.some(t=>{json.dumps(real_hist)}.includes(t.id))"))
+            check('duress PIN: it has a history of its own (the sats it received)', await d.ev("Nutcade.S.txs.length>=1"))
+            for tabn in ('wallet', 'history', 'mints', 'settings'):
+                await d.ev("Nutcade.closeSheet()"); await d.click(f'[data-act=tab][data-tab={tabn}]'); await d.wait(300)
+                txt = await d.ev("document.body.innerText")
+                bad = r'decoy|real wallet|second wallet' + ('' if tabn == 'settings' else '|duress|another wallet')   # (Settings has the duress PIN row every wallet has, and "Moving from another wallet?")   # (Settings has the duress PIN row every wallet has)
+                check(f'duress PIN: the {tabn} screen says nothing about a decoy or another wallet, and shows no real amount', not re.search(bad, txt, re.I) and f'{real_bal:,}' not in txt and '12,000' not in txt, re.findall(r'.{0,30}(?:' + bad + r').{0,30}', txt, re.I)[:3])
+            await settings(d)
+            st = await d.ev("(document.querySelector('#set-security')||{}).innerText||''")
+            check('duress PIN: Settings shows a PIN wallet with no duress PIN set', 'ON' in st and re.search(r'Duress PIN\s*OFF', st), st)
+            # the decoy is a working wallet: it can spend its sats
+            tok, e = await d.send_ecash(100); check('duress PIN: the decoy can spend its own sats', tok and not e, e)
+            dec_keys = await d.ev("Object.keys(localStorage).sort()")
+            check('duress PIN: no new storage names while the decoy is open', set(dec_keys) <= set(ref_keys), (set(dec_keys) - set(ref_keys)))
+            check('duress PIN: the real wallet\'s encrypted data is untouched', await d.ev("(async()=>{await Nutcade.vault.chain; return JSON.parse(localStorage.getItem('nutcade:vault')).data.ct})()") == real_vault_ct)
+            check('duress PIN: the decoy never reads or writes the plain mint list of the real wallet', await d.ev("JSON.stringify(Nutcade.S.mints.map(m=>m.url))") != json.dumps([A, B]).replace(' ', ''))
+            # a backup made in the decoy is the decoy's only
+            bk = await d.ev("Nutcade.r8.backupData()")
+            check('duress PIN: a backup made in the decoy has only the decoy (its words, none of the real wallet)', dw in bk and real_words not in bk and A not in bk)
+            # wrong PIN tries count for both
+            await d.pg.reload(); await d.wait(700)
+            t_wrong = await unlock(d, '999999', wait=False)
+            # timing: the real and duress PIN take as long as each other (both keys are always tried)
+            await d.pg.reload(); await d.wait(700); t_real = await unlock(d, PIN)
+            check('timing: the duress and real PIN take about as long to open (within 50%)', max(t_dur, t_real) / max(0.01, min(t_dur, t_real)) < 1.5, (round(t_dur, 2), round(t_real, 2), round(t_wrong, 2)))
+            check('real PIN: the real wallet is all there, as it was', abs(await d.bal() - real_after) <= 0 and await d.ev(f"{json.dumps(real_hist)}.every(id=>Nutcade.S.txs.some(t=>t.id===id))") and await d.ev("Nutcade.S.seed.mnemonic") == real_words, (await d.bal(), real_after))
+            bk = await d.ev("Nutcade.r8.backupData()")
+            check('real PIN: a backup of the real wallet has no trace of the decoy', dw not in bk)
+            # change the real PIN: the duress PIN still opens the decoy
+            await settings(d); await d.click('[data-act=pinChange]'); await d.wait(200); await pad(d, PIN); await d.wait(800); await pad(d, '111333'); await d.wait(300); await pad(d, '111333'); await d.wait(2500)
+            await d.pg.reload(); await d.wait(700); await unlock(d, DPIN)
+            check('change real PIN: the duress PIN still opens the decoy', await d.ev("Nutcade.S.seed.mnemonic") == dw)
+            await d.pg.reload(); await d.wait(700); await unlock(d, '111333')
+            check('change real PIN: the new real PIN opens the real wallet', await d.ev("Nutcade.S.seed.mnemonic") == real_words)
+            # change the duress PIN (needs the real PIN)
+            await settings(d); await d.click('[data-act=duressOpen]'); await d.wait(250); await pad(d, '111333'); await d.until("!!document.querySelector('[data-act=duressChange]')", 8000)
+            await d.click('[data-act=duressChange]'); await d.wait(200); await pad(d, '222444'); await d.wait(300); await pad(d, '222444'); await d.wait(2500); await d.ev("Nutcade.closeSheet()")
+            await d.pg.reload(); await d.wait(700); await unlock(d, DPIN, wait=False)
+            check('change duress PIN: the old duress PIN no longer opens anything', not await d.ev("Nutcade.vault.open"))
+            await d.pg.reload(); await d.wait(700); await unlock(d, '222444')
+            check('change duress PIN: the new one opens the decoy', await d.ev("Nutcade.S.seed.mnemonic") == dw)
+            # lockout: wrong tries count across both PINs
+            await d.pg.reload(); await d.wait(700)
+            for _ in range(5): await unlock(d, '909090', wait=False)
+            await pad(d, '222444'); await d.wait(1200)
+            check('lockout: after 5 wrong tries the duress PIN waits too (same lockout)', not await d.ev("Nutcade.vault.open") and await d.ev("/Wait/.test(document.body.innerText)"))
+            await d.ev("localStorage.removeItem('nutcade:pinfails')")
+            # turn it off (needs the real PIN): the duress PIN is just a wrong PIN, storage names the same
+            await d.pg.reload(); await d.wait(700); await unlock(d, '111333')
+            await settings(d); await d.click('[data-act=duressOpen]'); await d.wait(250); await pad(d, '111333'); await d.until("!!document.querySelector('[data-act=duressOff]')", 8000)
+            bal_on = await d.bal(); await d.click('[data-act=duressOff]'); await d.wait(300)
+            if await d.ev("!!document.querySelector('[data-act=duressOffGo]')"): await d.click('[data-act=duressOffGo]'); await d.until("!document.querySelector('[data-act=duressOffGo]')", 30000); await d.wait(1500)
+            check("duress off: the duress wallet's sats (its coins and its unclaimed token) come back to the real wallet", await d.bal() - bal_on == 300, (bal_on, await d.bal()))
+            check('duress off: storage names unchanged', set(await d.ev("Object.keys(localStorage).sort()")) <= set(ref_keys))
+            await d.pg.reload(); await d.wait(700); await unlock(d, '222444', wait=False)
+            check('duress off: the old duress PIN is now just a wrong PIN', not await d.ev("Nutcade.vault.open"))
+            await d.ev("localStorage.removeItem('nutcade:pinfails')")
+            await d.pg.reload(); await d.wait(700); await unlock(d, '111333')
+            check('duress off: the real wallet is unchanged', await d.ev("Nutcade.S.seed.mnemonic") == real_words)
+            await books(d, 'duress real', broken, (A, B))
+            await d.pg.context.close()
+        await section('duress', duress)
+
+        # ======================= NUT-06: a mint that takes at most 3 items per request =======================
+        async def nut06():
+            seen = {'max': 0, 'paths': {}}
+            async def watch(route):
+                req = route.request
+                try:
+                    body = json.loads(req.post_data or '{}')
+                    for k in ('inputs', 'outputs', 'Ys'):
+                        if isinstance(body.get(k), list):
+                            seen['max'] = max(seen['max'], len(body[k])); p = req.url.split('/v1/')[-1]; seen['paths'][p] = max(seen['paths'].get(p, 0), len(body[k]))
+                except Exception: pass
+                await route.continue_()
+            info = json.loads(urllib.request.urlopen(C + '/v1/info', timeout=5).read())
+            check('NUT-06: the test mint advertises max_array_length 3', info.get('max_array_length') == 3, info.get('max_array_length'))
+            n = await wallet(b); words = await n.create(); await n.add_mint(C); await n.use(C)
+            await n.pg.route(f'{C}/v1/**', watch)
+            for _ in range(12): await n.receive_ln(7)
+            nproofs = await n.ev(f"(Nutcade.S.proofs[{json.dumps(C)}]||[]).length")
+            check('NUT-06: deposits fill the wallet with 20+ coins', nproofs >= 20 and await n.bal(C) == 84, (nproofs, await n.bal(C)))
+            await n.home(); await n.click('[data-act=receive]'); await n.wait(150)
+            if await n.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await n.click('[data-act=recvMethod][data-m=ln]'); await n.wait(100)
+            q0 = await n.ev("Nutcade.S.quotes.length"); await n.fill('#amtIn', '15'); await n.click('[data-act=doLnInvoice]'); await n.wait(1500)
+            e = await n.err(); await n.close()
+            check('NUT-06: a deposit made of more coin sizes than the mint takes (15 = 8+4+2+1) is refused before any invoice, with amounts that work', '3' in e and await n.ev("Nutcade.S.quotes.length") == q0 and re.search(r'\d+ SAT or \d+ SAT', e), e)
+            # state check over all coins
+            await settings(n); await n.click('[data-act=clean]'); await n.wait(3000)
+            check('NUT-06: "Remove spent ecash" checks 20+ coins in batches of at most 3', 0 < seen['paths'].get('checkstate', 0) <= 3, seen['paths'])
+            # swap: send 30 (4 coin sizes) and 45
+            for amt in (30, 27):
+                tok, e = await n.send_ecash(amt)
+                check(f'NUT-06: sending {amt} SAT works (requests split, none over 3 items)', tok and not e and seen['max'] <= 3, (e, seen['paths']))
+                if tok:
+                    r = await wallet(b); await r.create(); await r.add_mint(C); await r.use(C)
+                    _, e2, _ = await r.receive_token(tok)
+                    check(f'NUT-06: the {amt} SAT token is claimed by another wallet on the same mint', not e2 and await r.bal(C) == amt, (e2, await r.bal(C)))
+                    await r.pg.context.close()
+            l, pp = await n.ev(LEDGER + f"({json.dumps(C)})"); check('NUT-06: history adds up to the balance after the batched sends', l == pp, (l, pp))
+            # melt
+            e, txt = await n.pay_ln(invoice(5, B))
+            check('NUT-06: paying a Lightning invoice from the limited mint works, no request over 3 items', not e and seen['max'] <= 3, (e, seen['paths']))
+            # receive a token of 6 coins (more than the mint takes in one request)
+            g = await wallet(b); await g.create(); await g.add_mint(C); await g.use(C)
+            for _ in range(2): await g.receive_ln(7)
+            gtok = await g.ev(f"CashuLib.getEncodedToken({{mint:{json.dumps(C)}, unit:'sat', proofs:Nutcade.S.proofs[{json.dumps(C)}]}})")
+            await g.ev(f"Nutcade.S.proofs[{json.dumps(C)}]=[]; Nutcade.S.txs.unshift({{id:'gone',type:'out',method:'ecash',amount:14,mint:{json.dumps(C)},status:'pending',ts:Date.now()}})")
+            b0 = await n.bal(C); _, e, _ = await n.receive_token(gtok)
+            ok = await n.until(f"(Nutcade.S.proofs[{json.dumps(C)}]||[]).reduce((t,p)=>t+p.amount,0)==={b0 + 14}", 30000)
+            check('NUT-06: a token of 6 coins is claimed in batches (no request over 3 items)', ok and seen['max'] <= 3, (e, await n.bal(C) - b0, seen['paths']))
+            await g.pg.context.close()
+            # crash between batches: the second swap of a batched send never answers, the page reloads
+            calls = {'n': 0}
+            async def second_hangs(route):   # (registered last, so it is asked first; every other call goes on to the watcher)
+                if route.request.method == 'POST':
+                    calls['n'] += 1
+                    if calls['n'] == 2: await asyncio.sleep(30); return
+                await route.fallback()
+            await n.pg.route(f'{C}/v1/swap', second_hangs)
+            bal0 = await n.bal(C)
+            await n.home(); await n.click('[data-act=send]'); await n.wait(150); await n.fill('#amtIn', '27'); await n.click('[data-act=doSendEcash]')
+            await n.until(f"Nutcade.S.ops.length>0", 10000); await n.wait(1500)
+            await n.pg.reload(); await n.wait(800); await n.pg.unroute(f'{C}/v1/swap')
+            ok = await n.until("Nutcade.S.ops.length===0", 60000); await n.wait(1000)
+            l, pp = await n.ev(LEDGER + f"({json.dumps(C)})")
+            check('NUT-06: a crash between batches settles: no open record, history adds up to the balance, nothing lost', ok and l == pp and pp == bal0 and calls['n'] >= 2, (ok, l, pp, bal0, calls['n']))
+            tok, e = await n.send_ecash(27)
+            check('NUT-06: and the same payment goes through afterwards', tok and not e, e)
+            # restore from the 12 words: restore requests in batches of at most 3
+            seen['paths'].pop('restore', None)
+            m = await wallet(b); await m.ev("Nutcade.closeSheet()")
+            await m.pg.route(f'{C}/v1/**', watch)
+            await m.pg.check('#ack'); await m.click('[data-act=gateRestore]'); await m.until("!!document.querySelector('#phraseIn')", 5000)
+            await m.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); const x=document.querySelector('#rmExtra'); x.value={json.dumps(C)}}})()")
+            await m.click('[data-act=doRestorePhrase]')
+            await m.until(f"(Nutcade.S.proofs[{json.dumps(C)}]||[]).length>0 || /SCAN COMPLETE/.test(document.body.innerText)", 120000); await m.wait(800)
+            check('NUT-06: the restore finds the wallet\'s coins on the limited mint', await m.bal(C) > 0, await m.bal(C))
+            check('NUT-06: restoring from the 12 words asks the mint at most 3 outputs at a time', 0 < seen['paths'].get('restore', 0) <= 3, seen['paths'])
+            await m.pg.context.close()
+            # a mint without the field: one request as before
+            await n.add_mint(B); await n.use(B); await n.receive_ln(1000); seen['paths'] = {}
+            await n.pg.route(f'{B}/v1/**', watch)
+            calls_b = await n.ev("performance.getEntriesByType('resource').filter(e=>/3339\\/v1\\/swap/.test(e.name)).length")
+            tok, e = await n.send_ecash(300)
+            calls_b2 = await n.ev("performance.getEntriesByType('resource').filter(e=>/3339\\/v1\\/swap/.test(e.name)).length")
+            check('NUT-06: on a mint without the field a send is one swap, as before', tok and calls_b2 - calls_b == 1, (calls_b2 - calls_b, e))
+            await n.pg.context.close()
+        await section('nut06', nut06)
+
+        # ======================= stay upright =======================
+        IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+        IPAD = 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+        async def upright():
+            for lang in LANGS:
+                u = await wallet(b, 390, 844, lang, ua=IPHONE); await u.create()
+                vis = "(()=>{const e=document.querySelector('#upright'); return !!e && getComputedStyle(e).display!=='none' && e.getBoundingClientRect().width>0})()"
+                check(f'upright {lang}: no upright screen in portrait', not await u.ev(vis))
+                await u.pg.set_viewport_size({'width': 844, 'height': 390}); await u.wait(400)
+                txt = await u.ev("(document.querySelector('#upright')||{}).innerText||''")
+                check(f'upright {lang}: an iPhone in landscape shows the "turn your phone upright" screen, translated', await u.ev(vis) and len(txt) > 5 and (lang == 'en' or 'UPRIGHT' not in txt.upper() or lang == 'fr'), txt)
+                miss = await u.ev("[...(window.__i18nMiss||[])].filter(t=>/upright|landscape|turn/i.test(t))")
+                check(f'upright {lang}: nothing on it left in English', not miss, miss)
+                await u.pg.set_viewport_size({'width': 390, 'height': 844}); await u.wait(300)
+                check(f'upright {lang}: gone again when held upright', not await u.ev(vis))
+                await u.pg.context.close()
+            for name, ua, vw, vh, mob in [('iPad', IPAD, 1180, 820, True), ('desktop', None, 1440, 900, False)]:
+                u = await wallet(b, vw, vh, 'en', mobile=mob, ua=ua); await u.create()
+                check(f'upright: a {name} in landscape is left alone', not await u.ev("(()=>{const e=document.querySelector('#upright'); return !!e && getComputedStyle(e).display!=='none' && e.getBoundingClientRect().width>0})()"))
+                await u.pg.context.close()
+            # a game and a payment in progress carry on
+            u = await wallet(b, 390, 844, 'en', ua=IPHONE); await u.create(); await u.add_mint(B); await u.use(B); await u.receive_ln(2000)
+            await u.click('[data-act=tab][data-tab=arcade]'); await u.wait(200); await u.ev("document.querySelector('[data-game=swarm]').click()"); await u.wait(800)
+            await u.pg.set_viewport_size({'width': 844, 'height': 390}); await u.wait(1200); await u.pg.set_viewport_size({'width': 390, 'height': 844}); await u.wait(500)
+            check('upright: a game in progress is not ended by turning the phone', await u.ev("!!(window.Arcade && window.Arcade.playing())"))
+            await u.ev("document.querySelector('[data-g=exit]')?.click()"); await u.wait(1200)
+            held = {'go': False}
+            async def slow(route):
+                await asyncio.sleep(3)
+                try: await route.continue_()
+                except Exception: pass
+            await u.pg.route(f'{B}/v1/melt/bolt11', slow)
+            n0 = await u.ev("Nutcade.S.txs.length"); await ways(u, B)['ln'](300); await u.wait(500)
+            await u.pg.set_viewport_size({'width': 844, 'height': 390}); await u.wait(3500); await u.pg.set_viewport_size({'width': 390, 'height': 844})
+            r = await outcome(u, n0)
+            check('upright: a payment in progress finishes while the phone is turned', r[0] == 'ok' and await u.ev("Nutcade.S.pending.length===0"), r[:1])
+            await u.pg.context.close()
+        await section('upright', upright)
+
+        # ======================= About: report a problem; polish from the 1.12.1 recheck =======================
+        async def polish():
+            for lang in LANGS:
+                q = await wallet(b, 375, 667, lang); await q.create(); await settings(q)
+                a = await q.ev("(()=>{const e=[...document.querySelectorAll('#set-about a')].find(a=>/issues\\/new/.test(a.href)); return e ? [e.href, e.innerText] : null})()")
+                check(f'About {lang}: a "Report a problem" link to the issue form', a and 'template=bug.yml' in a[0], a)
+                await q.pg.context.close()
+            q = await wallet(b, 375, 667); await q.create(); await q.add_mint(A); await q.use(A); await q.receive_ln(1000)
+            # "Need X SAT including fees" includes the mint's fee to spend ecash
+            inv = invoice(990, B)
+            e, txt = await q.pay_ln(inv, confirm=True)
+            m = re.search(r'([\d,]+) SAT (?:including fees|plus)', e or '')
+            mq = await q.ev(f"(async()=>{{const w=new CashuLib.Wallet({json.dumps(A)},{{unit:'sat'}}); await w.loadMint(); const mq=await w.createMeltQuoteBolt11({json.dumps(inv)}); return [Number(mq.amount), Number(mq.fee_reserve)]}})()")
+            need = int(m.group(1).replace(',', '')) if m else 0
+            check('fee mint: "Need X SAT including fees" counts the mint\'s fee to spend ecash too', need > mq[0] + mq[1], (e, mq))
+            # a reclaim on a fee mint: one honest fee line
+            tok, e = await q.send_ecash(150)
+            t0 = await q.ev("Nutcade.S.txs[0].id")
+            await q.click('[data-act=tab][data-tab=history]'); await q.wait(150); await q.ev(f"Nutcade.closeSheet(); document.querySelector('[data-act=tx][data-id=\"{t0}\"]')?.click()"); await q.wait(300)
+            await q.ev("document.querySelector('[data-act=reclaim], [data-act=takeBack], [data-act=reclaimGo]')?.click()"); await q.wait(500)
+            await q.ev("document.querySelector('[data-act=reclaimGo]')?.click()"); await q.until(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(t0)}).status==='reclaimed'", 20000)
+            back = await q.ev("Nutcade.S.txs[0]"); sent = await q.ev(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(t0)})")
+            await q.ev("Nutcade.closeSheet()"); await q.click('[data-act=tab][data-tab=history]'); await q.wait(200)
+            rows = await q.ev("[...document.querySelectorAll('.tx')].slice(0,3).map(r=>r.innerText)")
+            fees = sum(len(re.findall(r'[Ff]ee \d', r)) for r in rows[:2])
+            check('reclaim on a fee mint: one fee line for what it cost, not "Sent fee 2" plus "Received fee 1"', fees <= 1 and (back.get('fee') or 0) == 0, (rows[:2], sent.get('fee'), back.get('fee')))
+            # never "removed 0 SAT of spent ecash"
+            async def spent_twice(route):
+                await route.fulfill(status=400, content_type='application/json', body=json.dumps({'detail': 'Token already spent.', 'code': 11001}))
+            await q.pg.route(f'{A}/v1/swap', spent_twice)
+            _, e = await q.send_ecash(50)
+            await q.pg.unroute(f'{A}/v1/swap')
+            check('"already spent" with nothing to remove never says "removed 0 SAT"', e and not re.search(r'removed 0 SAT', e), e)
+            # a failed treasure-hunt post redraws at once
+            await q.ev("Nutcade.S.prefs.relays=['ws://127.0.0.1:9/none']")
+            await q.ev("Nutcade.closeSheet()"); await q.home(); bal_shown0 = await q.ev("(document.querySelector('.credit-num')||{}).innerText||''")
+            await q.ev("Nutcade.closeSheet(); document.querySelector('[data-act=huntNew]')?.click()"); await q.wait(300)
+            opened = await q.ev("!!document.querySelector('[data-act=huntCreate]')")
+            if opened:
+                await q.fill('#amtIn', '100'); await q.click('[data-act=huntCreate]')
+                await q.until("!!(document.querySelector('#sheetErr')||{}).innerText || /RELAY/.test(document.body.innerText)", 30000); await q.wait(500)
+                await q.ev("Nutcade.closeSheet()"); await q.wait(300)
+                txt = await q.ev("document.body.innerText"); bal_shown = await q.ev("(document.querySelector('.credit-num')||{}).innerText||''")
+                check('treasure hunt: a post no relay took redraws at once (new balance, WAITING FOR A RELAY chip)', 'WAITING FOR A RELAY' in txt and bal_shown != bal_shown0, (bal_shown0, bal_shown, 'WAITING FOR A RELAY' in txt))
+            else: check('treasure hunt: a post no relay took redraws at once (new balance, WAITING FOR A RELAY chip)', False, 'hunt screen not found')
+            await q.pg.context.close()
+            # long names at 320 px in English: wrap or fit, nothing cut off
+            LN = 'Bartholomew Fitzgerald-Montgomery Lightning Emporium'
+            n = await wallet(b, 320, 640, 'en'); await n.create(); await n.add_mint(B); await n.receive_ln(3000)
+            await n.ev(f"""(()=>{{const S=Nutcade.S; S.mints[0].name={json.dumps(LN)}; S.contacts.push({{id:'cL',name:{json.dumps(LN)},ln:'bart@example.com',nostr:''}});
+              S.txs.forEach(t=>{{t.note='Zap to '+{json.dumps(LN)}+' for the great pizza'}}); Nutcade.render()}})()""")
+            cut = {}
+            for name, js in [('wallet', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=wallet]').click()"), ('history', "document.querySelector('[data-act=tab][data-tab=history]').click()"),
+                             ('mints', "document.querySelector('[data-act=tab][data-tab=mints]').click()"), ('contacts', "document.querySelector('[data-act=tab][data-tab=settings]').click(); document.querySelector('[data-act=contactsOpen]').click()")]:
+                await n.ev(js); await n.wait(300)
+                c = await n.ev("""[...document.querySelectorAll('#app *, #layer *')].filter(e=>e.getClientRects().length && e.children.length===0 && /Bartholomew|Emporium/.test(e.textContent) && (e.scrollWidth>e.clientWidth+1) && getComputedStyle(e).overflow!=='visible').map(e=>e.className+':'+e.textContent.slice(0,30))""")
+                o = await n.ev(OVER_JS)
+                if c or o: cut[name] = (c, o)
+            check('long names at 320 px (English): wrap or fit, nothing cut off or wider than the screen', not cut, cut)
+            await n.pg.context.close()
+        await section('polish', polish)
+
+        check('round 8: the books add up everywhere (history = balance)', not broken, broken)
+        print('SUMMARY', sum(1 for r in results if r[1]), 'passed,', sum(1 for r in results if not r[1]), 'failed')
+        await b.close()
+
+if __name__ == '__main__':
+    asyncio.run(main())
