@@ -108,8 +108,11 @@ async def words_ok(w, mints):
 
 async def unpaid(route):
     """the mint's real answer about a quote, but still UNPAID: holds a deposit unpaid however the test mint behaves"""
-    r = await route.fetch(); j = await r.json(); j['state'] = 'UNPAID'
-    await route.fulfill(response=r, body=json.dumps(j))
+    try:
+        r = await route.fetch(); j = await r.json(); j['state'] = 'UNPAID'
+        await route.fulfill(response=r, body=json.dumps(j))
+    except Exception:   # the test unrouted while this request was in flight ("Route is already handled"): nothing left to hold
+        pass
 
 
 async def nwc(w, uri, method, params=None, **kw):

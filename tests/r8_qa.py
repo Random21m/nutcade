@@ -750,7 +750,8 @@ async def main():
             await g.pg.context.close()
             # a mint that starts enforcing its limit after NUTCADE read its info: refused once, info read again, done in steps
             async def hide(route):
-                r = await route.fetch(); j = await r.json(); j.pop('max_array_length', None); await route.fulfill(response=r, body=json.dumps(j))
+                try: r = await route.fetch(); j = await r.json(); j.pop('max_array_length', None); await route.fulfill(response=r, body=json.dumps(j))
+                except Exception: pass   # unrouted while in flight
             h = await wallet(b); await h.pg.route(f'{C}/v1/info', hide); await h.create(); await h.add_mint(C); await h.use(C)
             for _ in range(6): await h.receive_ln(7)
             known = await h.ev(f"Nutcade.r8.mintMax({json.dumps(C)})"); await h.pg.unroute(f'{C}/v1/info')
