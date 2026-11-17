@@ -663,12 +663,12 @@ async function receiveTokenNow(token, note, opts = {}) {
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint);
   const w = await getWallet(meta.mint);
   const sm = smallMint(meta.mint);   // a mint that takes only a few coins per request: a big token is claimed in parts
-  if (sm && !opts.part && !opts.own && !opts.follow) {
+  if (sm && !opts.part && !opts.follow) {   // (our own token taken back too)
     let ps = []; try { ps = w.decodeToken(token).proofs || []; } catch (e) {}
     if (ps.length > sm || bitsOf(Math.max(0, sum(ps) - feeOfPs(w, ps))) > sm) {
       const parts = tokenParts(w, ps, sm);
-      if (!parts) throw new Error(`${host(meta.mint)} takes at most ${sm} coins per request, and this token can't be claimed there in parts that size.`);
-      if (parts.length > 1) return receiveInParts(w, meta, token, note, parts);
+      if (!parts) throw new Error(`${host(meta.mint)} takes at most ${sm} coins per request and charges a fee to claim, so each part of this token gives back its coins less that fee, and for some of its coins that needs more than ${sm} coins back. It can't be claimed there in any parts. Nothing was spent: the token still holds its sats, for when the mint takes more coins per request.`);
+      if (parts.length > 1) return receiveInParts(w, meta, token, note, parts, opts.own ? S.txs.find(t => t.token === token && (t.status === 'pending' || t.status === 'claimed')) : null);
     }
   }
   let res;

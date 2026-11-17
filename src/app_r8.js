@@ -402,6 +402,20 @@ const lowBit = n => { let b = 1; while (n % (b * 2) === 0) b *= 2; return b; };
 function fitAmounts(n, m) { const s = splitAmt(n); if (s.length <= m) return [n]; const lo = s.slice(0, m).reduce((a, b) => a + b, 0); return [lo, lo + lowBit(lo)]; }
 const feeOfK = (w, k, id) => { try { return num(w.getFeesForKeyset(k, id)); } catch (e) { return 0; } };
 const feeOfPs = (w, ps) => { try { return ps.length ? num(w.getFeesForProofs(ps)) : 0; } catch (e) { return 0; } };
+/* The coins of a token made on a mint with a small limit. Claimed whole if it can be (at most m coins, and what the
+   claim gives back fits in m coins); otherwise each coin of the amount travels with coins worth the mint's fee for
+   claiming it as a part of its own, so the receiver (or you, taking it back) can claim it in parts that fit and get the
+   whole amount. On a mint without a fee that is just the amount's coins. */
+function claimableCoins(w, amount, id, m) {
+  const r = rfeeFor(w, amount, id), D = splitAmt(amount + r);
+  if (D.length <= m && bitsOf(amount) <= m) return D;
+  const out = [];
+  for (const d of splitAmt(amount)) {
+    let e = 0; for (let j = 0; j < 5; j++) e = feeOfK(w, 1 + bitsOf(e), id);
+    out.push(d, ...splitAmt(e));
+  }
+  return out.sort((a, b) => b - a);
+}
 function rfeeFor(w, amount, id) { let r = 0; for (let j = 0; j < 5; j++) r = feeOfK(w, bitsOf(amount + r), id); return r; }
 // chunked restore and recorded-output restore: never more outputs in one request than the mint takes
 async function restoreRange(w, url, start, n, keysetId) {
@@ -495,7 +509,7 @@ const heldFree = url => { const busy = new Set(S.ops.filter(o => o.mint === url)
 async function sendBatched(w, amount, note, lockTo, url, opts, outCfg) {
   const m = smallMint(url), held = heldFree(url), kid = (() => { try { return w.keysetId; } catch (e) { return held[0] && held[0].id; } })();
   if (!lockTo) {
-    const rfee = rfeeFor(w, amount, kid), D = splitAmt(amount + rfee), sim = simulateCoins(w, held, D, m);
+    const D = claimableCoins(w, amount, kid, m), rfee = D.reduce((t, x) => t + x, 0) - amount, sim = simulateCoins(w, held, D, m);
     if (!sim) throw new Error(`${host(url)} takes at most ${m} coins per request, and the coins here can't be split that way for ${money(amount)}. Try a smaller amount.`);
     const hold = limitGate(amount + rfee + sim.fees, { free: opts.noLimit, grant: opts.grant, approved: opts.approved });
     try {
@@ -538,20 +552,47 @@ async function meltInputsBatched(w, url, need) {
   return { r: { keep: [], send: coins }, op: null, inputs: coins };
 }
 // how to claim a token on a mint with a small limit: parts of at most m coins, each giving at most m coins back
+// (each part pays the mint's own fee for its coins, and what it gives back has to fit in m coins: on a mint with a
+// fee a lone coin of 2^n gives back 2^n - 1, n coins, so parts are searched for, not just filled in order)
 function tokenParts(w, proofs, m) {
-  const ps = proofs.slice().sort((a, b) => num(b.amount) - num(a.amount)), parts = [];
-  const ok = g => g.length <= m && bitsOf(Math.max(0, sum(g) - feeOfPs(w, g))) <= m && sum(g) - feeOfPs(w, g) > 0;
-  for (const p of ps) { const g = parts.find(g => ok(g.concat([p]))); if (g) g.push(p); else parts.push([p]); }
-  return parts.every(ok) ? parts : null;
+  const ps = proofs.slice().sort((a, b) => num(b.amount) - num(a.amount));
+  const ok = g => g.length <= m && sum(g) - feeOfPs(w, g) > 0 && bitsOf(sum(g) - feeOfPs(w, g)) <= m;
+  const greedy = () => { const parts = []; for (const p of ps) { const g = parts.find(g => ok(g.concat([p]))); if (g) g.push(p); else parts.push([p]); } return parts.every(ok) ? parts : null; };
+  const g0 = greedy(); if (g0) return g0;
+  // each coin, biggest first, with the fewest of the smallest coins left that make its part fit (a coin and the fee for it)
+  const paired = () => {
+    const left = ps.slice(), parts = [];
+    while (left.length) {
+      const p = left.shift(), small = left.slice().reverse().slice(0, 12); let best = null;
+      const tryIt = c => { const g = [p].concat(c); if (ok(g) && (!best || g.length < best.length)) best = g; };
+      tryIt([]);
+      for (let a = 0; a < small.length && m >= 2; a++) { tryIt([small[a]]); for (let b2 = a + 1; b2 < small.length && m >= 3; b2++) tryIt([small[a], small[b2]]); }
+      if (!best) { const g = parts.find(g => ok(g.concat([p]))); if (!g) return null; g.push(p); continue; }   // (a coin left over joins a part it still fits in)
+      for (const c of best.slice(1)) left.splice(left.indexOf(c), 1);
+      parts.push(best);
+    }
+    return parts;
+  };
+  const g1 = paired(); if (g1 || ps.length > 14) return g1;
+  let tries = 0; const parts = [];
+  const go = i => {
+    if (++tries > 60000) return false;
+    if (i === ps.length) return parts.every(ok);
+    for (const g of parts) if (g.length < m) { g.push(ps[i]); if (go(i + 1)) return true; g.pop(); }
+    parts.push([ps[i]]); if (go(i + 1)) return true; parts.pop();
+    return false;
+  };
+  return go(0) ? parts.map(g => g.slice()) : null;
 }
-async function receiveInParts(w, meta, token, note, parts) {
+async function receiveInParts(w, meta, token, note, parts, own) {
   const n = parts.length, lines = parts.map((g, i) => addTx({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: (note || meta.memo || '') + ` (part ${i + 1} of ${n})`, status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true }));
   save();   // (every part is saved before the first is claimed: if NUTCADE closes in between, the rest are claimed later)
   let got = 0, last = null, err = null;
   for (const t of lines) {
     try { const nt = await receiveTokenNow(t.incoming, t.note, { follow: { k: 'incoming', txId: t.id, reqId: null }, part: true }); incomingClaimed({ txId: t.id, reqId: null }, nt); got += num(nt.amount); last = nt; }
-    catch (e) { if (!err) err = e; if (!netErr(e)) { const cur = txById(t.id); if (cur && cur.status === 'pending') updTx(t.id, { status: 'failed', note: (cur.note ? cur.note + ' · ' : '') + 'already claimed by someone else' }); } }
+    catch (e) { if (!err) err = e; if (isSpentErr(e)) { const cur = txById(t.id); if (cur && cur.status === 'pending') updTx(t.id, { status: 'failed', note: (cur.note ? cur.note + ' · ' : '') + 'already claimed by someone else' }); } }   // (any other error: the part stays saved and is claimed later)
   }
+  if (own && !err) updTx(own.id, { status: 'reclaimed' });   // (our own token, taken back in parts)
   if (!last && err) throw err;
   return Object.assign({}, last, { amount: got });
 }
