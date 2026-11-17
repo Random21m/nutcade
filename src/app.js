@@ -4204,7 +4204,6 @@ readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
 window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u) => sendEcash(a, n, l, u || S.active), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u) } };
 setLang();
-try { uprightSetup(); } catch (e) {}
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}
 if (!vault.on) mergeMintSpellings();   // with a PIN, this runs when the vault opens (hydrateFromVault)

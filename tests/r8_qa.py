@@ -1,5 +1,5 @@
 """Round 8 (1.13): the wallet-wide spending limit, the duress PIN, NUT-06 request-size limits (a mint that takes at
-most 3 items per request), "stay upright", the problem-report form, pinned GitHub Actions, and the 1.12.1 recheck's
+most 3 items per request), phones held sideways, the problem-report form, pinned GitHub Actions, and the 1.12.1 recheck's
 polish. Uses the local mints (3338 fee, 3339 no fee, 3342 no fee with max_array_length 3) and mock_nostr.py.
 
 The spending-limit grid: every way sats leave (Lightning, ecash, payment request, gift, bounty, Extra Life, move
@@ -187,10 +187,10 @@ async def main():
         b = await p.chromium.launch(**({'executable_path': os.environ['CHROME']} if os.environ.get('CHROME') else {}))
         broken = []
 
-        # ======================= files: upright manifest, the issue form, pinned actions =======================
+        # ======================= files: the manifest, the issue form, pinned actions =======================
         async def files():
             man = json.load(open(os.path.join(ROOT, 'public', 'manifest.webmanifest')))
-            check('upright: the manifest asks for portrait', man.get('orientation') == 'portrait', man.get('orientation'))
+            check('landscape: the manifest does not lock the orientation (you choose)', 'orientation' not in man, man.get('orientation'))
             bug = os.path.join(ROOT, '.github', 'ISSUE_TEMPLATE', 'bug.yml'); cfg = os.path.join(ROOT, '.github', 'ISSUE_TEMPLATE', 'config.yml')
             t = open(bug).read() if os.path.exists(bug) else ''
             check('report a problem: .github/ISSUE_TEMPLATE/bug.yml and config.yml exist', bool(t) and os.path.exists(cfg))
@@ -754,48 +754,38 @@ async def main():
             await h.pg.context.close()
         await section('nut06more', nut06_more)
 
-        # ======================= stay upright =======================
+        # ======================= phones held sideways: no card, everything usable, nothing lost =======================
         IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
-        IPAD = 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
-        async def upright():
-            for lang in LANGS:
-                u = await wallet(b, 390, 844, lang, ua=IPHONE); await u.create()
-                vis = "(()=>{const e=document.querySelector('#upright'); return !!e && getComputedStyle(e).display!=='none' && e.getBoundingClientRect().width>0})()"
-                check(f'upright {lang}: no upright screen in portrait', not await u.ev(vis))
-                await u.pg.set_viewport_size({'width': 844, 'height': 390}); await u.wait(400)
-                txt = await u.ev("(document.querySelector('#upright')||{}).innerText||''")
-                check(f'upright {lang}: an iPhone in landscape shows the "turn your phone upright" screen, translated', await u.ev(vis) and len(txt) > 5 and (lang == 'en' or 'UPRIGHT' not in txt.upper() or lang == 'fr'), txt)
-                miss = await u.ev("[...(window.__i18nMiss||[])].filter(t=>/upright|landscape|turn/i.test(t))")
-                check(f'upright {lang}: nothing on it left in English', not miss, miss)
-                await u.pg.set_viewport_size({'width': 390, 'height': 844}); await u.wait(300)
-                check(f'upright {lang}: gone again when held upright', not await u.ev(vis))
+        REACH = """(sel=>{const e=document.querySelector(sel); if(!e) return 'missing'; e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect();
+          if(r.width<1||r.top<0||r.bottom>innerHeight||r.left<0||r.right>innerWidth) return 'off screen'; const h=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2); return h&&(h===e||e.contains(h))?'ok':'covered'})"""
+        async def landscape():
+            for vw, vh in ((844, 390), (568, 320)):
+                u = await wallet(b, vw, vh, 'en', ua=IPHONE); await u.create(); await u.add_mint(B); await u.use(B); await u.receive_ln(2000)
+                res = {}
+                check(f'landscape {vw}x{vh}: no "turn your phone" card or anything covering the app', not await u.ev("!!document.querySelector('#upright')"))
+                for tabn, sel in (('wallet', '[data-act=send]'), ('history', '#app .tx'), ('mints', '#app [data-act=pickMint]'), ('settings', '[data-act=limOpen]')):
+                    await u.ev("Nutcade.closeSheet()"); await u.click(f'[data-act=tab][data-tab={tabn}]'); await u.wait(250)
+                    res[tabn] = await u.ev(REACH + f"({json.dumps(sel)})"); res[tabn + ' tabs'] = await u.ev(REACH + "('[data-act=tab][data-tab=wallet]')")
+                await u.home(); await u.click('[data-act=send]'); await u.wait(250); res['send sheet'] = await u.ev(REACH + "('[data-act=doSendEcash]')"); await u.ev("Nutcade.closeSheet()")
+                o = await u.ev(OVER_JS); check(f'landscape {vw}x{vh}: the main screens and the send sheet are usable (their buttons on screen and not covered), nothing wider than the screen', all(v == 'ok' for v in res.values()) and not o, (res, o))
+                await u.click('[data-act=tab][data-tab=arcade]'); await u.wait(200); await u.ev("document.querySelector('[data-game=swarm]').click()"); await u.wait(800)
+                g = await u.ev(REACH + "('[data-g=exit]')")
+                check(f'landscape {vw}x{vh}: a game opens and its exit is reachable', await u.ev("!!(window.Arcade && window.Arcade.playing())") and g == 'ok', g)
+                await u.pg.set_viewport_size({'width': vh, 'height': vw}); await u.wait(600); await u.pg.set_viewport_size({'width': vw, 'height': vh}); await u.wait(600)
+                check(f'landscape {vw}x{vh}: turning the phone in the middle of a game loses nothing (still playing)', await u.ev("!!(window.Arcade && window.Arcade.playing())"))
+                await u.ev("document.querySelector('[data-g=exit]')?.click()"); await u.wait(1200)
+                async def slow(route):
+                    await asyncio.sleep(3)
+                    try: await route.continue_()
+                    except Exception: pass
+                await u.pg.route(f'{B}/v1/melt/bolt11', slow)
+                n0 = await u.ev("Nutcade.S.txs.length"); bal0 = await u.bal(B); await ways(u, B)['ln'](300); await u.wait(500)
+                await u.pg.set_viewport_size({'width': vh, 'height': vw}); await u.wait(1500); await u.pg.set_viewport_size({'width': vw, 'height': vh})
+                r = await outcome(u, n0); await settled(u)
+                l, pp = await u.ev(LEDGER + f"({json.dumps(B)})")
+                check(f'landscape {vw}x{vh}: turning the phone in the middle of a payment loses nothing (paid once, history = balance)', r[0] == 'ok' and await u.ev("Nutcade.S.pending.length===0") and l == pp and bal0 - pp >= 300, (r[0], l, pp, bal0))
                 await u.pg.context.close()
-            u = await wallet(b, 320, 568, 'en', ua=IPHONE); await u.create(); await u.home(); await u.ev("document.querySelector('[data-act=pickMint]').click()"); await u.wait(300)
-            await u.pg.focus('#mintUrl'); await u.pg.set_viewport_size({'width': 320, 'height': 280}); await u.wait(500)
-            check('upright: a keyboard shrinking a portrait phone (320x280) never brings up the card over the form', not await u.ev("(()=>{const e=document.querySelector('#upright'); return !!e && getComputedStyle(e).display!=='none' && e.getBoundingClientRect().width>0})()"))
-            await u.pg.context.close()
-            for name, ua, vw, vh, mob in [('iPad', IPAD, 1180, 820, True), ('desktop', None, 1440, 900, False)]:
-                u = await wallet(b, vw, vh, 'en', mobile=mob, ua=ua); await u.create()
-                check(f'upright: a {name} in landscape is left alone', not await u.ev("(()=>{const e=document.querySelector('#upright'); return !!e && getComputedStyle(e).display!=='none' && e.getBoundingClientRect().width>0})()"))
-                await u.pg.context.close()
-            # a game and a payment in progress carry on
-            u = await wallet(b, 390, 844, 'en', ua=IPHONE); await u.create(); await u.add_mint(B); await u.use(B); await u.receive_ln(2000)
-            await u.click('[data-act=tab][data-tab=arcade]'); await u.wait(200); await u.ev("document.querySelector('[data-game=swarm]').click()"); await u.wait(800)
-            await u.pg.set_viewport_size({'width': 844, 'height': 390}); await u.wait(1200); await u.pg.set_viewport_size({'width': 390, 'height': 844}); await u.wait(500)
-            check('upright: a game in progress is not ended by turning the phone', await u.ev("!!(window.Arcade && window.Arcade.playing())"))
-            await u.ev("document.querySelector('[data-g=exit]')?.click()"); await u.wait(1200)
-            held = {'go': False}
-            async def slow(route):
-                await asyncio.sleep(3)
-                try: await route.continue_()
-                except Exception: pass
-            await u.pg.route(f'{B}/v1/melt/bolt11', slow)
-            n0 = await u.ev("Nutcade.S.txs.length"); await ways(u, B)['ln'](300); await u.wait(500)
-            await u.pg.set_viewport_size({'width': 844, 'height': 390}); await u.wait(3500); await u.pg.set_viewport_size({'width': 390, 'height': 844})
-            r = await outcome(u, n0)
-            check('upright: a payment in progress finishes while the phone is turned', r[0] == 'ok' and await u.ev("Nutcade.S.pending.length===0"), r[:1])
-            await u.pg.context.close()
-        await section('upright', upright)
+        await section('landscape', landscape)
 
         # ======================= About: report a problem; polish from the 1.12.1 recheck =======================
         async def polish():

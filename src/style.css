@@ -574,18 +574,11 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .sheet-head h3{overflow-wrap:break-word}   /* a long name still wraps (min-width:0), but a word only splits at its soft hyphens */
 .spinner,.game-top .ttl{line-height:1.5}   /* two-line pixel labels get room between their lines */
 
-/* ---------- Round 8: spending limit, duress PIN, stay upright ---------- */
+/* ---------- Round 8: spending limit, duress PIN ---------- */
 .lim-sheet{display:grid;gap:12px;max-width:420px;margin:auto;text-align:center}
 .lim-sheet .pinpad{margin:0 auto}
 .lim-msg{color:var(--gold)}
-html.upright-on #upright{display:flex;position:fixed;inset:0;z-index:9999;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:16px;background:var(--void,#0a0717);color:var(--ink,#f4f0ff);text-align:center}
-html.upright-on body{overflow:hidden}
-#upright .up-h{font-family:var(--f-display);font-size:18px;line-height:1.5;color:var(--gold)}
-#upright .up-t{font-size:20px;max-width:30em}
-#upright svg{width:72px;height:72px;animation:up-turn 2.4s steps(4) infinite}
-@keyframes up-turn{0%,40%{transform:rotate(-90deg)}60%,100%{transform:rotate(0)}}
-@media (prefers-reduced-motion:reduce){#upright svg{animation:none}}
-/* PIN pads in sheets on short screens (the limit, duress and over-the-limit pads have a line or two more): OK stays on screen */
+@media (prefers-reduced-motion:reduce){/* PIN pads in sheets on short screens (the limit, duress and over-the-limit pads have a line or two more): OK stays on screen */
 @media (max-height:640px){
   .sheet .pin-k{height:42px} .sheet .pin-keys{gap:7px} .sheet .pinpad{gap:6px}
   .sheet .pinpad .th{font-size:17px;line-height:1.15}

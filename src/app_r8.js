@@ -1,4 +1,4 @@
-/* ===================== Round 8 (1.13): spending limit, duress PIN, request-size limits, stay upright ===================== */
+/* ===================== Round 8 (1.13): spending limit, duress PIN, request-size limits ===================== */
 
 /* ---------- spending limit ----------
    Two optional limits for the whole wallet: "ask for the PIN above X SAT" for one payment, and "at most Y SAT a day"
@@ -512,34 +512,3 @@ async function receiveInParts(w, meta, token, note, parts) {
   return Object.assign({}, last, { amount: got });
 }
 
-/* ---------- stay upright ----------
-   The manifest asks for portrait, which Android follows. iPhones have no way to lock it, so a phone held sideways gets
-   a full-screen "turn your phone upright" card instead (not tablets or computers). It only covers the screen: a game
-   is paused (as when you switch apps), and a payment or anything else in progress carries on underneath. */
-const UPRIGHT_SVG = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges"><path d="M5 1h6v1h1v12h-1v1H5v-1H4V2h1zm0 2v9h6V3zm2 10v1h2v-1z"/></svg>';
-function uprightSetup() {
-  // a phone: a touch screen whose short side is a phone's; turned: what the screen itself says (its orientation, or
-  // iOS's window.orientation), never the size of the page, which a keyboard opening also shrinks
-  const isPhone = () => { try { return matchMedia('(pointer:coarse)').matches && Math.min(screen.width || 9999, screen.height || 9999) <= 500; } catch (e) { return false; } };
-  const turned = () => {
-    try {
-      const t = screen.orientation && screen.orientation.type; if (t) return /^landscape/.test(t);
-      if (typeof window.orientation === 'number') return Math.abs(window.orientation) === 90;
-      return screen.width > screen.height;
-    } catch (e) { return false; }
-  };
-  const typing = () => { const a = document.activeElement; return !!(a && a.matches && a.matches('input:not([type=checkbox]):not([type=radio]),textarea,select,[contenteditable]')); };
-  const el = document.createElement('div'); el.id = 'upright'; el.setAttribute('role', 'alert'); el.hidden = true;
-  const fill = () => { el.innerHTML = `${UPRIGHT_SVG}<div class="up-h">TURN YOUR PHONE UPRIGHT</div><div class="up-t">NUTCADE works held upright. Anything in progress keeps going; a game waits for you.</div>`; if (LANG !== 'en') trNode(el); };
-  fill(); document.body.appendChild(el);
-  let was = false;
-  const check = () => {
-    const on = isPhone() && turned() && !typing();
-    document.documentElement.classList.toggle('upright-on', on); el.hidden = !on;
-    if (on && !was) { fill(); if (window.Arcade && window.Arcade.playing()) window.dispatchEvent(new Event('blur')); }   // (the game pauses, as when you switch apps)
-    was = on;
-  };
-  window.addEventListener('resize', check); window.addEventListener('orientationchange', check); document.addEventListener('focusin', check); document.addEventListener('focusout', () => setTimeout(check, 50));
-  try { if (screen.orientation) screen.orientation.addEventListener('change', check); } catch (e) {}
-  check();
-}
