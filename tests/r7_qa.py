@@ -758,7 +758,9 @@ async def main():
             const q=await ws.createMintQuoteBolt11(640); const id='crash'+Date.now();
             S.txs.unshift({{id,ts:Date.now(),note:'',status:'pending',fee:0,type:'in',method:'ln',amount:640,mint:'{B}',quote:q.quote,request:q.request}});
             S.quotes.push({{kind:'bolt11',quote:q.quote,request:q.request,amount:640,mint:'{B}',txId:id}});
-            await new Promise(r=>setTimeout(r,1200)); await ws.mintProofsBolt11(640,q.quote); window.__crashTx=id; }})()""")
+            window.__crashTx=id; await new Promise(r=>setTimeout(r,1200));
+            // the app's own quote watcher may claim the deposit during the wait (it then owns those counters): that is the case under test too
+            try {{ await ws.mintProofsBolt11(640,q.quote); }} catch (e) {{ if (!/already (signed|issued)|issued|11003|20002|20003/i.test(String(e&&e.message||e))) throw e; }} }})()""")
         ok = await w.until("(Nutcade.S.txs.find(t=>t.id===window.__crashTx)||{}).status==='done'", 40000); await w.pg.unroute(f'{B}/v1/restore')
         ct = await w.ev("Nutcade.S.txs.find(t=>t.id===window.__crashTx)")
         check('(round 2, 1) an interrupted deposit whose recovery fails once is retried, then credited to the deposit itself', ok and ct['amount'] == 640 and not await w.ev("Nutcade.S.txs.some(t=>t.note==='Recovered with recovery phrase'&&t.mint===" + json.dumps(B) + "&&t.ts>Date.now()-60000)"), ct)
