@@ -5049,7 +5049,7 @@ function fmtDate(ms, withTime) {
   catch (e) { return d.toDateString(); }
 }
 // Notes NUTCADE writes itself (not ones you typed) are shown in your language.
-const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life |Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step|keeping Extra Life going)$|Ecash already spent elsewhere$|To |Zap to |Wallet Connect: |LNURL voucher$)|\((part \d+ of \d+|cancelled at the till)\)$/;
+const AUTO_NOTE = /^(Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life( |$)|Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step|keeping Extra Life going)$|Ecash already spent elsewhere$|Payment request couldn't be delivered: the sats came back$|To |Zap to |Wallet Connect: |LNURL voucher$)|\((part \d+ of \d+|cancelled at the till)\)$/;
 function noteText(n) {
   if (!n || !AUTO_NOTE.test(n)) return n;
   const m = /^(.*) \((part \d+ of \d+|cancelled at the till)\)$/.exec(n);   // your own words before the suffix stay as you typed them
