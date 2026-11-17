@@ -5425,7 +5425,8 @@ async function pinSubmit() {
         <button class="btn solid gold block" data-act="close">Done</button></div>`);
       refresh(); return;
     }
-    if (m === 'changeOld') { busy('CHECKING…'); if (!(await pinToDek(v))) { notePinFail(); return pinError('That PIN is wrong.'); } pinChangeCheck(); pinUI.old = v; nextPad('changeNew'); setBody(padHTML('NEW PIN', `Choose a new PIN (${PIN_MIN} to ${PIN_MAX} digits).`) + '<div id="sheetErr"></div>'); return; }
+    if (m === 'changeOld') { busy('CHECKING…'); if (!(await pinToDek(v))) { notePinFail(); return pinError('That PIN is wrong.'); } pinUI.old = v; nextPad('changeNew');   // (the allowance is checked once the new PIN is typed twice: the same step as every refusal of a new PIN)
+      setBody(padHTML('NEW PIN', `Choose a new PIN (${PIN_MIN} to ${PIN_MAX} digits).`) + '<div id="sheetErr"></div>'); return; }
     if (m === 'changeNew') { pinUI.first = v; nextPad('changeConfirm'); setBody(padHTML('CONFIRM NEW PIN', 'Enter it again.') + '<div id="sheetErr"></div>'); return; }
     if (m === 'changeConfirm') {
       if (v !== pinUI.first) { nextPad('changeNew'); setBody(padHTML('NEW PIN', "Those didn't match. Start again.") + '<div id="sheetErr"></div>'); return; }
