@@ -324,6 +324,7 @@ function openMove(from, to, amount) {
 async function moveQuote(from, to, amount) {
   if (from === to) throw new Error('Pick two different mints.');
   const wTo = await getWallet(to), wFrom = await getWallet(from);
+  { const e = quoteFitErr(to, amount); if (e) throw e; }   // (refused before anything is paid)
   const mintQ = await wTo.createMintQuoteBolt11(amount);
   const mq = await wFrom.createMeltQuoteBolt11(mintQ.request);
   const need = num(mq.amount) + num(mq.fee_reserve);

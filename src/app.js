@@ -519,8 +519,7 @@ function addProofs(url, ps) {
 async function lnMintQuote(amount, note, url = S.active) {
   if (isBlocked(url)) throw blockedErr(url, 'ln');
   const w = await getWallet(url);
-  const sm = smallMint(url);   // the mint signs a deposit's coins in one request: at most that many coin sizes
-  if (sm && bitsOf(amount) > sm) { const near = fitAmounts(amount, sm); throw new Error(`${(S.mints.find(m => m.url === url) || {}).name || host(url)} takes at most ${sm} coins per request, so a deposit there has to be made of at most ${sm} coin sizes. Try ${near.map(money).join(' or ')}.`); }
+  { const e = quoteFitErr(url, amount); if (e) throw e; }   // (one check before every mint quote: a deposit the mint can't issue is refused before anything is paid)
   const q = await w.createMintQuoteBolt11(amount);
   const tx = addTx({ type: 'in', method: 'ln', amount, mint: url, note, status: 'pending', request: q.request, quote: q.quote });
   S.quotes.push({ kind: 'bolt11', quote: q.quote, request: q.request, amount, mint: url, txId: tx.id, expiry: q.expiry || null, rec: 1 });
@@ -531,6 +530,7 @@ async function onchainMintQuote(note) {
   const url = S.active; if (isBlocked(url)) throw blockedErr(url, 'ln'); const w = await getWallet(url);
   const k = new Uint8Array(32); crypto.getRandomValues(k);
   const privkey = hex(k), pubkey = hex(L.getPubKeyFromPrivKey(k));
+  { const e = quoteFitErr(url, null); if (e) throw e; }
   const q = await w.createMintQuoteOnchain(pubkey);
   const tx = addTx({ type: 'in', method: 'onchain', amount: 0, mint: url, note, status: 'pending', request: q.request, quote: q.quote });
   S.quotes.push({ kind: 'onchain', quote: q.quote, request: q.request, mint: url, txId: tx.id, privkey, expiry: q.expiry || null });
@@ -3127,6 +3127,7 @@ async function swapIn(token, note) {
   let amt = total - Math.max(2, Math.ceil(total * 0.02)), mq, melt, need;
   for (let i = 0; i < 4; i++) {
     if (amt < 1) throw new Error('This token is too small to cover Lightning fees for a swap. Claim it at its own mint instead.');
+    { const e = quoteFitErr(dest.url, amt); if (e) { e.message += ` The token's ${money(total)} are in your balance at ${(S.mints.find(m => m.url === meta.mint) || {}).name || host(meta.mint)}.`; throw e; } }
     mq = await dw.createMintQuoteBolt11(amt);
     melt = await fw.createMeltQuoteBolt11(mq.request);
     const inFee = num(fw.getFeesForProofs(S.proofs[meta.mint]));

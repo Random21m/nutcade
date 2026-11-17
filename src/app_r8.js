@@ -359,6 +359,19 @@ async function pinMore(m, v, busy) {
    between steps leaves only finished swaps (their coins are in the balance) and at most one open record, which
    settles like any other. A token with more coins than the mint takes is claimed in parts, each saved first. A mint
    without the field keeps the old behaviour. */
+/* Every mint quote (Receive, a move between mints, a token swapped into your mint, an on-chain deposit; the cashier
+   and LNURL vouchers make theirs through Receive's) is checked first: the mint signs a deposit's coins in one request,
+   so an amount made of more coin sizes than it takes there could be paid and never issued. Refused before anything is
+   paid, with amounts that work. (An on-chain deposit's amount isn't known in advance: on a mint that takes fewer than
+   64 items it is refused.) */
+function quoteFitErr(url, amount) {
+  const m = mintMax(url); if (!m) return null;
+  const name = (S.mints.find(x => x.url === normUrl(url)) || {}).name || host(url);
+  if (amount == null) return m < 64 ? new Error(`${name} takes at most ${m} coins per request, so it can't take on-chain deposits: their amount isn't known in advance. Use Lightning.`) : null;
+  if (bitsOf(amount) <= m) return null;
+  const near = fitAmounts(amount, m);
+  return new Error(`${name} takes at most ${m} coins per request, so a deposit there has to be made of at most ${m} coin sizes. Try ${near.map(money).join(' or ')}.`);
+}
 // the limit the mint advertises (0: it says none), as it says it (a whole number from 1 to 10,000)
 function mintMax(url) {
   const w = (wallets[normUrl(url)] || {}).ready; if (!w) return 0;

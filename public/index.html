@@ -3650,8 +3650,7 @@ function addProofs(url, ps) {
 async function lnMintQuote(amount, note, url = S.active) {
   if (isBlocked(url)) throw blockedErr(url, 'ln');
   const w = await getWallet(url);
-  const sm = smallMint(url);   // the mint signs a deposit's coins in one request: at most that many coin sizes
-  if (sm && bitsOf(amount) > sm) { const near = fitAmounts(amount, sm); throw new Error(`${(S.mints.find(m => m.url === url) || {}).name || host(url)} takes at most ${sm} coins per request, so a deposit there has to be made of at most ${sm} coin sizes. Try ${near.map(money).join(' or ')}.`); }
+  { const e = quoteFitErr(url, amount); if (e) throw e; }   // (one check before every mint quote: a deposit the mint can't issue is refused before anything is paid)
   const q = await w.createMintQuoteBolt11(amount);
   const tx = addTx({ type: 'in', method: 'ln', amount, mint: url, note, status: 'pending', request: q.request, quote: q.quote });
   S.quotes.push({ kind: 'bolt11', quote: q.quote, request: q.request, amount, mint: url, txId: tx.id, expiry: q.expiry || null, rec: 1 });
@@ -3662,6 +3661,7 @@ async function onchainMintQuote(note) {
   const url = S.active; if (isBlocked(url)) throw blockedErr(url, 'ln'); const w = await getWallet(url);
   const k = new Uint8Array(32); crypto.getRandomValues(k);
   const privkey = hex(k), pubkey = hex(L.getPubKeyFromPrivKey(k));
+  { const e = quoteFitErr(url, null); if (e) throw e; }
   const q = await w.createMintQuoteOnchain(pubkey);
   const tx = addTx({ type: 'in', method: 'onchain', amount: 0, mint: url, note, status: 'pending', request: q.request, quote: q.quote });
   S.quotes.push({ kind: 'onchain', quote: q.quote, request: q.request, mint: url, txId: tx.id, privkey, expiry: q.expiry || null });
@@ -6258,6 +6258,7 @@ async function swapIn(token, note) {
   let amt = total - Math.max(2, Math.ceil(total * 0.02)), mq, melt, need;
   for (let i = 0; i < 4; i++) {
     if (amt < 1) throw new Error('This token is too small to cover Lightning fees for a swap. Claim it at its own mint instead.');
+    { const e = quoteFitErr(dest.url, amt); if (e) { e.message += ` The token's ${money(total)} are in your balance at ${(S.mints.find(m => m.url === meta.mint) || {}).name || host(meta.mint)}.`; throw e; } }
     mq = await dw.createMintQuoteBolt11(amt);
     melt = await fw.createMeltQuoteBolt11(mq.request);
     const inFee = num(fw.getFeesForProofs(S.proofs[meta.mint]));
@@ -6991,6 +6992,7 @@ function openMove(from, to, amount) {
 async function moveQuote(from, to, amount) {
   if (from === to) throw new Error('Pick two different mints.');
   const wTo = await getWallet(to), wFrom = await getWallet(from);
+  { const e = quoteFitErr(to, amount); if (e) throw e; }   // (refused before anything is paid)
   const mintQ = await wTo.createMintQuoteBolt11(amount);
   const mq = await wFrom.createMeltQuoteBolt11(mintQ.request);
   const need = num(mq.amount) + num(mq.fee_reserve);
@@ -9000,6 +9002,19 @@ async function pinMore(m, v, busy) {
    between steps leaves only finished swaps (their coins are in the balance) and at most one open record, which
    settles like any other. A token with more coins than the mint takes is claimed in parts, each saved first. A mint
    without the field keeps the old behaviour. */
+/* Every mint quote (Receive, a move between mints, a token swapped into your mint, an on-chain deposit; the cashier
+   and LNURL vouchers make theirs through Receive's) is checked first: the mint signs a deposit's coins in one request,
+   so an amount made of more coin sizes than it takes there could be paid and never issued. Refused before anything is
+   paid, with amounts that work. (An on-chain deposit's amount isn't known in advance: on a mint that takes fewer than
+   64 items it is refused.) */
+function quoteFitErr(url, amount) {
+  const m = mintMax(url); if (!m) return null;
+  const name = (S.mints.find(x => x.url === normUrl(url)) || {}).name || host(url);
+  if (amount == null) return m < 64 ? new Error(`${name} takes at most ${m} coins per request, so it can't take on-chain deposits: their amount isn't known in advance. Use Lightning.`) : null;
+  if (bitsOf(amount) <= m) return null;
+  const near = fitAmounts(amount, m);
+  return new Error(`${name} takes at most ${m} coins per request, so a deposit there has to be made of at most ${m} coin sizes. Try ${near.map(money).join(' or ')}.`);
+}
 // the limit the mint advertises (0: it says none), as it says it (a whole number from 1 to 10,000)
 function mintMax(url) {
   const w = (wallets[normUrl(url)] || {}).ready; if (!w) return 0;
