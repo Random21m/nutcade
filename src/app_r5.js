@@ -132,11 +132,13 @@ const daysLeft = ms => Math.max(0, Math.ceil(ms / 86400e3));
 // Lock sats of the balance for the Extra Life (setting it up): to your key, with your heir's key as the refund key
 // after the date. The journal has every output before the mint is asked, so an interrupted lock finishes as itself.
 const extraLockCfg = (w, until, heirPub) => ({ send: { type: 'p2pk', options: { pubkey: myLockPub(), locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() });
-async function lockExtra(url, amount, heirPub, until, follow) {
+async function lockExtra(url, amount, heirPub, until, follow, ctx = {}) {
   return mintLock(url, async () => {
     const w = await getWallet(url), inputs = [...(S.proofs[url] || [])];
     if (sum(inputs) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(inputs))}.`);
-    const { r: { keep, send }, op } = await journaled(url, 'send', { inputs, amount, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow }, (cb, o) => rSend(o, w, amount, inputs, { includeFees: true, onCountersReserved: cb }, extraLockCfg(w, until, heirPub)));
+    const cfg = extraLockCfg(w, until, heirPub), plan = swapPlan(w, inputs, amount, cfg.send);
+    ctx.hold = limitGate(plan ? plan.spend : feeMax(w, inputs, amount));   // (released by startExtra once its line is written)
+    const { r: { keep, send }, op } = await withPick(w, plan && plan.sel, () => journaled(url, 'send', { inputs, amount, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow, lim: limRec(ctx.hold) }, (cb, o) => rSend(o, w, amount, inputs, { includeFees: true, onCountersReserved: cb }, cfg)));
     const used = new Set(inputs.map(p => p.secret));   // (keep holds the coins the swap didn't need, as they were)
     S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep)); closeOp(op); save();
     return plain(send);
@@ -159,12 +161,13 @@ async function startExtra(amount, heir, days, auto) {
   piggyGuard(amount);
   const until = Date.now() + days * 86400e3;
   internalMove = true;
+  const ctx = {};
   try {
     const before = sum(S.proofs[S.active] || []);
-    const proofs = await lockExtra(S.active, amount, heir.pubkey, until, { k: 'extra', heir, days, auto: auto !== false, until });
+    const proofs = await lockExtra(S.active, amount, heir.pubkey, until, { k: 'extra', heir, days, auto: auto !== false, until }, ctx);
     S.extra = { mint: S.active, amount, proofs, heir, until, days, auto: auto !== false, created: Date.now(), renewed: Date.now() }; saveExtra();
-    addTx({ type: 'out', method: 'ecash', amount, fee: Math.max(0, before - sum(S.proofs[S.active] || []) - amount), mint: S.active, note: `Extra Life for ${heir.name}`, status: 'done', extraLife: true });
-  } finally { internalMove = false; }
+    addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee: Math.max(0, before - sum(S.proofs[S.active] || []) - amount), mint: S.active, note: `Extra Life for ${heir.name}`, status: 'done', extraLife: true }, ctx.hold && ctx.hold.id ? { limId: ctx.hold.id } : {}));
+  } finally { internalMove = false; if (ctx.hold) ctx.hold.release(); }
   await sendHeirCopy().catch(() => false);
   return S.extra;
 }

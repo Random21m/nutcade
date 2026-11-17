@@ -293,5 +293,7 @@ async function openCard(o) {
   };
 }
 
-window.Trophies = { DEFS, checkWallet, played, progress, gameOver, mount, openTrophy, openCard, renderCard, got: () => Object.assign({}, got), iconSVG };
+// (the duress PIN's wallet has trophies of its own: read again when it opens)
+function reload() { const g = store.get('trophies', null); first = g === null; got = g || {}; }
+window.Trophies = { DEFS, reload, checkWallet, played, progress, gameOver, mount, openTrophy, openCard, renderCard, got: () => Object.assign({}, got), iconSVG };
 })();

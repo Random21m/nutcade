@@ -522,6 +522,7 @@ const NWC = {
     catch (e) {
       refresh();
       if (e && e.piggy) throw nwcErr('RESTRICTED', 'This payment would dip into the piggy bank, which needs a countdown in NUTCADE.');
+      if (e && e.limit) { toast(`${c.name} asked to pay ${money(sats)}, over your spending limit, so NUTCADE refused.`, 'gold'); throw nwcErr('QUOTA_EXCEEDED', `Over the wallet's spending limit: ${e.message}${e.wait ? ' ' + e.wait : ''} Only someone with the phone (and the PIN) can let it through.`); }
       const f = friendly(e, url);
       toast(`${c.name}'s payment of ${money(sats)} through Wallet Connect failed. ${f.also || f.message}`, 'red');
       throw nwcErr(/enough/i.test(f.message) ? 'INSUFFICIENT_BALANCE' : 'PAYMENT_FAILED', f.message + (f.also ? ' ' + f.also : ''));

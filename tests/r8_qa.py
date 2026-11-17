@@ -87,6 +87,11 @@ async def outcome(w, n0, ms=30000):
     return ['timeout', await w.sheet_text()]
 
 
+async def settled(w):
+    """a payment that went through has finished on screen (its done screen shown) before the next step starts"""
+    await w.until("Nutcade.S.pending.length===0 && !document.querySelector('#layer .spinner')", 30000); await w.wait(600); await w.ev("Nutcade.closeSheet()"); await w.wait(200)
+
+
 async def layer_pin(w, pin=PIN):
     await pad(w, pin, '#limitLayer [data-pinpad]')
     await w.until("!document.querySelector('#limitLayer')", 20000)
@@ -234,7 +239,7 @@ async def main():
                     # exactly at: passes with no PIN asked
                     await set_limits(w, str(est), '')
                     n0 = await w.ev("Nutcade.S.txs.length"); bal0 = await w.bal(mint); await start(); r = await outcome(w, n0); await w.wait(800)
-                    cost = bal0 - await w.bal(mint)
+                    await settled(w); cost = bal0 - await w.bal(mint)
                     check(f'{way} {tag}: exactly at the per-payment limit ({est} SAT with fees) goes through without asking', r[0] == 'ok' and cost <= est, (r[0], cost, est))
                     await w.ev("Nutcade.closeSheet()")
                     # one SAT over: asks, PIN once lets it through
@@ -243,7 +248,7 @@ async def main():
                     nothing = await w.bal(mint) == bal0 and not await w.ev(f"Nutcade.S.ops.length || Nutcade.S.pending.some(p=>p.mint==={json.dumps(mint)})")
                     check(f'{way} {tag}: one SAT over the per-payment limit is held: nothing leaves, the screen says the amount', r[0] == 'limit' and f'{est:,}' in r[1] and nothing, (r, nothing))
                     if r[0] == 'limit':
-                        await layer_pin(w); r2 = await outcome(w, n0)
+                        await layer_pin(w); r2 = await outcome(w, n0); await settled(w)
                         check(f'{way} {tag}: the PIN lets it through once', r2[0] == 'ok', r2)
                         await w.ev("Nutcade.closeSheet()"); n1 = await w.ev("Nutcade.S.txs.length"); await start(); r3 = await outcome(w, n1)
                         check(f'{way} {tag}: the next one over asks again (the PIN was for one payment)', r3[0] == 'limit', r3)
@@ -339,11 +344,11 @@ async def main():
                 if r[0] == 'limit':
                     await layer_pin(w); r2 = await outcome(w, n0, 40000)
                     check(f'{way}: the PIN lets it through', r2[0] == 'ok', r2[:1] + [str(r2[1])[:160]])
-                await w.ev("Nutcade.closeSheet()"); await w.wait(500)
+                await settled(w)
                 await set_limits(w, '100000', '', PIN)
                 n0 = await w.ev("Nutcade.S.txs.length"); await start(); r = await outcome(w, n0, 40000)
                 check(f'{way}: under the limit goes through without asking', r[0] == 'ok', r[:1] + [str(r[1])[:160]])
-                await w.ev("Nutcade.closeSheet()"); await w.wait(400)
+                await settled(w)
                 await books(w, f'way {way}', broken, (A, B))
               except Exception as ex:
                 check(f'{way}: ran to the end', False, repr(ex)[:200]); await w.ev("document.querySelector('#limitLayer')?.remove(); Nutcade.closeSheet()")
@@ -403,7 +408,7 @@ async def main():
             for way in ('ln', 'reqpay'):
                 n0 = await w.ev("Nutcade.S.txs.length"); await wy[way](300); r = await outcome(w, n0)
                 check(f'Numo checkout ({way}): 300 SAT under a 400 SAT limit is paid', r[0] == 'ok', r[:1] + [str(r[1])[:120]])
-                await w.ev("Nutcade.closeSheet()")
+                await settled(w)
                 n0 = await w.ev("Nutcade.S.txs.length"); await wy[way](500); r = await outcome(w, n0)
                 check(f'Numo checkout ({way}): 500 SAT over a 400 SAT limit is held', r[0] == 'limit', r[:1] + [str(r[1])[:120]])
                 await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
@@ -421,7 +426,7 @@ async def main():
             await n.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
             n0 = await n.ev("Nutcade.S.txs.length"); await ways(n, B)['ln'](300); r = await outcome(n, n0)
             check('no PIN: under the limit goes through', r[0] == 'ok', r)
-            await set_pin(n)
+            await settled(n); await set_pin(n)
             check('no PIN -> PIN: setting a PIN moves the limit into the vault', await n.ev("localStorage.getItem('nutcade:limits')===null && Nutcade.S.limits.day===500"))
             await n.pg.context.close()
         await section('no PIN', no_pin)
@@ -708,6 +713,41 @@ async def main():
             check('long names at 320 px (English): wrap or fit, nothing cut off or wider than the screen', not cut, cut)
             await n.pg.context.close()
         await section('polish', polish)
+
+        # ======================= every new screen in each language, at 320 px: nothing left in English, nothing too wide =======================
+        async def looks():
+            for lang in LANGS:
+                k = await wallet(b, 320, 640, lang); await k.create(); await k.add_mint(B); await k.use(B); await k.receive_ln(3000); await set_pin(k)
+                miss, wide = set(), {}
+                async def shot(name):
+                    o = await k.ev(OVER_JS); iw = await k.ev("innerWidth")
+                    if o or iw != 320: wide[name] = (iw, o)
+                    for x in await k.ev("[...window.__i18nMiss]"): miss.add(x)
+                await k.ev("window.__i18nMiss=new Set()")
+                await settings(k); await k.ev("document.querySelector('#set-security').scrollIntoView()"); await shot('settings')
+                await k.click('[data-act=limOpen]'); await k.wait(250); await shot('limit sheet')
+                await k.ev("const e=document.querySelector('#limDay'); e.value='-1'; e.dispatchEvent(new Event('input',{bubbles:true}))"); await k.click('[data-act=limSave]'); await k.wait(300); await shot('limit error')
+                await k.ev("Nutcade.closeSheet()")
+                await set_limits(k, '1000', '2500')
+                await settings(k); await shot('settings with limits')
+                st = await k.ev("(document.querySelector('#set-security')||{}).innerText||''")
+                want = {'en': '2,500', 'es': '2.500', 'pt': '2.500', 'de': '2.500', 'fr': '2\u202f500'}[lang]
+                check(f'looks {lang}: the daily limit is written the {lang} way in Settings', want in st or (lang == 'fr' and '2 500' in st), st[-160:])
+                n0 = await k.ev("Nutcade.S.txs.length"); await ways(k, B)['ecash'](1500); r = await outcome(k, n0); await shot('over the limit')
+                want2 = {'en': '1,500', 'es': '1.500', 'pt': '1.500', 'de': '1.500', 'fr': '1\u202f500'}[lang]
+                check(f'looks {lang}: the over-the-limit screen is translated and writes amounts the {lang} way', r[0] == 'limit' and (want2 in r[1] or (lang == 'fr' and '1 500' in r[1])) and (lang == 'en' or 'This payment' not in r[1]), r[1][:200])
+                await k.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.closeSheet()")
+                await settings(k); await k.click('[data-act=duressOpen]'); await k.wait(250); await shot('duress pin')
+                await pad(k, PIN); await k.wait(900); await shot('duress new'); await pad(k, PIN); await k.wait(300); await shot('duress same')
+                await pad(k, DPIN); await k.wait(300); await pad(k, DPIN); await k.until("!!document.querySelector('#duressAmt')", 8000); await shot('duress fund')
+                await k.click('[data-act=duressMake]'); await k.until("!!document.querySelector('[data-act=close]')", 20000); await k.wait(300); await shot('duress ready')
+                await settings(k); await k.click('[data-act=duressOpen]'); await k.wait(250); await pad(k, PIN); await k.until("!!document.querySelector('[data-act=duressOff]')", 8000); await shot('duress menu')
+                await k.click('[data-act=duressOff]'); await k.wait(250); await shot('duress off')
+                await k.ev("Nutcade.closeSheet()"); await settings(k); await k.ev("document.querySelector('#set-about').scrollIntoView()"); await shot('about')
+                check(f'looks {lang}: the spending limit, over-the-limit, duress PIN and About screens have nothing left in English', lang == 'en' or not miss, sorted(miss)[:8])
+                check(f'looks {lang}: none of them is wider than 320 px', not wide, wide)
+                await k.pg.context.close()
+        await section('looks', looks)
 
         check('round 8: the books add up everywhere (history = balance)', not broken, broken)
         print('SUMMARY', sum(1 for r in results if r[1]), 'passed,', sum(1 for r in results if not r[1]), 'failed')

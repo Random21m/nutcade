@@ -2,7 +2,7 @@
    The page itself is fetched from the network first, so a new release reaches you right away;
    the saved copy is used only when the network fails or takes longer than a few seconds.
    Requests to mints, Nostr relays and other sites are never touched. */
-const CACHE = 'nutcade-v3';   // v3: 1.12.1 (v2: the new home-screen icon, 1.12.0)
+const CACHE = 'nutcade-v4';   // v4: 1.13.0 (v3: 1.12.1; v2: the new home-screen icon, 1.12.0)
 const CORE = ['./', './index.html', './zxing_reader.wasm', './manifest.webmanifest', './favicon.svg', './favicon-32.png', './apple-touch-icon.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

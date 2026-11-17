@@ -33,7 +33,7 @@ body:
     id: device
     attributes:
       label: Device and browser
-      description: For example "iPhone 13, iOS 17.5, added to the home screen" or "Pixel 7, Chrome 126".
+      description: For example "iPhone 13, iOS 17.5, added to the home screen" or "Galaxy S23, Chrome 126".
     validations:
       required: true
   - type: input

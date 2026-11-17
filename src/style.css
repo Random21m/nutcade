@@ -68,7 +68,8 @@ button{cursor:pointer}
 .credit-num{font-family:var(--f-display);font-size:clamp(26px,9vw,46px);color:var(--gold);text-shadow:0 0 14px var(--gold);text-shadow:0 0 14px color-mix(in srgb,var(--gold) 55%,transparent);font-variant-numeric:tabular-nums;white-space:nowrap;max-width:100%}
 .credit-num small{font-size:.38em;color:var(--pink);text-shadow:none;margin-left:8px;display:inline-block;white-space:nowrap;word-break:keep-all}
 .mint-pill{display:inline-flex;align-items:center;gap:8px;max-width:100%;min-height:44px;padding:4px 14px;border:1px solid var(--grid);border-radius:999px;background:var(--panel);font-size:19px;color:var(--ink);text-align:left}
-.mint-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mint-pill{border-radius:22px}
+.mint-pill span{min-width:0;overflow-wrap:anywhere;line-height:1.1}   /* a long mint name wraps (never cut off) */
 .dot{width:9px;height:9px;border-radius:50%;background:var(--lime);box-shadow:0 0 8px var(--lime);flex:none}
 .dot.off{background:var(--faint);box-shadow:none}
 
@@ -104,7 +105,7 @@ button{cursor:pointer}
 .tx .ico{width:34px;height:34px;display:grid;place-items:center;font-family:var(--f-display);font-size:14px;border:2px solid currentColor;border-radius:var(--r)}
 .tx.in .ico{color:var(--lime)} .tx.out .ico{color:var(--pink)}
 .tx .mid{min-width:0}
-.tx .note{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx .note{overflow-wrap:anywhere;line-height:1.1}   /* a long note or name wraps onto a second line (never cut off) */
 .tx .note.empty{color:var(--faint);font-style:italic}
 .tx .meta{font-size:17px;align-items:center;color:var(--dim);display:flex;gap:8px;flex-wrap:wrap}
 .tx .amt{font-family:var(--f-display);font-size:12px;font-variant-numeric:tabular-nums;text-align:right}
@@ -572,3 +573,18 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .sheet{grid-template-columns:minmax(0,1fr)}
 .sheet-head h3{overflow-wrap:break-word}   /* a long name still wraps (min-width:0), but a word only splits at its soft hyphens */
 .spinner,.game-top .ttl{line-height:1.5}   /* two-line pixel labels get room between their lines */
+
+/* ---------- Round 8: spending limit, duress PIN, stay upright ---------- */
+.lim-sheet{display:grid;gap:12px;max-width:420px;margin:auto;text-align:center}
+.lim-sheet .pinpad{margin:0 auto}
+.lim-msg{color:var(--gold)}
+#upright{display:none}
+@media (orientation:landscape) and (max-height:500px){
+  html.phone #upright{display:flex;position:fixed;inset:0;z-index:9999;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:16px;background:var(--void,#0a0717);color:var(--ink,#f4f0ff);text-align:center}
+  html.phone body{overflow:hidden}
+}
+#upright .up-h{font-family:var(--f-display);font-size:18px;line-height:1.5;color:var(--gold)}
+#upright .up-t{font-size:20px;max-width:30em}
+#upright svg{width:72px;height:72px;animation:up-turn 2.4s steps(4) infinite}
+@keyframes up-turn{0%,40%{transform:rotate(-90deg)}60%,100%{transform:rotate(0)}}
+@media (prefers-reduced-motion:reduce){#upright svg{animation:none}}

@@ -1,0 +1,488 @@
+/* ===================== Round 8 (1.13): spending limit, duress PIN, request-size limits, stay upright ===================== */
+
+/* ---------- spending limit ----------
+   Two optional limits for the whole wallet: "ask for the PIN above X SAT" for one payment, and "at most Y SAT a day"
+   (the last 24 hours, rolling). They apply to every way sats leave: every payment goes through one of four steps
+   (making a token, getting ecash ready for a Lightning or on-chain payment, handing over ecash offline, locking an
+   Extra Life), and each of them asks limitGate() first, with the most the payment can cost: the amount plus every
+   fee (the mint's fee to spend ecash, the fee a token carries for its receiver, the Lightning fee reserve).
+   The day counts what really left: every outgoing line in the history of the last 24 hours (amount + fee; a failed
+   payment only what the mint kept, a token taken back only its fee), every step written down but not finished yet
+   (the journal: a payment interrupted by a reload, or in flight in another tab), and the payments in flight in this
+   tab. The check and the hold on the amount happen together, in one go, so two taps (or two mints paying at once)
+   can't both fit under what is left. The limits live with the wallet: inside the PIN vault when there is a PIN, and
+   changing or removing them needs the PIN. Over a limit, the payment is held with the amount and when the day frees
+   up; with a PIN, entering it lets that one payment go over. */
+const DAY_MS = 86400e3;
+S.limits = store.get('limits', null);   // { per, day } in SAT; 0 or missing = off
+const limHolds = new Map();   // payments in flight in this tab: id -> { a, at }
+let limitOK = null;           // the PIN was entered for the payment being retried: { until } (used once, and gone when that retry ends)
+const limitsOn = () => !!(S.limits && (S.limits.per > 0 || S.limits.day > 0));
+// what an outgoing history line took from the wallet
+function limValue(t) {
+  if (t.status === 'failed' || t.status === 'expired') return 0;   // nothing left (what the mint kept is its own fee line)
+  if (t.status === 'reclaimed') return num(t.fee);                  // the token came back: only its fee left
+  return num(t.amount) + num(t.fee);
+}
+// every entry of the last 24 hours that counts toward the day: [{ at, v }]
+function limEntries(now = Date.now()) {
+  const since = now - DAY_MS, g = new Map(), out = [];
+  const add = (id, at, v) => { if (!(v > 0)) return; if (!id) { out.push({ at, v }); return; } const x = g.get(id); if (x) { x.v += v; x.at = Math.min(x.at, at); } else g.set(id, { at, v }); };
+  for (const t of S.txs) if (t.type === 'out' && (t.ts || 0) > since && t.note !== 'Ecash already spent elsewhere') add(t.limId, t.ts, limValue(t));
+  for (const o of S.ops) if (o.lim && (o.lim.at || o.created || 0) > since) add(o.lim.id, o.lim.at || o.created, num(o.lim.a));
+  for (const [id, h] of limHolds) { const x = g.get(id); if (x) { x.v = Math.max(x.v, h.a); } else g.set(id, { at: h.at, v: h.a }); }
+  return out.concat([...g.values()]);
+}
+const limitUsed = (now = Date.now()) => limEntries(now).reduce((t, e) => t + e.v, 0);
+const limitLeft = () => S.limits && S.limits.day > 0 ? Math.max(0, S.limits.day - limitUsed()) : null;
+// how long until `spend` fits in the day again (ms), or null if it never can
+function limitWait(spend, now = Date.now()) {
+  const day = S.limits.day; if (spend > day) return null;
+  const es = limEntries(now).sort((a, b) => a.at - b.at); let used = es.reduce((t, e) => t + e.v, 0);
+  for (const e of es) { used -= e.v; if (used + spend <= day) return Math.max(60e3, e.at + DAY_MS - now); }
+  return 60e3;
+}
+const waitText = ms => { const m = Math.ceil(ms / 60e3), h = Math.floor(m / 60); return h ? `It frees up in ${h} h ${m % 60} min.` : `It frees up in ${m} min.`; };
+function limitErr(kind, spend) {
+  const L = S.limits, e = new Error('');
+  if (kind === 'per') e.message = `This payment is ${money(spend)} with fees, over your limit of ${money(L.per)} a payment.`;
+  else {
+    const left = Math.max(0, L.day - limitUsed());
+    e.message = spend > L.day ? `This payment is ${money(spend)} with fees, more than your limit of ${money(L.day)} a day.` : `This payment is ${money(spend)} with fees, and ${money(left)} of your ${money(L.day)} a day is left.`;
+    const w = limitWait(spend); if (w != null) e.wait = waitText(w);
+  }
+  e.limit = { kind, spend }; e.keep = true;
+  return e;
+}
+/* The one check every payment goes through. spend = the most it can take, fees included. Returns a hold, released by
+   the caller once the payment is on record (or failed): { id, release() }. opts.grant: part of a payment already
+   checked as a whole (several mints paying one invoice). */
+function limitGate(spend, opts = {}) {
+  spend = Math.max(0, Math.ceil(num(spend)));
+  const none = { id: null, release() {} };
+  if (opts.free) return none;
+  if (opts.grant) return { id: opts.grant.id, part: true, release() {} };
+  if (!limitsOn()) return none;
+  const ok = !opts.auto && limitOK && limitOK.until > Date.now();   // (an app paying through Wallet Connect never uses a PIN you entered here)
+  if (ok) limitOK = null;   // the PIN was for this one payment
+  else {
+    if (S.limits.per > 0 && spend > S.limits.per) throw limitErr('per', spend);
+    if (S.limits.day > 0 && limitUsed() + spend > S.limits.day) throw limitErr('day', spend);
+  }
+  const id = uid(); limHolds.set(id, { a: spend, at: Date.now() });
+  return { id, release() { limHolds.delete(id); } };
+}
+// what a step's journal record carries: the hold's amount (a part of a payment checked as a whole carries none: the whole is held)
+const limRec = h => ({ id: h.id, a: !h.part && limHolds.has(h.id) ? limHolds.get(h.id).a : 0 });
+// a payment made of several parts (several mints paying one invoice): checked once as a whole, the parts then use it
+function limitGrant(total) { const h = limitGate(total); return { id: h.id || uid(), release: h.release }; }
+/* The most a swap that makes `amount` (for a token, or for a payment) can take from the balance, and the coins it
+   will use: the library's own numbers (the outputs with the receiver's fee, then the coins it picks), so the check
+   and the swap agree to the SAT. */
+function swapPlan(w, have, amount, sendOT) {
+  try {
+    const ks = w.getOutputKeyset(), ot = w.configureOutputs(w.parseAmount(amount, 'limit'), ks, sendOT || w.defaultOutputType(), true);
+    const h = num(w.preparedTotal(ot)), sel = w.selectProofsToSend(have, L.Amount.from(h), true);
+    if (!sel.send.length) return null;
+    return { spend: h + num(w.getFeesForProofs(sel.send)), sel };
+  } catch (e) { return null; }
+}
+// until the swap: the library's own pick, so the swap spends exactly the coins the check counted
+async function withPick(w, sel, fn) {
+  if (!sel || !w._selectProofs) return fn();
+  const pick = w._selectProofs, want = new Set(sel.send.map(p => p.secret));
+  w._selectProofs = (ps, ...a) => { const send = ps.filter(p => want.has(p.secret)); return send.length === want.size ? { keep: ps.filter(p => !want.has(p.secret)), send } : pick.call(w, ps, ...a); };
+  try { return await fn(); } finally { w._selectProofs = pick; }
+}
+function feeMax(w, have, amount) {   // when the library can't say: as if every coin is spent, plus the receiver's fee
+  let f = 0; try { f = num(w.getFeesForProofs(have)); } catch (e) {}
+  const coins = a => { let c = 0; for (let x = a; x > 0; x = Math.floor(x / 2)) c += x % 2; return c; };
+  let r = 0; try { for (let j = 0; j < 4; j++) r = num(w.getFeesForKeyset(coins(amount + r), have[0].id)); } catch (e) {}
+  return amount + f + r;
+}
+// (each part on its own, so each is translated whole)
+const limitSummary = () => {
+  if (!limitsOn()) return ['OFF'];
+  const a = []; if (S.limits.per > 0) a.push(`PIN above ${money(S.limits.per)}`); if (S.limits.day > 0) a.push(`${money(S.limits.day)} a day`);
+  return a;
+};
+function limitPanel() {
+  return `<div class="row between tiny" style="align-items:flex-start;gap:10px"><span>Spending limit</span><span style="color:${limitsOn() ? 'var(--lime)' : 'var(--dim)'};text-align:right;display:grid">${limitSummary().map(x => `<span>${esc(x)}</span>`).join('')}</span></div>
+    ${limitsOn() && S.limits.day > 0 ? `<div class="row between tiny"><span>Left today</span><span style="color:var(--ink)">${money(limitLeft())}</span></div>` : ''}
+    <button class="btn sm" data-act="limOpen">${limitsOn() ? 'Change spending limit' : 'Set a spending limit'}</button>`;
+}
+function openLimits() {
+  const L = S.limits || {};
+  openSheet('Spending limit', `<p style="margin:0">Limits for every way sats leave this wallet: Lightning, ecash, gifts, requests, Wallet Connect, zaps and moves between mints. Fees count too.</p>
+    <div class="field"><label for="limPer">Ask for my PIN above (SAT, one payment)</label><input id="limPer" class="inp" inputmode="numeric" autocomplete="off" placeholder="Off" value="${L.per > 0 ? fmt(L.per) : ''}" ${vault.on ? '' : 'disabled'}>
+      ${vault.on ? '' : '<div class="tiny muted">Set a PIN first to use this one.</div>'}</div>
+    <div class="field"><label for="limDay">At most (SAT, any 24 hours)</label><input id="limDay" class="inp" inputmode="numeric" autocomplete="off" placeholder="Off" value="${L.day > 0 ? fmt(L.day) : ''}"></div>
+    <div class="tiny muted">Leave a box empty to turn that limit off.${vault.on ? ' Changing or removing a limit needs your PIN, and your PIN lets one payment go over.' : ' Without a PIN anyone holding this phone can change them.'}</div>
+    <button class="btn solid gold block" data-act="limSave">Save</button><div id="sheetErr"></div>`);
+}
+function readLimit(id) {
+  const el = $('#' + id); if (!el || el.disabled) return 0;
+  const s = String(el.value || '').trim(); if (!s) return 0;
+  const n = parseSat(s); if (!(n > 0)) throw new Error('Type a limit above 0, or leave the box empty to turn it off.');
+  return n;
+}
+const limWant = { v: null };
+function applyLimits(v) {
+  S.limits = v.per || v.day ? { per: v.per || 0, day: v.day || 0 } : null;
+  store.set('limits', S.limits); save();
+  closeSheet(); refresh(); sfx('coin'); toast(S.limits ? 'Spending limit saved' : 'Spending limit off', 'lime');
+}
+/* Over a limit: the payment waits on a screen of its own (over the sheet it came from, which stays as it was). With a
+   PIN, entering it lets this one payment through; without one, the limit is changed in Settings. */
+let limitRetry = null;
+function limitAsk(e, retry) {
+  document.getElementById('limitLayer')?.remove();
+  const box = document.createElement('div'); box.id = 'limitLayer';
+  limitRetry = async () => { try { await retry(); } finally { limitOK = null; } };   // (the PIN is for this payment's retry only, whatever coins it ends up using)
+  pinUI.mode = 'limitOK'; pinUI.value = ''; pinUI.limit = e.limit;
+  box.innerHTML = `<div class="scrim" style="align-items:center;z-index:260"><div class="sheet lim-sheet" role="alertdialog" aria-modal="true" aria-label="Over your spending limit">
+    <div class="pb-h">OVER YOUR LIMIT</div>
+    <p class="lim-msg" style="margin:0">${esc(e.message)}</p>${e.wait ? `<p class="th" style="margin:0">${esc(e.wait)}</p>` : ''}
+    ${vault.on ? padHTML('ENTER PIN', 'Enter your PIN to let this one payment through.') : `<p style="margin:0">Nothing was sent. You can change the limit in Settings → Security.</p>`}
+    <button class="btn block" data-act="limitNo">Cancel</button></div></div>`;
+  document.body.appendChild(box);
+  if (LANG !== 'en') trNode(box);
+  sfx('err');
+}
+function limitClose() { document.getElementById('limitLayer')?.remove(); limitRetry = null; if (pinUI.mode === 'limitOK') pinUI.mode = null; }
+
+/* ---------- duress PIN ----------
+   A second PIN that opens a small, separate wallet (its own 12 words, its own balance and history) instead of this
+   one, for when someone forces you to unlock NUTCADE. The vault always has room for it: with a PIN set there is
+   always a second part, filled with random bytes until a duress PIN is set, so the vault looks the same with or
+   without one. Each PIN unlocks its own data key; every try runs both key derivations and both unwraps, so neither
+   the time it takes nor the message says which part opened, or that there is a second one. With the duress PIN's
+   wallet open, NUTCADE reads and writes only that wallet's encrypted part (the device's own settings aside): the
+   real wallet's data is never decrypted, read or written, and it has no key in memory. The real wallet keeps the
+   duress wallet's data key, so only the real PIN can set, change or remove the duress PIN. What it can't hide: see
+   "Duress PIN" in the README (someone reading the browser's storage directly sees how big each part is, and the
+   real wallet's plain settings such as its mint list). */
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep'];
+const lsGet = (k, d) => { try { const v = localStorage.getItem('nutcade:' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem('nutcade:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } };
+function splitPrefs(v) {
+  const dev = lsGet('prefs', {}), own = {};
+  for (const k of Object.keys(v || {})) { if (WALLET_PREFS.includes(k)) own[k] = v[k]; else dev[k] = v[k]; }
+  vault.data.prefs = own; queueVaultWrite();
+  return lsSet('prefs', dev);
+}
+const randBox = n => ({ iv: b64e(rnd(12)), ct: b64e(rnd(n)) });
+// an unused second part: random bytes shaped like a real one (salt, wrapped key, a small wallet's data)
+function fillerSlot() { return { kdf: { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(rnd(16)) }, pin: randBox(48), data: randBox(1800 + Math.floor(Math.random() * 2400)) }; }
+// one PIN try: both parts, always, in parallel
+async function pinToKeys(pin) {
+  const rec = raw.get('vault'), slot = rec.slot;
+  const [k1, k2] = await Promise.all([kekFromPin(pin, b64d(rec.kdf.salt), rec.kdf.iter), kekFromPin(pin, slot ? b64d(slot.kdf.salt) : rnd(16), slot ? slot.kdf.iter : rec.kdf.iter)]);
+  const [d1, d2] = await Promise.all([unwrapDek(rec.pin, k1).catch(() => null), slot ? unwrapDek(slot.pin, k2).catch(() => null) : unwrapDek(rec.pin, k2).catch(() => null)]);
+  return d1 ? { dek: d1, decoy: false } : d2 && slot ? { dek: d2, decoy: true } : null;
+}
+async function slotOpens(pin) {
+  const slot = raw.get('vault', {}).slot; if (!slot) return false;
+  try { await unwrapDek(slot.pin, await kekFromPin(pin, b64d(slot.kdf.salt), slot.kdf.iter)); return true; } catch (e) { return false; }
+}
+async function openPart(dek, decoy) {
+  vault.decoy = !!decoy;
+  try { await openVault(dek); } catch (e) { vault.decoy = false; vault.open = false; vault.data = {}; throw e; }
+  if (decoy) { enterDecoyState(); return; }
+  const rec = raw.get('vault'); if (!rec.slot) { rec.slot = fillerSlot(); raw.set('vault', rec); }   // (a vault from before 1.13 gets its second part)
+}
+// everything NUTCADE loaded from storage before the PIN, read again from the duress PIN's wallet
+function enterDecoyState() {
+  const d = vault.data;
+  S.mints = d.mints || []; S.active = d.active || null; S.counters = d.counters || {}; S.opsdone = d.opsdone || [];
+  for (const k of WALLET_PREFS) delete S.prefs[k];
+  Object.assign(S.prefs, d.prefs || {});
+  S.piggy = d.piggy || { saved: 0 }; S.mintlog = d.mintlog || {}; S.heirlooms = d.heirlooms || []; S.challenges = d.challenges || []; S.blocked = d.blocked || [];
+  seenWraps.clear(); for (const x of d.dmseen || []) seenWraps.add(x);
+  nwcSeen.clear(); for (const x of d.nwcseen || []) nwcSeen.add(x);
+  myGen = raw.get('gen', 0);
+  if (window.Trophies && window.Trophies.reload) window.Trophies.reload();
+}
+const duressOn = () => !!(vault.open && (vault.decoy ? vault.data.fakeDuress : vault.data.duress));
+function duressPanel() {
+  if (!vault.on) return '';
+  return `<div class="row between tiny"><span>Duress PIN</span><span style="color:${duressOn() ? 'var(--lime)' : 'var(--dim)'}">${duressOn() ? 'ON' : 'OFF'}</span></div>
+    <p class="th" style="margin:0">A second PIN that opens a small separate wallet instead of this one, if someone ever forces you to unlock NUTCADE.</p>
+    <button class="btn sm" data-act="duressOpen">${duressOn() ? 'Duress PIN settings' : 'Set a duress PIN'}</button>`;
+}
+const duressUI = { old: '', pin: '', change: false };
+function openDuress() {
+  duressUI.old = duressUI.pin = ''; duressUI.change = false;
+  openPinSheet('duressOld', 'Duress PIN', { title: 'ENTER PIN', text: 'Enter your PIN first.' });
+}
+const duressNewPad = () => { nextPad('duressNew'); setBody(padHTML('CHOOSE A DURESS PIN', `${PIN_MIN} to ${PIN_MAX} digits, different from your PIN. It opens a small separate wallet instead of this one.`) + '<div id="sheetErr"></div>'); };
+function duressMenu() {
+  setBody(`<p style="margin:0">Your duress PIN opens a small separate wallet instead of this one. Anyone who unlocks NUTCADE with it sees only that wallet.</p>
+    <button class="btn block gold" data-act="duressChange">Change duress PIN</button>
+    <button class="btn block red" data-act="duressOff">Turn off duress PIN</button>
+    <button class="btn block" data-act="close">Done</button><div id="sheetErr"></div>`);
+}
+function duressFund() {
+  setBody(`<p style="margin:0">The duress PIN's wallet starts empty, with its own 12 words. Put a small amount in it from the mint you're using now, so it looks used.</p>
+    <div class="field"><label for="duressAmt">Sats for it (SAT, optional)</label><input id="duressAmt" class="inp amount" inputmode="numeric" placeholder="0" autocomplete="off"></div>
+    <button class="btn solid gold block" data-act="duressMake">Set duress PIN</button><div id="sheetErr"></div>`);
+}
+async function decoyKey() { return crypto.subtle.importKey('raw', b64d(vault.data.duress.dek), { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']); }
+async function sealBox(key, obj) { const iv = rnd(12); const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(obj))); return { iv: b64e(iv), ct: b64e(ct) }; }
+async function openBox(key, box) { return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(box.iv) }, key, b64d(box.ct)))); }
+// set it up: the sats for it leave this wallet as a token, which the other wallet claims the first time it opens
+async function makeDuress(pin, amount) {
+  if (vault.decoy) {   // (in the duress PIN's wallet this looks and works the same, but sets up nothing)
+    if (amount > 0) await sendEcash(amount, '', null, S.active);
+    vault.data.fakeDuress = true; queueVaultWrite(); await vault.chain; return;
+  }
+  if (vault.data.duress) throw new Error('A duress PIN is already set.');
+  const url = S.active, m = activeMint(); if (amount > 0 && !m) throw new Error('Add a mint first.');
+  let token = null;
+  if (amount > 0) { const tx = await sendEcash(amount, 'Sats for the duress PIN wallet', null, url); token = tx.token; updTx(tx.id, { duressFund: true }); }
+  const created = Date.now(), dek = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+  const data = { seed: { mnemonic: newMnemonic(), backedUp: true, created, secured: true }, mints: m ? [JSON.parse(JSON.stringify(m))] : [], active: m ? url : null, proofs: {}, pending: [], quotes: [], ops: [], opsdone: [], counters: {},
+    txs: token ? [{ id: uid(), ts: created, type: 'in', method: 'ecash', amount, mint: url, note: '', status: 'pending', incoming: cleanToken(token), offline: true, fee: 0 }] : [], prefs: {}, requests: [], contacts: [], nwc: [] };
+  const salt = rnd(16), kek = await kekFromPin(pin, salt, PBKDF2_ITER);
+  const slot = { kdf: { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(salt) }, pin: await wrapDek(dek, kek), data: await sealBox(dek, data) };
+  vault.data.duress = { dek: b64e(await crypto.subtle.exportKey('raw', dek)), at: created };
+  queueVaultWrite(); await vault.chain;
+  const rec = raw.get('vault'); rec.slot = slot; if (!raw.set('vault', rec)) throw new Error("This browser won't save data.");
+}
+async function changeDuress(pin) {
+  if (vault.decoy) { vault.data.fakeDuress = true; queueVaultWrite(); return; }
+  const dek = await decoyKey(), salt = rnd(16), kek = await kekFromPin(pin, salt, PBKDF2_ITER);
+  const rec = raw.get('vault'); rec.slot.kdf = { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(salt) }; rec.slot.pin = await wrapDek(dek, kek);
+  raw.set('vault', rec);
+}
+// turn it off: its sats come back to this wallet. Each of its tokens and coins is saved here first (as ecash waiting to
+// be claimed, in the same vault), then its part becomes random bytes again, then they are claimed: an interruption at
+// any point loses nothing.
+async function duressOff() {
+  if (vault.decoy) { delete vault.data.fakeDuress; queueVaultWrite(); return 0; }
+  if (!vault.data.duress) return 0;
+  const rec = raw.get('vault'); let d = null;
+  try { d = await openBox(await decoyKey(), rec.slot.data); } catch (e) {}
+  const toks = [];
+  if (d) {
+    for (const [u, ps] of Object.entries(d.proofs || {})) if (ps && ps.length) toks.push(L.getEncodedToken({ mint: u, proofs: ps, unit: 'sat' }));
+    for (const t of d.txs || []) if (t.status === 'pending' && t.incoming) toks.push(t.incoming);
+    for (const t of d.txs || []) if (t.type === 'out' && t.status === 'pending' && t.token && !t.locked) toks.push(t.token);
+    for (const p of d.pending || []) if (p.proofs && p.proofs.length && !p.paid) toks.push(L.getEncodedToken({ mint: p.mint, proofs: p.proofs, unit: 'sat' }));
+  }
+  const ids = [];
+  for (const t of toks) { try { const meta = peekToken(t); if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint).catch(() => {}); ids.push(holdIncoming(t, "Back from the duress PIN's wallet").id); } catch (e) {} }
+  save(); await vault.chain;
+  rec.slot = fillerSlot(); raw.set('vault', rec);
+  delete vault.data.duress; queueVaultWrite(); await vault.chain;
+  let back = 0;   // (claimed now where the mint answers; the rest stays saved and is claimed later, like ecash saved offline)
+  for (const id of ids) { const t = txById(id); if (!t) continue; try { const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: id, reqId: null } }); incomingClaimed({ txId: id, reqId: null }, nt); back += num(nt.amount); } catch (e) {} }
+  return back;
+}
+// the PIN of the wallet that is open, for the steps that need it (a limit, the duress PIN)
+async function pinMore(m, v, busy) {
+  const f = pinFails(); if (f.until > Date.now()) return pinError(`Wait ${Math.ceil((f.until - Date.now()) / 1000)}s before trying again.`);
+  const check = async () => { busy('CHECKING…'); if (await pinToDek(v)) { raw.del('pinfails'); return true; } notePinFail(); pinError('That PIN is wrong.'); return false; };
+  if (m === 'limitOK') { if (!(await check())) return; limitOK = { until: Date.now() + 120e3 }; const r = limitRetry; limitClose(); sfx('coin'); if (r) r(); return; }
+  if (m === 'limitSave') { if (!(await check())) return; applyLimits(limWant.v); return; }
+  if (m === 'duressOld') { if (!(await check())) return; duressUI.old = v; if (duressOn()) duressMenu(); else duressNewPad(); return; }
+  if (m === 'duressNew') { if (v === duressUI.old) return pinError('Your duress PIN has to differ from your PIN.'); duressUI.pin = v; nextPad('duressConfirm'); setBody(padHTML('CONFIRM DURESS PIN', 'Type the same duress PIN again.') + '<div id="sheetErr"></div>'); return; }
+  if (m === 'duressConfirm') {
+    if (v !== duressUI.pin) { duressNewPad(); return pinError("Those didn't match. Start again."); }
+    if (duressUI.change) { busy('ENCRYPTING…'); await changeDuress(v); duressUI.pin = duressUI.old = ''; closeSheet(); refresh(); sfx('coin'); toast('Duress PIN changed', 'lime'); return; }
+    pinUI.mode = null; duressFund(); return;
+  }
+}
+
+/* ---------- mints that take only a few items per request (NUT-06 max_array_length) ----------
+   A mint may say how many items any list in a request can hold (inputs, outputs, Ys). Every Nutshell mint says 1,000,
+   so for nearly every payment nothing changes. Restores and state checks are always asked in pieces of at most that
+   size. A mint with a small limit (under 128) gets payments built in steps: swaps of at most that many coins in and
+   out, each one written in the journal like any swap, until the wallet holds exactly the coins the payment needs; the
+   token is then made of those coins (or a locked one with one last swap), and a Lightning payment spends them. A crash
+   between steps leaves only finished swaps (their coins are in the balance) and at most one open record, which
+   settles like any other. A token with more coins than the mint takes is claimed in parts, each saved first. A mint
+   without the field keeps the old behaviour. */
+const SMALL_MAX = 128;
+function mintMax(url) {
+  const w = (wallets[normUrl(url)] || {}).ready; if (!w) return 0;
+  try { const i = w.getMintInfo(), v = i && i._mintInfo && i._mintInfo.max_array_length; return v == null ? 0 : Math.max(1, Math.min(10000, Math.floor(num(i.maxArrayLength)) || 0)); } catch (e) { return 0; }
+}
+const smallMint = url => { const m = mintMax(url); return m > 0 && m < SMALL_MAX ? m : 0; };
+const bitsOf = n => { let c = 0; for (let x = n; x > 0; x = Math.floor(x / 2)) c += x % 2; return c; };
+const splitAmt = n => { const out = []; for (let b = 2 ** 52; b >= 1; b /= 2) if (n >= b) { out.push(b); n -= b; } return out; };
+const lowBit = n => { let b = 1; while (n % (b * 2) === 0) b *= 2; return b; };
+// the nearest amounts made of at most m coin sizes, below and above n
+function fitAmounts(n, m) { const s = splitAmt(n); if (s.length <= m) return [n]; const lo = s.slice(0, m).reduce((a, b) => a + b, 0); return [lo, lo + lowBit(lo)]; }
+const feeOfK = (w, k, id) => { try { return num(w.getFeesForKeyset(k, id)); } catch (e) { return 0; } };
+const feeOfPs = (w, ps) => { try { return ps.length ? num(w.getFeesForProofs(ps)) : 0; } catch (e) { return 0; } };
+function rfeeFor(w, amount, id) { let r = 0; for (let j = 0; j < 5; j++) r = feeOfK(w, bitsOf(amount + r), id); return r; }
+// chunked restore and recorded-output restore: never more outputs in one request than the mint takes
+async function restoreRange(w, url, start, n, keysetId) {
+  const m = mintMax(url) || n || 1, out = { proofs: [] };
+  for (let i = 0; i < n; i += m) { const r = await inTime(w.restore(start + i, Math.min(m, n - i), { keysetId }), 30000); out.proofs = out.proofs.concat(r.proofs || []); if (r.lastCounterWithSignature != null) out.lastCounterWithSignature = r.lastCounterWithSignature; }
+  return out;
+}
+/* Coins I (at most m) for a step that makes `target` in coins of its own plus change in at most `maxOut` coins:
+   the fewest coins and the least change. Small searches only: m is small here. */
+function pickInputs(w, free, target, m, maxOut) {
+  const cand = free.slice().sort((a, b) => num(b.amount) - num(a.amount)).slice(0, 40), n = cand.length;
+  let best = null;
+  const tryIt = I => { const s = I.reduce((t, p) => t + num(p.amount), 0), c = s - feeOfPs(w, I) - target; if (c < 0 || bitsOf(c) > maxOut) return; if (!best || I.length < best.I.length || (I.length === best.I.length && c < best.c)) best = { I, c }; };
+  for (let a = 0; a < n; a++) { tryIt([cand[a]]); if (m < 2) continue; for (let b = a + 1; b < n; b++) { tryIt([cand[a], cand[b]]); if (m < 3) continue; for (let c = b + 1; c < n; c++) tryIt([cand[a], cand[b], cand[c]]); } }
+  if (!best && m > 3) { for (let k = 4; k <= Math.min(m, n); k++) { tryIt(cand.slice(0, k)); tryIt(cand.slice(n - k)); } }   // (bigger limits: largest or smallest first)
+  return best && best.I;
+}
+// a step that only merges coins: at most m in, fewer out (never more than m)
+function pickMerge(w, free, m) {
+  const cand = free.slice().sort((a, b) => num(a.amount) - num(b.amount)).slice(0, 40), n = cand.length;
+  let best = null;
+  const tryIt = I => { const s = I.reduce((t, p) => t + num(p.amount), 0) - feeOfPs(w, I); if (s <= 0) return; const out = bitsOf(s), gain = I.length - out; if (gain <= 0 || out > m) return; if (!best || gain > best.gain || (gain === best.gain && s > best.s)) best = { I, gain, s }; };
+  for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) { if (m >= 2) tryIt([cand[a], cand[b]]); if (m >= 3) for (let c = b + 1; c < n; c++) tryIt([cand[a], cand[b], cand[c]]); }
+  if (!best && m > 3) for (let k = Math.min(m, n); k >= 2; k--) tryIt(cand.slice(0, k));
+  return best && best.I;
+}
+// the next step toward holding coins of exactly the amounts in D, from the coins `held` (reserved: already set aside)
+function nextStep(w, held, reserved, D, m) {
+  const left = D.slice(); const res = new Set(reserved);
+  for (const p of held) if (res.has(p.secret)) { const i = left.indexOf(num(p.amount)); if (i >= 0) left.splice(i, 1); }
+  const free = held.filter(p => !res.has(p.secret));
+  for (const p of free.slice().sort((a, b) => num(b.amount) - num(a.amount))) { const i = left.indexOf(num(p.amount)); if (i >= 0) { left.splice(i, 1); res.add(p.secret); } }   // coins already the right size
+  if (!left.length) return { done: true, reserved: res };
+  const free2 = held.filter(p => !res.has(p.secret));
+  for (let j = Math.min(m, left.length); j >= 1; j--) {
+    const C = left.slice(0, j), I = pickInputs(w, free2, C.reduce((t, x) => t + x, 0), m, m - j);
+    if (I) return { reserved: res, I, C };
+  }
+  const I = pickMerge(w, free2, m);
+  return I ? { reserved: res, I, C: [] } : { reserved: res, stuck: true };
+}
+// the same steps on paper, for the most they can cost (fees), before anything is asked
+function simulateCoins(w, held, D, m) {
+  let ps = held.map(p => ({ amount: num(p.amount), id: p.id, secret: p.secret })), reserved = new Set(), fees = 0, n = 0;
+  const kid = held[0] && held[0].id;
+  for (let i = 0; i < 80; i++) {
+    const st = nextStep(w, ps, reserved, D, m); reserved = st.reserved;
+    if (st.done) return { fees, steps: n };
+    if (st.stuck) return null;
+    const ids = new Set(st.I.map(p => p.secret)), f = feeOfPs(w, st.I), c = st.I.reduce((t, p) => t + p.amount, 0) - f - st.C.reduce((t, x) => t + x, 0);
+    ps = ps.filter(p => !ids.has(p.secret)); fees += f; n++;
+    for (const a of st.C) { const p = { amount: a, id: kid, secret: 'sim' + i + ':' + Math.random() }; ps.push(p); reserved.add(p.secret); }
+    for (const a of splitAmt(c)) ps.push({ amount: a, id: kid, secret: 'sim' + i + ':' + Math.random() });
+  }
+  return null;
+}
+/* Runs the steps: each a journaled swap with at most m coins in and out (the outputs it asks for are exactly the
+   coins the payment needs, plus the change). Returns the coins set aside, still in the balance. Each step's fee is
+   written in the same save as its coins, on one line for the whole payment. */
+async function makeCoins(w, url, D, m, feeLine) {
+  let reserved = new Set();
+  for (let i = 0; i < 80; i++) {
+    const busy = new Set(S.ops.filter(o => o.mint === url).flatMap(o => o.inputs));
+    const held = (S.proofs[url] || []).filter(p => !busy.has(p.secret));
+    const st = nextStep(w, held, reserved, D, m); reserved = st.reserved;
+    if (st.done) return held.filter(p => reserved.has(p.secret));
+    if (st.stuck) throw new Error(`${host(url)} takes at most ${m} coins per request, and the coins here can't be split that way for this amount. Try a smaller amount.`);
+    const I = st.I, C = st.C, sendC = C.reduce((t, x) => t + x, 0);
+    let res;
+    if (!C.length) { const r0 = await journaled(url, 'swap', { inputs: I }, (cb, o) => rRecv(o, w, I, { onCountersReserved: cb })); res = { r: { keep: r0.r, send: [] }, op: r0.op }; }   // (only merging coins)
+    else {
+      const cfg = { send: Object.assign({}, w.defaultOutputType(), { denominations: C }), keep: w.defaultOutputType() };
+      const pick = w._selectProofs; w._selectProofs = ps => ({ keep: [], send: ps });
+      try { res = await journaled(url, 'swap', { inputs: I }, (cb, o) => rSend(o, w, sendC, I, { includeFees: false, onCountersReserved: cb }, cfg)); }
+      finally { w._selectProofs = pick; }
+    }
+    const { r: { keep, send }, op } = res, used = new Set(I.map(p => p.secret));
+    const fee = Math.max(0, sum(I) - sum(send) - sum(keep));
+    S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(send), plain(keep));
+    for (const p of send) reserved.add(p.secret);
+    if (fee > 0) { const t = feeLine.id && txById(feeLine.id); if (t) t.fee = num(t.fee) + fee; else feeLine.id = addTx({ type: 'out', method: 'fee', amount: 0, fee, mint: url, note: 'Mint fee for splitting a payment into smaller requests', status: 'done', limId: feeLine.limId || undefined }).id; }
+    closeOp(op); save();
+  }
+  throw new Error(`${host(url)} takes at most ${m} coins per request, and this payment needs too many steps there. Try a smaller amount.`);
+}
+const heldFree = url => { const busy = new Set(S.ops.filter(o => o.mint === url).flatMap(o => o.inputs)); return (S.proofs[url] || []).filter(p => !busy.has(p.secret)); };
+// a token from a mint with a small limit: plain ecash is made of exactly the right coins (no last swap); locked ecash
+// gets one last swap from exactly the right coins
+async function sendBatched(w, amount, note, lockTo, url, opts, outCfg) {
+  const m = smallMint(url), held = heldFree(url), kid = (() => { try { return w.keysetId; } catch (e) { return held[0] && held[0].id; } })();
+  if (!lockTo) {
+    const rfee = rfeeFor(w, amount, kid), D = splitAmt(amount + rfee), sim = simulateCoins(w, held, D, m);
+    if (!sim) throw new Error(`${host(url)} takes at most ${m} coins per request, and the coins here can't be split that way for ${money(amount)}. Try a smaller amount.`);
+    const hold = limitGate(amount + rfee + sim.fees, { free: opts.noLimit, grant: opts.grant });
+    try {
+      const coins = await makeCoins(w, url, D, m, { limId: hold.id });
+      const ids = new Set(coins.map(p => p.secret));
+      S.proofs[url] = (S.proofs[url] || []).filter(p => !ids.has(p.secret));
+      const token = L.getEncodedToken({ mint: url, proofs: coins, unit: 'sat' });
+      const tx = addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(coins) - amount), mint: url, note, status: 'pending', token, sent: plain(coins), locked: null }, opts.txx || {}, hold.id ? { limId: hold.id } : {}));
+      save();
+      return tx;
+    } finally { hold.release(); }
+  }
+  // locked: the last swap's coins in sum to the token plus its fees, with no change, all in at most m coins out
+  const rfee = rfeeFor(w, amount, kid), out = bitsOf(amount + rfee);
+  let T = 0; for (let k = 1; k <= m && !T; k++) { const t = amount + rfee + feeOfK(w, k, kid); if (bitsOf(t) <= k && out <= m) T = t; }
+  if (!T) { const near = fitAmounts(amount, Math.max(1, m - 1)); throw new Error(`${host(url)} takes at most ${m} coins per request, so locked ecash there can be made of at most ${m} coin sizes. Try ${near.map(money).join(' or ')}.`); }
+  const D = splitAmt(T), sim = simulateCoins(w, held, D, m);
+  if (!sim) throw new Error(`${host(url)} takes at most ${m} coins per request, and the coins here can't be split that way for ${money(amount)}. Try a smaller amount.`);
+  const hold = limitGate(T + sim.fees, { free: opts.noLimit, grant: opts.grant });
+  try {
+    const coins = await makeCoins(w, url, D, m, { limId: hold.id });
+    return await withPick(w, { send: coins }, () => sendEcashSwap(w, amount, note, lockTo, url, opts, outCfg, hold));
+  } finally { hold.release(); }
+}
+// a Lightning payment from a mint with a small limit: the coins it spends, at most m, worth the amount, the fee
+// reserve and the mint's fee to spend them (with as little over as can be)
+function planMelt(w, url, need) {
+  const m = smallMint(url), held = heldFree(url), kid = held[0] && held[0].id;
+  const ceilFit = (n, k) => bitsOf(n) <= k ? n : fitAmounts(n, k)[1];
+  let best = null;
+  for (let k = 1; k <= m; k++) { const T = ceilFit(need + feeOfK(w, k, kid), k); if (!best || T < best.T) best = { T, k }; }
+  if (!best) return null;
+  const D = splitAmt(best.T), sim = simulateCoins(w, held, D, m);
+  return sim ? { T: best.T, D, fees: sim.fees, m } : null;
+}
+async function meltInputsBatched(w, url, need) {
+  const p = planMelt(w, url, need); if (!p) throw new Error(`${host(url)} takes at most ${smallMint(url)} coins per request, and the coins here can't be split that way for this payment.`);
+  const coins = await makeCoins(w, url, p.D, p.m, {});
+  return { r: { keep: [], send: coins }, op: null, inputs: coins };
+}
+// how to claim a token on a mint with a small limit: parts of at most m coins, each giving at most m coins back
+function tokenParts(w, proofs, m) {
+  const ps = proofs.slice().sort((a, b) => num(b.amount) - num(a.amount)), parts = [];
+  const ok = g => g.length <= m && bitsOf(Math.max(0, sum(g) - feeOfPs(w, g))) <= m && sum(g) - feeOfPs(w, g) > 0;
+  for (const p of ps) { const g = parts.find(g => ok(g.concat([p]))); if (g) g.push(p); else parts.push([p]); }
+  return parts.every(ok) ? parts : null;
+}
+async function receiveInParts(w, meta, token, note, parts) {
+  const n = parts.length, lines = parts.map((g, i) => addTx({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: (note || meta.memo || '') + ` (part ${i + 1} of ${n})`, status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true }));
+  save();   // (every part is saved before the first is claimed: if NUTCADE closes in between, the rest are claimed later)
+  let got = 0, last = null, err = null;
+  for (const t of lines) {
+    try { const nt = await receiveTokenNow(t.incoming, t.note, { follow: { k: 'incoming', txId: t.id, reqId: null }, part: true }); incomingClaimed({ txId: t.id, reqId: null }, nt); got += num(nt.amount); last = nt; }
+    catch (e) { if (!err) err = e; if (!netErr(e)) { const cur = txById(t.id); if (cur && cur.status === 'pending') updTx(t.id, { status: 'failed', note: (cur.note ? cur.note + ' · ' : '') + 'already claimed by someone else' }); } }
+  }
+  if (!last && err) throw err;
+  return Object.assign({}, last, { amount: got });
+}
+
+/* ---------- stay upright ----------
+   The manifest asks for portrait, which Android follows. iPhones have no way to lock it, so a phone held sideways gets
+   a full-screen "turn your phone upright" card instead (not tablets or computers). It only covers the screen: a game
+   is paused (as when you switch apps), and a payment or anything else in progress carries on underneath. */
+const UPRIGHT_SVG = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" shape-rendering="crispEdges"><path d="M5 1h6v1h1v12h-1v1H5v-1H4V2h1zm0 2v9h6V3zm2 10v1h2v-1z"/></svg>';
+function uprightSetup() {
+  const isPhone = () => { try { const coarse = matchMedia('(pointer:coarse)').matches, side = Math.min(screen.width || innerWidth, screen.height || innerHeight); return coarse && side <= 500; } catch (e) { return false; } };
+  const el = document.createElement('div'); el.id = 'upright'; el.setAttribute('role', 'alert');
+  const fill = () => { el.innerHTML = `${UPRIGHT_SVG}<div class="up-h">TURN YOUR PHONE UPRIGHT</div><div class="up-t">NUTCADE works held upright. Anything in progress keeps going; a game waits for you.</div>`; if (LANG !== 'en') trNode(el); };
+  fill(); document.body.appendChild(el);
+  let was = false;
+  const check = () => {
+    document.documentElement.classList.toggle('phone', isPhone());
+    const on = getComputedStyle(el).display !== 'none';
+    if (on && !was) { fill(); if (window.Arcade && window.Arcade.playing()) window.dispatchEvent(new Event('blur')); }   // (the game pauses, as when you switch apps)
+    was = on;
+  };
+  window.addEventListener('resize', check); window.addEventListener('orientationchange', check); check();
+}
