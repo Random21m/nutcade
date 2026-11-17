@@ -1,0 +1,64 @@
+name: Report a problem
+description: Something in NUTCADE didn't work the way it should.
+title: "[Problem] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to tell us. Issues on GitHub are public.
+
+        **Never paste your 12 words, your PIN, a backup file, a cashu token (cashuA… / cashuB…), a Wallet Connect link (nostr+walletconnect://…) or a Lightning invoice you still want paid.** Anyone who sees them can take your sats. Nobody working on NUTCADE will ever ask for them.
+
+        Nothing is collected about you here: this form only sends what you type to GitHub.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you expect, and what did NUTCADE do instead? Copy any message it showed.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to make it happen again
+      description: The taps, in order. Amounts and mint names help; leave out anything that can spend sats.
+      placeholder: |
+        1. Open Send
+        2. Pay a Lightning invoice of 2,500 SAT from Mint A
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and browser
+      description: For example "iPhone 13, iOS 17.5, added to the home screen" or "Pixel 7, Chrome 126".
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: NUTCADE version
+      description: Settings → About → Version.
+      placeholder: "1.13.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: money
+    attributes:
+      label: Are sats missing or in the wrong place?
+      options:
+        - "No"
+        - "Yes, the balance looks wrong"
+        - "Yes, a payment is stuck"
+        - "Not sure"
+    validations:
+      required: true
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Before you send
+      options:
+        - label: I didn't paste my 12 words, my PIN, a backup file, a token, a Wallet Connect link or an unpaid invoice.
+          required: true
