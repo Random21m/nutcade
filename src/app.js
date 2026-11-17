@@ -820,7 +820,7 @@ async function payPrep(w, kind, mq, feeIndex, note, dest, url, extra, lim = {}) 
   const have = S.proofs[url] || [];
   // the most this payment can take: the amount, the fee reserve and the mint's fees to spend the ecash
   // (more coins than the mint takes in one request, for the swap or for the payment itself: in steps, NUT-06)
-  let plan = swapPlan(w, have, need); const steps = plan && mintMax(url) && (overLimit(w, url, plan) || bitsOf(plan.h) > mintMax(url));
+  let plan = swapPlan(w, have, need); const steps = plan && mintMax(url) && (overLimit(w, url, plan) || plan.n > mintMax(url));   // (the payment spends the swap's sent coins: as many as it asked for)
   const pm = steps ? planMelt(w, url, need) : null; if (steps) plan = null;
   const most = pm ? pm.T + pm.fees : plan ? plan.spend : meltCost(url, amount, reserve).total;
   if (sum(have) < most) throw new Error(`Not enough funds. Need ${money(most)} including fees; this mint holds ${money(sum(have))}.`);

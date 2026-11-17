@@ -721,7 +721,7 @@ async def main():
         async def nut06_more():
             # a fee mint with a limit of 3: each step pays its own input fee, and the history and "Need" show the real total
             seen = {}; f = await wallet(b); await f.create(); await f.add_mint(CF); await f.use(CF); await f.pg.route(f'{CF}/v1/**', size_watch(seen))
-            for _ in range(8): await f.receive_ln(7)
+            for _ in range(14): await f.receive_ln(7)
             b0 = await f.bal(CF); tok, e = await f.send_ecash(10)
             l, pp = await f.ev(LEDGER + f"({json.dumps(CF)})")
             fees = await f.ev(f"Nutcade.S.txs.filter(t=>t.mint==={json.dumps(CF)}&&t.type==='out').reduce((a,t)=>a+(t.fee||0),0)")
@@ -730,6 +730,12 @@ async def main():
             e2, txt = await f.pay_ln(invoice(5, B))
             l, pp = await f.ev(LEDGER + f"({json.dumps(CF)})")
             check('NUT-06 fee mint: a Lightning payment works in steps, no request over 3 items, history = balance', not e2 and max(seen.values() or [0]) <= 3 and l == pp, (e2, seen, l, pp))
+            more = []   # (more sends and payments of other sizes: the coins picked differ every time, the limit must hold every time)
+            for kind, a in (('send', 5), ('pay', 3), ('send', 9), ('pay', 6), ('send', 12)):
+                if kind == 'send': t2, e4 = await f.send_ecash(a); more.append((kind, a, bool(t2), e4))
+                else: e4, _ = await f.pay_ln(invoice(a, B)); more.append((kind, a, not e4, e4))
+            l, pp = await f.ev(LEDGER + f"({json.dumps(CF)})")
+            check('NUT-06 fee mint: five more sends and payments of other sizes all work, never a request over 3 items, history = balance', all(x[2] for x in more) and max(seen.values() or [0]) <= 3 and l == pp, (more, seen, l, pp))
             e3, q3 = await f.pay_ln(invoice(await f.bal(CF) - 3, B))
             m3 = re.search(r'Need ([\d,]+) SAT including fees', e3 or '')
             check('NUT-06 fee mint: "Need X including fees" counts the fees of every step', m3 and int(m3.group(1).replace(',', '')) > await f.bal(CF), (e3, await f.bal(CF)))

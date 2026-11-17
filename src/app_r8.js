@@ -84,7 +84,7 @@ function swapPlan(w, have, amount, sendOT) {
     const ks = w.getOutputKeyset(), ot = w.configureOutputs(w.parseAmount(amount, 'limit'), ks, sendOT || w.defaultOutputType(), true);
     const h = num(w.preparedTotal(ot)), sel = w.selectProofsToSend(have, L.Amount.from(h), true);
     if (!sel.send.length) return null;
-    return { spend: h + num(w.getFeesForProofs(sel.send)), sel, h };
+    return { spend: h + num(w.getFeesForProofs(sel.send)), sel, h, n: (ot.denominations || []).length || bitsOf(h) };   // (n: the outputs the library asks for: the amount's coins plus the receiver's fee as coins of its own)
   } catch (e) { return null; }
 }
 // until the swap: the library's own pick, so the swap spends exactly the coins the check counted
@@ -335,7 +335,7 @@ function mintMax(url) {
   try { const i = w.getMintInfo(), v = i && i._mintInfo ? i._mintInfo.max_array_length : null; if (v == null) return 0; const n = Math.floor(num(v)); return n >= 1 ? Math.min(n, 10000) : 0; } catch (e) { return 0; }
 }
 const smallMint = mintMax;   // (any advertised limit is honoured; the steps below are only taken when a request would go over it)
-const outsOf = (w, plan, amount) => { const s = sum(plan.sel.send) - num(w.getFeesForProofs(plan.sel.send)) - plan.h; return bitsOf(plan.h) + bitsOf(Math.max(0, s)); };
+const outsOf = (w, plan) => { const s = sum(plan.sel.send) - num(w.getFeesForProofs(plan.sel.send)) - plan.h; return plan.n + bitsOf(Math.max(0, s)); };
 // would this swap's one request go over the mint's limit (coins in, or coins out)?
 function overLimit(w, url, plan) { const m = mintMax(url); if (!m) return false; if (!plan) return true; try { return plan.sel.send.length > m || outsOf(w, plan) > m; } catch (e) { return true; } }
 // "too many items" from a mint that started enforcing a limit after NUTCADE read its info
@@ -465,9 +465,10 @@ async function sendBatched(w, amount, note, lockTo, url, opts, outCfg) {
       return tx;
     } finally { hold.release(); }
   }
-  // locked: the last swap's coins in sum to the token plus its fees, with no change, all in at most m coins out
-  const rfee = rfeeFor(w, amount, kid), out = bitsOf(amount + rfee);
-  let T = 0; for (let k = 1; k <= m && !T; k++) { const t = amount + rfee + feeOfK(w, k, kid); if (bitsOf(t) <= k && out <= m) T = t; }
+  // locked: the last swap's coins in sum to the token plus its fees, with no change, all in at most m coins out (the
+  // outputs as the library makes them: the amount's coins, then the receiver's fee as coins of its own)
+  let out = 0, h = 0; try { const ot = w.configureOutputs(w.parseAmount(amount, 'limit'), w.getOutputKeyset(), outCfg.send, true); out = (ot.denominations || []).length; h = num(w.preparedTotal(ot)); } catch (e) { const r = rfeeFor(w, amount, kid); out = bitsOf(amount) + bitsOf(r); h = amount + r; }
+  let T = 0; for (let k = 1; k <= m && !T; k++) { const t = h + feeOfK(w, k, kid); if (bitsOf(t) <= k && out <= m) T = t; }
   if (!T) { const near = fitAmounts(amount, Math.max(1, m - 1)); throw new Error(`${host(url)} takes at most ${m} coins per request, so locked ecash there can be made of at most ${m} coin sizes. Try ${near.map(money).join(' or ')}.`); }
   const D = splitAmt(T), sim = simulateCoins(w, held, D, m);
   if (!sim) throw new Error(`${host(url)} takes at most ${m} coins per request, and the coins here can't be split that way for ${money(amount)}. Try a smaller amount.`);
