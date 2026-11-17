@@ -484,6 +484,7 @@ async function addMint(url, opts = {}) {
   let m = S.mints.find(x => x.url === url);
   const rec = { url, name: info.name || host(url), desc: info.description || '', methods: methodsOf(w) };
   const isNew = !m;
+  if (isNew && belowMin(url)) { const e = new Error(`${rec.name} only accepts ${mintMax(url)} coins per request; NUTCADE needs at least ${MIN_REQ}.`); e.keep = true; delete wallets[url]; throw e; }   // (it couldn't take deposits)
   if (m) Object.assign(m, rec); else { S.mints.push(rec); m = rec; }
   if (!S.proofs[url]) S.proofs[url] = [];
   if (!S.active || opts.activate) S.active = url;
@@ -662,7 +663,8 @@ async function receiveTokenNow(token, note, opts = {}) {
   if (meta.unit !== 'sat') throw new Error(`This token is in ${meta.unit}. NUTCADE handles sats only.`);
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint);
   const w = await getWallet(meta.mint);
-  const sm = smallMint(meta.mint);   // a mint that takes only a few coins per request: a big token is claimed in parts
+  if (belowMin(meta.mint)) throw minErr(meta.mint);   // (no new deposits at a mint below the minimum)
+  const sm = smallMint(meta.mint);   // a token with more coins than the mint takes in one request: claimed in parts
   if (sm && !opts.part && !opts.follow) {   // (our own token taken back too)
     let ps = []; try { ps = w.decodeToken(token).proofs || []; } catch (e) {}
     if (ps.length > sm || bitsOf(Math.max(0, sum(ps) - feeOfPs(w, ps))) > sm) {
@@ -752,8 +754,9 @@ async function sendEcashNow(amount, note, lockTo, url, opts) {
   if (sum(S.proofs[url] || []) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
   const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}) }, keep: w.defaultOutputType() } : undefined;
   // the spending limit, with the most this can take: the swap's own numbers, fees included
-  const plan = swapPlan(w, S.proofs[url] || [], amount, outCfg && outCfg.send);
-  if (plan && !opts.noBatch && overLimit(w, url, plan)) return sendBatched(w, amount, note, lockTo, url, opts, outCfg);   // more coins in or out than the mint takes in one request (NUT-06): in steps
+  if (belowMin(url) && !opts.noBatch) return sendBatched(w, amount, note, lockTo, url, opts, outCfg);   // (a mint that dropped below the minimum: its sats can still leave, in steps)
+  const plan = swapPlan(w, S.proofs[url] || [], amount, outCfg && outCfg.send, url);
+  if (plan && plan.tooMany) throw manyErr(url, plan.tooMany);
   const hold = limitGate(plan ? plan.spend : feeMax(w, S.proofs[url] || [], amount), { free: opts.noLimit, grant: opts.grant, approved: opts.approved });
   try { return await withPick(w, plan && plan.sel, () => sendEcashSwap(w, amount, note, lockTo, url, opts, outCfg, hold)); }
   finally { hold.release(); }
@@ -821,7 +824,9 @@ async function payPrep(w, kind, mq, feeIndex, note, dest, url, extra, lim = {}) 
   const have = S.proofs[url] || [];
   // the most this payment can take: the amount, the fee reserve and the mint's fees to spend the ecash
   // (more coins than the mint takes in one request, for the swap or for the payment itself: in steps, NUT-06)
-  let plan = swapPlan(w, have, need); const steps = plan && mintMax(url) && (overLimit(w, url, plan) || plan.n > mintMax(url));   // (the payment spends the swap's sent coins: as many as it asked for)
+  let plan = swapPlan(w, have, need, undefined, url); const steps = belowMin(url);   // (in steps only from a mint that dropped below the minimum)
+  if (plan && plan.tooMany && !steps) throw manyErr(url, plan.tooMany);
+  if (steps && kind !== 'ln') throw minErr(url);   // (on-chain: its change could need more outputs than the mint takes; paid only from mints that take enough)   // (the payment spends the swap's sent coins: as many as it asked for)
   const pm = steps ? planMelt(w, url, need) : null; if (steps) plan = null;
   const most = pm ? pm.T + pm.fees : plan ? plan.spend : meltCost(url, amount, reserve).total;
   if (sum(have) < most) throw new Error(`Not enough funds. Need ${money(most)} including fees; this mint holds ${money(sum(have))}.`);
@@ -1046,6 +1051,9 @@ const outRec = (o, send) => ({ a: num(String(o.blindedMessage.amount)), id: o.bl
 // a swap with its outputs on record: prepared (counters reserved), every output written down and stored, then asked
 async function askRecorded(w, op, prepared, privkey) {
   const p = await prepared;
+  // never a request with more items than the mint takes (NUT-06): refused here, before anything is recorded or sent,
+  // so the step can be done in pieces that fit instead
+  if (op) { const m = mintMax(op.mint), nOut = (p.sendOutputs || []).length + (p.keepOutputs || []).length; if (m && ((p.inputs || []).length > m || nOut > m)) throw Object.assign(new Error(`${host(op.mint)} takes at most ${m} coins per request, and this step would need more. Nothing was sent.`), { tooBig: true }); }
   if (op) {
     if (p.inputs && p.inputs.length) op.inputs = p.inputs.map(x => x.secret);   // exactly the coins this swap spends (they are busy until it settles)
     op.outs = (p.sendOutputs || []).map(o => outRec(o, true)).concat((p.keepOutputs || []).map(o => outRec(o, false))); await saveNow();
@@ -2201,7 +2209,7 @@ function viewMints() {
       <div style="font-family:var(--f-display);font-size:12px;white-space:nowrap">${fmt(balanceOf(m.url))}</div></div>
       <div class="row between" style="gap:8px">${mintHealthLine(m)}${reportChip(m.url)}</div>
       <div class="row" style="flex-wrap:wrap;gap:6px">${methodChips(m)}</div>
-      ${blockedNotice(m.url)}
+      ${blockedNotice(m.url)}${minNotice(m.url)}
       <div class="row" style="flex-wrap:wrap">${m.url === S.active ? '<span class="chip ecash">ACTIVE</span>' : `<button class="btn sm lime" data-act="useMint" data-url="${esc(m.url)}">Use</button>`}${isBlocked(m.url) ? '<span class="chip failed">BLOCKED</span>' : ''}
       <button class="btn sm" data-act="refreshMint" data-url="${esc(m.url)}">Refresh</button>
       ${isBlocked(m.url) ? `<button class="btn sm gold" data-act="unblockMint" data-url="${esc(m.url)}">Unblock</button>` : `<button class="btn sm" data-act="blockMint" data-url="${esc(m.url)}">Block</button>`}
@@ -2567,6 +2575,7 @@ async function npcConnect(wantMint) {
   const u = (await npc('/api/v2/user/info')).data.user;
   let mint = u.mintUrl ? normUrl(u.mintUrl) : '';
   const want = wantMint ? normUrl(wantMint) : (S.mints.find(m => m.url === mint) ? mint : (activeMint() && supports(activeMint(), 'mint', 'bolt11') ? S.active : mint));
+  if (want) { await getWallet(want).catch(() => {}); if (belowMin(want)) throw minErr(want); }   // (the Lightning address's payments are deposits there)
   if (want && want !== mint) {
     if (!S.mints.find(m => m.url === want)) await addMint(want);
     const d = await npc('/api/v2/user/mint', { method: 'PATCH', body: { mint_url: want } });
@@ -2740,6 +2749,10 @@ function openMultinut(invoice, amount, dest, note) {
           refresh();
           if (st.every(s => s === 'done')) return showDone('out', amount, `Lightning · ${n} mints`);
           if (st.some(s => s === 'pending')) setBody(`<div class="notice">The payment is in flight. NUTCADE will settle each part when the mints confirm. Check the parts in your notes.</div><button class="btn block gold" data-act="close">OK</button>`);
+          else if (st.some(s => s === 'done')) {   // (some parts were paid and some came back: the words match what was booked)
+            const paid = parts.filter((p, i) => st[i] === 'done'), kept = parts.reduce((t, p) => t + num((S.txs.find(x => x.quote === p.mq.quote) || {}).cost), 0);
+            setBody(`<div class="notice red">Only part of this payment went through: ${money(paid.reduce((t, p) => t + num(p.mq.amount), 0))} was paid. The other parts came back to your wallet${kept ? `, except ${money(kept)} the mints kept as fees` : ''}. Check with the payee: the invoice may not count as paid.</div><button class="btn block gold" data-act="close">OK</button>`);
+          }
           else {
             const kept = parts.reduce((t, p) => t + num((S.txs.find(x => x.quote === p.mq.quote) || {}).cost), 0);   // swap fees that didn't come back
             setBody(`<div class="notice red">${kept ? `The payment didn't go through. The parts that were sent came back to your wallet, except ${money(kept)} the mints kept as fees.` : "The payment didn't go through, so the parts that were sent came back to your wallet."}</div><button class="btn block gold" data-act="close">OK</button>`);
@@ -3369,11 +3382,11 @@ function showMeltQuote(kind, mq, dest, note) {
   const amount = num(mq.amount);
   const head = $('#layer .sheet-head h3'); if (head) { head.textContent = tr('Pay'); head.closest('.sheet').setAttribute('aria-label', tr('Pay')); }
   const opts = kind === 'onchain' ? (mq.fee_options || []) : [];
-  const worst = kind === 'ln' ? meltCost(S.active, amount, mq.fee_reserve) : meltCost(S.active, amount, Math.max(0, ...(mq.fee_options || []).map(o => num(o.fee_reserve))));
+  const worst = kind === 'ln' ? costShown(S.active, amount, mq.fee_reserve) : meltCost(S.active, amount, Math.max(0, ...(mq.fee_options || []).map(o => num(o.fee_reserve))));
   const feeRow = kind === 'ln' ? costRows(worst) : worst.mintFee ? `<dt>Mint fee, at most</dt><dd>${money(worst.mintFee)}</dd>` : '';
   setBody(`<dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd ${AUTO_NOTE.test(note) ? '' : 'data-noi18n'}>${esc(note)}</dd>` : ''}</dl>
     ${opts.length ? `<div class="field"><label>Fee speed</label><div class="txs">${opts.map((o, i) => `<label class="tx out" style="cursor:pointer"><span class="ico"><input type="radio" name="fee" value="${o.fee_index}" ${i === 0 ? 'checked' : ''} style="accent-color:var(--pink)"></span><span class="mid"><div class="note">${esc(tr(`~${o.estimated_blocks} block${o.estimated_blocks === 1 ? '' : 's'}`))}</div><div class="meta">≈ ${Math.round(o.estimated_blocks * 10)} min</div></span><span class="amt">${fmt(o.fee_reserve)}</span></label>`).join('')}</div></div>` : ''}
-    ${kind === 'ln' ? '<div class="tiny muted">Unused fee reserve comes back as change.</div>' : ''}
+    ${kind === 'ln' ? changeNote(S.active) : ''}
     ${kind === 'ln' && balanceOf(S.active) < worst.total ? `<div class="notice">${esc((activeMint() || {}).name || 'This mint')} holds ${money(balanceOf(S.active))}, not enough on its own.${S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? ' You can split the payment across your mints.' : ''}</div>` : ''}
     <button class="btn solid pink block" id="payBtn">Pay ${money(amount)}</button>
     ${kind === 'ln' && S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? `<button class="btn block violet" id="mppBtn">Pay from several mints</button>` : ''}<div id="sheetErr"></div>`, body => {
@@ -4207,7 +4220,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u) => sendEcash(a, n, l, u || S.active), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u) } };
+window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u) => sendEcash(a, n, l, u || S.active), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), moveQuote: (f, t, a) => moveQuote(f, t, a) } };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}

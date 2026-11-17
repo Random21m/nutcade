@@ -25,8 +25,8 @@ Object.assign(A, {
     const from = val('mvFrom'), to = val('mvTo'), a = amt();
     const mv = await moveQuote(from, to, a);
     const nm = u => (S.mints.find(m => m.url === u) || {}).name || host(u);
-    setBody(`<dl class="kv"><dt>Move</dt><dd>${money(a)}</dd><dt>From</dt><dd data-noi18n>${esc(nm(from))}</dd><dt>To</dt><dd data-noi18n>${esc(nm(to))}</dd>${costRows(meltCost(from, mv.mq.amount, mv.mq.fee_reserve))}</dl>
-      <div class="tiny muted">Unused fee reserve comes back as change.</div>
+    setBody(`<dl class="kv"><dt>Move</dt><dd>${money(a)}</dd><dt>From</dt><dd data-noi18n>${esc(nm(from))}</dd><dt>To</dt><dd data-noi18n>${esc(nm(to))}</dd>${costRows(costShown(from, mv.mq.amount, mv.mq.fee_reserve))}</dl>
+      ${changeNote(from)}
       <button class="btn solid gold block" id="mvGo">Move ${money(a)}</button><div id="sheetErr"></div>`, body => {
       body.querySelector('#mvGo').onclick = e => run(e.currentTarget, 'MOVING', async () => {
         const r = await doMove(mv); refresh();

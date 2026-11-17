@@ -307,7 +307,7 @@ function mintHealthLine(m) {
 }
 function openMove(from, to, amount) {
   const src = S.mints.filter(m => balanceOf(m.url) > 0 && supports(m, 'melt', 'bolt11'));
-  const dst = S.mints.filter(m => supports(m, 'mint', 'bolt11') && !isBlocked(m.url));   // nothing moves into a blocked mint
+  const dst = S.mints.filter(m => supports(m, 'mint', 'bolt11') && !isBlocked(m.url) && !belowMin(m.url));   // nothing moves into a blocked mint, or one below NUTCADE's request minimum
   // a mint can be moved from only if another mint can take the sats (canMoveFrom); the button isn't offered otherwise
   const movable = src.filter(m => canMoveFrom(m.url));
   if (!movable.length || (from && !canMoveFrom(from))) { toast('Moving sats needs two mints that both handle Lightning.', 'gold'); return; }

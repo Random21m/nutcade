@@ -79,11 +79,13 @@ function limitGrant(total) { const h = limitGate(total); return { id: h.id || ui
 /* The most a swap that makes `amount` (for a token, or for a payment) can take from the balance, and the coins it
    will use: the library's own numbers (the outputs with the receiver's fee, then the coins it picks), so the check
    and the swap agree to the SAT. */
-function swapPlan(w, have, amount, sendOT) {
+function swapPlan(w, have, amount, sendOT, url) {
   try {
     const ks = w.getOutputKeyset(), ot = w.configureOutputs(w.parseAmount(amount, 'limit'), ks, sendOT || w.defaultOutputType(), true);
-    const h = num(w.preparedTotal(ot)), sel = w.selectProofsToSend(have, L.Amount.from(h), true);
+    const h = num(w.preparedTotal(ot)); let sel = w.selectProofsToSend(have, L.Amount.from(h), true);
     if (!sel.send.length) return null;
+    const m = url ? mintMax(url) : 0;
+    if (m && sel.send.length > m) { sel = capPick(w, have, h, m); if (!sel) return { tooMany: m, h, n: 0, spend: 0 }; }   // (never more coins in than the mint takes)
     return { spend: h + num(w.getFeesForProofs(sel.send)), sel, h, n: (ot.denominations || []).length || bitsOf(h) };   // (n: the outputs the library asks for: the amount's coins plus the receiver's fee as coins of its own)
   } catch (e) { return null; }
 }
@@ -359,19 +361,44 @@ async function pinMore(m, v, busy) {
    between steps leaves only finished swaps (their coins are in the balance) and at most one open record, which
    settles like any other. A token with more coins than the mint takes is claimed in parts, each saved first. A mint
    without the field keeps the old behaviour. */
-/* Every mint quote (Receive, a move between mints, a token swapped into your mint, an on-chain deposit; the cashier
-   and LNURL vouchers make theirs through Receive's) is checked first: the mint signs a deposit's coins in one request,
-   so an amount made of more coin sizes than it takes there could be paid and never issued. Refused before anything is
-   paid, with amounts that work. (An on-chain deposit's amount isn't known in advance: on a mint that takes fewer than
-   64 items it is refused.) */
+/* The smallest request limit NUTCADE works with (NUT-06 max_array_length). Every amount is at most 21 million BTC,
+   under 2^51 SAT, so any amount is at most 51 coins. The biggest request a normal step makes: a token or the swap
+   before a payment, with the amount's coins (51), the coins for the receiver's fee (6 at most) and the change (51):
+   108 outputs; a payment's change outputs (51 at most) and a deposit's coins (51) are fewer; inputs are picked to
+   stay within the mint's limit. So 128. Nutshell mints say 1,000. A mint below it can't be added; a mint already
+   here that starts saying less takes no new deposits, and the sats there can still be moved out (in steps). */
+const MIN_REQ = 128;
+const belowMin = url => { const m = mintMax(url); return m > 0 && m < MIN_REQ; };
+const minErr = url => { const m = mintMax(url), name = (S.mints.find(x => x.url === normUrl(url)) || {}).name || host(url); const e = new Error(`${name} only accepts ${m} coins per request; NUTCADE needs at least ${MIN_REQ}. It takes no new deposits here; you can still move your sats out.`); e.keep = true; return e; };
+/* Every way money goes into a mint is checked first (Receive, which the cashier, LNURL vouchers and Wallet Connect's
+   invoices use; a move into it; a token swapped into it; an on-chain deposit; a token claimed there; Extra Life; the
+   Lightning address's mint), so nothing is paid that the mint could then never issue. */
 function quoteFitErr(url, amount) {
-  const m = mintMax(url); if (!m) return null;
-  const name = (S.mints.find(x => x.url === normUrl(url)) || {}).name || host(url);
-  if (amount == null) return m < 64 ? new Error(`${name} takes at most ${m} coins per request, so it can't take on-chain deposits: their amount isn't known in advance. Use Lightning.`) : null;
-  if (bitsOf(amount) <= m) return null;
-  const near = fitAmounts(amount, m);
-  return new Error(`${name} takes at most ${m} coins per request, so a deposit there has to be made of at most ${m} coin sizes. Try ${near.map(money).join(' or ')}.`);
+  if (belowMin(url)) return minErr(url);
+  const m = mintMax(url); if (!m || amount == null || bitsOf(amount) <= m) return null;
+  return minErr(url);
 }
+function minNotice(url) {
+  if (!belowMin(url)) return '';
+  return `<div class="notice red">This mint now accepts only ${mintMax(url)} coins per request; NUTCADE needs at least ${MIN_REQ}. It takes no new deposits. Move your sats out to another mint.</div>`;
+}
+/* Coins for one swap on a mint with a limit: never more than it takes. The library's pick, or else the biggest coins
+   first (the fewest); null when even those are too many. */
+function capPick(w, have, h, m) {
+  const desc = have.slice().sort((a, b) => num(b.amount) - num(a.amount)), send = [];
+  let t = 0;
+  for (const p of desc) { if (send.length >= m) break; send.push(p); t += num(p.amount); if (t >= h + feeOfPs(w, send)) { const ids = new Set(send.map(x => x.secret)); return { send, keep: have.filter(x => !ids.has(x.secret)) }; } }
+  return null;
+}
+// what a pay or move sheet shows: from a mint below the minimum (sats moving out, in steps) the change may come back
+// only in part, so the most it can cost includes the coins the payment spends as they are
+function costShown(url, amount, reserve) {
+  const c = meltCost(url, amount, reserve); if (!belowMin(url)) return c;
+  const w = (wallets[normUrl(url)] || {}).ready, pm = w ? planMelt(w, url, num(amount) + num(reserve)) : null;
+  return pm ? Object.assign({}, c, { total: Math.max(c.total, pm.T + pm.fees) }) : c;
+}
+const changeNote = url => belowMin(url) ? `<div class="tiny muted">This mint accepts only ${mintMax(url)} coins per request, so part of the unused fee reserve may be kept by the mint. The total above includes it.</div>` : '<div class="tiny muted">Unused fee reserve comes back as change.</div>';
+const manyErr = (url, m) => { const e = new Error(`${(S.mints.find(x => x.url === normUrl(url)) || {}).name || host(url)} accepts at most ${m} coins per request, and this payment would need more of your coins there. Try a smaller amount.`); e.keep = true; return e; };
 // the limit the mint advertises (0: it says none), as it says it (a whole number from 1 to 10,000)
 function mintMax(url) {
   const w = (wallets[normUrl(url)] || {}).ready; if (!w) return 0;
@@ -402,6 +429,17 @@ const lowBit = n => { let b = 1; while (n % (b * 2) === 0) b *= 2; return b; };
 function fitAmounts(n, m) { const s = splitAmt(n); if (s.length <= m) return [n]; const lo = s.slice(0, m).reduce((a, b) => a + b, 0); return [lo, lo + lowBit(lo)]; }
 const feeOfK = (w, k, id) => { try { return num(w.getFeesForKeyset(k, id)); } catch (e) { return 0; } };
 const feeOfPs = (w, ps) => { try { return ps.length ? num(w.getFeesForProofs(ps)) : 0; } catch (e) { return 0; } };
+// locked ecash on a mint with a small limit: the last swap's coins in sum to the token plus its fees, with no change,
+// all in at most m coins out (the outputs as the library makes them: the amount's coins, then the receiver's fee)
+function lockedPlan(w, url, amount, sendOT) {
+  const m = mintMax(url), held = heldFree(url), kid = (() => { try { return w.keysetId; } catch (e) { return held[0] && held[0].id; } })();
+  let out = 0, h = 0; try { const ot = w.configureOutputs(w.parseAmount(amount, 'limit'), w.getOutputKeyset(), sendOT, true); out = (ot.denominations || []).length; h = num(w.preparedTotal(ot)); } catch (e) { const r = rfeeFor(w, amount, kid); out = bitsOf(amount) + bitsOf(r); h = amount + r; }
+  let T = 0; for (let k = 1; k <= m && !T; k++) { const t = h + feeOfK(w, k, kid); if (bitsOf(t) <= k && out <= m) T = t; }
+  if (!T) { const near = fitAmounts(amount, Math.max(1, m - 1)); throw new Error(`${host(url)} takes at most ${m} coins per request, so locked ecash there can be made of at most ${m} coin sizes. Try ${near.map(money).join(' or ')}.`); }
+  const D = splitAmt(T), sim = simulateCoins(w, held, D, m);
+  if (!sim) throw new Error(`${host(url)} takes at most ${m} coins per request, and the coins here can't be split that way for ${money(amount)}. Try a smaller amount.`);
+  return { T, D, sim, m };
+}
 /* The coins of a token made on a mint with a small limit. Claimed whole if it can be (at most m coins, and what the
    claim gives back fits in m coins); otherwise each coin of the amount travels with coins worth the mint's fee for
    claiming it as a part of its own, so the receiver (or you, taking it back) can claim it in parts that fit and get the
@@ -457,7 +495,26 @@ function nextStep(w, held, reserved, D, m) {
     if (I) return { reserved: res, I, C };
   }
   const I = pickMerge(w, free2, m);
-  return I ? { reserved: res, I, C: [] } : { reserved: res, stuck: true };
+  if (I) return { reserved: res, I, C: [] };
+  const sp = pickSplit(w, free2, Math.max(...left), m);
+  return sp ? { reserved: res, I: sp.I, C: [], outs: sp.outs } : { reserved: res, stuck: true };
+}
+/* a step that breaks a coin bigger than any still needed into up to m smaller ones, halving toward the size needed
+   (4,096 for a 128: 2,048 + 1,024 + 1,024, then 512 + 256 + 256 ...). On a mint with a fee the coin goes with the
+   fewest small coins that make what comes back fit. */
+function pickSplit(w, free, t, m) {
+  if (m < 2) return null;
+  const big = free.filter(p => num(p.amount) > t).sort((a, b) => num(a.amount) - num(b.amount)), small = free.slice().sort((a, b) => num(a.amount) - num(b.amount)).slice(0, 12);
+  for (const p of big) {
+    const combos = [[]]; for (let a = 0; a < small.length && m >= 2; a++) { if (small[a] === p) continue; combos.push([small[a]]); for (let b = a + 1; b < small.length && m >= 3; b++) if (small[b] !== p) combos.push([small[a], small[b]]); }
+    for (const c of combos) {
+      const I = [p].concat(c), v = I.reduce((x, q) => x + num(q.amount), 0) - feeOfPs(w, I); if (v <= 0) continue;
+      const outs = splitAmt(v); if (outs.length > m) continue;
+      while (outs.length < m) { outs.sort((a, b) => b - a); if (outs[0] <= t || outs[0] < 2) break; const x = outs.shift(); outs.push(x / 2, x / 2); }
+      if (Math.max(...outs) < num(p.amount)) return { I, outs: outs.sort((a, b) => b - a) };
+    }
+  }
+  return null;
 }
 // the same steps on paper, for the most they can cost (fees), before anything is asked
 function simulateCoins(w, held, D, m) {
@@ -470,7 +527,7 @@ function simulateCoins(w, held, D, m) {
     const ids = new Set(st.I.map(p => p.secret)), f = feeOfPs(w, st.I), c = st.I.reduce((t, p) => t + p.amount, 0) - f - st.C.reduce((t, x) => t + x, 0);
     ps = ps.filter(p => !ids.has(p.secret)); fees += f; n++;
     for (const a of st.C) { const p = { amount: a, id: kid, secret: 'sim' + i + ':' + Math.random() }; ps.push(p); reserved.add(p.secret); }
-    for (const a of splitAmt(c)) ps.push({ amount: a, id: kid, secret: 'sim' + i + ':' + Math.random() });
+    for (const a of st.outs || splitAmt(c)) ps.push({ amount: a, id: kid, secret: 'sim' + i + ':' + Math.random() });
   }
   return null;
 }
@@ -485,7 +542,7 @@ async function makeCoins(w, url, D, m, feeLine) {
     const st = nextStep(w, held, reserved, D, m); reserved = st.reserved;
     if (st.done) return held.filter(p => reserved.has(p.secret));
     if (st.stuck) throw new Error(`${host(url)} takes at most ${m} coins per request, and the coins here can't be split that way for this amount. Try a smaller amount.`);
-    const I = st.I, C = st.C, sendC = C.reduce((t, x) => t + x, 0);
+    const I = st.I, C = st.outs || st.C, sendC = C.reduce((t, x) => t + x, 0);
     let res;
     if (!C.length) { const r0 = await journaled(url, 'swap', { inputs: I }, (cb, o) => rRecv(o, w, I, { onCountersReserved: cb })); res = { r: { keep: r0.r, send: [] }, op: r0.op }; }   // (only merging coins)
     else {
@@ -497,7 +554,7 @@ async function makeCoins(w, url, D, m, feeLine) {
     const { r: { keep, send }, op } = res, used = new Set(I.map(p => p.secret));
     const fee = Math.max(0, sum(I) - sum(send) - sum(keep));
     S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(send), plain(keep));
-    for (const p of send) reserved.add(p.secret);
+    if (!st.outs) for (const p of send) reserved.add(p.secret);   // (a split step's coins are free coins, set aside next round if they are the right size)
     if (fee > 0) { const t = feeLine.id && txById(feeLine.id); if (t) t.fee = num(t.fee) + fee; else feeLine.id = addTx({ type: 'out', method: 'fee', amount: 0, fee, mint: url, note: 'Mint fee for splitting a payment into smaller requests', status: 'done', limId: feeLine.limId || undefined }).id; }
     closeOp(op); save();
   }
@@ -522,13 +579,7 @@ async function sendBatched(w, amount, note, lockTo, url, opts, outCfg) {
       return tx;
     } finally { hold.release(); }
   }
-  // locked: the last swap's coins in sum to the token plus its fees, with no change, all in at most m coins out (the
-  // outputs as the library makes them: the amount's coins, then the receiver's fee as coins of its own)
-  let out = 0, h = 0; try { const ot = w.configureOutputs(w.parseAmount(amount, 'limit'), w.getOutputKeyset(), outCfg.send, true); out = (ot.denominations || []).length; h = num(w.preparedTotal(ot)); } catch (e) { const r = rfeeFor(w, amount, kid); out = bitsOf(amount) + bitsOf(r); h = amount + r; }
-  let T = 0; for (let k = 1; k <= m && !T; k++) { const t = h + feeOfK(w, k, kid); if (bitsOf(t) <= k && out <= m) T = t; }
-  if (!T) { const near = fitAmounts(amount, Math.max(1, m - 1)); throw new Error(`${host(url)} takes at most ${m} coins per request, so locked ecash there can be made of at most ${m} coin sizes. Try ${near.map(money).join(' or ')}.`); }
-  const D = splitAmt(T), sim = simulateCoins(w, held, D, m);
-  if (!sim) throw new Error(`${host(url)} takes at most ${m} coins per request, and the coins here can't be split that way for ${money(amount)}. Try a smaller amount.`);
+  const { T, D, sim } = lockedPlan(w, url, amount, outCfg.send);
   const hold = limitGate(T + sim.fees, { free: opts.noLimit, grant: opts.grant, approved: opts.approved });
   try {
     const coins = await makeCoins(w, url, D, m, { limId: hold.id });
@@ -544,11 +595,17 @@ function planMelt(w, url, need) {
   for (let k = 1; k <= m; k++) { const T = ceilFit(need + feeOfK(w, k, kid), k); if (!best || T < best.T) best = { T, k }; }
   if (!best) return null;
   const D = splitAmt(best.T), sim = simulateCoins(w, held, D, m);
-  return sim ? { T: best.T, D, fees: sim.fees, m } : null;
+  if (sim) return { T: best.T, D, fees: sim.fees, m };
+  // no steps can make those coins (a mint with a fee and one big coin): the payment spends coins held as they are, at
+  // most m of them, and the change comes back in at most m coins (what doesn't fit is kept by the mint, within the total)
+  const desc = held.slice().sort((a, b) => num(a.amount) - num(b.amount)); let direct = null;
+  for (const p of desc) if (num(p.amount) >= need + feeOfPs(w, [p])) { direct = [p]; break; }
+  if (!direct) { const I = pickInputs(w, held, need, m, 64); if (I) direct = I; }
+  return direct ? { T: sum(direct), D: direct.map(p => num(p.amount)), fees: 0, m, direct } : null;
 }
 async function meltInputsBatched(w, url, need) {
   const p = planMelt(w, url, need); if (!p) throw new Error(`${host(url)} takes at most ${smallMint(url)} coins per request, and the coins here can't be split that way for this payment.`);
-  const coins = await makeCoins(w, url, p.D, p.m, {});
+  const coins = p.direct || await makeCoins(w, url, p.D, p.m, {});
   return { r: { keep: [], send: coins }, op: null, inputs: coins };
 }
 // how to claim a token on a mint with a small limit: parts of at most m coins, each giving at most m coins back

@@ -622,93 +622,7 @@ async def main():
         await section('duress', duress)
 
         # ======================= NUT-06: a mint that takes at most 3 items per request =======================
-        async def nut06():
-            seen = {'max': 0, 'paths': {}}
-            async def watch(route):
-                req = route.request
-                try:
-                    body = json.loads(req.post_data or '{}')
-                    for k in ('inputs', 'outputs', 'Ys'):
-                        if isinstance(body.get(k), list):
-                            seen['max'] = max(seen['max'], len(body[k])); p = req.url.split('/v1/')[-1]; seen['paths'][p] = max(seen['paths'].get(p, 0), len(body[k]))
-                except Exception: pass
-                await route.continue_()
-            info = json.loads(urllib.request.urlopen(C + '/v1/info', timeout=5).read())
-            check('NUT-06: the test mint advertises max_array_length 3', info.get('max_array_length') == 3, info.get('max_array_length'))
-            n = await wallet(b); words = await n.create(); await n.add_mint(C); await n.use(C)
-            await n.pg.route(f'{C}/v1/**', watch)
-            for _ in range(12): await n.receive_ln(7)
-            nproofs = await n.ev(f"(Nutcade.S.proofs[{json.dumps(C)}]||[]).length")
-            check('NUT-06: deposits fill the wallet with 20+ coins', nproofs >= 20 and await n.bal(C) == 84, (nproofs, await n.bal(C)))
-            await n.home(); await n.click('[data-act=receive]'); await n.wait(150)
-            if await n.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await n.click('[data-act=recvMethod][data-m=ln]'); await n.wait(100)
-            q0 = await n.ev("Nutcade.S.quotes.length"); await n.fill('#amtIn', '15'); await n.click('[data-act=doLnInvoice]'); await n.wait(1500)
-            e = await n.err(); await n.close()
-            check('NUT-06: a deposit made of more coin sizes than the mint takes (15 = 8+4+2+1) is refused before any invoice, with amounts that work', '3' in e and await n.ev("Nutcade.S.quotes.length") == q0 and re.search(r'\d+ SAT or \d+ SAT', e), e)
-            # state check over all coins
-            await settings(n); await n.click('[data-act=clean]'); await n.wait(3000)
-            check('NUT-06: "Remove spent ecash" checks 20+ coins in batches of at most 3', 0 < seen['paths'].get('checkstate', 0) <= 3, seen['paths'])
-            # swap: send 30 (4 coin sizes) and 45
-            for amt in (30, 27):
-                tok, e = await n.send_ecash(amt)
-                check(f'NUT-06: sending {amt} SAT works (requests split, none over 3 items)', tok and not e and seen['max'] <= 3, (e, seen['paths']))
-                if tok:
-                    r = await wallet(b); await r.create(); await r.add_mint(C); await r.use(C)
-                    _, e2, _ = await r.receive_token(tok)
-                    check(f'NUT-06: the {amt} SAT token is claimed by another wallet on the same mint', not e2 and await r.bal(C) == amt, (e2, await r.bal(C)))
-                    await r.pg.context.close()
-            l, pp = await n.ev(LEDGER + f"({json.dumps(C)})"); check('NUT-06: history adds up to the balance after the batched sends', l == pp, (l, pp))
-            # melt
-            e, txt = await n.pay_ln(invoice(5, B))
-            check('NUT-06: paying a Lightning invoice from the limited mint works, no request over 3 items', not e and seen['max'] <= 3, (e, seen['paths']))
-            # receive a token of 6 coins (more than the mint takes in one request)
-            g = await wallet(b); await g.create(); await g.add_mint(C); await g.use(C)
-            for _ in range(2): await g.receive_ln(7)
-            gtok = await g.ev(f"CashuLib.getEncodedToken({{mint:{json.dumps(C)}, unit:'sat', proofs:Nutcade.S.proofs[{json.dumps(C)}]}})")
-            await g.ev(f"Nutcade.S.proofs[{json.dumps(C)}]=[]; Nutcade.S.txs.unshift({{id:'gone',type:'out',method:'ecash',amount:14,mint:{json.dumps(C)},status:'pending',ts:Date.now()}})")
-            b0 = await n.bal(C); _, e, _ = await n.receive_token(gtok)
-            ok = await n.until(f"(Nutcade.S.proofs[{json.dumps(C)}]||[]).reduce((t,p)=>t+p.amount,0)==={b0 + 14}", 30000)
-            check('NUT-06: a token of 6 coins is claimed in batches (no request over 3 items)', ok and seen['max'] <= 3, (e, await n.bal(C) - b0, seen['paths']))
-            await g.pg.context.close()
-            # crash between batches: the second swap of a batched send never answers, the page reloads
-            calls = {'n': 0}
-            async def second_hangs(route):   # (registered last, so it is asked first; every other call goes on to the watcher)
-                if route.request.method == 'POST':
-                    calls['n'] += 1
-                    if calls['n'] == 2: await asyncio.sleep(30); return
-                await route.fallback()
-            await n.pg.route(f'{C}/v1/swap', second_hangs)
-            bal0 = await n.bal(C)
-            await n.home(); await n.click('[data-act=send]'); await n.wait(150); await n.fill('#amtIn', '27'); await n.click('[data-act=doSendEcash]')
-            await n.until(f"Nutcade.S.ops.length>0", 10000); await n.wait(1500)
-            await n.pg.reload(); await n.wait(800); await n.pg.unroute(f'{C}/v1/swap')
-            ok = await n.until("Nutcade.S.ops.length===0", 60000); await n.wait(1000)
-            l, pp = await n.ev(LEDGER + f"({json.dumps(C)})")
-            check('NUT-06: a crash between batches settles: no open record, history adds up to the balance, nothing lost', ok and l == pp and pp == bal0 and calls['n'] >= 2, (ok, l, pp, bal0, calls['n']))
-            tok, e = await n.send_ecash(27)
-            check('NUT-06: and the same payment goes through afterwards', tok and not e, e)
-            # restore from the 12 words: restore requests in batches of at most 3
-            seen['paths'].pop('restore', None)
-            m = await wallet(b); await m.ev("Nutcade.closeSheet()")
-            await m.pg.route(f'{C}/v1/**', watch)
-            await m.pg.check('#ack'); await m.click('[data-act=gateRestore]'); await m.until("!!document.querySelector('#phraseIn')", 5000)
-            await m.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); const x=document.querySelector('#rmExtra'); x.value={json.dumps(C)}}})()")
-            await m.click('[data-act=doRestorePhrase]')
-            await m.until(f"(Nutcade.S.proofs[{json.dumps(C)}]||[]).length>0 || /SCAN COMPLETE/.test(document.body.innerText)", 120000); await m.wait(800)
-            check('NUT-06: the restore finds the wallet\'s coins on the limited mint', await m.bal(C) > 0, await m.bal(C))
-            check('NUT-06: restoring from the 12 words asks the mint at most 3 outputs at a time', 0 < seen['paths'].get('restore', 0) <= 3, seen['paths'])
-            await m.pg.context.close()
-            # a mint without the field: one request as before
-            await n.add_mint(B); await n.use(B); await n.receive_ln(1000); seen['paths'] = {}
-            await n.pg.route(f'{B}/v1/**', watch)
-            calls_b = await n.ev("performance.getEntriesByType('resource').filter(e=>/3339\\/v1\\/swap/.test(e.name)).length")
-            tok, e = await n.send_ecash(300)
-            calls_b2 = await n.ev("performance.getEntriesByType('resource').filter(e=>/3339\\/v1\\/swap/.test(e.name)).length")
-            check('NUT-06: on a mint without the field a send is one swap, as before', tok and calls_b2 - calls_b == 1, (calls_b2 - calls_b, e))
-            await n.pg.context.close()
-        await section('nut06', nut06)
-
-        CF, CM = 'http://127.0.0.1:3343', 'http://127.0.0.1:3344'   # 3 items per request with input fees; 150 items per request
+        CF, CM = 'http://127.0.0.1:3343', 'http://127.0.0.1:3344'   # 3 items per request with input fees; exactly 128 (NUTCADE's minimum)
         def size_watch(seen):
             async def watch(route):
                 try:
@@ -718,48 +632,80 @@ async def main():
                 except Exception: pass
                 await route.fallback()
             return watch
-        async def nut06_more():
-            # a fee mint with a limit of 3: each step pays its own input fee, and the history and "Need" show the real total
-            seen = {}; f = await wallet(b); await f.create(); await f.add_mint(CF); await f.use(CF); await f.pg.route(f'{CF}/v1/**', size_watch(seen))
-            for _ in range(14): await f.receive_ln(7)
-            b0 = await f.bal(CF); tok, e = await f.send_ecash(10)
-            l, pp = await f.ev(LEDGER + f"({json.dumps(CF)})")
-            fees = await f.ev(f"Nutcade.S.txs.filter(t=>t.mint==={json.dumps(CF)}&&t.type==='out').reduce((a,t)=>a+(t.fee||0),0)")
-            check('NUT-06 fee mint (3 per request): a send works in steps, no request over 3 items', tok and not e and max(seen.values() or [0]) <= 3, (e, seen))
-            check('NUT-06 fee mint: every step paid its own fee, and the history shows them all (history = balance, fees = what left beyond the 10)', l == pp and b0 - pp == 10 + fees, (b0, pp, fees))
-            e2, txt = await f.pay_ln(invoice(5, B))
-            l, pp = await f.ev(LEDGER + f"({json.dumps(CF)})")
-            check('NUT-06 fee mint: a Lightning payment works in steps, no request over 3 items, history = balance', not e2 and max(seen.values() or [0]) <= 3 and l == pp, (e2, seen, l, pp))
-            more = []   # (more sends and payments of other sizes: the coins picked differ every time, the limit must hold every time)
-            for kind, a in (('send', 5), ('pay', 3), ('send', 9), ('pay', 6), ('send', 12)):
-                if kind == 'send': t2, e4 = await f.send_ecash(a); more.append((kind, a, bool(t2), e4))
-                else: e4, _ = await f.pay_ln(invoice(a, B)); more.append((kind, a, not e4, e4))
-            l, pp = await f.ev(LEDGER + f"({json.dumps(CF)})")
-            check('NUT-06 fee mint: five more sends and payments of other sizes all work, never a request over 3 items, history = balance', all(x[2] for x in more) and max(seen.values() or [0]) <= 3 and l == pp, (more, seen, l, pp))
-            e3, q3 = await f.pay_ln(invoice(await f.bal(CF) - 3, B))
-            m3 = re.search(r'Need ([\d,]+) SAT including fees', e3 or '')
-            check('NUT-06 fee mint: "Need X including fees" counts the fees of every step', m3 and int(m3.group(1).replace(',', '')) > await f.bal(CF), (e3, await f.bal(CF)))
-            await f.pg.context.close()
-            # a limit between 128 and 999: 160 coins, a send that needs more than 150 of them
-            seen = {}; g = await wallet(b); await g.create(); await g.add_mint(CM); await g.use(CM); await g.pg.route(f'{CM}/v1/**', size_watch(seen))
+        async def hide(route):   # (the mint's info without its limit: as a mint that starts enforcing one later)
+            try:
+                r = await route.fetch(); j = await r.json(); j.pop('max_array_length', None); await route.fulfill(response=r, body=json.dumps(j))
+            except Exception: pass
+        async def nut06():
+            info = json.loads(urllib.request.urlopen(C + '/v1/info', timeout=5).read())
+            check('NUT-06: the test mints advertise 3 (and 128, NUTCADE\'s minimum)', info.get('max_array_length') == 3 and json.loads(urllib.request.urlopen(CM + '/v1/info', timeout=5).read()).get('max_array_length') == 128)
+            # a mint below the minimum can't be added, in every language
+            for lang in LANGS:
+                n = await wallet(b, 375, 667, lang); await n.create(); await n.add_mint(C); t = await n.toast()
+                check(f'NUT-06 {lang}: a mint that accepts only 3 coins per request can\'t be added, and says why (3, and the minimum 128)', not await n.ev(f"Nutcade.S.mints.some(m=>m.url==={json.dumps(C)})") and '3' in t and '128' in t and (lang == 'en' or 'only accepts' not in t), t)
+                await n.pg.context.close()
+            n = await wallet(b); await n.create(); await n.add_mint(CF)
+            check('NUT-06: the fee mint with 3 per request can\'t be added either', not await n.ev(f"Nutcade.S.mints.some(m=>m.url==={json.dumps(CF)})"), await n.toast())
+            await n.pg.context.close()
+            # a mint at exactly the minimum: works normally, never a request over 128, coins picked within the limit
+            seen = {}; g = await wallet(b); gw = await g.create(); await g.add_mint(CM); await g.use(CM); await g.pg.route(f'{CM}/v1/**', size_watch(seen))
             for _ in range(16): await g.receive_ln(1023)
-            n = await g.ev(f"Nutcade.S.proofs[{json.dumps(CM)}].length")
+            n0 = await g.ev(f"Nutcade.S.proofs[{json.dumps(CM)}].length")
+            b1 = await g.bal(CM); tok2, e2 = await g.send_ecash(b1 - 8)
+            check('NUT-06 at 128: a payment that would need more coins than the mint takes is refused with a clear message, nothing sent', not tok2 and '128 coins' in e2 and await g.bal(CM) == b1, (e2, await g.bal(CM) - b1))
+            sw0 = await g.ev("performance.getEntriesByType('resource').filter(e=>/3344\\/v1\\/swap/.test(e.name)).length")
             tok, e = await g.send_ecash(16000)
-            check('NUT-06 limit 150: a send that needs over 150 coins is made in steps, no request over 150 items', n >= 160 and tok and not e and max(seen.values() or [0]) <= 150, (n, e, seen))
-            l, pp = await g.ev(LEDGER + f"({json.dumps(CM)})"); check('NUT-06 limit 150: history = balance', l == pp, (l, pp))
-            await g.pg.context.close()
-            # a mint that starts enforcing its limit after NUTCADE read its info: refused once, info read again, done in steps
-            async def hide(route):
-                try: r = await route.fetch(); j = await r.json(); j.pop('max_array_length', None); await route.fulfill(response=r, body=json.dumps(j))
-                except Exception: pass   # unrouted while in flight
-            h = await wallet(b); await h.pg.route(f'{C}/v1/info', hide); await h.create(); await h.add_mint(C); await h.use(C)
-            for _ in range(6): await h.receive_ln(7)
-            known = await h.ev(f"Nutcade.r8.mintMax({json.dumps(C)})"); await h.pg.unroute(f'{C}/v1/info')
+            sw1 = await g.ev("performance.getEntriesByType('resource').filter(e=>/3344\\/v1\\/swap/.test(e.name)).length")
+            check('NUT-06 at 128: a send that the usual pick would make of over 128 coins takes the biggest coins instead: one swap, at most 128 coins in', n0 >= 160 and tok and not e and sw1 - sw0 == 1 and max(seen.values() or [0]) <= 128, (n0, e, sw1 - sw0, seen))
+            l, pp = await g.ev(LEDGER + f"({json.dumps(CM)})"); check('NUT-06 at 128: history = balance', l == pp, (l, pp))
+            m = await wallet(b); await m.pg.route(f'{CM}/v1/**', size_watch(seen)); await m.pg.check('#ack'); await m.click('[data-act=gateRestore]'); await m.until("!!document.querySelector('#phraseIn')", 5000)
+            await m.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(gw)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); document.querySelector('#rmExtra').value={json.dumps(CM)}}})()")
+            await m.click('[data-act=doRestorePhrase]'); await m.until(f"(Nutcade.S.proofs[{json.dumps(CM)}]||[]).length>0", 120000); await m.wait(1500)
+            check('NUT-06 at 128: restoring from the 12 words finds the coins, at most 128 outputs per request', await m.bal(CM) > 0 and 0 < seen.get('restore', 0) <= 128, (await m.bal(CM), seen.get('restore')))
+            await m.pg.context.close(); await g.pg.context.close()
+            # a mint already here that starts saying less than the minimum: no new deposits, a notice, sats can still move out
+            seen = {}; h = await wallet(b); await h.pg.route(f'{C}/v1/info', hide); await h.create(); await h.add_mint(B); await h.add_mint(C); await h.use(C); await h.pg.route(f'{C}/v1/**', size_watch(seen))
+            for a in (7, 7, 7, 56, 448, 3584, 14, 112, 896): await h.receive_ln(a)
+            check('NUT-06 later: while its info says nothing, the mint is used as usual', await h.bal(C) == 5131, await h.bal(C))
+            await h.pg.unroute(f'{C}/v1/info')
             tok, e = await h.send_ecash(30)
             l, pp = await h.ev(LEDGER + f"({json.dumps(C)})")
-            check('NUT-06: a mint enforcing a limit NUTCADE didn\'t know: refused once, info read again, sent in steps, nothing lost', known == 0 and tok and not e and l == pp and await h.ev("Nutcade.S.ops.length===0"), (known, e, l, pp))
-            await h.pg.context.close()
-        await section('nut06more', nut06_more)
+            check('NUT-06 later: when it starts enforcing 3, the refused request is followed by its info read again, and the sats still leave (in steps), nothing lost', tok and not e and l == pp and await h.ev("Nutcade.S.ops.length===0"), (e, l, pp))
+            await h.pg.reload(); await h.wait(1500); await h.ev("Nutcade.closeSheet()"); await h.click('[data-act=tab][data-tab=mints]'); await h.wait(1500)
+            txt = await h.ev("document.body.innerText")
+            check('NUT-06 later: the mints screen says it now accepts only 3 coins and to move the sats out', 'accepts only 3 coins' in txt and 'Move your sats out' in txt, txt[:300])
+            await h.use(C); await h.home(); await h.click('[data-act=receive]'); await h.wait(150)
+            if await h.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await h.click('[data-act=recvMethod][data-m=ln]'); await h.wait(100)
+            q0 = await h.ev("Nutcade.S.quotes.length"); await h.fill('#amtIn', '7'); await h.click('[data-act=doLnInvoice]'); await h.wait(1500); e = await h.err(); await h.close()
+            check('NUT-06 later: Receive there is refused before any invoice', 'no new deposits' in e and await h.ev("Nutcade.S.quotes.length") == q0, e)
+            b0 = await h.bal(B); await h.ev("Nutcade.closeSheet()"); await h.click('[data-act=tab][data-tab=mints]'); await h.wait(200); await h.click('#app [data-act=moveOpen]'); await h.wait(250)
+            await h.ev(f"(()=>{{const f=document.querySelector('#mvFrom'), t=document.querySelector('#mvTo'); f.value={json.dumps(B)}; f.dispatchEvent(new Event('change',{{bubbles:true}})); t.value={json.dumps(C)}; t.dispatchEvent(new Event('change',{{bubbles:true}}))}})()")
+            offered = await h.ev(f"[...document.querySelectorAll('#mvTo option')].some(o=>o.value==={json.dumps(C)})")
+            await h.fill('#amtIn', '7'); await h.click('[data-act=moveQuote]'); await h.wait(2500); e = await h.err(); await h.ev("Nutcade.closeSheet()")
+            check('NUT-06 later: a move INTO it is not offered (or refused) before anything is paid', (not offered or 'no new deposits' in e) and await h.bal(B) == b0 and not await h.ev(f"Nutcade.S.quotes.some(q=>q.mint==={json.dumps(C)})"), (offered, e, b0 - await h.bal(B)))
+            m2 = await h.ev(f"Nutcade.r8.moveQuote ? Nutcade.r8.moveQuote({json.dumps(B)}, {json.dumps(C)}, 7).then(()=>'ok',e=>e.message) : 'n/a'")
+            check('NUT-06 later: and the move itself refuses it before any quote is paid (the check every quote site uses)', 'no new deposits' in m2, m2)
+            fz = await wallet(b); await fz.create(); await fz.add_mint(A); await fz.use(A); await fz.receive_ln(500); tk, _ = await fz.send_ecash(300); await fz.add_mint(B); await fz.use(B); await fz.receive_ln(500); tk2, _ = await fz.send_ecash(200); await fz.pg.context.close()
+            await h.use(C); await h.home(); await h.click('[data-act=receive]'); await h.wait(150); await h.click('[data-act=recvMethod][data-m=ecash]'); await h.wait(100)
+            await h.ev(f"(()=>{{const t=document.querySelector('#tokIn'); t.value={json.dumps(tk)}; t.dispatchEvent(new Event('input',{{bubbles:true}}))}})()"); await h.wait(300)
+            await h.click('[data-act=doReceiveToken]'); await h.until("!!document.querySelector('[data-act=swapToken]')", 8000)
+            await h.ev("document.querySelector('[data-act=swapToken]')?.click()"); await h.until("!!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 30000)
+            e = await h.err(); await h.close()
+            check('NUT-06 later: a token from another mint swapped into it is refused before anything is paid', 'no new deposits' in e and not await h.ev(f"Nutcade.S.quotes.some(q=>q.mint==={json.dumps(C)})"), e)
+            _, e, _ = await h.receive_token(tk2)
+            n_c = await h.ev(f"(Nutcade.S.proofs[{json.dumps(C)}]||[]).length")
+            check('NUT-06 later: a token of the other mint is still claimed there (not into this one)', not e or 'no new deposits' not in e, e)
+            await h.ev("Nutcade.closeSheet()"); await h.click('[data-act=tab][data-tab=mints]'); await h.wait(200); await h.click('#app [data-act=moveOpen]'); await h.wait(250)
+            await h.ev(f"(()=>{{const f=document.querySelector('#mvFrom'), t=document.querySelector('#mvTo'); f.value={json.dumps(C)}; f.dispatchEvent(new Event('change',{{bubbles:true}})); t.value={json.dumps(B)}; t.dispatchEvent(new Event('change',{{bubbles:true}}))}})()")
+            seen.clear(); bc = await h.bal(C); await h.fill('#amtIn', '2048'); await h.click('[data-act=moveQuote]'); await h.until("!!document.querySelector('#mvGo') || !!(document.querySelector('#sheetErr')||{}).innerText", 15000)
+            sheet = await h.sheet_text(); tot = re.search(r'Total, at most\s*([\d,]+)', sheet)
+            if await h.ev("!!document.querySelector('#mvGo')"): await h.wait(300); await h.click('#mvGo')
+            await h.until("/MOVED!|ON ITS WAY/.test((document.querySelector('.sheet-body')||{}).innerText||'') || !!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 60000); await h.wait(2000)
+            e = await h.err(); await h.ev("Nutcade.closeSheet()")
+            l, pp = await h.ev(LEDGER + f"({json.dumps(C)})")
+            check('NUT-06 later: moving sats OUT still works (in steps, never a request over 3), the sheet says part of the change may be kept and its total holds', not e and 'may be kept' in sheet and 'comes back as change' not in sheet and max(seen.values() or [0]) <= 3 and l == pp and tot and bc - pp <= int(tot.group(1).replace(',', '')), (e, seen, l, pp, tot and tot.group(1), bc - pp))
+            await books(h, 'nut06 later', broken, (B, C)); await h.pg.context.close()
+        await section('nut06', nut06)
 
         # ======================= phones held sideways: no card, everything usable, nothing lost =======================
         IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
@@ -924,79 +870,24 @@ async def main():
         await section('r2reset', r2_reset)
 
         async def r2_mints():
-            seen = {}
-            z = await wallet(b); await z.create(); await z.add_mint(B); await z.add_mint(C); await z.use(B); await z.receive_ln(2000)
-            await z.pg.route(f'{C}/v1/**', size_watch(seen))
-            # a move INTO a mint that takes 3 coins per request: refused before anything is paid
+            # the mint at the minimum: every way money goes in still works there (a move into it, a token swapped into it)
+            z = await wallet(b); await z.create(); await z.add_mint(B); await z.add_mint(CM); await z.use(B); await z.receive_ln(2000)
             b0 = await z.bal(B)
             await z.ev("Nutcade.closeSheet()"); await z.click('[data-act=tab][data-tab=mints]'); await z.wait(200); await z.click('#app [data-act=moveOpen]'); await z.wait(250)
-            await z.ev(f"(()=>{{const f=document.querySelector('#mvFrom'), t=document.querySelector('#mvTo'); if(f){{f.value={json.dumps(B)}; f.dispatchEvent(new Event('change',{{bubbles:true}}))}} if(t){{t.value={json.dumps(C)}; t.dispatchEvent(new Event('change',{{bubbles:true}}))}}}})()")
-            await z.fill('#amtIn', '300'); await z.click('[data-act=moveQuote]'); await z.wait(2500)
-            e = await z.err(); await z.ev("document.querySelector('#mvGo')?.click()"); await z.wait(2500); await z.ev("Nutcade.closeSheet()")
-            check('move into a 3-coins-per-request mint: 300 (4 coin sizes) is refused before anything is paid, with the Receive screen\'s message', 'coin sizes' in e and await z.bal(B) == b0 and not await z.ev(f"Nutcade.S.quotes.some(q=>q.mint==={json.dumps(C)})"), (e, b0 - await z.bal(B)))
-            # a token from another mint swapped into it: refused before anything is paid
-            fz = await wallet(b); await fz.create(); await fz.add_mint(A); await fz.use(A); await fz.receive_ln(2000); tok, _ = await fz.send_ecash(1000); await fz.pg.context.close()   # (about 990 arrives: far more than 3 coin sizes)
-            await z.use(C); n0 = await z.ev("Nutcade.S.txs.length")
-            await z.home(); await z.click('[data-act=receive]'); await z.wait(150); await z.click('[data-act=recvMethod][data-m=ecash]'); await z.wait(100)
-            await z.ev(f"(()=>{{const t=document.querySelector('#tokIn'); t.value={json.dumps(tok)}; t.dispatchEvent(new Event('input',{{bubbles:true}}))}})()"); await z.wait(300)
-            await z.click('[data-act=doReceiveToken]'); await z.until("!!document.querySelector('[data-act=swapToken]')", 8000)
-            await z.ev("document.querySelector('[data-act=swapToken]')?.click()"); await z.until("!!((document.querySelector('#sheetErr')||{}).innerText||'').trim() || /SWAPPED|received/i.test((document.querySelector('.sheet-body')||{}).innerText||'')", 30000)
-            r = await z.err(); await z.ev("Nutcade.closeSheet()")
-            check('a token from another mint swapped into a 3-coins-per-request mint is refused before anything is paid', 'coin sizes' in r and not await z.ev(f"Nutcade.S.quotes.some(q=>q.mint==={json.dumps(C)})"), r)
+            await z.ev(f"(()=>{{const f=document.querySelector('#mvFrom'), t=document.querySelector('#mvTo'); f.value={json.dumps(B)}; f.dispatchEvent(new Event('change',{{bubbles:true}})); t.value={json.dumps(CM)}; t.dispatchEvent(new Event('change',{{bubbles:true}}))}})()")
+            await z.fill('#amtIn', '300'); await z.click('[data-act=moveQuote]'); await z.until("!!document.querySelector('#mvGo')", 15000); await z.wait(300); await z.click('#mvGo')
+            ok = await z.until(f"(Nutcade.S.proofs[{json.dumps(CM)}]||[]).reduce((t,p)=>t+p.amount,0)===300", 40000)
+            check('a move into a mint at the minimum (128) works as usual', ok, await z.bal(CM))
             await z.pg.context.close()
         await section('r2mints', r2_mints)
 
-        async def r2_reclaim():
-            for M, tag in ((C, 'no-fee'), (CF, 'fee')):
-                seen = {}
-                z = await wallet(b); words = await z.create(); await z.add_mint(M); await z.use(M); await z.pg.route(f'{M}/v1/**', size_watch(seen))
-                for a in (7, 7, 7, 56, 448, 3584, 14, 112, 896, 3584, 448, 56): await z.receive_ln(a)
-                b0 = await z.bal(M); tok, e = await z.send_ecash(5000); b1 = await z.bal(M)
-                t0 = await z.ev("(Nutcade.S.txs.find(t=>t.amount===5000&&t.token)||{}).id")
-                n = await z.ev(f"(Nutcade.S.txs.find(t=>t.id==={json.dumps(t0)})||{{sent:[]}}).sent.length")
-                # another wallet claims it in parts (on the fee mint too)
-                o = await wallet(b); await o.create(); await o.add_mint(M); await o.use(M); seen2 = {}; await o.pg.route(f'{M}/v1/**', size_watch(seen2))
-                _, e2, _ = await o.receive_token(tok); await o.until(f"(Nutcade.S.proofs[{json.dumps(M)}]||[]).reduce((t,p)=>t+p.amount,0)>4900", 30000)
-                got = await o.bal(M); fee_o = await o.ev("Nutcade.S.txs.reduce((a,t)=>a+(t.fee||0),0)")
-                check(f'{tag} 3-coin mint: a {n}-coin token of 5,000 is claimed by another wallet in parts (each part pays the mint\'s real fee), never a request over 3', got >= 4990 and max(seen2.values() or [0]) <= 3, (e2, got, fee_o, seen2))
-                await o.pg.context.close()
-                # and a second token, never claimed, is taken back in parts
-                tok2, e3 = await z.send_ecash(3000); b2 = await z.bal(M); t2 = await z.ev("(Nutcade.S.txs.find(t=>t.amount===3000&&t.token)||{}).id")
-                await z.click('[data-act=tab][data-tab=history]'); await z.wait(150); await z.ev(f"Nutcade.closeSheet(); document.querySelector('[data-act=tx][data-id=\"{t2}\"]')?.click()"); await z.wait(300)
-                await z.ev("document.querySelector('[data-act=reclaim]')?.click()"); await z.until(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(t2)}).status==='reclaimed'", 40000); await z.wait(1500)
-                back = await z.bal(M) - b2; er = await z.err(); await z.ev("Nutcade.closeSheet()")
-                l, pp = await z.ev(LEDGER + f"({json.dumps(M)})")
-                coins2 = await z.ev(f"(Nutcade.S.txs.find(t=>t.id==={json.dumps(t2)})||{{sent:[]}}).sent.map(p=>p.amount)")
-                check(f'{tag} 3-coin mint: an unclaimed token is taken back in parts (never a request over 3), history = balance', back >= 2990 and max(seen.values() or [0]) <= 3 and l == pp, (back, er[:120], seen, l, pp, coins2))
-                notes = await z.ev("Nutcade.S.txs.map(t=>t.note||'').filter(n=>/part \\d/.test(n))")
-                check(f'{tag} 3-coin mint: notes of parts have no leading space', all(not n.startswith(' ') for n in notes), notes[:3])
-                await z.pg.context.close()
-        await section('r2reclaim', r2_reclaim)
-
-        async def r2_melt():
-            for M, tag, coins, pay in ((C, 'no-fee', (4096,), 2100), (CF, 'fee', (1024,), 700), (C, 'no-fee', (3584, 448, 56), 3900)):
-                seen = {}
-                z = await wallet(b); await z.create(); await z.add_mint(M); await z.use(M); await z.pg.route(f'{M}/v1/**', size_watch(seen))
-                for a in coins: await z.receive_ln(a)
-                await z.home(); await z.click('[data-act=send]'); await z.wait(150); await z.click('[data-act=sendMethod][data-m=ln]'); await z.wait(100)
-                await z.fill('#destIn', invoice(pay, B)); await z.click('[data-act=doMeltQuote]'); await z.until("!!document.querySelector('#payBtn')", 15000); await z.wait(300)
-                sheet = await z.sheet_text()
-                check(f'{tag} 3-coin mint: the pay sheet does not promise the unused reserve back, and says part of the change may be kept', 'comes back as change' not in sheet and re.search(r'kept by the mint|may keep', sheet), sheet[-260:])
-                tot = re.search(r'Total, at most\s*([\d,]+)', sheet); b0 = await z.bal(M)
-                await z.click('#payBtn'); r = await outcome(z, await z.ev("Nutcade.S.txs.length") - 1, 40000); await settled(z)
-                ok = await z.ev(f"Nutcade.S.txs.some(t=>t.type==='out'&&t.method==='ln'&&t.amount==={pay}&&t.status==='done')")
-                l, pp = await z.ev(LEDGER + f"({json.dumps(M)})")
-                check(f'{tag} 3-coin mint: paying {pay} from {"+".join(map(str, coins))} works in steps, never a request over 3, cost within "Total, at most", history = balance', ok and max(seen.values() or [0]) <= 3 and l == pp and tot and b0 - pp <= int(tot.group(1).replace(',', '')), (r[0], seen, l, pp, tot and tot.group(1), b0 - pp))
-                await z.pg.context.close()
-        await section('r2melt', r2_melt)
-
         async def r2_multi():
             seen = {}
-            z = await wallet(b); await z.create(); await z.add_mint(B); await z.add_mint(C); await z.pg.route(f'{C}/v1/**', size_watch(seen))
-            await z.use(C)
+            z = await wallet(b); await z.create(); await z.add_mint(B); await z.add_mint(CM); await z.pg.route(f'{CM}/v1/**', size_watch(seen))
+            await z.use(CM)
             for a in (7, 7, 7, 56, 448, 3584, 14, 112, 896): await z.receive_ln(a)
             await z.use(B); await z.receive_ln(1500)
-            amt = await z.bal(C) + 800
+            amt = await z.bal(CM) + 800
             await z.home(); await z.click('[data-act=send]'); await z.wait(150); await z.click('[data-act=sendMethod][data-m=ln]'); await z.wait(100)
             await z.fill('#destIn', invoice(amt, 'http://127.0.0.1:3340')); await z.click('[data-act=doMeltQuote]'); await z.until("!!document.querySelector('#mppBtn')", 20000); await z.wait(300)
             await z.click('#mppBtn'); await z.until("!!document.querySelector('#mppPay') || !!document.querySelector('#layer .notice.red')", 40000); await z.wait(300)
@@ -1004,8 +895,8 @@ async def main():
             await z.until("!document.querySelector('#mppPay')", 60000); await z.wait(4000)
             txt = await z.sheet_text(); st = await z.ev("Nutcade.S.txs.filter(t=>/part \\d of/.test(t.note||'')).map(t=>t.status)")
             words_ok = not ('came back' in txt and 'done' in st and 'went through' not in txt)
-            check('multi-mint with a 3-coin mint as one part: never a request over 3, and the sheet says what was booked', max(seen.values() or [0]) <= 3 and words_ok, (seen, st, txt[:200]))
-            await books(z, 'r2 multi', broken, (B, C)); await z.pg.context.close()
+            check('multi-mint with a 128-item mint as one part: never a request over 128, and the sheet says what was booked', max(seen.values() or [0]) <= 128 and words_ok, (seen, st, txt[:200]))
+            await books(z, 'r2 multi', broken, (B, CM)); await z.pg.context.close()
         await section('r2multi', r2_multi)
 
         async def r2_decoy():

@@ -135,8 +135,10 @@ const extraLockCfg = (w, until, heirPub) => ({ send: { type: 'p2pk', options: { 
 async function lockExtra(url, amount, heirPub, until, follow, ctx = {}) {
   return mintLock(url, async () => {
     const w = await getWallet(url), inputs = [...(S.proofs[url] || [])];
+    if (belowMin(url)) throw minErr(url);   // (no new Extra Life at a mint below the minimum)
     if (sum(inputs) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(inputs))}.`);
-    const cfg = extraLockCfg(w, until, heirPub), plan = swapPlan(w, inputs, amount, cfg.send);
+    const cfg = extraLockCfg(w, until, heirPub), plan = swapPlan(w, inputs, amount, cfg.send, url);
+    if (plan && plan.tooMany) throw manyErr(url, plan.tooMany);
     ctx.hold = limitGate(plan ? plan.spend : feeMax(w, inputs, amount));   // (released by startExtra once its line is written)
     const { r: { keep, send }, op } = await withPick(w, plan && plan.sel, () => journaled(url, 'send', { inputs, amount, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow, lim: limRec(ctx.hold) }, (cb, o) => rSend(o, w, amount, inputs, { includeFees: true, onCountersReserved: cb }, cfg)));
     const used = new Set(inputs.map(p => p.secret));   // (keep holds the coins the swap didn't need, as they were)
