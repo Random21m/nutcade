@@ -899,6 +899,19 @@ async def main():
             await books(z, 'r2 multi', broken, (B, CM)); await z.pg.context.close()
         await section('r2multi', r2_multi)
 
+        async def r2_parts():
+            # a token with more coins than the mint takes (160 on a 128 mint) is claimed in saved parts; its notes read cleanly
+            seen = {}; g2 = await wallet(b); await g2.create(); await g2.add_mint(CM); await g2.use(CM)
+            for _ in range(16): await g2.receive_ln(1023)
+            big = await g2.ev(f"CashuLib.getEncodedToken({{mint:{json.dumps(CM)}, unit:'sat', proofs:Nutcade.S.proofs[{json.dumps(CM)}]}})"); await g2.pg.context.close()
+            o = await wallet(b); await o.create(); await o.add_mint(CM); await o.use(CM); await o.pg.route(f'{CM}/v1/**', size_watch(seen))
+            _, e, _ = await o.receive_token(big); await o.until(f"(Nutcade.S.proofs[{json.dumps(CM)}]||[]).reduce((t,p)=>t+p.amount,0)>=16368", 40000)
+            notes = await o.ev("Nutcade.S.txs.map(t=>t.note||'').filter(n=>/part \\d/.test(n))")
+            check('a 160-coin token on a 128 mint is claimed in parts (no request over 128), all of it', await o.bal(CM) == 16368 and max(seen.values() or [0]) <= 128, (e, await o.bal(CM), seen))
+            check('notes of parts have no leading space (an empty note reads "(part 1 of 2)")', notes and all(not n.startswith(' ') for n in notes), notes[:3])
+            await o.pg.context.close()
+        await section('r2parts', r2_parts)
+
         async def r2_decoy():
             # the sats put in the duress wallet are its own coins at once: the real words never find them
             d = await wallet(b); words = await d.create(); await d.add_mint(B); await d.use(B); await d.receive_ln(3000); await set_pin(d)
