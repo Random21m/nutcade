@@ -6,8 +6,6 @@ A Cashu ecash wallet with a 1980s arcade built in.
 
 **Open it:** https://random21m.github.io/nutcade/
 
-**Watch it:** [the NUTCADE video (1 minute) on X](https://x.com/Random21m/status/2121716082323165262), or the [2-minute tour of every feature](https://x.com/Random21m/status/2120760385179619678)
-
 **Timestamped in Bitcoin:** NUTCADE v1.8.1, including the send-by-sound chiptune modem, is anchored in [block 975,501](https://mempool.space/block/00000000000000000000c8328fa2baa44180bc59c74d739bfb317dd984ade480), mined 11 November 2026. The proof covers the release checksums, and the checksum for `index.html` covers the sound code inside it. The proof, `SHA256SUMS.txt.ots`, is attached to the [v1.8.1 release](https://github.com/Random21m/nutcade/releases/tag/v1.8.1); check it at [opentimestamps.org](https://opentimestamps.org).
 
 **Send by sound, timestamped on its own:** the sound modem's source, [`src/chiptune.js`](src/chiptune.js) (SHA-256 `77cb1714…c1c48f9`, unchanged since), is anchored in [block 975,513](https://mempool.space/block/00000000000000000000ffe72c5aff0f1b98e79bc4353e3345c48208cb23f1fb), mined 11 November 2026. The proof is [`docs/chiptune.js.ots`](docs/chiptune.js.ots); check it with `ots verify -f src/chiptune.js docs/chiptune.js.ots` or at [opentimestamps.org](https://opentimestamps.org).
@@ -33,8 +31,6 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 - Each browser and each icon keeps its own wallet. Set it up once in the place you'll use it.
 - Write down your **12 words** when you create the wallet. They're the only way back if the phone is lost or the browser data is cleared.
 - Updates arrive by themselves: the next time you open NUTCADE, it loads the new version.
-
-<p align="center"><a href="https://x.com/Random21m/status/2121716082323165262"><img src="docs/screens/video-poster.jpg" alt="Watch the NUTCADE video on X" width="720"></a><br><sub>▶ Click to watch the NUTCADE video (1 minute, sound on)</sub></p>
 
 <table>
 <tr><td><img src="docs/screens/01-lightning.jpg" alt="Loading sats over Lightning: a 1UP and a coin shower"></td><td><img src="docs/screens/02-arcade.jpg" alt="Star Swarm, one of the 8 original arcade games"></td></tr>
