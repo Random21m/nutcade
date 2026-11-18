@@ -666,12 +666,13 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .arr-card[data-type=away] .arr-ico{color:var(--cyan)}
 .arr-big{flex:none;font-family:var(--f-display);font-size:clamp(10px,3.6vw,13px);line-height:1.4;color:var(--lime);white-space:nowrap}   /* never cut: up to +9,999,999 SAT fits at 320 px */
 .arr-sp{flex:1}
-.arr-more{flex:none;min-height:28px;padding:3px 8px;font-size:8px}
+.arr-sub .arr-sp{display:none}
+.arr-more{flex:none;margin-left:auto;min-height:28px;padding:3px 8px;font-size:8px}
 .arr-x{flex:none;width:30px;height:24px;margin:-4px -4px -4px 0;border:0;background:transparent;color:var(--dim);font-size:22px;line-height:1;cursor:pointer}
 .arr-x:hover,.arr-x:focus-visible{color:var(--ink)}
 .arr-sub{display:flex;align-items:center;gap:10px;min-width:0;white-space:nowrap}
-.arr-what{flex:0 0 auto;max-width:62%;color:var(--ink);overflow:hidden;text-overflow:ellipsis}   /* (what came keeps its room; a long mint name gives way first) */
-.arr-mint{flex:0 1 auto;min-width:0;color:var(--dim);overflow:hidden;text-overflow:ellipsis}
+.arr-what{flex:0 1 auto;min-width:0;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
+.arr-mint{flex:0 4 auto;min-width:0;color:var(--dim);overflow:hidden;text-overflow:ellipsis}   /* (a long mint name gives way first) */
 /* Details (a sheet) */
 .arr-details{display:grid;gap:10px}
 .arr-note{color:var(--dim);font-size:17px}
@@ -687,6 +688,7 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .arr-lock{margin-bottom:10px;text-align:center}
 /* a game or the till fills the screen: the notices wait under it */
 body:has(.game-view,.cashier) .arr-stack{display:none}
+@media (max-width:340px){.arr-sub{gap:6px}.arr-mint:empty{display:none}}
 </style>
 
 <div id="app" class="crt"></div>
