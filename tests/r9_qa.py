@@ -513,7 +513,9 @@ async def run(b, broken):
         d4 = await fresh(b); await restore_json(d4, bk)
         check('backup from before, new device: the old coins count as spent elsewhere (no fee)', await bal(d4, FREE) == 0 and not [t for t in await lines(d4, FREE) if t.get('fee')])
         await settings(d4); await d4.click('[data-act=findLost]'); await d4.until("!document.querySelector('[data-act=findLost] .spinner')", 90000); await d4.wait(800)
-        check('backup from before, new device: "Find lost ecash" finds the moved coins', await bal(d4, FREE) == bb, (await bal(d4, FREE), bb))
+        # (the 400 SAT exist once at the mint, unspent, held by whichever phone won the race above; the other one counts them
+        # spent elsewhere. The 12 words find them either way.)
+        check('backup from before, new device: "Find lost ecash" finds the moved coins', await bal(d4, FREE) == b0, (await bal(d4, FREE), b0, bb))
         await books(d4, FREE, 'new device', broken)
         for x in (d1, d2, d3, d4): await x.pg.context.close()
         # a backup holding an open check-up step
