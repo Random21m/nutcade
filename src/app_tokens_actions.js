@@ -1,6 +1,13 @@
 /* Printable tokens + the logo in QR codes: actions */
 Object.assign(A, {
   ptOpen: () => { sfx('select'); openPrint(); },
+  ptIntroOk: () => { ptIntroDone(); sfx('select'); openPrint(); },
+  ptPreset: b => {
+    const el = $('#ptAmt'); if (!el) return;
+    if (b.dataset.a === 'other') { el.value = ''; el.focus(); } else setSats(el, +b.dataset.a);
+    document.querySelectorAll('[data-act=ptPreset]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    sfx('blip');
+  },
   ptStyle: b => {
     ptUI.style = b.dataset.s === 'ink' ? 'ink' : 'arcade';
     document.querySelectorAll('[data-act=ptStyle]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.s === ptUI.style)));
