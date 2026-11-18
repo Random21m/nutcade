@@ -13,7 +13,7 @@ announced twice (across reloads, tabs and restores).
 
 Uses two local test mints (ARR_FEE, default 3338, with input fees; ARR_FREE, default 3339, without) and mock_nostr.py
 (ARR_NOSTR, default ws://127.0.0.1:3350/relay; it also stands in for npub.cash). ARR_ONLY=a,b runs some sections
-(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, langs, widths). ARR_SHOTS: where screenshots go
+(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, langs, widths, game). ARR_SHOTS: where screenshots go
 (default QA_OUT)."""
 import asyncio, json, os, re, time, urllib.request
 from playwright.async_api import async_playwright
@@ -47,6 +47,14 @@ window.__tones = [];
 (() => { const P = window.AudioContext || window.webkitAudioContext; if (!P) return; const oc = P.prototype.createOscillator;
   P.prototype.createOscillator = function () { const o = oc.call(this); const f = o.frequency, sv = f.setValueAtTime.bind(f); f.setValueAtTime = (v, t) => { window.__tones.push(v); return sv(v, t); }; return o; }; })();
 window.__sys = [];
+// A browser that can't grant notifications here (an older headless Chromium, as in CI): an in-page stand-in for the
+// granted Notification API and the service worker's notifications, kept across reloads like the real ones.
+(() => { if (!window.__wantNotif || !window.Notification || Notification.permission === 'granted' || !window.ServiceWorkerRegistration) return;
+  const K = '__fakeNotes', load = () => JSON.parse(localStorage.getItem(K) || '[]'), keep = a => localStorage.setItem(K, JSON.stringify(a));
+  Object.defineProperty(Notification, 'permission', { configurable: true, get: () => 'granted' }); Notification.requestPermission = async () => 'granted';
+  ServiceWorkerRegistration.prototype.showNotification = async function (t, o) { o = o || {}; const a = load().filter(x => !o.tag || x.tag !== o.tag); a.push({ id: Math.random(), title: t, body: o.body || '', data: o.data || null, tag: o.tag || '' }); keep(a); };
+  ServiceWorkerRegistration.prototype.getNotifications = async function (f) { return load().filter(x => !f || !f.tag || x.tag === f.tag).map(n => ({ title: n.title, body: n.body, data: n.data, tag: n.tag, close() { keep(load().filter(x => x.id !== n.id)); } })); };
+  window.__fakeNotif = true; })();
 (() => { if (window.ServiceWorkerRegistration) { const sn = ServiceWorkerRegistration.prototype.showNotification;
     ServiceWorkerRegistration.prototype.showNotification = function (t, o) { window.__sys.push({ title: t, body: (o || {}).body || '', at: Date.now() }); return sn.call(this, t, o); }; }
   if (window.Notification) { const N = window.Notification; const F = function (t, o) { window.__sys.push({ title: t, body: (o || {}).body || '', page: 1, at: Date.now() }); return new N(t, o); };
@@ -86,7 +94,9 @@ class Block:
 async def wallet(b, lang='en', vw=390, vh=844, notif=False, sound=False, ctx=None):
     if ctx is None:
         ctx = await b.new_context(viewport={'width': vw, 'height': vh}, device_scale_factor=1, is_mobile=vw < 800, has_touch=vw < 800)
-        if notif: await ctx.grant_permissions(['notifications'], origin=ORIGIN)
+        if notif:   # (ARR_FAKE_NOTIF=1: try the stand-in, as on a browser that can't grant notifications)
+            if not os.environ.get('ARR_FAKE_NOTIF'): await ctx.grant_permissions(['notifications'], origin=ORIGIN)
+            await ctx.add_init_script("window.__wantNotif = 1")
         prefs = {'sound': sound, 'music': False, 'crt': False, 'lang': lang, 'relays': [NOSTR], 'npcHost': MOCK}
         await ctx.add_init_script(INIT % J(J(prefs)))
         await ctx.route_web_socket(re.compile('coinbase'), lambda ws: None)
@@ -317,7 +327,8 @@ async def main():
             await settings(r); await r.ev("document.querySelector('#p_arrNotify')?.click()"); await r.wait(800)
             check('notifications on: turning it on asks for permission then (granted here) and stays on', await r.ev("Notification.permission==='granted' && !!Nutcade.S.prefs.arrNotify && document.querySelector('#p_arrNotify').checked"))
             dn = await wallet(b)
-            await dn.create(); await settings(dn); await dn.ev("document.querySelector('#p_arrNotify')?.click()"); await dn.wait(1500)
+            await dn.create(); await settings(dn); await dn.ev("document.querySelector('#p_arrNotify')?.click()")
+            await dn.until("Notification.permission!=='default' || !document.querySelector('#p_arrNotify') || !document.querySelector('#p_arrNotify').checked", 20000); await dn.wait(300)   # (the browser answers the prompt)
             txt = await dn.ev("(document.querySelector('#arrNotifyHelp')||{}).textContent||''")
             check('notifications denied: the setting goes back off and says how to allow them', await dn.ev("!Nutcade.S.prefs.arrNotify && !!document.querySelector('#p_arrNotify') && !document.querySelector('#p_arrNotify').checked") and bool(re.search(r'blocked|allow', txt, re.I)), txt[-300:])
             await dn.ev("__hide(true)"); await dn.ev("__sys.length=0")
@@ -600,6 +611,20 @@ async def main():
                 check(f'{vw} px: the summary fits the screen', bool(await summary_rows(r)) and not ov, ov)
                 await shot(r, f'summary-{vw}')
                 await dismiss(r)
+
+        # ---------- a game (or the till) fills the screen: the notices wait under it, its controls stay reachable ----------
+        if want('widths') or want('game'):
+            await r.pg.set_viewport_size({'width': 844, 'height': 390}); await dismiss(r)
+            tok = await token_from(p, 1500, FREE); await claim(r, tok)
+            await r.until("!document.querySelector('#layer .spinner')", 15000); await r.wait(1500); await r.ev("Nutcade.closeSheet()")
+            shown = bool(await cards(r))
+            await r.click('[data-act=tab][data-tab=arcade]'); await r.wait(200); await r.ev("document.querySelector('[data-game=swarm]').click()"); await r.wait(800)
+            g = await r.ev("""(sel=>{const e=document.querySelector(sel); if(!e) return 'missing'; const q=e.getBoundingClientRect();
+              const h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2); return h&&(h===e||e.contains(h))?'ok':'covered'})('[data-g=exit]')""")
+            check('a game: a notice on screen waits under it (the exit stays reachable)', shown and g == 'ok', (shown, g))
+            await r.ev("document.querySelector('[data-g=exit]')?.click()"); await r.wait(500)
+            check('a game: back from it, the notice is there again', await r.ev("!!document.querySelector('#arrStack .arr-card') && getComputedStyle(document.querySelector('#arrStack')).display!=='none'"))
+            await dismiss(r); await r.home(); await r.pg.set_viewport_size({'width': 390, 'height': 844})
 
         errs = [e for e in (r.errs + p.errs) if 'PAGEERROR' in e]
         for e in r.errs + p.errs: print('  page said:', e[:300])
