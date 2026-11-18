@@ -358,11 +358,10 @@ async def main():
               start = lambda: wy[way](amt)
               try:
                 await set_limits(w, '100', '', PIN)
-                n0 = await w.ev("Nutcade.S.txs.length"); bal0 = await w.bal(); await start(); r = await outcome(w, n0)
-                # (a move asks the destination mint for an invoice before it asks for the PIN; the test mints' fake Lightning marks that invoice paid
-                # after 0.5 s, and the wallet then mints it: on a slow machine +amt may arrive before this reads the balance. That is not sats leaving.)
-                d_bal = await w.bal() - bal0
-                check(f'{way}: over the per-payment limit is held with the amount on screen, nothing leaves', r[0] == 'limit' and re.search(r'\d', r[1] or '') and d_bal in ((0, amt) if way == 'move' else (0,)), (r[0], (r[1] or '')[:160], d_bal))
+                # (nothing leaves the paying mint, A. Not the whole balance: a move's receiving deposit at B is paid at once by
+                # the test mints' fake Lightning, and the wallet may credit it while the payment is held)
+                n0 = await w.ev("Nutcade.S.txs.length"); bal0 = await w.bal(A); await start(); r = await outcome(w, n0)
+                check(f'{way}: over the per-payment limit is held with the amount on screen, nothing leaves', r[0] == 'limit' and re.search(r'\d', r[1] or '') and await w.bal(A) == bal0, (r[0], (r[1] or '')[:160], await w.bal(A) - bal0))
                 if r[0] == 'limit':
                     await layer_pin(w); r2 = await outcome(w, n0, 40000)
                     check(f'{way}: the PIN lets it through', r2[0] == 'ok', r2[:1] + [str(r2[1])[:160]])
