@@ -241,12 +241,12 @@ async function renderCard(o) {
   txt(ctx, when, rx, 486, 16, '#9a8fc4');
   if (o.loaded && o.loaded.url) {
     // a loaded card: a QR over the game screen that pays out to whoever scans it first
-    const L = window.CashuLib; let qr = null; try { qr = L.qrcode(0, 'M'); qr.addData(o.loaded.url); qr.make(); } catch (e) { qr = null; }
-    if (qr) {
-      const m = qr.getModuleCount(), cell = Math.floor(260 / (m + 4)), size = cell * (m + 4), qx = bx + bw - size - 14, qy = by + bh - size - 14;
+    // tokens: the shared QR drawing (the acorn in the middle when the setting is on and it reads back, else plain)
+    let qc = null; try { qc = window.NutQR ? await window.NutQR.verified(o.loaded.url, w => Math.floor(260 / w), { quiet: 2 }) : null; } catch (e) { qc = null; }
+    if (qc) {
+      const size = qc.canvas.width, qx = bx + bw - size - 14, qy = by + bh - size - 14;
       ctx.fillStyle = '#ffcf3a'; ctx.fillRect(qx - 8, qy - 8, size + 16, size + 16);
-      ctx.fillStyle = '#ffffff'; ctx.fillRect(qx, qy, size, size); ctx.fillStyle = '#0a0717';
-      for (let r = 0; r < m; r++) for (let k = 0; k < m; k++) if (qr.isDark(r, k)) ctx.fillRect(qx + (k + 2) * cell, qy + (r + 2) * cell, cell, cell);
+      ctx.drawImage(qc.canvas, qx, qy);
       ctx.fillStyle = 'rgba(5,3,12,.88)'; ctx.fillRect(bx, by, bw, 66);
       txt(ctx, 'INSERT COIN: SCAN TO WIN', bx + bw / 2, by + 8, 18, '#ffcf3a', 'center');
       txt(ctx, `${N().fmtEn(o.loaded.amount)} SAT · FIRST SCAN TAKES IT`, bx + bw / 2, by + 38, 16, '#9dff3a', 'center');
