@@ -1068,6 +1068,14 @@ RE = [
 (r"^Some of this ecash was already spent\. NUTCADE removed (.+) of spent ecash from your balance \(see your notes\)\. Try again with what is left\.$", "Parte de este ecash ya estaba gastado. NUTCADE quitó $1 de ecash gastado de tu saldo (mira tus notas). Inténtalo de nuevo con lo que queda.", "Parte deste ecash já estava gasta. O NUTCADE removeu $1 de ecash gasto do seu saldo (veja suas notas). Tente de novo com o que sobrou.", "Ein Teil dieses Ecash war schon ausgegeben. NUTCADE hat $1 ausgegebenes Ecash aus deinem Guthaben entfernt (siehe Notizen). Versuch es noch einmal mit dem, was übrig ist.", "Une partie de cet ecash était déjà dépensée. NUTCADE a retiré $1 d'ecash dépensé de votre solde (voir vos notes). Réessayez avec ce qui reste."),
 ]
 
+# Corner Pocket (9th cabinet): its rows live in i18n_pool.py; an English line already above keeps its first translation
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import i18n_pool as _pool
+_have = {r[0] for r in ROWS}
+ROWS += [r for r in _pool.ROWS if r[0] not in _have]
+RE += _pool.RE
+
 LANGS = ['es', 'pt', 'de', 'fr']
 
 # Numbers on screen are already written the language's way ("2,500" en, "2.500" de/es/pt, "2 500" fr with a narrow

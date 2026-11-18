@@ -689,7 +689,8 @@ const nutFlipper = {
   }
 };
 
-const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper];
+/*@@game_pool.js@@*/
+const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper, cornerPocket];
 // The challenger's ghost: their player drawn faintly over yours while you race their replay
 starSwarm.ghost = (s, ctx) => { if (!s.p.dead) spr(ctx, SHIP, s.p.x, s.p.y, { c: C.white, w: C.white, p: C.white }); };
 brickBlitz.ghost = (s, ctx) => { ctx.fillStyle = C.white; ctx.fillRect(s.pad.x, s.pad.y, s.pad.w, s.pad.h); ctx.fillRect(s.ball.x - 2, s.ball.y - 2, 4, 4); };
