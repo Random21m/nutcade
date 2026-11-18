@@ -37,8 +37,8 @@ Object.assign(A, {
     zapByQuote.set(mq.quote, z.zapOk ? { zap: { pubkey: z.pubkey, id: zapReq.id, anon }, zapName: z.name } : { lnName: z.name });
     showMeltQuote('ln', mq, z.addr, note);
   }),
-  nwcNew: () => { sfx('select'); openNwcNew(); },
-  nwcCreate: b => run(b, 'CREATING', async () => {
+  nwcNew: () => { sfx('select'); pinGuard('nwc', openNwcNew); },
+  nwcCreate: b => !guardHeld('nwc') ? closeSheet() : run(b, 'CREATING', async () => {
     const budget = readBudget();
     const { c, uri } = nwcCreate(val('nwcName'), budget, !!($('#nwcAll') || {}).checked);
     sfx('coin'); refresh(); showNwcUri(c, uri);

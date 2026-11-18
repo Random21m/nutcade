@@ -57,6 +57,8 @@ jobs:
             suites: game_loop,game_daily,game_poker,game_neonroad
           - name: core
             suites: wallet,crash,pin,games_smoke,round2,v16,r3
+          - name: pinguard
+            suites: pinguard
           - name: r4-r6
             suites: r4,r5,r6
     env:
