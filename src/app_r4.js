@@ -265,12 +265,13 @@ async function checkHealth() {
   if (tab === 'mints' && !$('#layer .sheet')) refresh();
 }
 const SPREAD_COLS = ['var(--gold)', 'var(--cyan)', 'var(--pink)', 'var(--lime)', 'var(--violet)', 'var(--red)'];
+const msFmt = n => Math.round(num(n)).toLocaleString(numLocale(), { useGrouping: 'always' });   // a latency is not an amount: Hide amounts leaves it alone
 function healthOf(url) {
   const h = health[url];
   if (!h) return { cls: 'wait', label: 'CHECKING' };
   if (!h.ok) return { cls: 'bad', label: 'NOT ANSWERING' };
-  if (h.ms > 2500) return { cls: 'slow', label: `SLOW · ${fmt(h.ms)} MS` };
-  return { cls: 'good', label: `ONLINE · ${fmt(h.ms)} MS` };
+  if (h.ms > 2500) return { cls: 'slow', label: `SLOW · ${msFmt(h.ms)} MS` };
+  return { cls: 'good', label: `ONLINE · ${msFmt(h.ms)} MS` };
 }
 function evenOut() {   // biggest mint down toward half, into the healthiest other mint that can take Lightning
   const tot = totalBalance(); if (S.mints.length < 2 || tot < 1000) return null;

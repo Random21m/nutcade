@@ -30,10 +30,10 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 **Good to know**
 - Each browser and each icon keeps its own wallet. Set it up once in the place you'll use it.
 - Write down your **12 words** when you create the wallet. They're the only way back if the phone is lost or the browser data is cleared.
-- Updates arrive by themselves: the next time you open NUTCADE, it loads the new version.
+- Updates arrive by themselves: the next time you open NUTCADE, it loads the new version, and a note tells you what's new. If you keep NUTCADE open for days, a message says when a new version is ready, and you reload when you're done (never in the middle of a payment).
 
 <table>
-<tr><td><img src="docs/screens/01-lightning.jpg" alt="Loading sats over Lightning: a 1UP and a coin shower"></td><td><img src="docs/screens/02-arcade.jpg" alt="Star Swarm, one of the 8 original arcade games"></td></tr>
+<tr><td><img src="docs/screens/01-lightning.jpg" alt="Loading sats over Lightning: a 1UP and a coin shower"></td><td><img src="docs/screens/02-arcade.jpg" alt="Star Swarm, one of the 10 arcade cabinets"></td></tr>
 <tr><td><img src="docs/screens/03-trophies.jpg" alt="The trophy room"></td><td><img src="docs/screens/04-send.jpg" alt="Sending sats to a friend: SENT! on one phone, 1UP! on the other"></td></tr>
 <tr><td><img src="docs/screens/05-sound.jpg" alt="Send by sound: one phone plays the coins, the other listens and receives them"></td><td><img src="docs/screens/06-cashier.jpg" alt="Cashier mode: a paid sale of 5,000 sats"></td></tr>
 <tr><td><img src="docs/screens/07-languages.jpg" alt="The wallet in English, Spanish, Portuguese, German and French"></td><td><img src="docs/screens/08-pin.jpg" alt="The PIN lock"></td></tr>
@@ -60,6 +60,11 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 - **Spending limit**: have NUTCADE ask for your PIN above an amount you pick for one payment, and cap what can leave in any 24 hours. It covers every way sats leave: Lightning, ecash (also by sound, NFC or QR), payment requests and bill splits, gifts, bounties (challenge stakes), treasure hunts and loaded cards, Extra Life, moves between your own mints (in full), Wallet Connect (on top of each app's budget), zaps, tips, Lightning addresses and LNURL, contacts, payments from several mints (judged as a whole before any part leaves), on-chain, and the sats you put in a duress PIN's wallet. Fees count. Over a limit, you see the amount and when the day frees up, and your PIN lets that one payment through
 - **Duress PIN**: a second PIN that opens a small, separate wallet instead of yours, for when someone forces you to unlock NUTCADE (see [Safety](#safety) for what it does and doesn't hide)
 - **Keyset check-up**: when a mint retires its keys (a NUT-02 keyset turned inactive, or one less than 7 days from its final expiry), NUTCADE moves your coins there to the mint's new keys, and combines many tiny coins into fewer, with the same crash-safe swap as every payment. When it's free it just happens; when the mint charges a fee you're asked once, with the fee shown. Each mint's line in **Mints** says what was done ("2 coins moved off an old keyset", "Nothing to do")
+- **Help & FAQ** (Settings → Help): short answers in plain words, offline, in all five languages: what ecash and a mint are, what happens if a mint closes, your 12 words, a new phone, a stuck payment, "not yours until claimed", fees, the PIN and the duress PIN, offline use, updates, and what NUTCADE contacts (the same list as [Privacy](#privacy))
+- **Check your 12 words**: a week after you back up, and then about twice a year, NUTCADE offers to check three of your words against your paper copy (you can say Later or turn the reminder off). The words are compared on your phone; they are never shown, saved or sent. Settings → Backup shows when you last checked and when you last made a backup file
+- **Updated to vX** and **new version ready**: after an update you see one note with what's new and a link to the release and its signed checksums. In a tab left open for days, a message says when a new version is ready, and offers a reload only when no payment or other money step is open. NUTCADE finds out by reading this site's own page; no server is asked
+- **Mint details**: Mints → **Details** shows what a mint says about itself (NUT-06): its contact methods, its terms and its description. This text comes from the mint, so it is shown as plain text, and only web addresses (http or https) become links
+- **Hide amounts**: tap your balance (or the eye beside it, or **Settings → Look & sound → Hide amounts**) to show ••• instead of amounts on the wallet, notes and mints screens. It is remembered on this device. Payment screens and tokens always show the real amount, so you can't send blind
 - **Mints with a request limit** (NUT-06): NUTCADE honours a mint's `max_array_length` and needs at least 128 items per request; a mint below that can't be added (see [Safety](#safety))
 - **Report a problem** from Settings → About, with a form that asks for what happened, the steps, your device and the version, and warns never to paste your 12 words, PIN or tokens
 - Use several mints at once and switch between them
@@ -120,14 +125,15 @@ Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons
 
 **Settings**
 - **Security:** set, change or remove your PIN, turn on Face ID / fingerprint, lock now, and choose when the wallet locks itself
-- **Backup:** show your phrase, find lost ecash, back up your mint list to Nostr, download or import a backup file, restore a wallet from 12 words, reset the wallet
+- **Backup:** when you last checked your 12 words and last made a backup file, check your 12 words, show your phrase, find lost ecash, back up your mint list to Nostr, download or import a backup file, restore a wallet from 12 words, reset the wallet
 - **Lightning address:** turn on your own address, choose which mint receives the payments, check for payments, turn it off
 - **Contacts:** add, edit and pay contacts, and show your ecash address
-- **Look & sound:** language, three cabinet themes (Neon, Amber CRT, Green phosphor), sound effects, music, CRT scanlines, amounts shown as ₿
+- **Look & sound:** language, three cabinet themes (Neon, Amber CRT, Green phosphor), sound effects, music, CRT scanlines, amounts shown as ₿, hide amounts
 - **Privacy:** turn the live price and price chart on or off (prices come from Coinbase, in your currency), choose whether to check if sent tokens were claimed, and whether to receive ecash sent over Nostr
 - **Piggy bank:** turn round-ups on or off, choose what to round to, and empty the piggy bank
 - **Wallet tools:** cashier mode and today's till, move sats between mints, the keyset check-up (on its own when free, or always ask), remove spent ecash and check stuck payments
-- **About:** version, links and support
+- **Help:** Help & FAQ
+- **About:** version, what's new, check for a new version, links and support
 
 ## Getting started
 
@@ -312,6 +318,22 @@ If a mint says it no longer accepts some coins at all (it dropped their keys, or
 
 **Settings → Backup → Reset wallet** deletes the wallet from this browser and returns you to the start screen to create a new one or restore one. With a PIN set, it asks for the PIN first. Write down your 12 words and mints first if there are sats in it.
 
+### Help & FAQ
+
+**Settings → Help → Help & FAQ** answers the questions new users ask, in plain words, offline and in English, Spanish, Portuguese, German and French. Topics: what NUTCADE is, ecash and mints, what happens if a mint closes or stops working, your 12 words, a new or lost phone, a payment that looks stuck, why ecash isn't yours until it's claimed, fees, the PIN and the duress PIN (and what the duress PIN can't do), offline use, hiding amounts, updates, keeping your wallet safe, what NUTCADE contacts, and how to report a problem. The help is written from this README and the app's behaviour, and the sheet has buttons for the public problem form and for the private security report. The text is in `src/app_trust.js` and its translations in `tools/i18n_trust.py`.
+
+### Checking your 12 words
+
+NUTCADE offers to check your words a week after you back them up, and then about every six months. It asks for three words by position (for example "Word #3"), which you type from your paper copy. They are compared on your phone with the phrase already in the wallet: nothing is sent anywhere, the words aren't shown on this screen, and nothing about your answer is stored, only when you last passed and when to ask next. **Later** asks again in a week; **Don't remind me again** turns the reminder off (the check stays in **Settings → Backup → Check my 12 words**). A wrong word tells you which one; you can show your words again from there.
+
+### Mint details
+
+**Mints → Details** shows what the mint says about itself in its info (NUT-06): its **contact** methods, its **terms of service** link, its short and long **description**, its message of the day and its software version. NUTCADE reads this when you open the sheet (and when the report card checks the mint), and keeps it on your phone. The mint wrote that text, so NUTCADE treats it as untrusted: it is cut to a sensible length, stripped of control and text-direction characters, and shown as plain text. A web address becomes a link only when it starts with http:// or https:// and has no name or password in it; it opens in a new tab with `rel="noopener noreferrer"`. Email addresses, Nostr names and anything else are shown as text, never as links.
+
+### Hiding amounts
+
+Tap your balance, or the eye button beside it (also **Settings → Look & sound → Hide amounts**). The wallet, notes and mints screens, and the amounts in Settings, show ••• instead. It is remembered on this device (and is the same whichever wallet a PIN opens). The sheets where you pay, receive or confirm something are not hidden: you always see what you are about to send. A toast that says "Received 500 SAT" for a moment is not hidden either.
+
 ## Safety
 
 - **PIN lock and encryption.** With a PIN set, your phrase, ecash, history and notes are stored encrypted (AES-256-GCM). The key is unlocked by your PIN (PBKDF2, 600,000 rounds) or by a Face ID / fingerprint passkey (WebAuthn PRF). Five wrong PINs trigger a growing wait, and the wallet locks itself after the time you choose. While the wallet is open, the steps that could hand over the whole wallet (show the phrase, the backup file, import a backup, restore from 12 words, connect or edit an app, reset) ask for the PIN again; see [Spending limit](#spending-limit). A PIN stops someone who picks up your phone; it can't stop malware on a compromised device. If you forget it, reset and restore with your 12 words.
@@ -365,16 +387,20 @@ Every push runs the suites in `tests/` automatically on GitHub (GitHub Actions) 
 
 ## Privacy
 
-NUTCADE has no account, no tracking and no analytics. Your recovery phrase and notes stay in your browser, and mints only see the ecash you exchange with them. The app contacts other services only for these things:
+NUTCADE has no account, no tracking, no analytics and no ads. Your recovery phrase and notes stay in your browser, and mints only see the ecash you exchange with them. The app contacts other services only for these things (the same list is in **Settings → Help → Help & FAQ**, in five languages; each line below was checked against the code):
 
-- **Mints**: yours for every payment, and the ones listed in the mint picker to show whether they're online
-- **Nostr relays, for the Daily Challenge**: only when you tap **Post** under **Share my score**, to publish the one note you just previewed
-- **Coinbase**, for the price and chart, only while **Show Bitcoin price** is on
-- **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to send and receive game challenges with your contacts, to save your encrypted mint list when it changes and to look for it when you restore (turn this off in Settings → Backup), to receive payments for requests you made in the last 30 days, to deliver payments to requests you pay, to receive ecash friends send to your ecash address (turn this off in Settings → Privacy), and when you tap "Find mints people recommend". Payments you send over Nostr are signed with a one-time key, so they aren't linked to you. Challenges and their scores are signed with your NUTCADE Nostr key so friends know they're from you
+- **Your mints**: for every payment, to check that they answer (the Mints tab and the report card), and to read their name, contact details, terms and description (NUT-06 `/v1/info`)
+- **The mints in the Add mint list** (Minibits, Cuba Bitcoin, 8333.space, and two test mints), only while that list is open, to show whether they're online
+- **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to send and receive game challenges with your contacts, to talk to apps you connect with Wallet Connect, to save your encrypted mint list when it changes and to look for it when you restore (turn this off in Settings → Backup), to receive payments for requests you made in the last 30 days, to deliver payments to requests you pay, to receive ecash friends send to your ecash address (turn this off in Settings → Privacy), to publish the one note you just previewed when you tap **Post** under **Share my score**, and to look up a Nostr profile when you zap it. A contact, a payment request or a Wallet Connect link can name relays of its own, which are used when you send to them. Payments you send over Nostr are signed with a one-time key, so they aren't linked to you. Challenges and their scores are signed with your NUTCADE Nostr key so friends know they're from you
+- **Two more Nostr relays** (relay.nostr.band and relay.cashumints.space), only when you tap **Find mints people recommend**
+- **Coinbase** (api.coinbase.com, api.exchange.coinbase.com and ws-feed.exchange.coinbase.com), for the price and chart, only while **Show Bitcoin price** is on
 - **npub.cash**, only while your Lightning address is turned on. It sees the amounts and times of payments to your address, not the rest of your wallet
 - **The support address** (npub.cash), only when you tip from inside the app
+- **The web address of a Lightning address, LNURL, voucher or payment request** you pay or scan (for example the domain after the @ in name@wallet.com), and of a Nostr profile's Lightning address when you zap it. That server sees the one request
+- **This website** (random21m.github.io/nutcade): it loads NUTCADE and its QR decoder (only when you open the scanner), and, in a tab left open for days, the update check reads this site's own page. GitHub, which hosts the site, sees these requests like any website visit. No other server is asked about versions or notices
+- **GitHub pages** (the source, the release notes, the problem form and the private security report), only when you tap a link to them
 
-The **microphone** is used only while a Listen screen is open. The sound is decoded on your phone and nothing is recorded or sent anywhere.
+The **camera** is used only while the scanner is open, and the **microphone** only while a Listen screen is open. The picture and the sound are decoded on your phone, and nothing is recorded or sent anywhere.
 
 ## Sharing
 
@@ -404,6 +430,15 @@ You can also tip from inside NUTCADE: **Settings → About → Support**. The sa
 
 ## Changelog
 
+- **v1.17.0:** the **Trust & help** release. Nothing in this release changes how money moves.
+  - **Help & FAQ** in Settings: plain answers, offline, in all five languages, with a Privacy answer that lists every service NUTCADE contacts.
+  - **Check your 12 words**: offered a week after your backup, then about twice a year; three words, compared on your phone only. Settings → Backup shows when you last checked and when you last made a backup file.
+  - **Updated to vX** (once, with what's new and a link to the release and its signed checksums) and **new version ready** (in a tab left open for days; the reload is offered only when no payment or other money step is open, and never happens by itself). Both read only this site; there is no notice server.
+  - **Mint details**: Mints → Details shows each mint's contact, terms and description, as plain text, with only http(s) links.
+  - **Hide amounts**: tap your balance to show ••• instead of amounts on the main screens; remembered per device. Payment screens still show the real amount.
+  - The **Privacy** section is complete and checked against the code (relay.nostr.band, relay.cashumints.space, Lightning address servers, Wallet Connect relays, this site's update check); **SECURITY.md** explains GitHub's private vulnerability reporting step by step.
+  - The listing text says **10 arcade cabinets** (the page description and link previews said 8), and the app manifest has an id, a longer description, categories and screenshots.
+  - Small fixes: a mint's "ONLINE · ms" speed is no longer hidden by Hide amounts, and invisible zero-width characters are stripped from a mint's text.
 - **v1.16.0:** the **arrival notices** release. **Notices when money arrives**. A Lightning deposit, a token claimed, ecash over Nostr, a payment request paid, a payment to your npub.cash Lightning address (zaps included) or a Wallet Connect invoice paid: a short notice over the logo bar says how much, from where and at which mint, with the coin sound (if sound is on); Details has the rest and a link to your notes.
   - **While you were away**: on opening NUTCADE or unlocking it, after its start-up checks, one line with what arrived since you last had it in front of you; Details has the count and total per kind, exactly the history lines in question.
   - Each arrival is announced once: not again after a reload, in a second tab or after a restore. Old history brought back by a restore or a backup, moves between your own mints, coins the keyset check-up gets back, and your own tokens you bring back yourself (taken back, or scanned or pasted into Receive; printed or not; a gift you take back too, also when the mint's answer was lost, it is claimed in parts, or it is saved to claim later because you're offline or its mint can't be reached), an Extra Life you cash out, coins found again (Find lost ecash, a backup, ecash swept from another phrase) and the duress PIN's wallet's sats coming back when you turn it off are not "arrivals". Each of those is marked by the step that writes its line, never recognized by its note: a stranger's memo that reads like one of NUTCADE's own notes ("Reclaimed: ...", "Restored from backup", "Gift came back") is still an arrival, with its usual label. Your own token is recognized by its coins, not its text, so it is yours also when it comes back by sound, from an NFC card or from a QR code (and its line in your notes says reclaimed). A gift nobody opened that comes back by itself is an arrival ("Came back to you"), and so is your own token handed back to you over Nostr by the person you sent it to. A claim of your own coins cut off while NUTCADE 1.15 was open (its mint's answer lost) and finished by this version, after a reload or from a 1.15 backup, is treated the same way. One message per arrival: no "+X received" toast beside the notice; a deposit recovered after the mint's answer was lost is said once, by its notice, or by "Recovered X from an interrupted deposit" when it adds to a line that was announced already.

@@ -4,7 +4,11 @@ NUTCADE holds real money, so security reports are taken seriously.
 
 ## Reporting a problem
 
-Please **don't open a public issue** for anything that could put someone's sats at risk. Instead, open the [Security tab](https://github.com/Random21m/nutcade/security) and choose **Report a vulnerability**. Only the maintainer can see the report.
+Please **don't open a public issue** for anything that could put someone's sats at risk. Use GitHub's **private vulnerability reporting** instead. Only the maintainer can see what you send.
+
+1. Go to <https://github.com/Random21m/nutcade/security/advisories/new>. (Or open the repository's **Security** tab, choose **Advisories**, then **Report a vulnerability**.)
+2. Sign in to GitHub. A free account is enough.
+3. Fill in the title and the description, and send it.
 
 Useful things to include:
 
@@ -12,7 +16,9 @@ Useful things to include:
 - the steps to reproduce it, and the browser and phone you used
 - the NUTCADE version (Settings → About)
 
-You'll get a reply within a few days. Once a fix is live, the changelog will credit you, unless you'd rather stay anonymous.
+The report opens a private conversation between you and the maintainer on GitHub. You'll get a reply within a few days. Once a fix is live, the changelog will credit you, unless you'd rather stay anonymous.
+
+Never put the details of a security problem, your 12 words, a PIN or a backup file in a public issue, a comment or a social post.
 
 ## What's covered
 
