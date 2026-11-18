@@ -1055,6 +1055,22 @@ async def main():
                 await z.pg.context.close()
         await section('r3own', r3_own)
 
+        async def r3_flight():
+            # "N SAT in flight." on the wallet screen, in every language, its number written the local way
+            for lang, word in (('en', 'in flight.'), ('es', 'en curso.'), ('pt', 'em andamento.'), ('de', 'unterwegs.'), ('fr', 'en cours.')):
+                z = await wallet(b, 375, 667, lang); await z.create(); await z.add_mint(B); await z.home()
+                num = await z.ev("Nutcade.fmt(1280)")
+                await z.ev(f"window.__i18nMiss=new Set(); Nutcade.S.pending.push({{id:'fp1', mint:{json.dumps(B)}, txId:null, paid:false, proofs:[{{id:'00', amount:1024, secret:'a', C:'02'}},{{id:'00', amount:256, secret:'b', C:'02'}}]}}); Nutcade.render()")
+                await z.wait(300); t = await z.ev("document.querySelector('#app').innerText"); miss = await z.ev("[...(window.__i18nMiss||[])].filter(x=>/flight/.test(x))")
+                await z.ev("Nutcade.S.pending=Nutcade.S.pending.filter(p=>p.id!=='fp1'); Nutcade.render()")
+                check(f'in flight {lang}: "{num} SAT {word}" on the wallet screen, in your language with the number written the local way', f'{num} SAT {word}' in t and not miss and (lang == 'en' or 'in flight' not in t), (num, re.findall(r'.{0,12}SAT [^\n]{0,20}', t)[:4], miss))
+                if lang != 'en':   # (the same kind of text found by the search: an amount inside a sentence built in the page)
+                    leg = f"You already hold {num} SAT here from before recovery phrases. Creating your phrase moves that ecash under it so it's protected too."
+                    t2 = await z.ev(f"Nutcade.tr({json.dumps(leg)})")
+                    check(f'in flight {lang}: the older-wallet notice with its amount ("You already hold {num} SAT here...") is in your language too', t2 != leg and num in t2, t2[:80])
+                await z.pg.context.close()
+        await section('r3flight', r3_flight)
+
         check('round 8: the books add up everywhere (history = balance)', not broken, broken)
         print('SUMMARY', sum(1 for r in results if r[1]), 'passed,', sum(1 for r in results if not r[1]), 'failed')
         await b.close()
