@@ -656,6 +656,29 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
   #tokPrint .pt-page{display:grid;gap:5mm;justify-content:center;break-after:page;page-break-after:always}
   #tokPrint .pt-page:last-child{break-after:auto;page-break-after:auto}
 }
+/* Notices when money arrives (src/app_arrive.js) */
+.arr-stack{position:fixed;left:50%;top:calc(8px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:280;width:min(calc(100vw - 32px),440px);display:grid;gap:8px;pointer-events:none}
+.arr-card{pointer-events:auto;display:grid;gap:6px;padding:10px 12px;border:3px solid var(--lime);border-radius:var(--r);background:var(--well);box-shadow:4px 4px 0 #000;font-size:18px;line-height:1.15;max-height:calc(100vh - 120px);overflow:auto}
+.arr-card[data-type=away]{border-color:var(--cyan)}
+.arr-head{display:flex;align-items:center;gap:8px;min-width:0}
+.arr-ico{flex:none;font-family:var(--f-display);font-size:14px;color:var(--lime)}
+.arr-card[data-type=away] .arr-ico{color:var(--cyan)}
+.arr-title{flex:1;min-width:0;font-family:var(--f-display);font-size:10px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.arr-x{flex:none;width:32px;height:32px;margin:-6px -6px -6px 0;border:0;background:transparent;color:var(--dim);font-size:24px;line-height:1;cursor:pointer}
+.arr-x:hover,.arr-x:focus-visible{color:var(--ink)}
+.arr-big{font-family:var(--f-display);font-size:16px;line-height:1.4;color:var(--lime);overflow-wrap:anywhere}
+.arr-what{display:flex;flex-wrap:wrap;gap:2px 10px;color:var(--ink)}
+.arr-mint{color:var(--dim);overflow-wrap:anywhere;min-width:0}
+.arr-sub{color:var(--dim);font-size:16px}
+.arr-lines{display:grid;gap:4px}
+.arr-line{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:baseline;padding:4px 0;border-bottom:1px dashed var(--grid)}
+.arr-k{min-width:0;overflow-wrap:anywhere;color:var(--ink)}
+.arr-n{grid-column:1;color:var(--dim);font-size:16px}
+.arr-a{grid-column:2;grid-row:1 / span 2;align-self:center;text-align:right;white-space:nowrap;color:var(--lime)}
+.arr-total{display:flex;justify-content:space-between;gap:10px;font-family:var(--f-display);font-size:10px;line-height:1.6;color:var(--ink)}
+.arr-total span:last-child{color:var(--lime);white-space:nowrap}
+.arr-acts{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.arr-lock{margin-bottom:10px;text-align:center}
 </style>
 
 <div id="app" class="crt"></div>
@@ -2776,6 +2799,14 @@ window.NUTCADE_I18N = {
   if (D.fr) { Object.assign(D.fr.t, {"Print tokens": "Imprimer des jetons", "Hand sats over on paper, like arcade tokens. Each token is its own Cashu token with its own QR code: whoever scans it first gets its sats, with any Cashu wallet.": "Remettez des sats sur papier, comme des jetons d'arcade. Chaque jeton est un jeton Cashu à part, avec son propre QR code : la première personne qui le scanne reçoit ses sats, avec n'importe quel portefeuille Cashu.", "Amount per token (SAT)": "Montant par jeton (SAT)", "How many (1 to 20)": "Combien (1 à 20)", "Style": "Style", "INK SAVER": "ÉCO ENCRE", "Ink saver": "Éco encre", "Black on white.": "Noir sur blanc.", "Full color. The QR code is always dark on light.": "En couleurs. Le QR code est toujours foncé sur clair.", "Next": "Suivant", "Printed tokens ({#})": "Jetons imprimés ({#})", "Pick how many tokens: 1 to 20.": "Choisissez combien de jetons : de 1 à 20.", "Making tokens needs the mint, and you're offline. Try again online.": "Créer des jetons nécessite le mint, et vous êtes hors ligne. Réessayez en ligne.", "{#} × {#} SAT plus the mint's fees is more than this mint holds ({#} SAT).": "{#} × {#} SAT plus les frais du mint, c'est plus que ce que contient ce mint ({#} SAT).", "Tokens": "Jetons", "{#} × {#} SAT": "{#} × {#} SAT", "Total": "Total", "Fees": "Frais", "up to {#} SAT": "jusqu'à {#} SAT", "None at this mint": "Aucun sur ce mint", "The mint's fee for making each token, and the fee each token carries so whoever claims it gets the full {#} SAT.": "Les frais du mint pour créer chaque jeton, et les frais que chaque jeton emporte pour que la personne qui le réclame reçoive les {#} SAT entiers.", "The sats leave your balance now. Unclaimed tokens can be taken back any time from Printed tokens. A photo of a code is enough to take its sats, so keep them hidden until you hand them over.": "Les sats quittent votre solde maintenant. Les jetons non réclamés peuvent être repris à tout moment depuis Jetons imprimés. Une photo d'un code suffit pour prendre ses sats : gardez-les cachés jusqu'à ce que vous les remettiez.", "Make 1 token": "Créer 1 jeton", "Make {#} tokens": "Créer {#} jetons", "MAKING TOKENS": "CRÉATION DES JETONS", "MAKING TOKEN {#} OF {#}": "CRÉATION DU JETON {#} SUR {#}", "CHECKING CODES": "VÉRIFICATION DES CODES", "TAKING BACK": "REPRISE", "{#} of {#} tokens were made before this. They are in Printed tokens: print them or take them back.": "{#} jetons sur {#} ont été créés avant cela. Ils sont dans Jetons imprimés : imprimez-les ou reprenez-les.", "Every token of this batch was claimed or taken back, so there is nothing to print.": "Tous les jetons de ce lot ont été réclamés ou repris : il n'y a rien à imprimer.", "1 TOKEN READY": "1 JETON PRÊT", "{#} TOKENS READY": "{#} JETONS PRÊTS", "Fees paid": "Frais payés", "✓ Every code was read back and scans.": "✓ Chaque code a été relu et se scanne.", "Cut along the dashed lines. Fold each card on the dotted line, printed sides out: front and back of one token. Fold it the other way to keep the code hidden until you hand it over.": "Découpez le long des tirets. Pliez chaque carte sur la ligne pointillée, faces imprimées vers l'extérieur : le recto et le verso d'un jeton. Pliez-la dans l'autre sens pour garder le code caché jusqu'à ce que vous le remettiez.", "Print": "Imprimer", "BEFORE YOU PRINT": "AVANT D'IMPRIMER", "A printed token is cash. Whoever scans it first gets the sats. Keep it folded or hidden until you hand it over.": "Un jeton imprimé, c'est de l'argent liquide. La première personne qui le scanne reçoit les sats. Gardez-le plié ou caché jusqu'à ce que vous le remettiez.", "I understand": "J'ai compris", "Amount per token": "Montant par jeton", "OTHER": "AUTRE", "{#} SAT would need {#} coins here, too dense to scan reliably on paper.": "{#} SAT nécessiterait {#} pièces ici, trop dense pour se scanner de façon fiable sur papier.", "Nobody claimed it? Take it back any time in": "Personne ne l'a réclamé ? Reprenez-le quand vous voulez dans", "Notes → Printed tokens": "Notes → Jetons imprimés", "STOPPED AFTER {#} OF {#}": "ARRÊTÉ APRÈS {#} SUR {#}", "Nothing more was made.": "Rien de plus n'a été créé.", "Print what was made": "Imprimer ce qui a été créé", "Your balance changed since, so the cost was worked out again. Check it and tap Make again.": "Votre solde a changé entre-temps : le coût a été recalculé. Vérifiez-le et touchez à nouveau Créer.", "Another payment changed the coins at this mint during the batch, so the next token would cost more than shown.": "Un autre paiement a modifié les pièces de ce mint pendant le lot : le jeton suivant coûterait plus que prévu.", "These coins are no longer here. Nothing was sent.": "Ces pièces ne sont plus là. Rien n'a été envoyé.", "A {#} SAT token needs {#} coins, and its QR code would be too dense to scan reliably on paper. Pick an amount made of fewer coins: {#} or {#} are one coin each, {#} is six.": "Un jeton de {#} SAT nécessite {#} pièces, et son QR code serait trop dense pour se scanner de façon fiable sur papier. Choisissez un montant fait de moins de pièces : {#} ou {#} font une pièce chacun, {#} en fait six.", "Make the tokens again to print them.": "Préparez à nouveau les jetons pour les imprimer.", "TOKEN": "JETON", "Mint:": "Mint :", "Made": "Créé le", "Token": "Jeton", "SCAN TO CLAIM": "SCANNEZ POUR RÉCLAMER", "HOW TO CLAIM": "COMMENT RÉCLAMER", "Open any Cashu wallet (NUTCADE, Minibits, cashu.me…).": "Ouvrez n'importe quel portefeuille Cashu (NUTCADE, Minibits, cashu.me…).", "Scan the code on the front. The sats are now yours.": "Scannez le code au recto. Les sats sont à vous.", "New to this? Open": "Première fois ? Ouvrez", "This token IS the money. Whoever scans it first gets the sats. Keep the code hidden until you hand it over.": "Ce jeton EST l'argent. La première personne qui le scanne reçoit les sats. Gardez le code caché jusqu'à ce que vous le remettiez.", "CHECK IT'S STILL GOOD: SCAN IN NUTCADE": "TOUJOURS VALABLE ? SCANNEZ DANS NUTCADE", "NO ACCOUNT. NO TRACKING.": "SANS COMPTE. SANS PISTAGE.", "Printed tokens": "Jetons imprimés", "{#} printed · {#} unclaimed · {#} claimed · {#} taken back": "{#} imprimés · {#} non réclamés · {#} réclamés · {#} repris", "Take back all unclaimed": "Reprendre tous les non réclamés", "Print again": "Imprimer à nouveau", "UNCLAIMED": "NON RÉCLAMÉ", "TAKEN BACK": "REPRIS", "Take back": "Reprendre", "No printed tokens yet.": "Pas encore de jetons imprimés.", "{#} claimed since the last check": "{#} réclamés depuis la dernière vérification", "No new claims": "Aucune nouvelle réclamation", "Token taken back": "Jeton repris", "1 token taken back": "1 jeton repris", "{#} tokens taken back": "{#} jetons repris", "1 token couldn't be taken back.": "1 jeton n'a pas pu être repris.", "{#} tokens couldn't be taken back.": "{#} jetons n'ont pas pu être repris.", "PRINTED": "IMPRIMÉ", "Printed token": "Jeton imprimé", "Printed token {#} of {#}": "Jeton imprimé {#} sur {#}", "QR code center": "Centre du QR code", "NONE": "AUCUN", "NUTCADE ACORN": "GLAND NUTCADE", "The acorn in the middle of the QR codes NUTCADE shows and prints. A code that wouldn't scan with it shows plain, and animated codes stay plain.": "Le gland au centre des QR codes que NUTCADE affiche et imprime. Un code qui ne se scannerait pas avec lui s'affiche sans, et les codes animés restent sans."}); D.fr.re = [[new RegExp("^Token #(\\S+) is too long for one printed QR code, so nothing was printed\\. It is kept in Printed tokens: take it back, or send it another way\\.$"), "Le jeton #$1 est trop long pour un seul QR code imprimé : rien n'a été imprimé. Il reste dans Jetons imprimés : reprenez-le, ou envoyez-le autrement."], [new RegExp("^The QR code of token #(\\S+) didn't read back, so nothing was printed\\. Your tokens are kept in Printed tokens: try printing again, or take them back\\.$"), "Le QR code du jeton #$1 n'a pas pu être relu : rien n'a été imprimé. Vos jetons restent dans Jetons imprimés : réessayez d'imprimer, ou reprenez-les."], [new RegExp("^Someone already claimed token #(\\S+), so there is nothing to take back\\. Your balance didn't change\\.$"), "Quelqu'un a déjà réclamé le jeton #$1 : il n'y a rien à reprendre. Votre solde n'a pas changé."], [new RegExp("^Couldn't reach (.+)\\. Nothing changed for its tokens: check again when it answers\\.$"), "Impossible de joindre $1. Rien n'a changé pour ses jetons : vérifiez à nouveau quand il répondra."], [new RegExp("^The QR code of token #(\\S+) is too dense to scan reliably on paper, so nothing was printed\\. It is kept in Printed tokens: take it back, or send it another way\\.$"), "Le QR code du jeton #$1 est trop dense pour se scanner de façon fiable sur papier : rien n'a été imprimé. Il reste dans Jetons imprimés : reprenez-le, ou envoyez-le autrement."], [new RegExp("^(.+) takes too few coins per request to print tokens from it\\.$"), "$1 accepte trop peu de pièces par requête pour imprimer des jetons depuis ce mint."], [new RegExp("^QR code of token #(\\S+)$"), "QR code du jeton #$1"]].concat(D.fr.re || []); }
 })();
 </script>
+<script>/* NUTCADE translations for the arrival notices, generated from tools/i18n_arrive.py: added to the dictionaries in i18n.js */
+(() => { const D = window.NUTCADE_I18N || {};
+  if (D.es) Object.assign(D.es.t, {"Lightning deposit": "Depósito Lightning", "On-chain deposit": "Depósito on-chain", "Wallet Connect invoice": "Factura de Wallet Connect", "Payment request paid": "Solicitud de pago pagada", "Ecash over Nostr": "Ecash por Nostr", "Ecash claimed": "Ecash reclamado", "Came back to you": "Volvió a ti", "MONEY ARRIVED": "LLEGÓ DINERO", "Money arrived": "Llegó dinero", "WHILE YOU WERE AWAY": "MIENTRAS NO ESTABAS", "While you were away": "Mientras no estabas", "Since you last had NUTCADE open": "Desde la última vez que abriste NUTCADE", "Total": "Total", "{#} payment": "{#} pago", "{#} payments": "{#} pagos", "Open notes": "Abrir notas", "Dismiss": "Cerrar", "Money arrived, unlock to see.": "Llegó dinero; desbloquea para verlo.", "Notify me when money arrives": "Avisarme cuando llegue dinero", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.": "Cuando llega dinero mientras NUTCADE está abierto en otra pestaña o ventana. Solo los muestra este dispositivo: sin servicio push, no se envía nada a ningún sitio. Con la cartera bloqueada no muestran importes.", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "Las notificaciones de NUTCADE están bloqueadas en los ajustes de este navegador. Permítelas allí y luego activa esto.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "No se permitieron las notificaciones. Activa esto para que se te vuelva a preguntar, o permítelas en los ajustes del navegador.", "This browser can't show notifications.": "Este navegador no puede mostrar notificaciones."});
+  if (D.pt) Object.assign(D.pt.t, {"Lightning deposit": "Depósito Lightning", "On-chain deposit": "Depósito on-chain", "Wallet Connect invoice": "Fatura do Wallet Connect", "Payment request paid": "Pedido de pagamento pago", "Ecash over Nostr": "Ecash via Nostr", "Ecash claimed": "Ecash resgatado", "Came back to you": "Voltou para você", "MONEY ARRIVED": "DINHEIRO RECEBIDO", "Money arrived": "Dinheiro recebido", "WHILE YOU WERE AWAY": "ENQUANTO VOCÊ ESTAVA FORA", "While you were away": "Enquanto você estava fora", "Since you last had NUTCADE open": "Desde a última vez que você abriu o NUTCADE", "Total": "Total", "{#} payment": "{#} pagamento", "{#} payments": "{#} pagamentos", "Open notes": "Abrir notas", "Dismiss": "Fechar", "Money arrived, unlock to see.": "Dinheiro recebido; desbloqueie para ver.", "Notify me when money arrives": "Avisar quando chegar dinheiro", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.": "Quando chega dinheiro enquanto o NUTCADE está aberto em outra aba ou janela. Só este dispositivo as mostra: sem serviço de push, nada é enviado a lugar nenhum. Com a carteira bloqueada, não mostram valores.", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "As notificações do NUTCADE estão bloqueadas nas configurações deste navegador. Permita-as lá e depois ative isto.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "As notificações não foram permitidas. Ative isto para ser perguntado de novo, ou permita-as nas configurações do navegador.", "This browser can't show notifications.": "Este navegador não consegue mostrar notificações."});
+  if (D.de) Object.assign(D.de.t, {"Lightning deposit": "Lightning-Einzahlung", "On-chain deposit": "On-Chain-Einzahlung", "Wallet Connect invoice": "Wallet-Connect-Rechnung", "Payment request paid": "Zahlungsanforderung bezahlt", "Ecash over Nostr": "Ecash über Nostr", "Ecash claimed": "Ecash eingelöst", "Came back to you": "Zu dir zurückgekommen", "MONEY ARRIVED": "GELD EINGEGANGEN", "Money arrived": "Geld eingegangen", "WHILE YOU WERE AWAY": "WÄHREND DU WEG WARST", "While you were away": "Während du weg warst", "Since you last had NUTCADE open": "Seit du NUTCADE zuletzt geöffnet hattest", "Total": "Gesamt", "{#} payment": "{#} Zahlung", "{#} payments": "{#} Zahlungen", "Open notes": "Notizen öffnen", "Dismiss": "Schließen", "Money arrived, unlock to see.": "Geld eingegangen, entsperre zum Ansehen.", "Notify me when money arrives": "Benachrichtigen, wenn Geld eingeht", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.": "Wenn Geld eingeht, während NUTCADE in einem anderen Tab oder Fenster offen ist. Nur dieses Gerät zeigt sie an: kein Push-Dienst, nichts wird irgendwohin gesendet. Gesperrt zeigen sie keine Beträge.", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "Benachrichtigungen für NUTCADE sind in den Einstellungen dieses Browsers blockiert. Erlaube sie dort und schalte dies dann ein.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "Benachrichtigungen wurden nicht erlaubt. Schalte dies ein, um erneut gefragt zu werden, oder erlaube sie in den Browser-Einstellungen.", "This browser can't show notifications.": "Dieser Browser kann keine Benachrichtigungen anzeigen."});
+  if (D.fr) Object.assign(D.fr.t, {"Lightning deposit": "Dépôt Lightning", "On-chain deposit": "Dépôt on-chain", "Wallet Connect invoice": "Facture Wallet Connect", "Payment request paid": "Demande de paiement payée", "Ecash over Nostr": "Ecash par Nostr", "Ecash claimed": "Ecash encaissé", "Came back to you": "Vous est revenu", "MONEY ARRIVED": "ARGENT REÇU", "Money arrived": "Argent reçu", "WHILE YOU WERE AWAY": "PENDANT VOTRE ABSENCE", "While you were away": "Pendant votre absence", "Since you last had NUTCADE open": "Depuis la dernière ouverture de NUTCADE", "Total": "Total", "{#} payment": "{#} paiement", "{#} payments": "{#} paiements", "Open notes": "Ouvrir les notes", "Dismiss": "Fermer", "Money arrived, unlock to see.": "Argent reçu, déverrouillez pour voir.", "Notify me when money arrives": "Me prévenir quand de l'argent arrive", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.": "Quand de l'argent arrive alors que NUTCADE est ouvert dans un autre onglet ou une autre fenêtre. Affichées par cet appareil seulement : aucun service push, rien n'est envoyé nulle part. Verrouillé, elles n'affichent aucun montant.", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "Les notifications de NUTCADE sont bloquées dans les réglages de ce navigateur. Autorisez-les là, puis activez ceci.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "Les notifications n'ont pas été autorisées. Activez ceci pour qu'on vous le redemande, ou autorisez-les dans les réglages du navigateur.", "This browser can't show notifications.": "Ce navigateur ne peut pas afficher de notifications."});
+})();
+</script>
 <script>/* NUTCADE audio: chiptune sfx + tiny sequencer for original music loops */
 (function(){
 'use strict';
@@ -3733,10 +3764,11 @@ function addTx(t) {
   const ru = piggyRoundUp(tx); if (ru) tx.roundup = ru;
   S.txs.unshift(tx);
   save();
+  arrivalSeen(tx);   // (arrival notices: src/app_arrive.js)
   return tx;
 }
 const txById = id => S.txs.find(t => t.id === id);
-function updTx(id, patch) { const t = txById(id); if (t) Object.assign(t, patch); save(); return t; }
+function updTx(id, patch) { const t = txById(id); if (t) Object.assign(t, patch); save(); arrivalSeen(t); return t; }   // (arrivalSeen: src/app_arrive.js)
 function addProofs(url, ps) {
   const cur = S.proofs[url] || [];
   const seen = new Set(cur.map(p => p.secret));
@@ -5325,6 +5357,7 @@ const ICONS = {
 const TABS = [['wallet', 'WALLET'], ['arcade', 'ARCADE'], ['history', 'NOTES'], ['mints', 'MINTS'], ['settings', 'SETTINGS']];
 
 function render() {
+  arrRendered();   // (arrival notices: src/app_arrive.js)
   const app = $('#app');
   app.className = S.prefs.crt ? 'crt' : '';
   document.body.className = 'theme-' + (S.prefs.theme || 'neon');
@@ -5621,7 +5654,7 @@ function viewLock() {
   const rec = raw.get('vault', {}); const f = pinFails(); const wait = Math.max(0, Math.ceil((f.until - Date.now()) / 1000));
   if (pinUI.mode !== 'unlock') { pinUI.mode = 'unlock'; pinUI.value = ''; }
   return `<section class="screen"><div class="panel hot gate" style="justify-items:center">
-    ${padHTML('ENTER PIN', wait ? `Too many wrong tries. Wait ${wait}s.` : 'Your wallet is locked.', { warn: !!wait, extra:
+    ${arrLockHTML()}${padHTML('ENTER PIN', wait ? `Too many wrong tries. Wait ${wait}s.` : 'Your wallet is locked.', { warn: !!wait, extra:
       `${rec.bio ? `<button class="btn block violet" data-act="bioUnlock">Unlock with Face ID / fingerprint</button>` : ''}
        <button class="linkbtn" data-act="forgotPin" style="justify-self:center">Forgot PIN?</button>` })}
   </div></section>`;
@@ -5788,6 +5821,7 @@ function viewSettings() {
       <div class="field"><label>Cabinet theme</label><div class="seg three" role="group" aria-label="Theme">${THEMES.map(([k, l]) => `<button data-act="setTheme" data-t="${k}" aria-pressed="${S.prefs.theme === k}">${l.split(' ')[0].toUpperCase()}</button>`).join('')}</div></div>
       <div class="field"><label for="p_lang">Language</label><select id="p_lang" class="inp" data-act="prefSelect" data-k="lang">${LANGS.map(([k, l]) => `<option value="${k}" ${(S.prefs.lang || 'auto') === k ? 'selected' : ''} data-noi18n>${l}</option>`).join('')}</select></div>
       ${toggle('sound', 'Sound effects', '')}
+      ${arrSettingsHTML()}
       ${toggle('music', 'Arcade music', '')}
       ${toggle('crt', 'CRT scanlines', '')}
       ${toggle('btcSymbol', 'Show amounts as ₿', '₿1,000 instead of 1,000 SAT.')}
@@ -6213,6 +6247,7 @@ async function receivePayload(p, from) {
   try {
     const tx = await receiveToken(token, note, req ? { follow: { k: 'req', reqId: req.id } } : {});
     updTx(tx.id, { reqId: p.id || null });
+    if (!req) arrivalFrom(tx.id, 'nostr');   // (arrival notices: src/app_arrive.js)
     if (req) reqPaid(req.id, tx);
     sfx('coin'); refresh();
     if (!$('#layer .sheet')) celebrate('in', tx.amount);
@@ -10306,6 +10341,214 @@ window.NutTokens = {
   _logoScale: 0
 };
 
+/* ===================== Notices when money arrives (inlined inside app.js) =====================
+   No server, no push service, no tracking: everything here is worked out by the open page from the wallet's own
+   history, and nothing is sent anywhere.
+
+   What counts: a history line of money coming in, once it is complete (status done, an amount above 0), as this
+   wallet's own code writes it (addTx / updTx call arrivalSeen). Not an internal move between your own mints, not sats
+   found by a restore or brought in by a backup, not the duress wallet's sats coming back. Each line is announced once:
+   its id goes into a small record kept with the wallet (`arrivals`: in the PIN vault when there is a PIN, so the
+   duress PIN's wallet has its own and never sees the other's), written in the same moment as the line itself. A
+   reload, a second tab or a restore therefore never announces it again, and lines another tab or device wrote are
+   that tab's or device's to announce.
+     seen: [[id, ts]]   every line announced or waiting to be (kept 30 days)
+     pend: [{id, k}]    lines not yet seen in the app: they make the "while you were away" summary
+   On opening or unlocking, the app's own start-up checks run first (deposits, npub.cash, saved tokens, Nostr); what
+   they and earlier, unseen arrivals bring is summed up per kind, exactly the history lines in question. After that,
+   each arrival gets its own notice. In a background tab the notice waits on the page and, if turned on in Settings,
+   a system notification says what came (shown by the page or its service worker, with the permission asked when the
+   setting is turned on). When the app locks, those notifications are replaced by one that says only "Money arrived,
+   unlock to see" (or simply closed when a duress PIN is set up, so the duress wallet never has to explain it). */
+function arrS() {
+  return arrS.s || (arrS.s = { base: Date.now(), log: [], card: [], onPage: new Set(), away: 0, awayDone: false, tickDone: 0, awayIv: 0, flushT: 0, coinAt: 0, wasOpen: false, lockLine: false, unseen: new Set() });
+}
+arrS();
+const ARR_TAG = 'nutcade-arrival';
+const ARR_KINDS = ['ln', 'onchain', 'npc', 'nwc', 'request', 'nostr', 'token', 'back'];
+const ARR_LABEL = { ln: 'Lightning deposit', onchain: 'On-chain deposit', npc: 'Lightning address', nwc: 'Wallet Connect invoice', request: 'Payment request paid', nostr: 'Ecash over Nostr', token: 'Ecash claimed', back: 'Came back to you' };
+const arrOpen = () => !!(S.seed && S.seed.backedUp) && !tabLocked && !writeGuard.paused && !(vault.on && !vault.open);
+function arrLedger() {
+  const l = raw.get('arrivals', null);
+  return l && l.v === 1 && Array.isArray(l.seen) && Array.isArray(l.pend) ? l : { v: 1, since: arrS().base, seen: [], pend: [] };
+}
+function arrQual(t) {
+  return !!t && t.type === 'in' && t.status === 'done' && num(t.amount) > 0 && !t.move
+    && !/^(Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Back from the duress PIN's wallet$)/.test(t.note || '');
+}
+// the kind, from the line (and, for npub.cash, its deposit record, which is gone once it is credited)
+function arrKind(t) {
+  if (t.nwc) return 'nwc';
+  if (t.method === 'onchain') return 'onchain';
+  if (t.method === 'ln') { const q = S.quotes.find(q => q.quote === t.quote); return (q && q.npc) || t.note === 'Lightning address' ? 'npc' : /^Swapped from /.test(t.note || '') ? 'token' : 'ln'; }
+  if (t.reqId) return 'request';
+  return /^(Reclaimed: |Gift came back|Payment request couldn't be delivered|Extra Life cashed out)/.test(t.note || '') ? 'back' : 'token';
+}
+// called right after a history line is written (addTx) or changed (updTx)
+function arrivalSeen(t) {
+  try {
+    if (!t || !arrQual(t) || tabLocked || writeGuard.paused || (vault.on && !vault.open)) return;
+    if (Date.now() - t.ts > 10 * 60e3) return;   // (an old line coming back changed, or one from another device's backup)
+    const l = arrLedger(); if (!(t.ts >= l.since) || l.seen.some(x => x[0] === t.id)) return;
+    l.seen.push([t.id, t.ts]); l.pend.push({ id: t.id, k: arrKind(t) });
+    const old = Date.now() - 30 * 86400e3; l.seen = l.seen.filter(x => x[1] > old).slice(-600); l.pend = l.pend.slice(-200);
+    raw.set('arrivals', l); arrSchedule();
+  } catch (e) {}
+}
+// where a receive knows more than its line says (ecash that came over Nostr)
+function arrivalFrom(id, k) {
+  try { const l = arrLedger(), p = l.pend.find(x => x.id === id); if (p && p.k !== 'request') { p.k = k; raw.set('arrivals', l); } } catch (e) {}
+}
+const arrItem = p => { const t = txById(p.id); if (!t || !arrQual(t)) return null; return { id: t.id, k: t.reqId ? 'request' : ARR_KINDS.includes(p.k) ? p.k : 'token', a: num(t.amount), m: t.mint }; };
+function arrSeen(ids) {
+  if (!ids.length || !arrOpen()) return;
+  const l = arrLedger(), n = l.pend.length; l.pend = l.pend.filter(p => !ids.includes(p.id));
+  if (l.pend.length !== n) raw.set('arrivals', l);
+  ids.forEach(id => arrS().unseen.delete(id));
+  arrCloseSys();
+}
+function arrSchedule() { const A = arrS(); clearTimeout(A.flushT); A.flushT = setTimeout(arrFlush, 700); }   // (a receive in parts, or a request's id written just after: one notice)
+function arrCoin() { const A = arrS(); if (Date.now() - A.coinAt > 2500) sfx('coin'); }
+if (window.NutAudio && !window.NutAudio.arrWrapped) {   // the app's own coin for an arrival is enough: the notice adds none then
+  const f = window.NutAudio.sfx; window.NutAudio.sfx = n => { if (n === 'coin') arrS().coinAt = Date.now(); return f(n); }; window.NutAudio.arrWrapped = true;
+}
+
+/* ---------- the notices ---------- */
+const arrCount = n => tr(n === 1 ? '1 payment' : `${fmt(n)} payments`);
+function arrGroups(items) {
+  const g = {}; for (const it of items) { const x = g[it.k] || (g[it.k] = { k: it.k, n: 0, a: 0 }); x.n++; x.a += it.a; }
+  return ARR_KINDS.filter(k => g[k]).map(k => g[k]);
+}
+function arrCardHTML(type, items) {
+  const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
+  const body = one
+    ? `<div class="arr-big" data-noi18n>+${esc(money(one.a))}</div><div class="arr-what"><span>${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span></div>`
+    : `${type === 'away' ? '<div class="arr-sub">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
+      <div class="arr-total"><span>Total</span><span data-noi18n>+${esc(money(total))}</span></div>`;
+  return `<div class="arr-head"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-title">${type === 'away' ? 'WHILE YOU WERE AWAY' : 'MONEY ARRIVED'}</span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
+    ${body}
+    <div class="arr-acts"><button type="button" class="btn sm" data-act="arrNotes">Open notes</button>${type === 'away' ? '<button type="button" class="btn sm" data-act="arrClose">OK</button>' : ''}</div>`;
+}
+function arrShow(type, items) {
+  let st = document.getElementById('arrStack');
+  if (!st) { st = document.createElement('div'); st.id = 'arrStack'; st.className = 'arr-stack'; st.setAttribute('role', 'region'); st.setAttribute('aria-label', tr('Money arrived')); document.body.appendChild(st); }
+  let c = st.querySelector(`.arr-card[data-type="${type}"]`);
+  if (!c) { c = document.createElement('div'); c.className = 'arr-card'; c.dataset.type = type; c.setAttribute('role', 'status'); c.setAttribute('aria-live', 'polite'); type === 'away' ? st.prepend(c) : st.appendChild(c); }
+  c.dataset.ids = items.map(x => x.id).join(' ');
+  c.innerHTML = arrCardHTML(type, items);
+  clearTimeout(c.hideT);
+  if (type === 'live') { const hide = () => { if (document.hidden) { c.hideT = setTimeout(hide, 3000); return; } c.remove(); arrS().card = []; }; c.hideT = setTimeout(hide, 20000); }
+}
+function arrClear() { const st = document.getElementById('arrStack'); if (st) st.remove(); arrS().card = []; }
+function arrFlush() {
+  const A = arrS(); A.flushT = 0;
+  if (!arrOpen() || (A.away && !A.awayDone)) return;   // (while the opening's checks run, everything goes into the summary)
+  if (window.Arcade && window.Arcade.playing && window.Arcade.playing()) { A.flushT = setTimeout(arrFlush, 2000); return; }
+  const l = arrLedger();
+  const fresh = l.pend.filter(p => !A.onPage.has(p.id)).map(arrItem).filter(Boolean);
+  if (!fresh.length) return;
+  fresh.forEach(x => A.onPage.add(x.id));
+  if (document.querySelector('.cashier') && !document.hidden) { arrSeen(fresh.map(x => x.id)); return; }   // (the till shows its own PAID! screen)
+  A.card = A.card.concat(fresh);
+  arrShow('live', A.card);
+  A.log.push({ type: 'live', ids: fresh.map(x => x.id), at: Date.now() });
+  arrCoin();
+  if (document.hidden) { fresh.forEach(x => A.unseen.add(x.id)); arrSys(tr('Money arrived'), A.card.filter(x => A.unseen.has(x.id))); }
+  else arrSeen(fresh.map(x => x.id));
+}
+// on opening or unlocking: the start-up checks first, then one summary of everything not yet seen
+function arrAwayStart() {
+  const A = arrS(); A.away = Date.now(); A.awayDone = false; A.tickDone = 0; clearInterval(A.awayIv);
+  arrCloseSys();
+  A.awayIv = setInterval(() => {
+    if (!arrOpen()) return;
+    const el = Date.now() - A.away;
+    if (!A.tickDone && tickAt >= A.away && !tickRun) A.tickDone = Date.now();
+    // (the start-up check begins within about a second of opening or unlocking; none by then: none is coming)
+    if ((A.tickDone && Date.now() - A.tickDone > 2500) || (tickAt < A.away && el > 3500) || el > 45000) { clearInterval(A.awayIv); arrAwayEnd(); }
+  }, 500);
+}
+function arrAwayEnd() {
+  const A = arrS(); A.awayDone = true;
+  const l = arrLedger(), items = l.pend.map(arrItem).filter(Boolean);
+  if (items.length !== l.pend.length) { const ok = new Set(items.map(x => x.id)); l.pend = l.pend.filter(p => ok.has(p.id)); raw.set('arrivals', l); }   // (a line that is gone, or no longer an arrival)
+  if (!items.length) return;
+  items.forEach(x => A.onPage.add(x.id));
+  arrShow('away', items);
+  A.log.push({ type: 'away', ids: items.map(x => x.id), at: Date.now() });
+  arrCoin();
+  if (document.hidden) { items.forEach(x => A.unseen.add(x.id)); arrSys(tr('While you were away'), items); }
+  else arrSeen(items.map(x => x.id));
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { const A = arrS(); if (A.unseen.size && document.getElementById('arrStack')) arrSeen([...A.unseen]); } });
+// called at the start of every render: notices the wallet opening (start, unlock, a wallet just set up)
+function arrRendered() {
+  try {
+    const A = arrS(), open = arrOpen();
+    if (open && !A.wasOpen) arrAwayStart();
+    if (!open && A.wasOpen) arrClear();
+    A.wasOpen = open;
+  } catch (e) {}
+}
+
+/* ---------- system notifications (only when turned on in Settings) ---------- */
+async function arrReg() {
+  try { if (!('serviceWorker' in navigator)) return null; return await Promise.race([navigator.serviceWorker.getRegistration(), sleep(1500).then(() => null)]) || null; } catch (e) { return null; }
+}
+const arrSysOk = () => !!S.prefs.arrNotify && typeof Notification !== 'undefined' && Notification.permission === 'granted';
+function arrSysBody(items) {
+  if (items.length === 1) { const x = items[0]; return `${tr(ARR_LABEL[x.k])}: +${money(x.a)} · ${mintName(x.m)}`; }
+  return arrGroups(items).map(g => `${tr(ARR_LABEL[g.k])}: ${arrCount(g.n)} · +${money(g.a)}`).join('\n');
+}
+async function arrSys(title, items) {
+  if (!arrSysOk() || !items.length) return;
+  // after a lock it may be replaced by "Money arrived, unlock to see"; not when a duress PIN is set up (or open)
+  const opt = { body: arrSysBody(items), tag: ARR_TAG, renotify: true, icon: 'icon-192.png', silent: !S.prefs.sound, data: { g: vault.decoy || (vault.on && vault.data && vault.data.duress) ? 0 : 1 } };
+  const reg = await arrReg();
+  if (reg) { try { await reg.showNotification(title, opt); return; } catch (e) {} }
+  try { const n = new Notification(title, opt); n.onclick = () => { try { window.focus(); } catch (e) {} n.close(); }; } catch (e) {}
+}
+async function arrCloseSys() { const reg = await arrReg(); if (!reg) return; try { (await reg.getNotifications({ tag: ARR_TAG })).forEach(n => n.close()); } catch (e) {} }
+// locked: nothing of a wallet can be read, so an earlier notification can't stay as it was
+async function arrLockedBoot() {
+  if (!(vault.on && !vault.open)) return;
+  const reg = await arrReg(); if (!reg) return;
+  let ns = []; try { ns = await reg.getNotifications({ tag: ARR_TAG }); } catch (e) { return; }
+  if (!ns.length) return;
+  const generic = ns.some(n => n.data && n.data.g);
+  ns.forEach(n => n.close());
+  if (!generic) return;
+  arrS().lockLine = true;
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') { try { await reg.showNotification('NUTCADE', { body: tr('Money arrived, unlock to see.'), tag: ARR_TAG, icon: 'icon-192.png', silent: true, data: { g: 1 } }); } catch (e) {} }
+  const pad = document.querySelector('.pinpad'); if (pad && vault.on && !vault.open && !document.querySelector('.arr-lock')) pad.insertAdjacentHTML('beforebegin', arrLockHTML());
+}
+const arrLockHTML = () => arrS().lockLine ? '<div class="notice cyan arr-lock" role="status"><span aria-hidden="true">↓ </span><span>Money arrived, unlock to see.</span></div>' : '';
+setTimeout(() => { arrLockedBoot().catch(() => {}); }, 0);
+
+/* ---------- Settings: Look & sound ---------- */
+function arrHelp(p, asked) {
+  if (p === 'unsupported') return "This browser can't show notifications.";
+  if (asked && p === 'default') return "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.";
+  if (p === 'denied') return "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.";
+  return 'When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.';
+}
+function arrSettingsHTML() {
+  const p = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+  return `<label class="toggle set" for="p_arrNotify"><span><span class="tl">Notify me when money arrives</span><span class="th" id="arrNotifyHelp">${esc(arrHelp(p))}</span></span><input id="p_arrNotify" type="checkbox" ${S.prefs.arrNotify && p === 'granted' ? 'checked' : ''} ${p === 'unsupported' ? 'disabled' : ''}></label>`;
+}
+async function arrToggle(el) {
+  if (!el.checked) { S.prefs.arrNotify = false; save(); sfx('blip'); return; }
+  let p = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+  if (p === 'default') { try { p = await Notification.requestPermission(); } catch (e) { p = 'denied'; } }   // asked now, when you turn it on
+  S.prefs.arrNotify = p === 'granted'; save();
+  el.checked = S.prefs.arrNotify;
+  const h = document.getElementById('arrNotifyHelp'); if (h) h.textContent = tr(arrHelp(p, true));
+  sfx(S.prefs.arrNotify ? 'blip' : 'err');
+}
+document.addEventListener('change', e => { if (e.target && e.target.id === 'p_arrNotify') arrToggle(e.target); });
+
+window.NutArrivals = { log: arrS().log, ledger: () => arrLedger(), awayDone: () => !arrS().away || arrS().awayDone };
+
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -11098,6 +11341,12 @@ Object.assign(A, {
     if (bad.length) { const e = new Error(bad.length === 1 ? "1 token couldn't be taken back." : `${bad.length} tokens couldn't be taken back.`); e.also = bad.join(' · '); e.keep = true; throw e; }
   }),
   qrLogo: b => { S.prefs.qrLogo = b.dataset.v === 'none' ? 'none' : 'acorn'; save(); refresh(); sfx('select'); }
+});
+
+/* Arrival notices: their buttons (src/app_arrive.js) */
+Object.assign(A, {
+  arrClose: b => { const c = b.closest('.arr-card'); if (c) { if (c.dataset.type === 'live') arrS().card = []; c.remove(); } sfx('blip'); },
+  arrNotes: b => { const c = b.closest('.arr-card'); if (c) { if (c.dataset.type === 'live') arrS().card = []; c.remove(); } closeSheet(); tab = 'history'; render(); window.scrollTo(0, 0); sfx('select'); }
 });
 
 function setTrust(meta) {

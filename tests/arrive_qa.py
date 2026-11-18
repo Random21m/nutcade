@@ -109,6 +109,12 @@ async def settled(w, ms=45000):
 async def cards(w): return await w.ev(CARDS_JS)
 
 
+async def pend(w, missing):
+    """the ids waiting for a summary (without the feature: [missing], so a check on it fails)"""
+    x = await w.ev(PEND_JS)
+    return x if x is not None else [missing]
+
+
 async def dismiss(w):
     await w.ev("document.querySelectorAll('#arrStack [data-act=arrClose]').forEach(b=>b.click())"); await w.wait(150)
 
@@ -242,7 +248,7 @@ async def main():
         b = await pw.chromium.launch(**({'executable_path': os.environ['CHROME']} if os.environ.get('CHROME') else {}))
         # ---------- the payer (two mints, sats on both) and the receiver ----------
         p = await wallet(b); await p.create(); await p.add_mint(FEE); await p.add_mint(FREE)
-        await p.use(FEE); await p.receive_ln(30000); await p.use(FREE); await p.receive_ln(30000)
+        await p.use(FEE); await p.receive_ln(30000); await p.use(FREE); await p.receive_ln(60000); await p.receive_ln(60000)
         r = await wallet(b, notif=True); words = await r.create(); await r.add_mint(FEE); await r.add_mint(FREE); await r.use(FREE)
         await r.receive_ln(1000); await r.wait(1500); await dismiss(r)
         rpk = await npub_hex(r)
@@ -295,7 +301,7 @@ async def main():
                       bool(line) and len(cs) == 1 and LABEL[kind] in got and ('+' + fmtn(line['amount']) + ' SAT') in got and NAME[mint] in got, (line and line['amount'], got))
                 check(f'open, {kind}: announced once, for that history line', bool(line) and ann == [line['id']], (ann, line and line['id']))
                 check(f'open, {kind}: no system notification while the page is in front', len(await r.ev("__sys")) == sys0)
-                check(f'open, {kind}: nothing left for the summary', bool(line) and line['id'] not in (await r.ev(PEND_JS) or [line['id']]))
+                check(f'open, {kind}: nothing left for the summary', bool(line) and line['id'] not in await pend(r, line['id']))
                 if kind == 'nostr': await shot(r, 'notice-open-390')
             await dismiss(r)
 
@@ -308,12 +314,12 @@ async def main():
             check('notifications off: an arrival in a background tab shows no system notification', bool(line) and await r.ev("__sys.length") == 0, await r.ev("__sys"))
             check('notifications off: the notice is still on the page for when you come back', bool(line) and any(line['id'] in c['ids'] for c in await cards(r)))
             await r.ev("__hide(false)"); await r.wait(400); await dismiss(r)
-            await settings(r); await r.ev("document.querySelector('#p_arrNotify').click()"); await r.wait(800)
+            await settings(r); await r.ev("document.querySelector('#p_arrNotify')?.click()"); await r.wait(800)
             check('notifications on: turning it on asks for permission then (granted here) and stays on', await r.ev("Notification.permission==='granted' && !!Nutcade.S.prefs.arrNotify && document.querySelector('#p_arrNotify').checked"))
             dn = await wallet(b)
-            await dn.create(); await settings(dn); await dn.ev("document.querySelector('#p_arrNotify').click()"); await dn.wait(1500)
-            txt = await dn.ev("(document.querySelector('#set-look')||document.body).innerText")
-            check('notifications denied: the setting goes back off and says the browser blocks them', await dn.ev("!Nutcade.S.prefs.arrNotify && !document.querySelector('#p_arrNotify').checked") and bool(re.search(r'blocked|block', txt, re.I)), txt[-300:])
+            await dn.create(); await settings(dn); await dn.ev("document.querySelector('#p_arrNotify')?.click()"); await dn.wait(1500)
+            txt = await dn.ev("(document.querySelector('#arrNotifyHelp')||{}).textContent||''")
+            check('notifications denied: the setting goes back off and says how to allow them', await dn.ev("!Nutcade.S.prefs.arrNotify && !!document.querySelector('#p_arrNotify') && !document.querySelector('#p_arrNotify').checked") and bool(re.search(r'blocked|allow', txt, re.I)), txt[-300:])
             await dn.ev("__hide(true)"); await dn.ev("__sys.length=0")
             await dn.add_mint(FREE); await dn.use(FREE); await dn.receive_ln(500); await dn.wait(1500)
             check('notifications denied: an arrival shows none (and nothing breaks)', await dn.ev("__sys.length") == 0 and not [e for e in dn.errs if 'PAGEERROR' in e], dn.errs[:3])
@@ -331,9 +337,9 @@ async def main():
                 check(f'background, {kind}: the notice is on the page', bool(line) and len(cs) == 1 and line['id'] in cs[0]['ids'], cs)
                 check(f'background, {kind}: one system notification with the amount, the kind and the mint',
                       bool(line) and len(sysn) == 1 and fmtn(line['amount']) in sysn[0]['body'] and LABEL[kind] in sysn[0]['body'] + sysn[0]['title'] and NAME[mint] in sysn[0]['body'], sysn)
-                check(f'background, {kind}: not counted as seen until you come back', bool(line) and line['id'] in (await r.ev(PEND_JS) or []))
+                check(f'background, {kind}: not counted as seen until you come back', bool(line) and line['id'] in await pend(r, None))
                 await r.ev("__hide(false)"); await r.wait(500)
-                check(f'background, {kind}: seen once you come back (no summary later)', bool(line) and line['id'] not in (await r.ev(PEND_JS) or [line['id']]))
+                check(f'background, {kind}: seen once you come back (no summary later)', bool(line) and line['id'] not in await pend(r, line['id']))
                 ann = [i for e in (await r.ev(LOG_JS))[log0:] for i in e['ids']]
                 check(f'background, {kind}: announced once', bool(line) and ann.count(line['id']) == 1 and len(ann) == 1, ann)
             await dismiss(r)
@@ -347,11 +353,12 @@ async def main():
             await ln_invoice(r, 1301, FREE); await r.ev("Nutcade.closeSheet()")
             await nwc_invoice(nwc_uri, 1302)
             tok = await token_from(p, 1303, FEE)
-            await r.pg.route(re.compile(re.escape(FEE) + r'/v1/(swap|keys|keysets|info|checkstate)'), lambda route: route.abort())
-            await claim(r, tok); await r.until("Nutcade.S.txs.some(t=>t.status==='pending'&&t.incoming)", 15000); await r.ev("Nutcade.closeSheet()")
+            await r_ctx.set_offline(True)   # offline: the token is saved, and claimed once NUTCADE is back
+            await claim(r, tok); await r.until("Nutcade.S.txs.some(t=>t.status==='pending'&&t.incoming&&t.offline)", 15000); await r.ev("Nutcade.closeSheet()")
             await r.wait(1200)   # (the invoices are paid at the mint by now; this page can't see it)
             t0 = t0 or int(time.time() * 1000)
             await close()
+            await r_ctx.set_offline(False)
             blk.on = False
             try: await r.pg.unroute_all(behavior='ignoreErrors')
             except Exception: pass
@@ -362,7 +369,7 @@ async def main():
             r = await reopen()
             done = await settled(r, 60000); await r.wait(500)
             lines = await r.ev(ARRIVED_JS + f"({t0})")
-            want_k = dict({1301: 'ln', 1302: 'nwc', 1304: 'nostr', 1111: 'request', 1305: 'npc'}, **(extra or {}))
+            want_k = {1301: 'ln', 1302: 'nwc', 1304: 'nostr', 1111: 'request', 1305: 'npc', **(extra or {})}
             kinds = {}
             for l in lines:
                 k = want_k.get(l['amount']) or ('token' if l['mint'] == FEE else '?')
@@ -376,7 +383,7 @@ async def main():
             check(f'{label}: the summary names each kind and the total', bool(sm) and all(LABEL[k] in sm['text'] for k in KINDS) and fmtn(sum(x['amount'] for x in lines)) in sm['text'], sm and sm['text'])
             check(f'{label}: no separate notice for them as well', not [c for c in await cards(r) if c['type'] == 'live'])
             if shotname: await shot(r, shotname)
-            await r.click('#arrStack [data-act=arrNotes]'); await r.wait(300)
+            await r.ev("document.querySelector('#arrStack [data-act=arrNotes]')?.click()"); await r.wait(300)
             check(f'{label}: the summary links to the notes (history)', await r.ev("!!document.querySelector('[data-act=tab][data-tab=history][aria-current]')") and not await r.ev("!!document.querySelector('#arrStack .arr-card[data-type=away]')"))
             await r.home(); await r.wait(300)
             return lines
@@ -465,7 +472,7 @@ async def main():
         if want('locked'):
             await dismiss(r); await set_pin(r)
             if not await r.ev("!!Nutcade.S.prefs.arrNotify"):
-                await settings(r); await r.ev("document.querySelector('#p_arrNotify')&&document.querySelector('#p_arrNotify').click()"); await r.wait(600)
+                await settings(r); await r.ev("document.querySelector('#p_arrNotify')&&document.querySelector('#p_arrNotify')?.click()"); await r.wait(600)
             await r.home()
             # a detailed notification while unlocked (background tab), then the app locks
             t_seen = int(time.time() * 1000)
@@ -486,8 +493,7 @@ async def main():
             async def unlock_r():
                 await unlock(r); return r
             lines = await away_batch('locked, unlocked', lock, unlock_r, after_close=look_locked, t0=t_seen, extra={a: 'npc'}, shotname='summary-unlocked-390')
-            sm = await summary_rows(r)
-            check('locked: the arrival shown only as a notification while unlocked is in the summary (it was never seen in the app)', bool(line) and bool(sm) and line['id'] in sm['ids'] or not line, sm and sm['ids'])
+            check('locked: the arrival shown only as a notification while unlocked is in the summary (it was never seen in the app)', bool(line) and line['id'] in [l['id'] for l in lines])
             ns = await r.ev(SYSN_JS)
             check('unlocked: the "unlock to see" notifications are cleared', not ns, ns)
             await r.pg.reload(); await r.wait(900); await unlock(r); await settled(r)
@@ -524,18 +530,19 @@ async def main():
             await pad(d, PIN); await d.wait(800); await pad(d, DPIN); await d.wait(300); await pad(d, DPIN)
             await d.until("!!document.querySelector('#duressAmt')", 8000); await d.fill('#duressAmt', '300'); await d.click('[data-act=duressMake]')
             await d.until("/READY/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 30000); await d.ev("Nutcade.closeSheet()")
-            await settings(d); await d.ev("document.querySelector('#p_arrNotify').click()"); await d.wait(600); await d.home(); await dismiss(d)
+            await settings(d); await d.ev("document.querySelector('#p_arrNotify')?.click()"); await d.wait(600); await d.home(); await dismiss(d)
             # the real wallet gets ecash in a background tab (a detailed notification), then the app locks
             await d.ev("__hide(true)"); await dm(p, dpk, 777, FREE)
             ok = await d.until("Nutcade.S.txs.some(t=>t.amount===777&&t.status==='done')", 20000); await d.wait(1500)
             check('duress: (the real wallet got 777 SAT in a background tab)', ok)
+            real_ids = await d.ev("Nutcade.S.txs.map(t=>t.id)")
             await d.pg.reload(); await d.wait(1500)
             ns = await d.ev(SYSN_JS); body = await d.ev("document.body.innerText")
             check('duress set: locked, the real wallet\'s notifications are gone (no amount, and no "money arrived" that the duress wallet couldn\'t explain)', not ns and not re.search(r'Money arrived', body), (ns, body[:200]))
             await d.ev("__hide(false)")
             await unlock(d, DPIN); await settled(d)
             check('duress wallet: no summary of the real wallet\'s arrival', not await cards(d), await cards(d))
-            check('duress wallet: its record of arrivals knows nothing of the real wallet', not await d.ev("JSON.stringify(NutArrivals.ledger()).includes('777')") if await has(d) else False)
+            check('duress wallet: its record of arrivals knows nothing of the real wallet', await has(d) and not await d.ev(f"(ids=>{{const j=JSON.stringify(NutArrivals.ledger()); return ids.some(i=>j.includes(i))}})({J(real_ids)})"))
             a = 888; tok = await token_from(p, a, FREE); await claim(d, tok)
             await d.until(f"Nutcade.S.txs.some(t=>t.amount===888&&t.status==='done')", 15000); await d.wait(1500)
             cs = await cards(d)
@@ -595,6 +602,7 @@ async def main():
                 await dismiss(r)
 
         errs = [e for e in (r.errs + p.errs) if 'PAGEERROR' in e]
+        for e in r.errs + p.errs: print('  page said:', e[:300])
         check('no page errors', not errs, errs[:5])
         await b.close()
     fails = [n for n, ok, _ in results if not ok]

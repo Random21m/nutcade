@@ -1,0 +1,23 @@
+/* Notices when money arrives (src/app_arrive.js) */
+.arr-stack{position:fixed;left:50%;top:calc(8px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:280;width:min(calc(100vw - 32px),440px);display:grid;gap:8px;pointer-events:none}
+.arr-card{pointer-events:auto;display:grid;gap:6px;padding:10px 12px;border:3px solid var(--lime);border-radius:var(--r);background:var(--well);box-shadow:4px 4px 0 #000;font-size:18px;line-height:1.15;max-height:calc(100vh - 120px);overflow:auto}
+.arr-card[data-type=away]{border-color:var(--cyan)}
+.arr-head{display:flex;align-items:center;gap:8px;min-width:0}
+.arr-ico{flex:none;font-family:var(--f-display);font-size:14px;color:var(--lime)}
+.arr-card[data-type=away] .arr-ico{color:var(--cyan)}
+.arr-title{flex:1;min-width:0;font-family:var(--f-display);font-size:10px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.arr-x{flex:none;width:32px;height:32px;margin:-6px -6px -6px 0;border:0;background:transparent;color:var(--dim);font-size:24px;line-height:1;cursor:pointer}
+.arr-x:hover,.arr-x:focus-visible{color:var(--ink)}
+.arr-big{font-family:var(--f-display);font-size:16px;line-height:1.4;color:var(--lime);overflow-wrap:anywhere}
+.arr-what{display:flex;flex-wrap:wrap;gap:2px 10px;color:var(--ink)}
+.arr-mint{color:var(--dim);overflow-wrap:anywhere;min-width:0}
+.arr-sub{color:var(--dim);font-size:16px}
+.arr-lines{display:grid;gap:4px}
+.arr-line{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:baseline;padding:4px 0;border-bottom:1px dashed var(--grid)}
+.arr-k{min-width:0;overflow-wrap:anywhere;color:var(--ink)}
+.arr-n{grid-column:1;color:var(--dim);font-size:16px}
+.arr-a{grid-column:2;grid-row:1 / span 2;align-self:center;text-align:right;white-space:nowrap;color:var(--lime)}
+.arr-total{display:flex;justify-content:space-between;gap:10px;font-family:var(--f-display);font-size:10px;line-height:1.6;color:var(--ink)}
+.arr-total span:last-child{color:var(--lime);white-space:nowrap}
+.arr-acts{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.arr-lock{margin-bottom:10px;text-align:center}
