@@ -5,6 +5,16 @@ new screen at 375 px in English and German."""
 import asyncio, json, os, re, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 from wallet_qa import W, check, results, A, B, URL, invoice, outside_net
+_orig_ev = W.ev
+async def _dbg_ev(s, js):
+    try: return await _orig_ev(s, js)
+    except Exception as e:
+        print('NAVDBG ev failed', str(e)[:70], '| js=', js[:140], '| url=', s.pg.url, flush=True)
+        await asyncio.sleep(2); print('NAVDBG url after 2s', s.pg.url, flush=True)
+        try: print('NAVDBG state', await _orig_ev(s, "[performance.now(), document.readyState, performance.getEntriesByType('navigation')[0].type]"), flush=True)
+        except Exception as e2: print('NAVDBG state failed', str(e2)[:80], flush=True)
+        raise
+W.ev = _dbg_ev
 
 MOCK = 'http://127.0.0.1:3350'
 FM = 'http://127.0.0.1:3340'
