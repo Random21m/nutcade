@@ -423,6 +423,7 @@ body.theme-amber,body.theme-phosphor{background-image:linear-gradient(rgba(255,2
 .extra-panel{display:flex;gap:12px;align-items:center;text-align:left;width:100%;border-color:var(--lime);font:inherit;color:inherit;cursor:pointer}
 .extra-panel.heir{cursor:default;border-color:var(--gold)}
 .extra-panel .mid,.imports-panel .mid{display:grid;gap:3px}
+.ks-line{display:grid;gap:2px;overflow-wrap:anywhere}.ks-line .ks-h{color:var(--cyan);font-family:var(--f-display);font-size:9px;letter-spacing:.04em}.ks-ask{gap:6px}.ks-ask .tiny{overflow-wrap:anywhere}
 .extra-panel.soon{animation:xlblink 1.2s steps(2) infinite}
 @keyframes xlblink{50%{border-color:var(--pink)}}
 @media (prefers-reduced-motion: reduce){.extra-panel.soon{animation:none;border-color:var(--pink)}}

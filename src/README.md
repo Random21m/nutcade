@@ -18,6 +18,8 @@
 | `app_r7_actions.js` | Round 7 button handlers, also inlined inside `app.js` |
 | `app_r8.js` | Round 8 (1.13), inlined inside `app.js`: the spending limit, the duress PIN (a second, separate wallet in the PIN vault), and mints that limit request size (NUT-06 `max_array_length`) |
 | `app_r8_actions.js` | Round 8 button handlers, also inlined inside `app.js` |
+| `app_r9.js` | Round 9 (1.14), inlined inside `app.js`: the keyset check-up (coins on a mint's retired or expiring keys moved to its current keys, tiny coins combined, coins the mint no longer accepts set aside) |
+| `app_r9_actions.js` | Round 9 button handlers, also inlined inside `app.js` |
 | `ur.js` | Animated QR codes: a BC-UR encoder and decoder (`ur:bytes`, multipart fountain codes), compatible with cashu.me |
 | `chiptune.js` | The sound modem used by Send by sound (encoder, decoder, microphone and speaker) |
 | `games.js` | The arcade engine and eight cabinets |
