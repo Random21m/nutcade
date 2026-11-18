@@ -9529,6 +9529,9 @@ function ksBind(w) { try { const t = ksTarget(w), cur = ksAll(w).find(k => k.id 
 function ksPlan(w, url, now = Date.now()) {
   const t = ksTarget(w, now); if (!t) return null;
   const known = new Map(ksAll(w).map(k => [k.id, k]));
+  // (coins of a step waiting aside, S.oplate, may be moved: if its late request reaches the mint first, those coins
+  // are spent and the check-up leaves them to lateCheck, which settles that step as itself; if the check-up is first,
+  // the late request is refused and that step finds nothing of its coins left to book)
   const busy = new Set(S.ops.filter(o => o.mint === url).flatMap(o => o.inputs || []));
   const free = (S.proofs[url] || []).filter(p => !busy.has(p.secret));
   const old = free.filter(p => { const k = known.get(p.id); return !k || (k.id !== t.id && (!k.isActive || ksSoon(k, now))); });   // (a keyset the mint doesn't list: tried, and set aside if it refuses)
@@ -9559,12 +9562,22 @@ const ksNote = (n, t, k) => n && t ? `Keyset check-up: ${n === 1 ? '1 coin' : fm
   : n ? `Keyset check-up: ${n === 1 ? '1 coin' : fmt(n) + ' coins'} moved to the mint's new keys` : `Keyset check-up: ${fmt(t)} small coins combined into ${fmt(k)}`;
 const ksBackoff = ks => { ks.tries = (ks.tries || 0) + 1; return Date.now() + Math.min(30 * 60e3, 60e3 * 2 ** (ks.tries - 1)); };
 
+/* Anything at this mint that is being collected or settled comes first, and the check-up doesn't run beside it: its
+   swap takes the wallet's next counters and its clean-up books spent coins, so neither may happen while a deposit is
+   being collected (or may be, any moment: an invoice under an hour old, one the mint says is paid, one with counters
+   on record, one from before 1.12), while a payment, a journaled step, a backup's waiting part or a restore scan is
+   open there. It runs at the next check once they have settled (it is asked again at every regular check). */
+const quoteBusy = q => { if (busyQuotes.has(q.quote)) return true; if (q.kind !== 'bolt11') return false; const t = txById(q.txId); return q.state === 'PAID' || q.state === 'ISSUED' || !!q.ctr || legacyQuote(q) || (!!t && t.status === 'pending' && Date.now() - num(t.ts) < 60 * 60e3); };
+function ksBusy(url) {
+  return S.ops.some(o => o.mint === url) || S.pending.some(p => p.mint === url) || (S.imports || []).some(r => r.mint === url)
+    || S.quotes.some(q => q.mint === url && quoteBusy(q)) || flights.has('restore:' + url);
+}
 /* opts: startup (NUTCADE just opened or unlocked), manual (Refresh), agree + fee (you tapped Move with that fee shown) */
 function ksCheck(url, opts = {}) { url = normUrl(url); if (!ksMint(url)) return Promise.resolve(null); return tooManyRetry(url, () => mintLock(url, () => ksNow(url, opts))); }
 async function ksNow(url, opts) {
   const m = ksMint(url); if (!m || !S.seed) return null;
   const ks = m.ks || (m.ks = {}), now = Date.now(), deep = !!(opts.startup || opts.manual || opts.agree);
-  if (S.ops.some(o => o.mint === url)) return ks;   // (a step still open here is settled first; the check-up comes after it)
+  if (ksBusy(url)) return ks;   // (whatever is being collected or settled here goes first; the check-up comes after it)
   if (!deep && ks.due && now < ks.due) return ks;
   let w; try { w = await getWallet(url); } catch (e) { ks.due = ksBackoff(ks); save(); return ks; }   // (mint down: nothing changes, nothing to alarm about; asked again later)
   if (deep && (ks.aside || []).length) await ksBack(w, url, ks).catch(() => {});
@@ -9577,6 +9590,7 @@ async function ksNow(url, opts) {
   let st; try { st = await inTime(w.checkProofsStates(cand), 30000); } catch (e) { ks.due = ksBackoff(ks); save(); return ks; }
   const spent = new Set(cand.filter((p, i) => st[i] && st[i].state === 'SPENT').map(p => p.secret)), held = new Set(cand.filter((p, i) => st[i] && st[i].state !== 'UNSPENT').map(p => p.secret));
   const res = { n: 0, t: 0, k: 0, fee: 0, aside: 0, asideA: 0, spentN: 0, spentA: 0, why: '' };
+  if (ksBusy(url)) return ks;   // (something started meanwhile: next time)
   if (spent.size) { await ksPrune(url, cand, res); plan = ksPlan(w, url, now); }
   const old = plan.old.filter(p => !held.has(p.secret)), tidy = plan.tidy.filter(p => !held.has(p.secret));
   const auto = S.prefs.ksAuto !== false, fAll = ksFee(w, url, old.concat(tidy), plan.known), fOld = ksFee(w, url, old, plan.known);
@@ -9585,13 +9599,14 @@ async function ksNow(url, opts) {
   else if (auto && fAll === 0) move = old.concat(tidy);
   else if (auto && fOld === 0) move = old;   // (the free part now; combining the small coins costs a fee: asked)
   if (move.length) await ksMove(w, url, plan, move, res);
-  if (res.again && !res.why) {   // (once more for what is left of a part that met coins spent elsewhere)
+  if (res.again && !res.why && !res.busy) {   // (once more for what is left of a part that met coins spent elsewhere)
     const mine = new Set((S.proofs[url] || []).map(p => p.secret)), more = move.filter(p => mine.has(p.secret));
     res.again = false; if (more.length) await ksMove(w, url, plan, more, res);
   }
   if (res.n || res.t) ks.last = { at: now, n: res.n, t: res.t, k: res.k, fee: res.fee };
   if (res.spentN) ks.spent = { at: now, n: res.spentN, a: res.spentA };
   if (res.why) { Object.assign(ks, { at: now, st: res.why, due: ksBackoff(ks) }); save(); return ks; }
+  if (res.busy) { save(); return ks; }
   ks.tries = 0; ks.due = 0;
   // what is left to ask about: the coins not moved now that a swap would move (never ones worth less than their fee)
   const moved = new Set(move.map(p => p.secret)), mine = new Set((S.proofs[url] || []).map(p => p.secret)), left = p => !moved.has(p.secret) && mine.has(p.secret);
@@ -9615,6 +9630,7 @@ async function ksMove(w, url, plan, move, res) {
   const tidyS = new Set(plan.tidy.map(p => p.secret));
   let line = null;
   for (const g of ksGroups(w, url, move, plan.known)) {
+    if (ksBusy(url)) { res.busy = true; break; }   // (a deposit, payment or scan started here meanwhile: the rest waits for the next check)
     const n = g.filter(p => !tidyS.has(p.secret)).length;
     let r;
     try { r = await journaled(url, 'swap', { inputs: g, follow: { k: 'keyset', n, t: g.length - n } }, (cb, o) => rRecv(o, w, g, { keysetId: plan.t.id, onCountersReserved: cb })); }
