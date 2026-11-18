@@ -17,15 +17,7 @@ def _gate_retryable(e):
 class W:
     def __init__(s, pg, name): s.pg=pg; s.name=pg, name; s.errs=[]
     async def ev(s, js): return await s.pg.evaluate(js)
-    async def click(s, sel):
-        js = f"(()=>{{const e=document.querySelector({json.dumps(sel)}); if(!e) throw new Error('missing '+{json.dumps(sel)}); e.click()}})()"
-        try: await s.pg.evaluate(js)
-        except PWError as e:
-            if 'missing ' not in str(e): raise
-            # (the screen is being redrawn, or has not been drawn yet, on a slow machine: give the element up to 2 s to be there, then click, or fail as before)
-            try: await s.pg.wait_for_function("sel=>!!document.querySelector(sel)", sel, timeout=2000)
-            except PWError: pass
-            await s.pg.evaluate(js)
+    async def click(s, sel): await s.pg.evaluate(f"(()=>{{const e=document.querySelector({json.dumps(sel)}); if(!e) throw new Error('missing '+{json.dumps(sel)}); e.click()}})()")
     async def fill(s, sel, v): await s.pg.fill(sel, v); await s.pg.dispatch_event(sel,'input')
     async def wait(s, ms=400): await s.pg.wait_for_timeout(ms)
     async def bal(s, url=None):
@@ -110,7 +102,8 @@ class W:
                 if s.wrong_msg.strip(): break
         picks=await s.ev("[...document.querySelectorAll('[data-cw]')].map(e=>e.dataset.cw)")
         await s.gate_fill({k: words[int(k)] for k in picks})
-        s.done_shown = await s.until("document.body.innerText.includes('PLAYER 1 READY')", 15000)
+        await s.until("!!document.querySelector('[data-act=gateStart]')", 15000)   # (the READY screen; not by its words, which are translated)
+        s.done_shown = await s.ev("document.body.innerText.includes('PLAYER 1 READY')")
         if ready_only: return phrase
         await s.gate_step('gateStart', "!!document.querySelector('.tabbar')")   # (no mint yet: it opens the Add-mint sheet, which is closed next)
         await s.until("!!document.querySelector('#layer .sheet')", 1500); await s.ev("Nutcade.closeSheet()")
