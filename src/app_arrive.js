@@ -18,7 +18,7 @@
    setting is turned on). When the app locks, those notifications are replaced by one that says only "Money arrived,
    unlock to see" (or simply closed when a duress PIN is set up, so the duress wallet never has to explain it). */
 function arrS() {
-  return arrS.s || (arrS.s = { base: Date.now(), log: [], card: [], onPage: new Set(), away: 0, awayDone: false, tickDone: 0, awayIv: 0, flushT: 0, coinAt: 0, wasOpen: false, lockLine: false, unseen: new Set() });
+  return arrS.s || (arrS.s = { base: Date.now(), log: [], card: [], items: {}, onPage: new Set(), away: 0, awayDone: false, tickDone: 0, awayIv: 0, flushT: 0, coinAt: 0, wasOpen: false, lockLine: false, unseen: new Set() });
 }
 arrS();
 const ARR_TAG = 'nutcade-arrival';
@@ -76,24 +76,33 @@ function arrGroups(items) {
   const g = {}; for (const it of items) { const x = g[it.k] || (g[it.k] = { k: it.k, n: 0, a: 0 }); x.n++; x.a += it.a; }
   return ARR_KINDS.filter(k => g[k]).map(k => g[k]);
 }
+// A notice is one short card over the logo bar, never over the balance, the lock or the mint (about 60 px high, at
+// any size): the amount, Details, and what came (for a summary: "while you were away"). Details opens a sheet with
+// everything: the kind and mint, or the summary's count and total per kind, and the way to the notes.
 function arrCardHTML(type, items) {
   const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
-  // (one arrival: a compact card, so it covers little even on a phone held sideways)
-  if (one) return `<div class="arr-head"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-title">MONEY ARRIVED</span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
-    <div class="arr-one"><span class="arr-big" data-noi18n>+${esc(money(one.a))}</span><span class="arr-what">${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span><button type="button" class="linkbtn arr-link" data-act="arrNotes">Open notes</button></div>`;
-  const body = `${type === 'away' ? '<div class="arr-sub">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
+  const sub = type === 'away' ? '<span class="arr-what">While you were away</span>'
+    : one ? `<span class="arr-what">${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span>` : `<span class="arr-what">${esc(arrCount(items.length))}</span>`;
+  return `<div class="arr-row"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-big" data-noi18n>+${esc(money(total))}</span><span class="arr-sp"></span><button type="button" class="btn sm arr-more" data-act="arrMore">Details</button><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
+    <div class="arr-sub">${sub}</div>`;
+}
+function arrDetailsHTML(type, items) {
+  const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
+  const lines = one ? `<dl class="kv"><dt>Amount</dt><dd data-noi18n>+${esc(money(one.a))}</dd><dt>From</dt><dd>${esc(ARR_LABEL[one.k])}</dd><dt>Mint</dt><dd data-noi18n>${esc(mintName(one.m))}</dd></dl>`
+    : `${type === 'away' ? '<div class="arr-note">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
       <div class="arr-total"><span>Total</span><span data-noi18n>+${esc(money(total))}</span></div>`;
-  return `<div class="arr-head"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-title">${type === 'away' ? 'WHILE YOU WERE AWAY' : 'MONEY ARRIVED'}</span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
-    ${body}
-    <div class="arr-acts"><button type="button" class="btn sm" data-act="arrNotes">Open notes</button>${type === 'away' ? '<button type="button" class="btn sm" data-act="arrClose">OK</button>' : ''}</div>`;
+  return `<div class="arr-details" data-type="${type}" data-ids="${esc(items.map(x => x.id).join(' '))}">${lines}
+    <div class="arr-acts"><button type="button" class="btn solid gold" data-act="arrNotes">Open notes</button><button type="button" class="btn" data-act="close">OK</button></div></div>`;
 }
 function arrShow(type, items) {
   let st = document.getElementById('arrStack');
   if (!st) { st = document.createElement('div'); st.id = 'arrStack'; st.className = 'arr-stack'; st.setAttribute('role', 'region'); st.setAttribute('aria-label', tr('Money arrived')); document.body.appendChild(st); }
+  // (one card at a time: a summary already in front of you gives way to a new arrival)
+  if (type === 'live') { const aw = st.querySelector('.arr-card[data-type=away]'); if (aw && !(aw.dataset.ids || '').split(' ').some(id => arrS().unseen.has(id))) aw.remove(); }
   let c = st.querySelector(`.arr-card[data-type="${type}"]`);
   if (!c) { c = document.createElement('div'); c.className = 'arr-card'; c.dataset.type = type; c.setAttribute('role', 'status'); c.setAttribute('aria-live', 'polite'); type === 'away' ? st.prepend(c) : st.appendChild(c); }
   c.dataset.ids = items.map(x => x.id).join(' '); c.dataset.at = document.hidden ? Date.now() + 864e5 : Date.now();
-  c.innerHTML = arrCardHTML(type, items);
+  c.innerHTML = arrCardHTML(type, items); arrS().items[type] = items.slice();
   clearTimeout(c.hideT);
   if (type === 'live') { const hide = () => { if (document.hidden) { c.hideT = setTimeout(hide, 3000); return; } c.remove(); arrS().card = []; }; c.hideT = setTimeout(hide, 20000); }
 }
@@ -101,12 +110,15 @@ function arrClear() { const st = document.getElementById('arrStack'); if (st) st
 function arrFlush() {
   const A = arrS(); A.flushT = 0;
   if (!arrOpen() || (A.away && !A.awayDone)) return;   // (while the opening's checks run, everything goes into the summary)
-  if (window.Arcade && window.Arcade.playing && window.Arcade.playing()) { A.flushT = setTimeout(arrFlush, 2000); return; }
   const l = arrLedger();
-  const fresh = l.pend.filter(p => !A.onPage.has(p.id)).map(arrItem).filter(Boolean);
+  let fresh = l.pend.filter(p => !A.onPage.has(p.id)).map(arrItem).filter(Boolean);
   if (!fresh.length) return;
+  if (arrCovered()) {   // a game or the till fills the screen: the till's own sale is on its PAID! screen; the rest wait
+    const sale = fresh.filter(x => arrTillSale(txById(x.id)));
+    if (sale.length && document.querySelector('.cashier') && !document.hidden) { sale.forEach(x => A.onPage.add(x.id)); arrSeen(sale.map(x => x.id)); }
+    A.flushT = setTimeout(arrFlush, 2000); return;
+  }
   fresh.forEach(x => A.onPage.add(x.id));
-  if (document.querySelector('.cashier') && !document.hidden) { arrSeen(fresh.map(x => x.id)); return; }   // (the till shows its own PAID! screen)
   A.card = A.card.concat(fresh);
   arrShow('live', A.card);
   A.log.push({ type: 'live', ids: fresh.map(x => x.id), at: Date.now() });
@@ -114,6 +126,9 @@ function arrFlush() {
   if (document.hidden) { fresh.forEach(x => A.unseen.add(x.id)); arrSys(tr('Money arrived'), A.card.filter(x => A.unseen.has(x.id))); }
   else arrSeen(fresh.map(x => x.id));
 }
+function arrCovered() { return !!(document.querySelector('.cashier') || (window.Arcade && window.Arcade.playing && window.Arcade.playing())); }
+// a sale taken at the till (a Lightning charge, or a payment request the till made)
+function arrTillSale(t) { return !!t && !!(t.cashier || t.cashierPending || (t.reqId && S.requests.some(r => r.id === t.reqId && r.cashier))); }
 // on opening or unlocking: the start-up checks first, then one summary of everything not yet seen
 function arrAwayStart() {
   const A = arrS(); A.away = Date.now(); A.awayDone = false; A.tickDone = 0; clearInterval(A.awayIv);
@@ -127,7 +142,9 @@ function arrAwayStart() {
   }, 500);
 }
 function arrAwayEnd() {
-  const A = arrS(); A.awayDone = true;
+  const A = arrS();
+  if (arrCovered()) { setTimeout(arrAwayEnd, 2000); return; }   // (not under a game or the till, where nobody would see it)
+  A.awayDone = true;
   const l = arrLedger(), items = l.pend.map(arrItem).filter(Boolean);
   if (items.length !== l.pend.length) { const ok = new Set(items.map(x => x.id)); l.pend = l.pend.filter(p => ok.has(p.id)); raw.set('arrivals', l); }   // (a line that is gone, or no longer an arrival)
   if (!items.length) return;
@@ -150,6 +167,7 @@ function arrRendered() {
     const A = arrS(), open = arrOpen(), unlocked = vault.on && vault.open;
     if (open && !A.wasOpen && (!A.rendered || (unlocked && !A.wasUnlocked))) arrAwayStart();
     A.rendered = true; A.wasUnlocked = unlocked;
+    const mode = arrSysMode(); if (A.sysMode && mode !== A.sysMode && mode !== 'full') arrCloseSys(); A.sysMode = mode;   // (a PIN or duress PIN just set: none with an amount stays)
     if (!open && A.wasOpen) arrClear();
     A.wasOpen = open;
     // going to another tab: notices you have had in front of you for a moment are done
@@ -164,14 +182,18 @@ async function arrReg() {
   try { if (!('serviceWorker' in navigator)) return null; return await Promise.race([navigator.serviceWorker.getRegistration(), sleep(1500).then(() => null)]) || null; } catch (e) { return null; }
 }
 const arrSysOk = () => !!S.prefs.arrNotify && typeof Notification !== 'undefined' && Notification.permission === 'granted';
+// what a system notification may say: no PIN, what came; a PIN, only that money came (a closed or discarded tab, or a
+// phone's lock screen, would otherwise show it while the wallet is locked); a duress PIN, nothing at all
+function arrSysMode() { return vault.decoy || (vault.on && vault.data && vault.data.duress) ? 'none' : vault.on ? 'generic' : 'full'; }
 function arrSysBody(items) {
   if (items.length === 1) { const x = items[0]; return `${tr(ARR_LABEL[x.k])}: +${money(x.a)} · ${mintName(x.m)}`; }
   return arrGroups(items).map(g => `${tr(ARR_LABEL[g.k])}: ${arrCount(g.n)} · +${money(g.a)}`).join('\n');
 }
 async function arrSys(title, items) {
-  if (!arrSysOk() || !items.length) return;
-  // after a lock it may be replaced by "Money arrived, unlock to see"; not when a duress PIN is set up (or open)
-  const opt = { body: arrSysBody(items), tag: ARR_TAG, renotify: true, icon: 'icon-192.png', silent: !S.prefs.sound, data: { g: vault.decoy || (vault.on && vault.data && vault.data.duress) ? 0 : 1 } };
+  const mode = arrSysMode();
+  if (!arrSysOk() || !items.length || mode === 'none') return;
+  if (mode === 'generic') { title = 'NUTCADE'; }
+  const opt = { body: mode === 'generic' ? tr('Money arrived. Open NUTCADE to see.') : arrSysBody(items), tag: ARR_TAG, renotify: true, icon: 'icon-192.png', silent: !S.prefs.sound, data: { g: 1 } };
   const reg = await arrReg();
   if (reg) { try { await reg.showNotification(title, opt); return; } catch (e) {} }
   try { const n = new Notification(title, opt); n.onclick = () => { try { window.focus(); } catch (e) {} n.close(); }; } catch (e) {}
@@ -198,7 +220,7 @@ function arrHelp(p, asked) {
   if (p === 'unsupported') return "This browser can't show notifications.";
   if (asked && p === 'default') return "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.";
   if (p === 'denied') return "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.";
-  return 'When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.';
+  return 'When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. With a PIN they show no amount, only “Money arrived. Open NUTCADE to see.” With a duress PIN there are none.';
 }
 function arrSettingsHTML() {
   const p = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;

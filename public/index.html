@@ -590,22 +590,25 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
   .sheet .pinpad .th{font-size:17px;line-height:1.15}
   .lim-sheet{gap:6px} .lim-sheet .pb-h{font-size:13px} .lim-sheet .lim-msg,.lim-sheet .th{font-size:17px;line-height:1.15}
 }
-/* Notices when money arrives (src/app_arrive.js) */
-.arr-stack{position:fixed;left:50%;top:calc(8px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:280;width:min(calc(100vw - 32px),440px);display:grid;gap:8px;pointer-events:none}
-.arr-card{pointer-events:auto;display:grid;gap:4px;padding:8px 12px;border:3px solid var(--lime);border-radius:var(--r);background:var(--well);box-shadow:4px 4px 0 #000;font-size:18px;line-height:1.15;max-height:calc(100vh - 120px);overflow:auto}
+/* Notices when money arrives (src/app_arrive.js). A notice sits over the logo bar only: it never covers the balance,
+   the lock or the mint (the credits panel starts 100 px down at every size). */
+.arr-stack{position:fixed;left:50%;top:calc(6px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:280;width:min(calc(100vw - 32px),440px);display:grid;gap:6px;pointer-events:none}
+.arr-card{pointer-events:auto;display:grid;gap:2px;padding:5px 8px 5px 10px;border:3px solid var(--lime);border-radius:var(--r);background:var(--well);box-shadow:4px 4px 0 #000;font-size:17px;line-height:1.1;min-width:0}
 .arr-card[data-type=away]{border-color:var(--cyan)}
-.arr-head{display:flex;align-items:center;gap:8px;min-width:0}
-.arr-ico{flex:none;font-family:var(--f-display);font-size:14px;color:var(--lime)}
+.arr-row{display:flex;align-items:center;gap:8px;min-width:0}
+.arr-ico{flex:none;font-family:var(--f-display);font-size:13px;color:var(--lime)}
 .arr-card[data-type=away] .arr-ico{color:var(--cyan)}
-.arr-title{flex:1;min-width:0;font-family:var(--f-display);font-size:10px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
-.arr-x{flex:none;width:32px;height:28px;margin:-6px -8px -6px 0;border:0;background:transparent;color:var(--dim);font-size:24px;line-height:1;cursor:pointer}
+.arr-big{flex:0 1 auto;min-width:0;font-family:var(--f-display);font-size:13px;line-height:1.4;color:var(--lime);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.arr-sp{flex:1}
+.arr-more{flex:none;min-height:30px;padding:4px 9px}
+.arr-x{flex:none;width:30px;height:30px;margin:-4px -4px -4px 0;border:0;background:transparent;color:var(--dim);font-size:22px;line-height:1;cursor:pointer}
 .arr-x:hover,.arr-x:focus-visible{color:var(--ink)}
-.arr-one{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;min-width:0}
-.arr-big{font-family:var(--f-display);font-size:14px;line-height:1.5;color:var(--lime);overflow-wrap:anywhere}
-.arr-what{color:var(--ink);overflow-wrap:anywhere;min-width:0}
-.arr-mint{color:var(--dim);overflow-wrap:anywhere;min-width:0}
-.arr-link{margin:-9px -8px -9px auto;min-height:40px;padding:4px 8px;font-size:16px}
-.arr-sub{color:var(--dim);font-size:16px}
+.arr-sub{display:flex;gap:10px;min-width:0;white-space:nowrap;overflow:hidden}
+.arr-what{color:var(--ink);overflow:hidden;text-overflow:ellipsis;min-width:0}
+.arr-mint{color:var(--dim);overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+/* Details (a sheet) */
+.arr-details{display:grid;gap:10px}
+.arr-note{color:var(--dim);font-size:17px}
 .arr-lines{display:grid;gap:4px}
 .arr-line{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:baseline;padding:4px 0;border-bottom:1px dashed var(--grid)}
 .arr-k{min-width:0;overflow-wrap:anywhere;color:var(--ink)}
@@ -613,11 +616,11 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .arr-a{grid-column:2;grid-row:1 / span 2;align-self:center;text-align:right;white-space:nowrap;color:var(--lime)}
 .arr-total{display:flex;justify-content:space-between;gap:10px;font-family:var(--f-display);font-size:10px;line-height:1.6;color:var(--ink)}
 .arr-total span:last-child{color:var(--lime);white-space:nowrap}
-.arr-acts{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.arr-acts{display:flex;flex-wrap:wrap;gap:8px}
+.arr-acts .btn{flex:1 1 40%}
 .arr-lock{margin-bottom:10px;text-align:center}
 /* a game or the till fills the screen: the notices wait under it */
 body:has(.game-view,.cashier) .arr-stack{display:none}
-@media (max-height:500px){.arr-card{padding:6px 10px;gap:2px}.arr-card[data-type=away]{max-height:calc(100vh - 24px)}}
 </style>
 
 <div id="app" class="crt"></div>
@@ -2723,10 +2726,10 @@ window.NUTCADE_I18N = {
 </script>
 <script>/* NUTCADE translations for the arrival notices, generated from tools/i18n_arrive.py: added to the dictionaries in i18n.js */
 (() => { const D = window.NUTCADE_I18N || {};
-  if (D.es) Object.assign(D.es.t, {"Lightning deposit": "Depósito Lightning", "On-chain deposit": "Depósito on-chain", "Wallet Connect invoice": "Factura de Wallet Connect", "Payment request paid": "Solicitud de pago pagada", "Ecash over Nostr": "Ecash por Nostr", "Ecash claimed": "Ecash reclamado", "Came back to you": "Volvió a ti", "MONEY ARRIVED": "LLEGÓ DINERO", "Money arrived": "Llegó dinero", "WHILE YOU WERE AWAY": "MIENTRAS NO ESTABAS", "While you were away": "Mientras no estabas", "Since you last had NUTCADE open": "Desde la última vez que abriste NUTCADE", "Total": "Total", "{#} payment": "{#} pago", "{#} payments": "{#} pagos", "Open notes": "Abrir notas", "Dismiss": "Cerrar", "Money arrived, unlock to see.": "Llegó dinero; desbloquea para verlo.", "Notify me when money arrives": "Avisarme cuando llegue dinero", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.": "Cuando llega dinero mientras NUTCADE está abierto en otra pestaña o ventana. Solo los muestra este dispositivo: sin servicio push, no se envía nada a ningún sitio. Con la cartera bloqueada no muestran importes.", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "Las notificaciones de NUTCADE están bloqueadas en los ajustes de este navegador. Permítelas allí y luego activa esto.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "No se permitieron las notificaciones. Activa esto para que se te vuelva a preguntar, o permítelas en los ajustes del navegador.", "This browser can't show notifications.": "Este navegador no puede mostrar notificaciones."});
-  if (D.pt) Object.assign(D.pt.t, {"Lightning deposit": "Depósito Lightning", "On-chain deposit": "Depósito on-chain", "Wallet Connect invoice": "Fatura do Wallet Connect", "Payment request paid": "Pedido de pagamento pago", "Ecash over Nostr": "Ecash via Nostr", "Ecash claimed": "Ecash resgatado", "Came back to you": "Voltou para você", "MONEY ARRIVED": "DINHEIRO RECEBIDO", "Money arrived": "Dinheiro recebido", "WHILE YOU WERE AWAY": "ENQUANTO VOCÊ ESTAVA FORA", "While you were away": "Enquanto você estava fora", "Since you last had NUTCADE open": "Desde a última vez que você abriu o NUTCADE", "Total": "Total", "{#} payment": "{#} pagamento", "{#} payments": "{#} pagamentos", "Open notes": "Abrir notas", "Dismiss": "Fechar", "Money arrived, unlock to see.": "Dinheiro recebido; desbloqueie para ver.", "Notify me when money arrives": "Avisar quando chegar dinheiro", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.": "Quando chega dinheiro enquanto o NUTCADE está aberto em outra aba ou janela. Só este dispositivo as mostra: sem serviço de push, nada é enviado a lugar nenhum. Com a carteira bloqueada, não mostram valores.", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "As notificações do NUTCADE estão bloqueadas nas configurações deste navegador. Permita-as lá e depois ative isto.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "As notificações não foram permitidas. Ative isto para ser perguntado de novo, ou permita-as nas configurações do navegador.", "This browser can't show notifications.": "Este navegador não consegue mostrar notificações."});
-  if (D.de) Object.assign(D.de.t, {"Lightning deposit": "Lightning-Einzahlung", "On-chain deposit": "On-Chain-Einzahlung", "Wallet Connect invoice": "Wallet-Connect-Rechnung", "Payment request paid": "Zahlungsanforderung bezahlt", "Ecash over Nostr": "Ecash über Nostr", "Ecash claimed": "Ecash eingelöst", "Came back to you": "Zu dir zurückgekommen", "MONEY ARRIVED": "GELD EINGEGANGEN", "Money arrived": "Geld eingegangen", "WHILE YOU WERE AWAY": "WÄHREND DU WEG WARST", "While you were away": "Während du weg warst", "Since you last had NUTCADE open": "Seit du NUTCADE zuletzt geöffnet hattest", "Total": "Gesamt", "{#} payment": "{#} Zahlung", "{#} payments": "{#} Zahlungen", "Open notes": "Notizen öffnen", "Dismiss": "Schließen", "Money arrived, unlock to see.": "Geld eingegangen, entsperre zum Ansehen.", "Notify me when money arrives": "Benachrichtigen, wenn Geld eingeht", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.": "Wenn Geld eingeht, während NUTCADE in einem anderen Tab oder Fenster offen ist. Nur dieses Gerät zeigt sie an: kein Push-Dienst, nichts wird irgendwohin gesendet. Gesperrt zeigen sie keine Beträge.", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "Benachrichtigungen für NUTCADE sind in den Einstellungen dieses Browsers blockiert. Erlaube sie dort und schalte dies dann ein.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "Benachrichtigungen wurden nicht erlaubt. Schalte dies ein, um erneut gefragt zu werden, oder erlaube sie in den Browser-Einstellungen.", "This browser can't show notifications.": "Dieser Browser kann keine Benachrichtigungen anzeigen."});
-  if (D.fr) Object.assign(D.fr.t, {"Lightning deposit": "Dépôt Lightning", "On-chain deposit": "Dépôt on-chain", "Wallet Connect invoice": "Facture Wallet Connect", "Payment request paid": "Demande de paiement payée", "Ecash over Nostr": "Ecash par Nostr", "Ecash claimed": "Ecash encaissé", "Came back to you": "Vous est revenu", "MONEY ARRIVED": "ARGENT REÇU", "Money arrived": "Argent reçu", "WHILE YOU WERE AWAY": "PENDANT VOTRE ABSENCE", "While you were away": "Pendant votre absence", "Since you last had NUTCADE open": "Depuis la dernière ouverture de NUTCADE", "Total": "Total", "{#} payment": "{#} paiement", "{#} payments": "{#} paiements", "Open notes": "Ouvrir les notes", "Dismiss": "Fermer", "Money arrived, unlock to see.": "Argent reçu, déverrouillez pour voir.", "Notify me when money arrives": "Me prévenir quand de l'argent arrive", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.": "Quand de l'argent arrive alors que NUTCADE est ouvert dans un autre onglet ou une autre fenêtre. Affichées par cet appareil seulement : aucun service push, rien n'est envoyé nulle part. Verrouillé, elles n'affichent aucun montant.", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "Les notifications de NUTCADE sont bloquées dans les réglages de ce navigateur. Autorisez-les là, puis activez ceci.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "Les notifications n'ont pas été autorisées. Activez ceci pour qu'on vous le redemande, ou autorisez-les dans les réglages du navigateur.", "This browser can't show notifications.": "Ce navigateur ne peut pas afficher de notifications."});
+  if (D.es) Object.assign(D.es.t, {"Lightning deposit": "Depósito Lightning", "On-chain deposit": "Depósito on-chain", "Wallet Connect invoice": "Factura de Wallet Connect", "Payment request paid": "Solicitud de pago pagada", "Ecash over Nostr": "Ecash por Nostr", "Ecash claimed": "Ecash reclamado", "Came back to you": "Volvió a ti", "MONEY ARRIVED": "LLEGÓ DINERO", "Money arrived": "Llegó dinero", "WHILE YOU WERE AWAY": "MIENTRAS NO ESTABAS", "While you were away": "Mientras no estabas", "Since you last had NUTCADE open": "Desde la última vez que abriste NUTCADE", "Total": "Total", "{#} payment": "{#} pago", "{#} payments": "{#} pagos", "Open notes": "Abrir notas", "Dismiss": "Cerrar", "Money arrived, unlock to see.": "Llegó dinero; desbloquea para verlo.", "Notify me when money arrives": "Avisarme cuando llegue dinero", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. With a PIN they show no amount, only “Money arrived. Open NUTCADE to see.” With a duress PIN there are none.": "Cuando llega dinero mientras NUTCADE está abierto en otra pestaña o ventana. Solo los muestra este dispositivo: sin servicio push, no se envía nada a ningún sitio. Con un PIN no muestran el importe, solo «Llegó dinero. Abre NUTCADE para verlo.» Con un PIN de coacción no hay ninguno.", "Money arrived. Open NUTCADE to see.": "Llegó dinero. Abre NUTCADE para verlo.", "Details": "Detalles", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "Las notificaciones de NUTCADE están bloqueadas en los ajustes de este navegador. Permítelas allí y luego activa esto.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "No se permitieron las notificaciones. Activa esto para que se te vuelva a preguntar, o permítelas en los ajustes del navegador.", "This browser can't show notifications.": "Este navegador no puede mostrar notificaciones."});
+  if (D.pt) Object.assign(D.pt.t, {"Lightning deposit": "Depósito Lightning", "On-chain deposit": "Depósito on-chain", "Wallet Connect invoice": "Fatura do Wallet Connect", "Payment request paid": "Pedido de pagamento pago", "Ecash over Nostr": "Ecash via Nostr", "Ecash claimed": "Ecash resgatado", "Came back to you": "Voltou para você", "MONEY ARRIVED": "DINHEIRO RECEBIDO", "Money arrived": "Dinheiro recebido", "WHILE YOU WERE AWAY": "ENQUANTO VOCÊ ESTAVA FORA", "While you were away": "Enquanto você estava fora", "Since you last had NUTCADE open": "Desde a última vez que você abriu o NUTCADE", "Total": "Total", "{#} payment": "{#} pagamento", "{#} payments": "{#} pagamentos", "Open notes": "Abrir notas", "Dismiss": "Fechar", "Money arrived, unlock to see.": "Dinheiro recebido; desbloqueie para ver.", "Notify me when money arrives": "Avisar quando chegar dinheiro", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. With a PIN they show no amount, only “Money arrived. Open NUTCADE to see.” With a duress PIN there are none.": "Quando chega dinheiro enquanto o NUTCADE está aberto em outra aba ou janela. Só este dispositivo as mostra: sem serviço de push, nada é enviado a lugar nenhum. Com um PIN não mostram o valor, só “Dinheiro recebido. Abra o NUTCADE para ver.” Com um PIN de coação não há nenhuma.", "Money arrived. Open NUTCADE to see.": "Dinheiro recebido. Abra o NUTCADE para ver.", "Details": "Detalhes", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "As notificações do NUTCADE estão bloqueadas nas configurações deste navegador. Permita-as lá e depois ative isto.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "As notificações não foram permitidas. Ative isto para ser perguntado de novo, ou permita-as nas configurações do navegador.", "This browser can't show notifications.": "Este navegador não consegue mostrar notificações."});
+  if (D.de) Object.assign(D.de.t, {"Lightning deposit": "Lightning-Einzahlung", "On-chain deposit": "On-Chain-Einzahlung", "Wallet Connect invoice": "Wallet-Connect-Rechnung", "Payment request paid": "Zahlungsanforderung bezahlt", "Ecash over Nostr": "Ecash über Nostr", "Ecash claimed": "Ecash eingelöst", "Came back to you": "Zu dir zurückgekommen", "MONEY ARRIVED": "GELD EINGEGANGEN", "Money arrived": "Geld eingegangen", "WHILE YOU WERE AWAY": "WÄHREND DU WEG WARST", "While you were away": "Während du weg warst", "Since you last had NUTCADE open": "Seit du NUTCADE zuletzt geöffnet hattest", "Total": "Gesamt", "{#} payment": "{#} Zahlung", "{#} payments": "{#} Zahlungen", "Open notes": "Notizen öffnen", "Dismiss": "Schließen", "Money arrived, unlock to see.": "Geld eingegangen, entsperre zum Ansehen.", "Notify me when money arrives": "Benachrichtigen, wenn Geld eingeht", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. With a PIN they show no amount, only “Money arrived. Open NUTCADE to see.” With a duress PIN there are none.": "Wenn Geld eingeht, während NUTCADE in einem anderen Tab oder Fenster offen ist. Nur dieses Gerät zeigt sie an: kein Push-Dienst, nichts wird irgendwohin gesendet. Mit einer PIN zeigen sie keinen Betrag, nur „Geld eingegangen. Öffne NUTCADE, um es zu sehen.“ Mit einer Notfall-PIN gibt es keine.", "Money arrived. Open NUTCADE to see.": "Geld eingegangen. Öffne NUTCADE, um es zu sehen.", "Details": "Details", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "Benachrichtigungen für NUTCADE sind in den Einstellungen dieses Browsers blockiert. Erlaube sie dort und schalte dies dann ein.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "Benachrichtigungen wurden nicht erlaubt. Schalte dies ein, um erneut gefragt zu werden, oder erlaube sie in den Browser-Einstellungen.", "This browser can't show notifications.": "Dieser Browser kann keine Benachrichtigungen anzeigen."});
+  if (D.fr) Object.assign(D.fr.t, {"Lightning deposit": "Dépôt Lightning", "On-chain deposit": "Dépôt on-chain", "Wallet Connect invoice": "Facture Wallet Connect", "Payment request paid": "Demande de paiement payée", "Ecash over Nostr": "Ecash par Nostr", "Ecash claimed": "Ecash encaissé", "Came back to you": "Vous est revenu", "MONEY ARRIVED": "ARGENT REÇU", "Money arrived": "Argent reçu", "WHILE YOU WERE AWAY": "PENDANT VOTRE ABSENCE", "While you were away": "Pendant votre absence", "Since you last had NUTCADE open": "Depuis la dernière ouverture de NUTCADE", "Total": "Total", "{#} payment": "{#} paiement", "{#} payments": "{#} paiements", "Open notes": "Ouvrir les notes", "Dismiss": "Fermer", "Money arrived, unlock to see.": "Argent reçu, déverrouillez pour voir.", "Notify me when money arrives": "Me prévenir quand de l'argent arrive", "When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. With a PIN they show no amount, only “Money arrived. Open NUTCADE to see.” With a duress PIN there are none.": "Quand de l'argent arrive alors que NUTCADE est ouvert dans un autre onglet ou une autre fenêtre. Affichées par cet appareil seulement : aucun service push, rien n'est envoyé nulle part. Avec un PIN, elles n'affichent aucun montant, seulement « Argent reçu. Ouvrez NUTCADE pour voir. » Avec un PIN de contrainte, il n'y en a aucune.", "Money arrived. Open NUTCADE to see.": "Argent reçu. Ouvrez NUTCADE pour voir.", "Details": "Détails", "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.": "Les notifications de NUTCADE sont bloquées dans les réglages de ce navigateur. Autorisez-les là, puis activez ceci.", "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.": "Les notifications n'ont pas été autorisées. Activez ceci pour qu'on vous le redemande, ou autorisez-les dans les réglages du navigateur.", "This browser can't show notifications.": "Ce navigateur ne peut pas afficher de notifications."});
 })();
 </script>
 <script>/* NUTCADE audio: chiptune sfx + tiny sequencer for original music loops */
@@ -9405,7 +9408,7 @@ async function receiveInParts(w, meta, token, note, parts, own, mine) {
    setting is turned on). When the app locks, those notifications are replaced by one that says only "Money arrived,
    unlock to see" (or simply closed when a duress PIN is set up, so the duress wallet never has to explain it). */
 function arrS() {
-  return arrS.s || (arrS.s = { base: Date.now(), log: [], card: [], onPage: new Set(), away: 0, awayDone: false, tickDone: 0, awayIv: 0, flushT: 0, coinAt: 0, wasOpen: false, lockLine: false, unseen: new Set() });
+  return arrS.s || (arrS.s = { base: Date.now(), log: [], card: [], items: {}, onPage: new Set(), away: 0, awayDone: false, tickDone: 0, awayIv: 0, flushT: 0, coinAt: 0, wasOpen: false, lockLine: false, unseen: new Set() });
 }
 arrS();
 const ARR_TAG = 'nutcade-arrival';
@@ -9463,24 +9466,33 @@ function arrGroups(items) {
   const g = {}; for (const it of items) { const x = g[it.k] || (g[it.k] = { k: it.k, n: 0, a: 0 }); x.n++; x.a += it.a; }
   return ARR_KINDS.filter(k => g[k]).map(k => g[k]);
 }
+// A notice is one short card over the logo bar, never over the balance, the lock or the mint (about 60 px high, at
+// any size): the amount, Details, and what came (for a summary: "while you were away"). Details opens a sheet with
+// everything: the kind and mint, or the summary's count and total per kind, and the way to the notes.
 function arrCardHTML(type, items) {
   const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
-  // (one arrival: a compact card, so it covers little even on a phone held sideways)
-  if (one) return `<div class="arr-head"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-title">MONEY ARRIVED</span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
-    <div class="arr-one"><span class="arr-big" data-noi18n>+${esc(money(one.a))}</span><span class="arr-what">${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span><button type="button" class="linkbtn arr-link" data-act="arrNotes">Open notes</button></div>`;
-  const body = `${type === 'away' ? '<div class="arr-sub">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
+  const sub = type === 'away' ? '<span class="arr-what">While you were away</span>'
+    : one ? `<span class="arr-what">${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span>` : `<span class="arr-what">${esc(arrCount(items.length))}</span>`;
+  return `<div class="arr-row"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-big" data-noi18n>+${esc(money(total))}</span><span class="arr-sp"></span><button type="button" class="btn sm arr-more" data-act="arrMore">Details</button><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
+    <div class="arr-sub">${sub}</div>`;
+}
+function arrDetailsHTML(type, items) {
+  const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
+  const lines = one ? `<dl class="kv"><dt>Amount</dt><dd data-noi18n>+${esc(money(one.a))}</dd><dt>From</dt><dd>${esc(ARR_LABEL[one.k])}</dd><dt>Mint</dt><dd data-noi18n>${esc(mintName(one.m))}</dd></dl>`
+    : `${type === 'away' ? '<div class="arr-note">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
       <div class="arr-total"><span>Total</span><span data-noi18n>+${esc(money(total))}</span></div>`;
-  return `<div class="arr-head"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-title">${type === 'away' ? 'WHILE YOU WERE AWAY' : 'MONEY ARRIVED'}</span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
-    ${body}
-    <div class="arr-acts"><button type="button" class="btn sm" data-act="arrNotes">Open notes</button>${type === 'away' ? '<button type="button" class="btn sm" data-act="arrClose">OK</button>' : ''}</div>`;
+  return `<div class="arr-details" data-type="${type}" data-ids="${esc(items.map(x => x.id).join(' '))}">${lines}
+    <div class="arr-acts"><button type="button" class="btn solid gold" data-act="arrNotes">Open notes</button><button type="button" class="btn" data-act="close">OK</button></div></div>`;
 }
 function arrShow(type, items) {
   let st = document.getElementById('arrStack');
   if (!st) { st = document.createElement('div'); st.id = 'arrStack'; st.className = 'arr-stack'; st.setAttribute('role', 'region'); st.setAttribute('aria-label', tr('Money arrived')); document.body.appendChild(st); }
+  // (one card at a time: a summary already in front of you gives way to a new arrival)
+  if (type === 'live') { const aw = st.querySelector('.arr-card[data-type=away]'); if (aw && !(aw.dataset.ids || '').split(' ').some(id => arrS().unseen.has(id))) aw.remove(); }
   let c = st.querySelector(`.arr-card[data-type="${type}"]`);
   if (!c) { c = document.createElement('div'); c.className = 'arr-card'; c.dataset.type = type; c.setAttribute('role', 'status'); c.setAttribute('aria-live', 'polite'); type === 'away' ? st.prepend(c) : st.appendChild(c); }
   c.dataset.ids = items.map(x => x.id).join(' '); c.dataset.at = document.hidden ? Date.now() + 864e5 : Date.now();
-  c.innerHTML = arrCardHTML(type, items);
+  c.innerHTML = arrCardHTML(type, items); arrS().items[type] = items.slice();
   clearTimeout(c.hideT);
   if (type === 'live') { const hide = () => { if (document.hidden) { c.hideT = setTimeout(hide, 3000); return; } c.remove(); arrS().card = []; }; c.hideT = setTimeout(hide, 20000); }
 }
@@ -9488,12 +9500,15 @@ function arrClear() { const st = document.getElementById('arrStack'); if (st) st
 function arrFlush() {
   const A = arrS(); A.flushT = 0;
   if (!arrOpen() || (A.away && !A.awayDone)) return;   // (while the opening's checks run, everything goes into the summary)
-  if (window.Arcade && window.Arcade.playing && window.Arcade.playing()) { A.flushT = setTimeout(arrFlush, 2000); return; }
   const l = arrLedger();
-  const fresh = l.pend.filter(p => !A.onPage.has(p.id)).map(arrItem).filter(Boolean);
+  let fresh = l.pend.filter(p => !A.onPage.has(p.id)).map(arrItem).filter(Boolean);
   if (!fresh.length) return;
+  if (arrCovered()) {   // a game or the till fills the screen: the till's own sale is on its PAID! screen; the rest wait
+    const sale = fresh.filter(x => arrTillSale(txById(x.id)));
+    if (sale.length && document.querySelector('.cashier') && !document.hidden) { sale.forEach(x => A.onPage.add(x.id)); arrSeen(sale.map(x => x.id)); }
+    A.flushT = setTimeout(arrFlush, 2000); return;
+  }
   fresh.forEach(x => A.onPage.add(x.id));
-  if (document.querySelector('.cashier') && !document.hidden) { arrSeen(fresh.map(x => x.id)); return; }   // (the till shows its own PAID! screen)
   A.card = A.card.concat(fresh);
   arrShow('live', A.card);
   A.log.push({ type: 'live', ids: fresh.map(x => x.id), at: Date.now() });
@@ -9501,6 +9516,9 @@ function arrFlush() {
   if (document.hidden) { fresh.forEach(x => A.unseen.add(x.id)); arrSys(tr('Money arrived'), A.card.filter(x => A.unseen.has(x.id))); }
   else arrSeen(fresh.map(x => x.id));
 }
+function arrCovered() { return !!(document.querySelector('.cashier') || (window.Arcade && window.Arcade.playing && window.Arcade.playing())); }
+// a sale taken at the till (a Lightning charge, or a payment request the till made)
+function arrTillSale(t) { return !!t && !!(t.cashier || t.cashierPending || (t.reqId && S.requests.some(r => r.id === t.reqId && r.cashier))); }
 // on opening or unlocking: the start-up checks first, then one summary of everything not yet seen
 function arrAwayStart() {
   const A = arrS(); A.away = Date.now(); A.awayDone = false; A.tickDone = 0; clearInterval(A.awayIv);
@@ -9514,7 +9532,9 @@ function arrAwayStart() {
   }, 500);
 }
 function arrAwayEnd() {
-  const A = arrS(); A.awayDone = true;
+  const A = arrS();
+  if (arrCovered()) { setTimeout(arrAwayEnd, 2000); return; }   // (not under a game or the till, where nobody would see it)
+  A.awayDone = true;
   const l = arrLedger(), items = l.pend.map(arrItem).filter(Boolean);
   if (items.length !== l.pend.length) { const ok = new Set(items.map(x => x.id)); l.pend = l.pend.filter(p => ok.has(p.id)); raw.set('arrivals', l); }   // (a line that is gone, or no longer an arrival)
   if (!items.length) return;
@@ -9537,6 +9557,7 @@ function arrRendered() {
     const A = arrS(), open = arrOpen(), unlocked = vault.on && vault.open;
     if (open && !A.wasOpen && (!A.rendered || (unlocked && !A.wasUnlocked))) arrAwayStart();
     A.rendered = true; A.wasUnlocked = unlocked;
+    const mode = arrSysMode(); if (A.sysMode && mode !== A.sysMode && mode !== 'full') arrCloseSys(); A.sysMode = mode;   // (a PIN or duress PIN just set: none with an amount stays)
     if (!open && A.wasOpen) arrClear();
     A.wasOpen = open;
     // going to another tab: notices you have had in front of you for a moment are done
@@ -9551,14 +9572,18 @@ async function arrReg() {
   try { if (!('serviceWorker' in navigator)) return null; return await Promise.race([navigator.serviceWorker.getRegistration(), sleep(1500).then(() => null)]) || null; } catch (e) { return null; }
 }
 const arrSysOk = () => !!S.prefs.arrNotify && typeof Notification !== 'undefined' && Notification.permission === 'granted';
+// what a system notification may say: no PIN, what came; a PIN, only that money came (a closed or discarded tab, or a
+// phone's lock screen, would otherwise show it while the wallet is locked); a duress PIN, nothing at all
+function arrSysMode() { return vault.decoy || (vault.on && vault.data && vault.data.duress) ? 'none' : vault.on ? 'generic' : 'full'; }
 function arrSysBody(items) {
   if (items.length === 1) { const x = items[0]; return `${tr(ARR_LABEL[x.k])}: +${money(x.a)} · ${mintName(x.m)}`; }
   return arrGroups(items).map(g => `${tr(ARR_LABEL[g.k])}: ${arrCount(g.n)} · +${money(g.a)}`).join('\n');
 }
 async function arrSys(title, items) {
-  if (!arrSysOk() || !items.length) return;
-  // after a lock it may be replaced by "Money arrived, unlock to see"; not when a duress PIN is set up (or open)
-  const opt = { body: arrSysBody(items), tag: ARR_TAG, renotify: true, icon: 'icon-192.png', silent: !S.prefs.sound, data: { g: vault.decoy || (vault.on && vault.data && vault.data.duress) ? 0 : 1 } };
+  const mode = arrSysMode();
+  if (!arrSysOk() || !items.length || mode === 'none') return;
+  if (mode === 'generic') { title = 'NUTCADE'; }
+  const opt = { body: mode === 'generic' ? tr('Money arrived. Open NUTCADE to see.') : arrSysBody(items), tag: ARR_TAG, renotify: true, icon: 'icon-192.png', silent: !S.prefs.sound, data: { g: 1 } };
   const reg = await arrReg();
   if (reg) { try { await reg.showNotification(title, opt); return; } catch (e) {} }
   try { const n = new Notification(title, opt); n.onclick = () => { try { window.focus(); } catch (e) {} n.close(); }; } catch (e) {}
@@ -9585,7 +9610,7 @@ function arrHelp(p, asked) {
   if (p === 'unsupported') return "This browser can't show notifications.";
   if (asked && p === 'default') return "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.";
   if (p === 'denied') return "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.";
-  return 'When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. While locked they show no amounts.';
+  return 'When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. With a PIN they show no amount, only “Money arrived. Open NUTCADE to see.” With a duress PIN there are none.';
 }
 function arrSettingsHTML() {
   const p = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
@@ -10334,6 +10359,12 @@ Object.assign(A, {
 /* Arrival notices: their buttons (src/app_arrive.js) */
 Object.assign(A, {
   arrClose: b => { const c = b.closest('.arr-card'); if (c) { if (c.dataset.type === 'live') arrS().card = []; c.remove(); } sfx('blip'); },
+  arrMore: b => {
+    const c = b.closest('.arr-card'); if (!c) return;
+    const type = c.dataset.type, items = arrS().items[type] || [];
+    if (type === 'live') arrS().card = []; c.remove(); sfx('select');
+    openSheet(type === 'away' ? 'While you were away' : 'Money arrived', arrDetailsHTML(type, items));
+  },
   arrNotes: b => { const c = b.closest('.arr-card'); if (c) { if (c.dataset.type === 'live') arrS().card = []; c.remove(); } closeSheet(); tab = 'history'; render(); window.scrollTo(0, 0); sfx('select'); }
 });
 
