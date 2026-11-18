@@ -60,7 +60,9 @@ async def books(w, mints=(FEE, NOFEE)):
 
 async def open_print(w, mint):
     await w.use(mint); await w.home(); await w.click('[data-act=send]'); await w.wait(150)
-    await w.click('[data-act=ptOpen]'); await w.until("!!document.querySelector('#ptAmt')", 5000)
+    await w.click('[data-act=ptOpen]'); await w.until("!!document.querySelector('#ptAmt') || !!document.querySelector('.pt-intro')", 5000)
+    if await w.ev("!!document.querySelector('.pt-intro')"):   # (the first time: the first-scan rule, then the screen)
+        await w.click('[data-act=ptIntroOk]'); await w.until("!!document.querySelector('#ptAmt')", 5000)
 
 
 async def make(w, mint, amount, count, style='arcade', expect_ok=True, ms=180000):
@@ -577,6 +579,75 @@ async def main():
             check('money2 disabled: history = balance', not await books(w, (NOFEE,)))
             await w.pg.context.close()
         await section('money2', money2)
+
+        # ---------- owner additions: the first-scan rule first, amount presets with their value, take back after printing ----------
+        async def owner():
+            RULE = 'A printed token is cash. Whoever scans it first gets the sats. Keep it folded or hidden until you hand it over.'
+            w = await funded(b, [FEE, NOFEE], 6000); await w.use(NOFEE)
+            async def tap(x):
+                await x.home(); await x.click('[data-act=send]'); await x.wait(150); await x.click('[data-act=ptOpen]'); await x.until("!!document.querySelector('#ptAmt') || !!document.querySelector('.pt-intro')", 5000)
+                return await x.ev("!!document.querySelector('.pt-intro')"), await x.sheet_text()
+            intro, t = await tap(w)
+            check('owner intro: the first tap on Print tokens shows the first-scan rule before anything else, with I understand', intro and RULE in t and 'I UNDERSTAND' in t.upper() and not await w.ev("!!document.querySelector('#ptAmt')"), t[:300])
+            await w.click('[data-act=ptIntroOk]'); await w.until("!!document.querySelector('#ptAmt')", 5000)
+            check('owner intro: I understand goes on to the Print tokens screen', await w.ev("!!document.querySelector('#ptAmt')"))
+            intro, t = await tap(w)
+            check('owner intro: shown once (the second time straight to the screen)', not intro)
+            await w.pg.reload(); await w.wait(1200); intro, t = await tap(w)
+            check('owner intro: still once after a reload', not intro)
+            # the same wallet restored on a new phone: shown there again
+            y = await wallet(b); await y.pg.check('#ack'); await y.click('[data-act=gateRestore]'); await y.until("!!document.querySelector('#phraseIn')", 5000)
+            await y.fill('#phraseIn', await w.ev("Nutcade.S.seed.mnemonic")); await y.ev("document.querySelectorAll('[data-rmint]').forEach(i=>{i.checked=false})"); await y.fill('#rmExtra', NOFEE)
+            await y.click('[data-act=doRestorePhrase]'); await y.until("/SCAN COMPLETE|CONTINUE/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 180000); await y.ev("Nutcade.closeSheet()")
+            await y.use(NOFEE); intro, t = await tap(y)
+            check('owner intro: the same wallet restored on a new phone shows it again', intro and RULE in t, t[:200])
+            await y.pg.context.close()
+            # in every language
+            for lang in LANGS[1:]:
+                z = await wallet(b, lang); await z.create(); await z.add_mint(NOFEE); await z.ev("window.__i18nMiss=new Set()")
+                intro, t = await tap(z); miss = await z.ev("[...(window.__i18nMiss||[])]")
+                check(f'owner intro {lang}: the rule in the language', intro and 'Whoever scans' not in t and len(t) > 60 and not miss, (t[:160], miss[:4]))
+                await z.pg.context.close()
+            # presets: 1,000 / 2,100 / 5,000 / 21,000 and Other, each with its value in the chosen currency from the price the app has
+            await w.ev("Nutcade.S.prefs.fiat=false; Nutcade.closeSheet()")
+            await open_print(w, NOFEE)
+            pre = await w.ev("[...document.querySelectorAll('[data-act=ptPreset]')].map(b=>[b.dataset.a, b.innerText.replace(/\\s+/g,' ').trim()])")
+            check('owner presets: 1,000 / 2,100 / 5,000 / 21,000 and Other', [x[0] for x in pre] == ['1000', '2100', '5000', '21000', 'other'] and '2,100' in pre[1][1], pre)
+            check('owner presets: no price available (Show Bitcoin price off): no money value shown', await w.ev("[...document.querySelectorAll('.pt-fiat')].every(e=>!e.innerText.trim())"))
+            reqs = []
+            w.pg.on('request', lambda r: reqs.append(r.url) if not re.match(r'https?://(127\.0\.0\.1|localhost)', r.url) and not r.url.startswith('data:') else None)
+            await w.ev("Nutcade.S.prefs.fiat=true; Nutcade.S.prefs.currency='USD'; Nutcade.livePrice(50000,'USD'); Nutcade.closeSheet()")
+            await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=ptOpen]'); await w.until("!!document.querySelector('#ptAmt')", 5000); await w.wait(400)
+            fx = await w.ev("[...document.querySelectorAll('[data-act=ptPreset]')].map(b=>(b.parentElement.querySelector('.pt-fiat[data-a=\"'+b.dataset.a+'\"]')||{}).innerText||'')")
+            check('owner presets: each preset shows about what it is worth from the price the app already has ($0.50 / $1.05 / $2.50 / $10.50 at $50,000)', fx[:4] == ['≈ $0.50', '≈ $1.05', '≈ $2.50', '≈ $10.50'], fx)
+            check('owner presets: no network request for it', not reqs, reqs[:3])
+            await w.click('[data-act=ptPreset][data-a="2100"]'); await w.wait(100)
+            check('owner presets: a preset fills the amount and is marked (✓, not color alone)', await w.ev("Nutcade.parseSat(document.querySelector('#ptAmt').value)") == 2100 and await w.ev("document.querySelector('[data-act=ptPreset][data-a=\"2100\"]').getAttribute('aria-pressed')") == 'true' and '✓' in await w.ev("getComputedStyle(document.querySelector('[data-act=ptPreset][data-a=\"2100\"]'),'::before').content"))
+            await w.click('[data-act=ptPreset][data-a=other]'); await w.wait(100)
+            check('owner presets: Other clears the amount for any amount', await w.ev("document.querySelector('#ptAmt').value===''") and await w.ev("document.querySelector('[data-act=ptPreset][data-a=other]').getAttribute('aria-pressed')") == 'true')
+            # a preset whose code would be too dense on this mint (fee coin counted) is disabled, with the reason
+            for mint in (FEE, NOFEE):
+                info = await w.ev(f"NutTokens.presetInfo({json.dumps(mint)})")
+                check(f'owner presets {mint[-4:]}: every preset fits the 133-module rule here (fee coins counted)', all(x['fits'] == (x['modules'] <= 133) for x in info) and all(x['fits'] for x in info), info)
+                lim = max(x['modules'] for x in info) - 1
+                await w.ev(f"NutTokens.maxModules={lim}; Nutcade.closeSheet()"); await open_print(w, mint); await w.wait(200)
+                st = await w.ev("[...document.querySelectorAll('[data-act=ptPreset]')].filter(b=>b.dataset.a!=='other').map(b=>[b.dataset.a, b.disabled])")
+                info = {str(x['a']): x for x in await w.ev(f"NutTokens.presetInfo({json.dumps(mint)})")}
+                why = await w.ev("(document.querySelector('.pt-pre-why')||{}).innerText||''")
+                check(f'owner presets {mint[-4:]}: a preset that would be too dense here is disabled, the reason shown, the others not', all(d == (not info[a]['fits']) for a, d in st) and any(d for a, d in st) and not all(d for a, d in st) and 'too dense' in why and 'coins' in why, (st, why))
+                await w.ev("NutTokens.maxModules=133")
+            # after printing: take it back any time, with a link to the list
+            await w.ev("Nutcade.closeSheet()")
+            s_, e, bid = await make(w, NOFEE, 2100, 1)
+            await w.click('[data-act=ptPrint]'); await w.until("!!document.querySelector('.pt-after')", 5000)
+            t = await w.ev("(document.querySelector('.pt-after')||{}).innerText||''")
+            check('owner after print: "Nobody claimed it? Take it back any time in Notes → Printed tokens", with a link', 'Nobody claimed it? Take it back any time in Notes → Printed tokens' in t and await w.ev("!!document.querySelector('.pt-after [data-act=ptList]')"), t)
+            await w.click('.pt-after [data-act=ptList]'); await w.until("!!document.querySelector('.pt-list')", 5000)
+            check('owner after print: the link opens Printed tokens', await w.ev("!!document.querySelector('.pt-list')"))
+            await w.ev("NutTokens.endPrint()")
+            check('owner: no page errors', not w.errs, w.errs[:3])
+            await w.pg.context.close()
+        await section('owner', owner)
 
         # ---------- every new screen in five languages at 320 px: nothing off screen, nothing left in English ----------
         async def narrow():
