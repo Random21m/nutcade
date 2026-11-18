@@ -561,6 +561,10 @@ async def run(b, broken):
         await journal_followups(b, broken)
     await section('journal', journal)
 
+    async def busy():
+        await busy_mint(b, broken)
+    await section('busy', busy)
+
 
 # ---------------- 1.13.1 journal follow-ups (steps whose request reaches the mint late) ----------------
 def post_swap(u, body):
@@ -622,6 +626,67 @@ async def journal_followups(b, broken):
     check('shared coin: the step the mint signed is booked as itself: no "spent elsewhere" + "Recovered" pair', not await lines(w, FREE, 'spent elsewhere') and not await lines(w, FREE, 'Recovered'), L)
     await books(w, FREE, 'journal shared', broken)
     check('no script errors (journal follow-ups)', not w.errs, w.errs[:4]); await w.pg.context.close()
+
+
+# ---------------- the check-up never runs beside a deposit being collected (1.14.1) ----------------
+LEGACY = """(async([U,amt])=>{ const S=Nutcade.S; const ws=new CashuLib.Wallet(U,{unit:'sat',bip39seed:CashuLib.mnemonicToSeedSync(S.seed.mnemonic),counterInit:{...S.counters}}); await ws.loadMint();
+  const q=await ws.createMintQuoteBolt11(amt); const id='legacy'+Date.now();
+  S.txs.unshift({id,ts:Date.now(),note:'',status:'pending',fee:0,type:'in',method:'ln',amount:amt,mint:U,quote:q.quote,request:q.request});
+  S.quotes.push({kind:'bolt11',quote:q.quote,request:q.request,amount:amt,mint:U,txId:id}); window.__legacy=id;
+  localStorage.setItem('nutcade:txs',JSON.stringify(S.txs)); localStorage.setItem('nutcade:quotes',JSON.stringify(S.quotes));   // (as the app would have written it)
+  const c0=JSON.stringify(S.counters); await Nutcade.r9.check(U,{startup:true}).catch(()=>{}); const c1=JSON.stringify(S.counters);   // (the check-up, forced at this very moment)
+  await new Promise(r=>setTimeout(r,1200));
+  try { await ws.mintProofsBolt11(amt,q.quote); } catch (e) { if (!/already (signed|issued)|issued|11003|20002|20003/i.test(String(e&&e.message||e))) throw e; }
+  return c0===c1 })"""
+
+
+async def busy_mint(b, broken):
+    u = FREE; w = await fresh(b, u); await fund(w, u, 3000); await inject(w, u, 30)   # (30 tiny coins: a check-up would combine them; the sheet inject leaves open keeps the regular check away)
+    n0 = await count(w, u)
+    # a deposit whose answer was lost (the mint signed it at the counters on its record), and whose recovery fails for now
+    async def lost(route):
+        try: await route.fetch()
+        except Exception: pass
+        try: await route.abort()
+        except Exception: pass
+    async def fail(route):
+        try: await route.fulfill(status=500, headers={'Access-Control-Allow-Origin': '*'}, content_type='application/json', body='{"detail":"test failure"}')
+        except Exception: pass
+    await w.pg.route(u + '/v1/mint/bolt11', lost); await w.pg.route(u + '/v1/restore', fail)
+    await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=receive]'); await w.wait(150)
+    if await w.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await w.click('[data-act=recvMethod][data-m=ln]'); await w.wait(100)
+    await w.fill('#amtIn', '640'); await w.click('[data-act=doLnInvoice]')
+    ok = await w.until(f"Nutcade.S.quotes.some(q=>q.mint==={J(u)}&&q.amount==640&&q.ctr)", 30000); await w.wait(1500)
+    c0 = await w.ev("JSON.stringify(Nutcade.S.counters)"); w.swaps.clear(); L0 = len(await lines(w, u))
+    await w.ev(f"Nutcade.r9.check({J(u)},{{startup:true}})"); await w.wait(500)
+    check('busy mint: a deposit being collected there (its answer lost, its recovery failing for now) and a check-up at that moment: no swap, no counter taken, nothing booked', ok and not w.swaps and await w.ev("JSON.stringify(Nutcade.S.counters)") == c0 and await count(w, u) == n0 and len(await lines(w, u)) == L0, (ok, w.swaps, await count(w, u), n0))
+    await w.pg.unroute(u + '/v1/restore'); await w.pg.unroute(u + '/v1/mint/bolt11')
+    ok = await w.until(f"Nutcade.S.txs.some(t=>t.type==='in'&&t.method==='ln'&&t.amount===640&&t.status==='done'&&t.mint==={J(u)}) && !Nutcade.S.quotes.some(q=>q.amount==640)", 90000)
+    check('busy mint: the deposit is then credited to itself (640 SAT), no "Recovered" line, nothing at 0', ok and not await lines(w, u, 'Recovered') and not await w.ev("Nutcade.S.txs.some(t=>t.type==='in'&&t.method==='ln'&&t.status==='done'&&t.amount===0)"))
+    await w.ev("Nutcade.closeSheet(); Nutcade.openSheet('Test','<p>x</p>')"); await w.ev(f"Nutcade.r9.check({J(u)},{{startup:true}})"); await w.wait(500)
+    check('busy mint: once it is settled, the check-up runs (the small coins combined)', await count(w, u) < n0 - 16 and len(await lines(w, u, 'small coins combined')) == 1, await count(w, u))
+    await books(w, u, 'busy deposit', broken)
+    # the r7 case: a deposit from before 1.12 (no counters on record) issued at the wallet's next counters, the check-up
+    # forced at the moment it is waiting; its recovery's first restore fails
+    await inject(w, u, 30); n1 = await count(w, u)
+    left = {'n': 1}
+    async def once(route):
+        if left['n'] > 0:
+            left['n'] -= 1
+            try: await route.fulfill(status=500, headers={'Access-Control-Allow-Origin': '*'}, content_type='application/json', body='{"detail":"test failure"}')
+            except Exception: pass
+        else:
+            try: await route.continue_()
+            except Exception: pass
+    await w.pg.route(u + '/v1/restore', once); w.swaps.clear()
+    same = await w.ev(LEGACY + f"([{J(u)},640])")
+    ok = await w.until("(Nutcade.S.txs.find(t=>t.id===window.__legacy)||{}).status==='done'", 60000); await w.wait(1000)
+    ct = await w.ev("Nutcade.S.txs.find(t=>t.id===window.__legacy)")
+    check('busy mint (r7 case): the check-up forced while the old-style deposit waits takes no counter and swaps nothing', same and not [s for s in w.swaps if s[1] >= 24], (same, w.swaps))
+    check('busy mint (r7 case): the deposit is credited to itself, 640 SAT, no "Recovered" line', ok and ct and ct['amount'] == 640 and not await lines(w, u, 'Recovered'), ct)
+    await w.pg.unroute(u + '/v1/restore')
+    await books(w, u, 'busy legacy', broken)
+    check('no script errors (busy mint)', not w.errs, w.errs[:4]); await w.pg.context.close()
 
 
 if __name__ == '__main__':
