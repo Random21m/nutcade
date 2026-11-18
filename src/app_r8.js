@@ -28,7 +28,7 @@ function limValue(t) {
 function limEntries(now = Date.now()) {
   const since = now - DAY_MS, g = new Map(), out = [];
   const add = (id, at, v) => { if (!(v > 0)) return; if (!id) { out.push({ at, v }); return; } const x = g.get(id); if (x) { x.v += v; x.at = Math.min(x.at, at); } else g.set(id, { at, v }); };
-  for (const t of S.txs) if (t.type === 'out' && (t.ts || 0) > since && t.note !== 'Ecash already spent elsewhere') add(t.limId, t.ts, limValue(t));
+  for (const t of S.txs) if (t.type === 'out' && (t.ts || 0) > since && t.note !== 'Ecash already spent elsewhere' && !t.upkeep) add(t.limId, t.ts, limValue(t));   // (a keyset check-up isn't spending: the coins stayed this wallet's)
   for (const o of S.ops) if (o.lim && (o.lim.at || o.created || 0) > since) add(o.lim.id, o.lim.at || o.created, num(o.lim.a));
   for (const [id, h] of limHolds) { const x = g.get(id); if (x) { x.v = Math.max(x.v, h.a); } else g.set(id, { at: h.at, v: h.a }); }
   return out.concat([...g.values()]);
@@ -260,7 +260,7 @@ async function makeDuress(pin, amount) {
   let token = null;
   if (amount > 0) { const tx = await sendEcash(amount, 'Sats for the duress PIN wallet', null, url, { approved: true }); token = tx.token; updTx(tx.id, { duressFund: true }); }   // (it counts toward the spending limit; the PIN just entered lets it through)
   const created = Date.now(), dek = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
-  const data = { seed: { mnemonic: newMnemonic(), backedUp: true, created, secured: true }, mints: m ? [JSON.parse(JSON.stringify(m))] : [], active: m ? url : null, proofs: {}, pending: [], quotes: [], ops: [], opsdone: [], counters: {},
+  const data = { seed: { mnemonic: newMnemonic(), backedUp: true, created, secured: true }, mints: m ? [(({ ks, ...r }) => r)(JSON.parse(JSON.stringify(m)))] : [], active: m ? url : null, proofs: {}, pending: [], quotes: [], ops: [], opsdone: [], counters: {},
     txs: token ? [{ id: uid(), ts: created, type: 'in', method: 'ecash', amount, mint: url, note: '', status: 'pending', incoming: cleanToken(token), offline: true, fee: 0 }] : [], prefs: {}, requests: [], contacts: [], nwc: [] };
   const salt = rnd(16), kek = await kekFromPin(pin, salt, PBKDF2_ITER);
   const slot = { kdf: { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(salt) }, pin: await wrapDek(dek, kek), data: await sealBox(dek, data) };

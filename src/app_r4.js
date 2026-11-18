@@ -651,7 +651,7 @@ S.piggy = store.get('piggy', { saved: 0 });
 let internalMove = false, piggyOK = 0;
 const piggySaved = () => S.prefs.piggy ? Math.max(0, Math.min(num(S.piggy.saved), totalBalance())) : 0;
 function piggyRoundUp(t) {
-  if (!S.prefs.piggy || internalMove || t.type !== 'out' || t.piggyBreak) return 0;
+  if (!S.prefs.piggy || internalMove || t.type !== 'out' || t.piggyBreak || t.upkeep || t.note === 'Ecash already spent elsewhere') return 0;   // (not payments: a keyset check-up, coins another device spent)
   const step = +S.prefs.piggyStep || 100, a = num(t.amount);
   const r = (step - a % step) % step; if (!r) return 0;
   S.piggy.saved = num(S.piggy.saved) + r; store.set('piggy', S.piggy);

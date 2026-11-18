@@ -41,7 +41,7 @@ const lsGet = (k, d) => { try { const v = localStorage.getItem('nutcade:' + k); 
 const lsSet = (k, v) => { try { localStorage.setItem('nutcade:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } };
 const lsDel = k => { try { localStorage.removeItem('nutcade:' + k); } catch (e) {} };
 // the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
-const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep'];
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto'];
 const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const walletPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const inVault = k => vault.on && !devKey(k);
@@ -201,7 +201,11 @@ S.counters = store.get('counters', {});  // keysetId -> next counter (NUT-13)
    the mint report log. Nothing is lost. It runs once everything is loaded (and again when the PIN vault opens). */
 function mergeMintSpellings() {
   let changed = false; const seen = new Map(), fix = u => { if (typeof u !== 'string' || !u) return u; const n = normUrl(u); if (n !== u) changed = true; return n; };
-  for (const m of S.mints) { const u = fix(m.url); if (seen.has(u)) { changed = true; continue; } seen.set(u, Object.assign(m, { url: u })); }
+  for (const m of S.mints) {
+    const u = fix(m.url);
+    if (seen.has(u)) { changed = true; const k = seen.get(u), a = (m.ks && m.ks.aside) || []; if (a.length) { k.ks = k.ks || {}; const h = new Set((k.ks.aside || []).map(p => p.secret)); k.ks.aside = (k.ks.aside || []).concat(a.filter(p => !h.has(p.secret))); } continue; }   // (a twin's coins set aside join the merged mint's)
+    seen.set(u, Object.assign(m, { url: u }));
+  }
   S.mints = [...seen.values()];
   const proofs = {};
   for (const [u, ps] of Object.entries(S.proofs || {})) { const k = fix(u), have = proofs[k] || (proofs[k] = []), ids = new Set(have.map(p => p.secret)); for (const p of ps || []) if (!ids.has(p.secret)) { have.push(p); ids.add(p.secret); } }
@@ -366,7 +370,7 @@ async function restoreFromMintNow(url, onStep, opts) {
   if (ranges().some(c => !looked.has(rkey(c)))) throw new Error("The mint didn't answer. Try again in a moment.");
   // from here to the write, no wait: not what we hold, nor a token we sent that hasn't been claimed, nor coins of a
   // payment in flight, nor anything an open step owns
-  const haveNow = () => new Set((S.proofs[url] || []).map(p => p.secret).concat(S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.pending.flatMap(p => p.proofs.map(x => x.secret)), S.extra && S.extra.mint === url ? S.extra.proofs.map(p => p.secret) : [], [...owned]));   // (nor the Extra Life's coins)
+  const haveNow = () => new Set((S.proofs[url] || []).map(p => p.secret).concat(S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.pending.flatMap(p => p.proofs.map(x => x.secret)), S.extra && S.extra.mint === url ? S.extra.proofs.map(p => p.secret) : [], asideOf(url).map(p => p.secret), [...owned]));   // (nor the Extra Life's coins, nor coins set aside by the keyset check-up)
   let fresh = found.filter(p => !haveNow().has(p.secret));
   if (fresh.length) {   // still unspent now (a coin found early may have been spent since), then the last look, with no wait after it
     const st = await inTime(w.checkProofsStates(fresh), 30000); fresh = fresh.filter((p, i) => st[i] && st[i].state === 'UNSPENT');
@@ -394,7 +398,8 @@ async function restoreFromMintNow(url, onStep, opts) {
 /* Same phrase used on another device can leave our counters behind: the mint answers 11003.
    Catch up by rescanning that mint (which also recovers anything new), then retry once. */
 /* A mint that answers a request with an error code (NUT-00) did none of it: it signed nothing for that request. */
-const isRefusal = e => !!e && (e.name === 'MintOperationError' || (e.status >= 400 && e.status < 500 && typeof e.code === 'number'));
+// (a keyset error, 12000-12999, comes wrapped by the library as a StaleKeysetError around the mint's own answer)
+const isRefusal = e => { const x = e && e.name === 'StaleKeysetError' && e.cause ? e.cause : e; return !!x && (x.name === 'MintOperationError' || (x.status >= 400 && x.status < 500 && typeof x.code === 'number')); };
 const isDupOutputs = e => e && (e.code === 11003 || /already signed/i.test(String(e.message || '')));
 async function withRepair(url, fn, ropts) {
   try { const r = await fn(); opMark(url, true); return r; }
@@ -441,6 +446,7 @@ async function getWallet(url) {
   const p = (async () => {
     const w = new L.Wallet(url, { unit: 'sat', bip39seed: seedFor(), counterSource });
     await w.loadMint();
+    ksBind(w);   // (new coins never on a keyset that expires soon, when the mint has another)
     p.ready = w;   // for the few places that need it without waiting (the cost shown on a pay screen)
     return w;
   })();
@@ -467,8 +473,8 @@ function friendly(e, url) {
       : /already spent|token.*spent|proofs? (are|is) spent/i.test(m) ? 'This ecash was already spent.'
       : /not paid|unpaid/i.test(m) ? "That invoice hasn't been paid yet."
       : /pending/i.test(m) ? 'The mint says this payment is still pending.'
+      : /keyset/i.test(m) ? 'The mint changed its keys. Refresh the mint and try again.'   // (before "expired": "keyset has expired" is about the mint's keys, not your request)
       : /expired/i.test(m) ? 'That request expired. Start again.'
-      : /keyset/i.test(m) ? 'The mint changed its keys. Refresh the mint and try again.'
       : /rate.?limit|too many requests/i.test(m) ? 'The mint is busy. Wait a moment and try again.'
       : /insufficient|not enough|balance/i.test(m) ? "There isn't enough to cover this."
       : 'The mint turned this down.';
@@ -1242,7 +1248,10 @@ async function settleOpNow(id) {
     // device holding this wallet): the Extra Life it was renewing is over here. Its sats left the balance when it was set
     // up, so no line for them; past its date it passed to the heir, as when the heir claims it.
     if (xr && xGone && S.extra === xr) { S.extra = null; saveExtra(); if (Date.now() > num((op.follow || {}).until)) extraPassed(xr); }
-    if (fee0) addTx({ type: 'out', method: 'fee', amount: 0, fee: fee0, mint: op.mint, note: 'Mint fee for an interrupted step', status: 'done', settled: true });
+    // a keyset check-up: its own line, as if it had finished (coins set aside coming back: what came in is their line)
+    const ksk = op.follow && (op.follow.k === 'keyset' || op.follow.k === 'keyset-back') ? ksSettled(op, signed, fee0, fresh.length) : null;
+    if (ksk === 'back') { if (added) addTx({ type: 'in', method: 'ecash', amount: added, mint: op.mint, note: 'Coins the mint accepts again', status: 'done', upkeep: true, settled: true }); closeOp(op); save(); return 'settled'; }
+    if (fee0 && !ksk) addTx({ type: 'out', method: 'fee', amount: 0, fee: fee0, mint: op.mint, note: 'Mint fee for an interrupted step', status: 'done', settled: true });
     rest(removed - added - fee0);
   }
   // nothing signed and no coin of it spent: the request may still be on its way to a slow mint (from a tab that was
@@ -1419,7 +1428,7 @@ function setLang() {
 
 /* ---------- sound ---------- */
 const PREF_DEFAULTS = { sound: true, music: true, crt: true, theme: 'neon', btcSymbol: false, fiat: true, currency: 'USD',
-  checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100 };
+  checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100, ksAuto: true };
 for (const k in PREF_DEFAULTS) if (S.prefs[k] === undefined) S.prefs[k] = PREF_DEFAULTS[k];
 S.p2pk = store.get('p2pk', []);   // [{pub, priv, created, used}]
 S.requests = store.get('requests', []);
@@ -2122,7 +2131,7 @@ function txRow(t) {
   const method = { ln: 'LN', ecash: 'ECASH', onchain: 'ON-CHAIN', fee: 'FEE' }[t.method];
   const moved = !(t.status === 'failed' || t.status === 'expired');   // a failed or expired payment moved nothing: its amount is struck through
   const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '') + (t.nwc ? '<span class="chip ecash">NWC</span>' : '') + (t.zap ? '<span class="chip claimed">ZAP</span>' : '') + (t.refused && t.status === 'pending' && isBlocked(t.mint) ? '<span class="chip failed">BLOCKED</span>' : '');
-  const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : t.method === 'fee' ? '-' + fmt(t.fee) : (moved ? sign : '') + fmt(t.amount);
+  const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : t.method === 'fee' ? (num(t.fee) ? '-' + fmt(t.fee) : fmt(0)) : (moved ? sign : '') + fmt(t.amount);
   const wide = amt.length > 11;   // a huge amount gets its own line under the note instead of squeezing the chips
   return `<button class="tx ${t.type}" data-act="tx" data-id="${t.id}"><span class="ico" aria-hidden="true">${t.type === 'in' ? '↓' : '↑'}</span>
     <span class="mid"><div class="note ${t.note ? '' : 'empty'}">${esc(noteText(t.note) || 'Add a note…')}</div>
@@ -2271,7 +2280,7 @@ function viewWallet() {
     </div>
     <div class="scanrow"><button class="btn violet scan-btn" data-act="scan"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h5v1H2v4H1zm9 0h5v5h-1V2h-4zM1 10h1v4h4v1H1zm13 0h1v5h-5v-1h4zM4 4h3v3H4zm5 0h3v3H9zM4 9h3v3H4zm5 0h1v1H9zm2 0h1v1h-1zm-2 2h1v1H9zm2 1h1v1h-1z"/></svg>Scan QR code</button>${window.Chiptune && window.Chiptune.canListen() ? '<button class="btn violet" data-act="ctListen" aria-label="Listen for a code sent as sound"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 1h4v8H6zM4 6h1v3a3 3 0 0 0 6 0V6h1v3a4 4 0 0 1-3.5 4V15h-1v-2A4 4 0 0 1 4 9z"/></svg>Listen</button>' : ''}</div>
     <div class="toolrow"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm pink" data-act="splitOpen">Split a bill</button>${S.extra ? '' : '<button class="btn sm lime" data-act="extraOpen">Extra Life</button>'}<button class="btn sm violet" data-act="huntNew">Treasure hunt</button></div>
-    ${importsPanel()}${splitPanels()}${piggyPanel()}${extraPanel()}${huntsPanel()}
+    ${importsPanel()}${ksAskPanel()}${splitPanels()}${piggyPanel()}${extraPanel()}${huntsPanel()}
     <div id="priceMount"></div>
     <div class="panel">
       <div class="row between"><span class="h2">Recent</span>${S.txs.length ? '<button class="linkbtn" data-act="tab" data-tab="history">All notes</button>' : ''}</div>
@@ -2308,7 +2317,7 @@ function viewMints() {
       <div style="font-family:var(--f-display);font-size:12px;white-space:nowrap">${fmt(balanceOf(m.url))}</div></div>
       <div class="row between" style="gap:8px">${mintHealthLine(m)}${reportChip(m.url)}</div>
       <div class="row" style="flex-wrap:wrap;gap:6px">${methodChips(m)}</div>
-      ${blockedNotice(m.url)}${minNotice(m.url)}
+      ${blockedNotice(m.url)}${minNotice(m.url)}${ksLine(m)}
       <div class="row" style="flex-wrap:wrap">${m.url === S.active ? '<span class="chip ecash">ACTIVE</span>' : `<button class="btn sm lime" data-act="useMint" data-url="${esc(m.url)}">Use</button>`}${isBlocked(m.url) ? '<span class="chip failed">BLOCKED</span>' : ''}
       <button class="btn sm" data-act="refreshMint" data-url="${esc(m.url)}">Refresh</button>
       ${isBlocked(m.url) ? `<button class="btn sm gold" data-act="unblockMint" data-url="${esc(m.url)}">Unblock</button>` : `<button class="btn sm" data-act="blockMint" data-url="${esc(m.url)}">Block</button>`}
@@ -2452,7 +2461,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.13.2';
+const APP_VERSION = '1.14.0';
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
 const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
 const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-about', 'About']];
@@ -2534,6 +2543,7 @@ function viewSettings() {
     <div class="panel" id="set-tools"><span class="h2">Wallet tools</span>
       <p class="th" style="margin:0">Use these if your balance looks wrong or a payment seems stuck.</p>
       <div class="row wrap"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm" data-act="tillOpen">Today's till</button>${S.mints.some(m => canMoveFrom(m.url)) ? '<button class="btn sm" data-act="moveOpen">Move sats between mints</button>' : ''}<button class="btn sm lime" data-act="extraOpen">Extra Life</button></div>
+      ${toggle('ksAuto', 'Keyset check-up', "When a mint retires its keys, NUTCADE moves your coins there to its new keys, and combines many tiny coins, on its own when that is free. When it costs a fee, or with this off, it asks first.")}
       <div class="row wrap"><button class="btn sm violet" data-act="clean">Remove spent ecash</button><button class="btn sm" data-act="reconcileAll">Check stuck payments${inflight ? ` (${inflight})` : ''}</button></div>
     </div>
 
@@ -3662,6 +3672,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_r7.js@@*/
 /*@@app_r8.js@@*/
 /*@@app_daily.js@@*/
+/*@@app_r9.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -3676,12 +3687,12 @@ const ledgerOf = (txs, u) => txs.reduce((s, t) => t.mint !== u || t.status === '
 const outSecret = o => { try { return new TextDecoder().decode(L.hexToBytes(o.s)); } catch (e) { return ''; } };
 function opSettledHere(o) {
   if ((S.opsdone || []).includes(o.id)) return true;
-  const mine = new Set([].concat(Object.values(S.proofs).flat().map(p => p.secret), S.txs.flatMap(t => (t.sent || []).map(p => p.secret)), S.extra ? S.extra.proofs.map(p => p.secret) : []));
+  const mine = new Set([].concat(Object.values(S.proofs).flat().map(p => p.secret), S.txs.flatMap(t => (t.sent || []).map(p => p.secret)), S.extra ? S.extra.proofs.map(p => p.secret) : [], S.mints.flatMap(m => asideOf(m.url)).map(p => p.secret)));
   return (o.outs || []).some(x => mine.has(outSecret(x)));
 }
 const uniqBy = (a, k) => { const seen = new Set(); return (a || []).filter(x => x && x[k] && !seen.has(x[k]) && seen.add(x[k])); };
 // coins this wallet already has at a mint: in the balance, in payments in flight, in tokens not yet claimed, in the Extra Life
-const heldHere = u => new Set((S.proofs[u] || []).map(p => p.secret).concat(S.pending.flatMap(p => p.proofs.map(x => x.secret)), S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.extra ? S.extra.proofs.map(p => p.secret) : []));
+const heldHere = u => new Set((S.proofs[u] || []).map(p => p.secret).concat(S.pending.flatMap(p => p.proofs.map(x => x.secret)), S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.extra ? S.extra.proofs.map(p => p.secret) : [], asideOf(u).map(p => p.secret)));   // (and coins set aside by the keyset check-up)
 // a backup's open deposit is new here only if this wallet isn't watching it already and its line is still waiting (a
 // Lightning deposit) or open (an on-chain address, which can be paid more than once): never one claimed or closed here
 const newQuote = q => !!q && (q.kind === 'bolt11' || q.kind === 'onchain') && typeof q.quote === 'string' && !S.quotes.some(x => x.quote === q.quote) && (t => !!t && (t.status === 'pending' || (q.kind === 'onchain' && t.status === 'done')))(txById(q.txId)) && !S.txs.some(t => t.quote === q.quote && t.id !== q.txId);
@@ -3741,7 +3752,12 @@ async function importBackup(d) {
   if (d.seed && (!S.seed || (S.seed.mnemonic !== d.seed && totalBalance() === 0))) setSeed(d.seed, true);
   for (const k in d.counters || {}) counterSource.advanceToAtLeast(k, d.counters[k]);
   for (const k of d.p2pk || []) if (!S.p2pk.find(x => x.pub === k.pub)) S.p2pk.push(k); store.set('p2pk', S.p2pk);
-  for (const m of d.mints || []) if (m && m.url && !S.mints.find(x => x.url === normUrl(m.url))) S.mints.push(Object.assign({}, m, { url: normUrl(m.url) }));
+  for (const m of d.mints || []) if (m && m.url && !S.mints.find(x => x.url === normUrl(m.url))) S.mints.push(Object.assign({}, m, { url: normUrl(m.url) }, { ks: m.ks && Array.isArray(m.ks.aside) ? { aside: [] } : undefined }));
+  // coins the backup's wallet had set aside (keyset check-up): kept aside here too, each once, never one held already
+  for (const m of d.mints || []) if (m && m.url && m.ks && Array.isArray(m.ks.aside) && m.ks.aside.length) {
+    const mine = S.mints.find(x => x.url === normUrl(m.url)), held = heldHere(mine.url), ks = mine.ks || (mine.ks = {});
+    ks.aside = uniqBy((ks.aside || []).concat(m.ks.aside.filter(p => p && typeof p.secret === 'string' && !held.has(p.secret)).map(p => Object.assign({}, p, { amount: num(p.amount) }))), 'secret');
+  }
   // per mint: its coins, history lines, payments in flight and open steps (a backup's own waiting parts included)
   const part = {}, P = u => part[u] || (part[u] = { proofs: [], txs: [], pending: [], ops: [], quotes: [] });
   for (const [u0, ps] of Object.entries(d.proofs || {})) P(normUrl(u0)).proofs.push(...(Array.isArray(ps) ? ps : []));
@@ -3845,11 +3861,12 @@ const A = {
   addMint: b => run(b, 'ADDING', async () => { if (isBlocked(b.dataset.url)) throw blockedErr(b.dataset.url, 'add'); const m = await addMint(b.dataset.url, { activate: true }); sfx('coin'); toast(`${m.name} added`, 'lime'); closeSheet(); render(); }),
   addMintUrl: b => run(b, 'ADDING', async () => { const u = val('mintUrl'); if (!u.trim()) throw new Error('Type a mint address first.'); if (isBlocked(normUrl(u))) throw blockedErr(normUrl(u), 'add'); const m = await addMint(u, { activate: true }); sfx('coin'); toast(`${m.name} added`, 'lime'); closeSheet(); render(); }),
   useMint: b => { S.active = b.dataset.url; save(); closeSheet(); render(); toast('Mint switched', 'cyan'); },
-  refreshMint: b => run(b, '…', async () => { delete wallets[b.dataset.url]; await addMint(b.dataset.url); render(); toast('Mint info refreshed', 'cyan'); }),
+  refreshMint: b => run(b, '…', async () => { delete wallets[b.dataset.url]; await addMint(b.dataset.url); await ksCheck(b.dataset.url, { manual: true }).catch(() => {}); render(); toast('Mint info refreshed', 'cyan'); }),
   removeMint: b => {
     const u = b.dataset.url, bal = balanceOf(u);
     if (bal > 0) { toast(`Send or move the ${money(bal)} out of this mint before removing it.`, 'red'); sfx('err'); return; }
-    openSheet('Remove mint', `<p style="margin:0">Remove ${esc(host(u))} from NUTCADE? Its transaction notes stay.</p><button class="btn solid red block" data-act="confirmRemove" data-url="${esc(u)}">Remove</button>`);
+    const aside = asideOf(u);
+    openSheet('Remove mint', `<p style="margin:0">Remove ${esc(host(u))} from NUTCADE? Its transaction notes stay.</p>${aside.length ? `<p class="tiny muted" style="margin:0">${aside.length === 1 ? `It also forgets 1 coin (${money(sum(aside))}) the mint no longer accepts.` : `It also forgets ${fmt(aside.length)} coins (${money(sum(aside))}) the mint no longer accepts.`}</p>` : ''}<button class="btn solid red block" data-act="confirmRemove" data-url="${esc(u)}">Remove</button>`);
   },
   confirmRemove: b => { const u = b.dataset.url; S.mints = S.mints.filter(m => m.url !== u); delete S.proofs[u]; if (S.active === u) S.active = S.mints[0] ? S.mints[0].url : null; save(); scheduleMintBackup(); closeSheet(); render(); },
   discover: b => {
@@ -4198,6 +4215,7 @@ const A = {
 /*@@app_r6_actions.js@@*/
 /*@@app_r7_actions.js@@*/
 /*@@app_r8_actions.js@@*/
+/*@@app_r9_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;
@@ -4285,6 +4303,7 @@ async function mintTick(url, startup) {
   for (const p of S.pending.filter(p => p.mint === url)) await step(reconcile(p, { force: !!startup })).catch(() => {});
   await step(fetchPreimages(url)).catch(() => {});
   if (S.prefs.checkSent) for (const t of S.txs.filter(t => t.mint === url && t.status === 'pending' && t.method === 'ecash' && t.sent).slice(0, 10)) await step(checkClaim(t)).catch(() => {});
+  await step(ksCheck(url, { startup: !!startup })).catch(() => {});   // the keyset check-up (last: after the steps and payments above have settled)
 }
 /* A payment settled from its coins' state (the mint's quote check failed at that moment) has no preimage yet: it is
    asked for later, a few times, so Wallet Connect apps and the details can show it. */
@@ -4332,7 +4351,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a) } };
+window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a) }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON } };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}
