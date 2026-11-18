@@ -9530,11 +9530,13 @@ document.addEventListener('visibilitychange', () => {
   const A = arrS(); document.querySelectorAll('#arrStack .arr-card').forEach(c => { if (+c.dataset.at > Date.now()) c.dataset.at = Date.now(); });   // (in front of you from now)
   if (A.unseen.size && document.getElementById('arrStack')) arrSeen([...A.unseen]);
 });
-// called at the start of every render: notices the wallet opening (start, unlock, a wallet just set up)
+// called at the start of every render: notices the wallet opening (NUTCADE starting with a wallet, or unlocking it;
+// not a wallet just made or restored, which has been in front of you all along)
 function arrRendered() {
   try {
-    const A = arrS(), open = arrOpen();
-    if (open && !A.wasOpen) arrAwayStart();
+    const A = arrS(), open = arrOpen(), unlocked = vault.on && vault.open;
+    if (open && !A.wasOpen && (!A.rendered || (unlocked && !A.wasUnlocked))) arrAwayStart();
+    A.rendered = true; A.wasUnlocked = unlocked;
     if (!open && A.wasOpen) arrClear();
     A.wasOpen = open;
     // going to another tab: notices you have had in front of you for a moment are done

@@ -646,7 +646,12 @@ async def main():
             for vw, vh in ((844, 390), (568, 320)):
                 ctx = await b.new_context(viewport={'width': vw, 'height': vh}, device_scale_factor=1, is_mobile=True, has_touch=True, user_agent=IPHONE)
                 await ctx.add_init_script(INIT % J(J({'sound': False, 'music': False, 'crt': False, 'lang': 'en', 'relays': [NOSTR], 'npcHost': MOCK})))
-                u = await wallet(b, ctx=ctx); await u.create(); await u.add_mint(FREE); await u.use(FREE); await u.receive_ln(2000)
+                u = await wallet(b, ctx=ctx); await u.create()
+                check(f'sideways {vw}x{vh}: a wallet just made has no "while you were away" to wait for', await u.ev("!!window.NutArrivals && NutArrivals.awayDone()"))
+                await u.add_mint(FREE); await u.use(FREE); await u.receive_ln(2000)
+                await u.until("!!document.querySelector('#arrStack .arr-card')", 5000)
+                ts = [c['type'] for c in await cards(u)]
+                check(f'sideways {vw}x{vh}: a deposit right after making a wallet gets its notice, not a "while you were away"', ts == ['live'], ts)
                 res = {}
                 for tabn, sel in (('wallet', '[data-act=send]'), ('history', '#app .tx'), ('mints', '#app [data-act=pickMint]'), ('settings', '[data-act=limOpen]')):
                     await u.ev("Nutcade.closeSheet()"); await u.click(f'[data-act=tab][data-tab={tabn}]'); await u.wait(250)
