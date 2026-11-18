@@ -228,7 +228,7 @@ async def tour(b, pa, pb, pc, pd):
         await h.pg.unroute(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'))
         await h.ev("window.__nutcadeTest={lnurlMs:800}"); mock('/test/lnurlw', {'id': vid + 's', 'min': 1, 'max': 50, 'mode': 'slow'})
         await h.pg.route(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'), unpaid)
-        await h.ev(f"Nutcade.handleScan('lnurlw://lnurl.test/lnurlw/{vid}s')"); await h.until("!!document.querySelector('[data-act=lnurlwGo]')", 8000); await h.click('[data-act=lnurlwGo]'); await h.wait(1600); await snap('voucher_waiting')
+        await h.ev(f"void Nutcade.handleScan('lnurlw://lnurl.test/lnurlw/{vid}s')"); await h.until("!!document.querySelector('[data-act=lnurlwGo]')", 8000); await h.click('[data-act=lnurlwGo]'); await h.wait(1600); await snap('voucher_waiting')
         await h.pg.unroute(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'))
         await h.ev("window.__nutcadeTest={}; Nutcade.closeSheet()")
         # blocked mint

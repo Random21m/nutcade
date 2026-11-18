@@ -29,8 +29,10 @@ class W:
         return False
     async def create(s, wrong_first=False):
         await s.pg.check('#ack'); await s.click('[data-act=gateCreate]'); await s.wait(400)
+        await s.until("!!(window.Nutcade && Nutcade.S && Nutcade.S.seed && Nutcade.S.seed.mnemonic)", 15000)   # (a slow machine: wait for the words, not a fixed time)
         phrase=await s.ev("Nutcade.S.seed.mnemonic"); words=phrase.split()
         await s.pg.check('#wrote'); await s.click('[data-act=gateToConfirm]'); await s.wait(200)
+        await s.until("!!document.querySelector('[data-act=gateConfirm]') && !!document.querySelector('[data-cw]')", 15000)
         if wrong_first:
             for el in await s.pg.query_selector_all('[data-cw]'): await el.fill('zebra')
             await s.click('[data-act=gateConfirm]'); await s.wait(300)

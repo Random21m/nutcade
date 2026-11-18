@@ -1,33 +1,66 @@
-# NUTCADE: run every test suite, then publish public/ to GitHub Pages.
-#   test:    runs every test suite against four local Nutshell test mints (fake Lightning) and a stand-in Nostr relay
-#   deploy:  publishes public/ with SHA-256 checksums, only if every check passed
+# NUTCADE: run every test suite in parallel, then publish public/ to GitHub Pages.
+#   page:    checks that public/index.html matches its sources
+#   test:    a matrix of parallel jobs, each running some of the test suites against only the local Nutshell test mints
+#            (fake Lightning) and the stand-in Nostr relay that it needs (tests/run_all.sh --only ...)
+#   deploy:  publishes public/ with SHA-256 checksums. It runs ONLY on main, and only if the page check and every test job passed.
+# Pushes to other branches (and manual runs) run the checks but never deploy.
 name: Test and deploy
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+# Nothing is granted by default; each job asks for what it needs.
+permissions: {}
 
+# A newer push to the same branch cancels a stale run. On main a running run is left alone (it may be deploying).
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  test:
+  page:
     runs-on: ubuntu-latest
     container: mcr.microsoft.com/playwright/python:v1.48.0-noble
-    env:
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      QA_OUT: ${{ github.workspace }}/qa-out
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: The page matches its sources
         run: python3 build.py --check
+
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright/python:v1.48.0-noble
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false   # let every job finish, so one run shows everything that failed
+      matrix:
+        include:
+          # roughly balanced by duration (grid_backup ~16 min, r7 ~10, r8 ~10, polish ~8, the rest short)
+          - name: grid_backup
+            suites: grid_backup
+          - name: r7
+            suites: r7
+          - name: r8
+            suites: r8
+          - name: polish
+            suites: polish
+          - name: core
+            suites: wallet,crash,pin,games_smoke,round2,v16,r3
+          - name: r4-r6
+            suites: r4,r5,r6
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      QA_OUT: ${{ github.workspace }}/qa-out
+      SUITES: ${{ matrix.suites }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Test-mint environment (Nutshell, fake Lightning)
         run: |
           python3 -m venv /tmp/mint || (apt-get update -qq && apt-get install -y -qq python3-venv && python3 -m venv /tmp/mint)
@@ -37,19 +70,31 @@ jobs:
         run: |
           python3 -m venv /tmp/qa
           /tmp/qa/bin/pip install -q playwright==1.48.0 pillow==11.0.0
-      - name: Run all test suites
-        run: MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh
+      - name: Run the test suites (${{ matrix.suites }})
+        run: MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh --only "$SUITES"
+      - name: The end of each suite log (when a suite failed)
+        if: failure()
+        run: for f in qa-out/*_qa.log; do echo "=== $f ==="; tail -n 40 "$f" | cut -c1-400; done
       - name: Keep logs and screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: qa-out
+          name: qa-out-${{ matrix.name }}
           path: qa-out/
           retention-days: 7
 
   deploy:
-    needs: test
+    # Only main deploys, and only when the page check and EVERY test job passed (needs: waits for all of the matrix).
+    if: github.ref == 'refs/heads/main'
+    needs: [page, test]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.pages.outputs.page_url }}
