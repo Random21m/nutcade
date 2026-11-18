@@ -21,3 +21,5 @@
 .arr-total span:last-child{color:var(--lime);white-space:nowrap}
 .arr-acts{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
 .arr-lock{margin-bottom:10px;text-align:center}
+/* a game or the till fills the screen: the notices wait under it */
+body:has(.game-view,.cashier) .arr-stack{display:none}

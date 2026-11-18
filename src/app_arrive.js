@@ -24,7 +24,7 @@ arrS();
 const ARR_TAG = 'nutcade-arrival';
 const ARR_KINDS = ['ln', 'onchain', 'npc', 'nwc', 'request', 'nostr', 'token', 'back'];
 const ARR_LABEL = { ln: 'Lightning deposit', onchain: 'On-chain deposit', npc: 'Lightning address', nwc: 'Wallet Connect invoice', request: 'Payment request paid', nostr: 'Ecash over Nostr', token: 'Ecash claimed', back: 'Came back to you' };
-const arrOpen = () => !!(S.seed && S.seed.backedUp) && !tabLocked && !writeGuard.paused && !(vault.on && !vault.open);
+function arrOpen() { return !!(S.seed && S.seed.backedUp) && !tabLocked && !writeGuard.paused && !(vault.on && !vault.open); }
 function arrLedger() {
   const l = raw.get('arrivals', null);
   return l && l.v === 1 && Array.isArray(l.seen) && Array.isArray(l.pend) ? l : { v: 1, since: arrS().base, seen: [], pend: [] };
@@ -179,7 +179,7 @@ async function arrLockedBoot() {
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') { try { await reg.showNotification('NUTCADE', { body: tr('Money arrived, unlock to see.'), tag: ARR_TAG, icon: 'icon-192.png', silent: true, data: { g: 1 } }); } catch (e) {} }
   const pad = document.querySelector('.pinpad'); if (pad && vault.on && !vault.open && !document.querySelector('.arr-lock')) pad.insertAdjacentHTML('beforebegin', arrLockHTML());
 }
-const arrLockHTML = () => arrS().lockLine ? '<div class="notice cyan arr-lock" role="status"><span aria-hidden="true">↓ </span><span>Money arrived, unlock to see.</span></div>' : '';
+function arrLockHTML() { return arrS().lockLine ? '<div class="notice cyan arr-lock" role="status"><span aria-hidden="true">↓ </span><span>Money arrived, unlock to see.</span></div>' : ''; }
 setTimeout(() => { arrLockedBoot().catch(() => {}); }, 0);
 
 /* ---------- Settings: Look & sound ---------- */
