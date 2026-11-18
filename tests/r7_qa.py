@@ -5,16 +5,6 @@ new screen at 375 px in English and German."""
 import asyncio, json, os, re, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 from wallet_qa import W, check, results, A, B, URL, invoice, outside_net
-_orig_ev = W.ev
-async def _dbg_ev(s, js):
-    try: return await _orig_ev(s, js)
-    except Exception as e:
-        print('NAVDBG ev failed', str(e)[:70], '| js=', js[:140], '| url=', s.pg.url, flush=True)
-        await asyncio.sleep(2); print('NAVDBG url after 2s', s.pg.url, flush=True)
-        try: print('NAVDBG state', await _orig_ev(s, "[performance.now(), document.readyState, performance.getEntriesByType('navigation')[0].type]"), flush=True)
-        except Exception as e2: print('NAVDBG state failed', str(e2)[:80], flush=True)
-        raise
-W.ev = _dbg_ev
 
 MOCK = 'http://127.0.0.1:3350'
 FM = 'http://127.0.0.1:3340'
@@ -59,13 +49,6 @@ async def wallet(b, vw=375, vh=667, lang='en', mobile=True, init=None):
     pg = await ctx.new_page(); w = W(pg, 'r7')
     pg.on('pageerror', lambda e: w.errs.append('PAGEERROR ' + str(e)))
     pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and not outside_net(m.text) and 'lnurl.test' not in m.text and 'down.test' not in m.text else None)
-    import time as _t
-    pg.on('framenavigated', lambda f: print('NAVDBG', round(_t.time() % 1000, 1), lang, f.url[:80], flush=True) if f == pg.main_frame else None)
-    pg.on('crash', lambda: print('NAVDBG crash', lang, flush=True))
-    pg.on('console', lambda m: print('NAVDBG console', round(_t.time() % 1000, 1), m.type, m.text[:160].replace('\n', ' '), flush=True) if m.type in ('error', 'warning') or 'NAVDBG' in m.text else None)
-    pg.on('load', lambda p_: print('NAVDBG load', round(_t.time() % 1000, 1), flush=True))
-    pg.on('framedetached', lambda f: print('NAVDBG detached', round(_t.time() % 1000, 1), f.url[:60], flush=True))
-    await ctx.add_init_script("try{navigation.addEventListener('navigate',e=>console.log('NAVDBG-PAGE '+e.navigationType+' '+e.destination.url+' '+performance.now()))}catch(e){}")
     await pg.goto(URL); await pg.wait_for_timeout(700)
     return w
 
@@ -245,7 +228,7 @@ async def tour(b, pa, pb, pc, pd):
         await h.pg.unroute(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'))
         await h.ev("window.__nutcadeTest={lnurlMs:800}"); mock('/test/lnurlw', {'id': vid + 's', 'min': 1, 'max': 50, 'mode': 'slow'})
         await h.pg.route(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'), unpaid)
-        await h.ev(f"Nutcade.handleScan('lnurlw://lnurl.test/lnurlw/{vid}s')"); await h.until("!!document.querySelector('[data-act=lnurlwGo]')", 8000); await h.click('[data-act=lnurlwGo]'); await h.wait(1600); await snap('voucher_waiting')
+        await h.ev(f"void Nutcade.handleScan('lnurlw://lnurl.test/lnurlw/{vid}s')"); await h.until("!!document.querySelector('[data-act=lnurlwGo]')", 8000); await h.click('[data-act=lnurlwGo]'); await h.wait(1600); await snap('voucher_waiting')
         await h.pg.unroute(re.compile(r'http://127\.0\.0\.1:3338/v1/mint/quote/bolt11/.+'))
         await h.ev("window.__nutcadeTest={}; Nutcade.closeSheet()")
         # blocked mint
