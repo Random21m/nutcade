@@ -37,6 +37,11 @@ async def open_road(w, start=True):
     if start:
         await w.pg.keyboard.press('Space'); await w.wait(250)
 
+async def steps(w, n):
+    """wait for n game steps (the game's own 60 Hz counter, window.__st.t), not for n/60 seconds: a loaded machine runs fewer steps per second"""
+    t0 = await w.ev("window.__st.t")
+    await w.until(f"window.__st.t >= {t0 + n}", 60000)
+
 async def wait_go(w):
     ok = await w.until("window.__st&&window.__st.go===0", 8000); await w.wait(100); return ok
 
@@ -118,30 +123,30 @@ async def main():
         check('play: starts with a countdown', await w.ev("window.__st&&window.__st.go>0"))
         check('play: the clock waits for the countdown', await w.ev("window.__st.tl===50*60"))
         check('play: the countdown ends', await wait_go(w), await w.ev("window.__st.go"))
-        await w.pg.keyboard.down('ArrowRight'); await w.wait(500)
+        await w.pg.keyboard.down('ArrowRight'); await steps(w, 30)
         steer = await w.ev("window.__st.steer"); await w.pg.keyboard.up('ArrowRight')
         check('play: the right arrow steers right', steer > 0.4, steer)
-        await w.pg.keyboard.down('KeyA'); await w.wait(500)
+        await w.pg.keyboard.down('KeyA'); await steps(w, 30)
         steer = await w.ev("window.__st.steer"); await w.pg.keyboard.up('KeyA')
         check('play: A steers left', steer < -0.4, steer)
-        await w.ev('window.__st.px = 0'); await w.pg.keyboard.down('ArrowUp'); await w.wait(2500)
+        await w.ev('window.__st.px = 0'); await w.pg.keyboard.down('ArrowUp'); await steps(w, 150)
         sp = await w.ev("window.__st.spd"); await w.pg.keyboard.up('ArrowUp')
         check('play: the up arrow speeds up', sp > 100, sp)
-        await w.pg.keyboard.down('ArrowUp'); await w.ev('window.__st.px = 0'); await w.wait(1200); await w.pg.keyboard.up('ArrowUp'); sp = await w.ev('window.__st.spd')
-        await w.pg.keyboard.down('ArrowDown'); await w.wait(900)
+        await w.pg.keyboard.down('ArrowUp'); await w.ev('window.__st.px = 0'); await steps(w, 72); await w.pg.keyboard.up('ArrowUp'); sp = await w.ev('window.__st.spd')
+        await w.pg.keyboard.down('ArrowDown'); await steps(w, 54)
         sp2 = await w.ev("window.__st.spd"); await w.pg.keyboard.up('ArrowDown')
         check('play: the down arrow brakes', sp2 < sp * 0.7, (sp, sp2))
-        await w.pg.keyboard.down('KeyW'); await w.wait(1500); await w.pg.keyboard.up('KeyW')
+        await w.pg.keyboard.down('KeyW'); await steps(w, 90); await w.pg.keyboard.up('KeyW')
         # touch: the sides of the screen steer, the top brakes
         box = await w.pg.locator('#gameCanvas').bounding_box()
-        await w.pg.mouse.move(box['x'] + box['width'] * 0.15, box['y'] + box['height'] * 0.8); await w.pg.mouse.down(); await w.wait(500)
+        await w.pg.mouse.move(box['x'] + box['width'] * 0.15, box['y'] + box['height'] * 0.8); await w.pg.mouse.down(); await steps(w, 30)
         sl = await w.ev("window.__st.steer"); await w.pg.mouse.up()
-        await w.pg.mouse.move(box['x'] + box['width'] * 0.85, box['y'] + box['height'] * 0.8); await w.pg.mouse.down(); await w.wait(500)
+        await w.pg.mouse.move(box['x'] + box['width'] * 0.85, box['y'] + box['height'] * 0.8); await w.pg.mouse.down(); await steps(w, 30)
         sr = await w.ev("window.__st.steer"); await w.pg.mouse.up()
         check('touch: pressing the left and right halves steers', sl < -0.4 and sr > 0.4, (sl, sr))
-        await w.pg.mouse.move(box['x'] + box['width'] * 0.3, box['y'] + box['height'] * 0.8); await w.pg.mouse.down(); await w.wait(300)
+        await w.pg.mouse.move(box['x'] + box['width'] * 0.3, box['y'] + box['height'] * 0.8); await w.pg.mouse.down(); await steps(w, 18)
         gas = await w.ev("[window.__st.gasOn, window.__st.brakeOn]"); await w.pg.mouse.up()
-        await w.pg.mouse.move(box['x'] + box['width'] * 0.5, box['y'] + box['height'] * 0.15); await w.pg.mouse.down(); await w.wait(300)
+        await w.pg.mouse.move(box['x'] + box['width'] * 0.5, box['y'] + box['height'] * 0.15); await w.pg.mouse.down(); await steps(w, 18)
         brk = await w.ev("[window.__st.gasOn, window.__st.brakeOn]"); await w.pg.mouse.up(); await w.wait(150)
         idle = await w.ev("[window.__st.gasOn, window.__st.brakeOn]")
         check('touch: touching the road drives, touching the top brakes, letting go coasts', gas == [True, False] and brk == [False, True] and idle == [False, False], (gas, brk, idle))

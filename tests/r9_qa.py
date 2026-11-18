@@ -498,9 +498,12 @@ async def run(b, broken):
         # at the same moment
         bk2 = await backup(d1); d3 = await fresh(b); await restore_json(d3, bk2)
         k2 = await rotate(FREE)
-        r = await asyncio.gather(reopen(d1, FREE), reopen(d3, FREE))
+        # (in a fixed order, d1 then d3, so d1 is always the one that moves the coins and d3 the one that finds them spent elsewhere. Two devices
+        # opened truly together decide by luck which of them holds the coins, and the checks below on the new device need to know which.)
+        r = [await reopen(d1, FREE)]
+        r.append(await reopen(d3, FREE))
         await d1.wait(1500); await d3.wait(1500)
-        r = r + await asyncio.gather(reopen(d1, FREE), reopen(d3, FREE))   # (whatever one of them saw in flight is settled by the next opening)
+        r = r + [await reopen(d1, FREE), await reopen(d3, FREE)]   # (whatever one of them saw in flight is settled by the next opening)
         f1 = [t for t in await lines(d1, FREE) if t.get('fee')]; f3 = [t for t in await lines(d3, FREE) if t.get('fee')]
         k_1 = set(await ids(d1, FREE)); k_3 = set(await ids(d3, FREE))
         check('two devices at once: both settle, no fee anywhere, no old coins left', all(r) and not f1 and not f3 and k_1 <= {k2} and k_3 <= {k2}, (r, f1, f3, k_1, k_3))

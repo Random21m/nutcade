@@ -134,7 +134,10 @@ class W:
         await s.click('[data-act=send]'); await s.wait(150)
         await s.fill('#amtIn', str(amt));
         if note: await s.fill('#noteIn', note)
+        n0=await s.ev("Nutcade.S.txs.length")
         await s.click('[data-act=doSendEcash]'); await s.wait(1500)
+        # (a slow machine: the token is made a moment later; wait for the new history line to have it, or for the error)
+        await s.until(f"!!((document.querySelector('#sheetErr')||{{}}).innerText||'').trim() || !!document.querySelector('#limitLayer') || (Nutcade.S.txs.length>{n0} && !!Nutcade.S.txs[0].token)", 15000)
         e=await s.err(); tok=None
         if not e: tok=await s.ev("Nutcade.S.txs[0].token")
         await s.close(); return tok, e
