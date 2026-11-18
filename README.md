@@ -85,7 +85,7 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 - Take back a sent token if nobody claimed it, and see when one was claimed
 - Coin-drop and 1UP effects when sats arrive, and a launch effect when you send
 
-**Arcade**: eight original cabinets with high-score tables, chiptune sound and music
+**Arcade**: nine original cabinets with high-score tables, chiptune sound and music
 
 | Cabinet | Style |
 |---|---|
@@ -97,6 +97,7 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 | Sky Shield | Missile defense |
 | Nibble | Snake |
 | Nut Flipper | Pinball: light N-U-T for a multiplier, drop the S-A-T targets, hunt the gold sat |
+| Nut Poker | Five-card draw video poker, jacks or better, for **free credits only** (never sats) |
 
 Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons (tap **Use D-pad** above the controls if you'd rather have arrow buttons).
 
@@ -169,6 +170,12 @@ Hunters scan the cards with their phone camera or the NUTCADE scanner. Each card
 ### Loaded score cards
 
 When you share a high-score or trophy card, type an amount under **Put sats in it** and tap **Load card**. The card is redrawn with a QR code and "INSERT COIN: SCAN TO WIN". It works like a one-card treasure hunt: the first person to scan it wins the sats, and if nobody does within a week, they come back to you. Anyone who sees the card can scan it, so only load what you're happy to give away.
+
+### Nut Poker (free credits only)
+
+Pick **Nut Poker** in the Arcade. You start with 100 credits. Tap **Bet one** (1 to 5 credits, it wraps round) or **Bet max**, then **Deal**: five cards are dealt face up. Tap a card to **HOLD** it (shown under the card), then **Draw** to swap the others for new cards from the same deck. The hand is scored against the pay table, which stays on screen with the current bet's column lit and the winning row flashing. It is the usual 9/6 jacks-or-better table, multiplied by your bet: royal flush 250 (4000 at max bet), straight flush 50, four of a kind 25, full house 9, flush 6, straight 4, three of a kind 3, two pair 2, jacks or better 1. A pair of 10s or lower pays nothing, and A-2-3-4-5 counts as a straight. The deck is shuffled fresh for every hand with the browser's cryptographic random numbers (`crypto.getRandomValues`), not the games' seeded generator, and the draw comes from the same shuffled deck. Keys: **1 to 5** hold, **D** or **Enter** deal / draw, **B** bet one, **M** bet max, **E** end the run, **P** pause.
+
+**Free credits only, never sats.** The credits are play money. They can't be bought with sats, can't be cashed out, and aren't linked to your wallet, mints or any payment in any way. Run out and you get a **FREE REFILL** to 100. The high score is the most credits you have held in one run; it is saved when you end the run or leave. Because of this, a Nut Poker score card can never be loaded with sats (no **Put sats in it** / **Load card**), and there are no challenges or bounties for it. Nut Poker's code (`src/poker.js`) contains no wallet or payment code.
 
 ### Extra Life
 
@@ -337,6 +344,7 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Changelog
 
+- **Unreleased:** **Nut Poker**, a ninth cabinet: five-card draw video poker (jacks or better, 9/6 pay table) for free credits only. It is never linked to sats: no purchases, no cash-out, a free refill at 0 credits, and its score card can't be loaded with sats. Hands are dealt from a fair cryptographically shuffled deck.
 - **v1.13.0:** a **spending limit** for the whole wallet (ask for the PIN above an amount per payment, and a cap per 24 hours, over every way sats leave, fees included, held for each payment in one step so two taps or two tabs can't both slip under it; kept in the PIN vault, changed only with the PIN; Wallet Connect apps get QUOTA_EXCEEDED); a **duress PIN** that opens a small separate wallet instead of yours (funded with coins of its own) (the vault always has room for it, both keys are tried on every PIN, and the real wallet is never read while the other is open; see Safety for what it can't hide); mints with a request limit (NUT-06 `max_array_length`): NUTCADE needs at least 128, a mint below that can't be added, coin picks stay within a mint's limit, restores and checks go in pieces, big tokens are claimed in parts, and a mint that drops below 128 takes no deposits but its sats can still move out; a **Report a problem** form (Settings → About); every GitHub Action pinned to a commit. Fixes: a treasure hunt (or any step) that moved sats and then failed redraws the screen at once; "Need X SAT including fees" counts the mint's fee to spend ecash; a token taken back on a mint with fees shows one fee line for what it cost; "already spent" with nothing to remove no longer says "removed 0 SAT"; long mint names and notes wrap instead of being cut off.
   - Known issues in v1.13.0: Wallet Connect can't ask for your PIN, so a payment over a limit from an app is refused (nothing paid, nothing taken from its budget), never let through. A mint that accepts fewer than 128 items per request can't be used for deposits; if a mint you use drops below that, npub.cash may still try to pay your Lightning address there (turn the address off or point it at another mint), and moving out of it may leave part of a payment's unused fee reserve with the mint (shown before you pay). Inside the duress wallet a duress PIN, Remove PIN and Face ID set-up aren't available (the same answer as a used-up PIN-change allowance), and Reset wallet there keeps the PIN; the allowance counter is plain device storage that someone with developer tools can read or clear (they could attack the vault directly anyway): someone who studies NUTCADE can notice these. The v1.12.1 known issues still apply.
 - **v1.12.1:** fixes for a backup restored on a second phone while the first phone keeps using the same wallet: a payment the mint refuses to the second phone (the first phone already claimed it) no longer shows up there as received with a matching "Ecash already spent elsewhere" line, and a deposit the first phone collected is closed on the second phone with nothing, instead of being credited with other coins of the wallet; only what the mint signed for a step is ever booked to it. A payment to a payment request that was cut off (a reload, a closed tab, a lost answer from the mint) now reaches the requester when the wallet is back, once, with the same ecash (and if it can't be delivered after several tries, the sats come back with a line that says so); a treasure hunt whose prize no relay took is published on a later start; a recovered bounty's challenge goes to your friend at most once; an heir's copy or an offered bounty whose mint was down when a backup came in is checked again later; a token saved offline and claimed since on the phone it was saved on no longer shows as "failed" on a phone restored from both backups. In German, Spanish, Portuguese and French, bounty, prize and Extra Life lines with amounts of 1,000 SAT or more are translated too. Also: send by sound is now an open standard ([docs/SOUND-SPEC.md](docs/SOUND-SPEC.md), with test recordings), the README shows how to add NUTCADE to your home screen on every device, and two automatic history notes are now translated.
