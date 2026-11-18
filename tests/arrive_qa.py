@@ -13,7 +13,7 @@ announced twice (across reloads, tabs and restores).
 
 Uses two local test mints (ARR_FEE, default 3338, with input fees; ARR_FREE, default 3339, without) and mock_nostr.py
 (ARR_NOSTR, default ws://127.0.0.1:3350/relay; it also stands in for npub.cash). ARR_ONLY=a,b runs some sections
-(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, langs, widths, game). ARR_SHOTS: where screenshots go
+(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, langs, widths, game, till). ARR_SHOTS: where screenshots go
 (default QA_OUT)."""
 import asyncio, json, os, re, time, urllib.request
 from playwright.async_api import async_playwright
@@ -233,10 +233,45 @@ def kind_of(line, reqs, nwc):
     return None
 
 
-async def summary_rows(w):
-    """the summary's lines: kind -> (count, total), read from the card"""
-    return await w.ev("""(()=>{const c=document.querySelector('#arrStack .arr-card[data-type=away]'); if(!c) return null;
-      const o={}; for(const l of c.querySelectorAll('.arr-line')) o[l.dataset.k]=[+l.dataset.n, +l.dataset.a]; return {rows:o, ids:(c.dataset.ids||'').split(' ').filter(Boolean), text:c.innerText}})()""")
+async def summary_rows(w, keep=False):
+    """the summary: its card (one line), then its Details sheet's lines: kind -> (count, total). The sheet is closed
+    again unless keep."""
+    card = await w.ev("""(()=>{const c=document.querySelector('#arrStack .arr-card[data-type=away]'); if(!c) return null; return {ids:(c.dataset.ids||'').split(' ').filter(Boolean), text:c.innerText}})()""")
+    if not card: return None
+    await w.ev("document.querySelector('#arrStack .arr-card[data-type=away] [data-act=arrMore]')?.click()"); await w.wait(350)
+    d = await w.ev("""(()=>{const d=document.querySelector('#layer .arr-details'); if(!d) return null; const o={}; for(const l of d.querySelectorAll('.arr-line')) o[l.dataset.k]=[+l.dataset.n, +l.dataset.a];
+      return {rows:o, ids:(d.dataset.ids||'').split(' ').filter(Boolean), text:(document.querySelector('#layer .sheet')||d).innerText}})()""")
+    if not keep: await w.ev("Nutcade.closeSheet()"); await w.wait(150)
+    if not d: return dict(card, rows={}, text=card['text'])
+    return {'rows': d['rows'], 'ids': card['ids'] if card['ids'] == d['ids'] else ['details differ'] + d['ids'], 'text': card['text'] + '\n' + d['text']}
+
+
+# what a notice covers on the wallet screen (scrolled to the top): the balance, the lock, the mint, Receive and Send are
+# sampled at their centre and corners; the card itself must be on screen with its buttons reachable
+COVER_JS = """(()=>{scrollTo(0,0); const out=[]; const sel={balance:'.credit-num', lock:'[data-act=lockNow]', mint:'#app .mint-pill', receive:'#app [data-act=receive]', send:'#app [data-act=send]'};
+  for(const [k,s] of Object.entries(sel)){const e=document.querySelector(s); if(!e) continue; const r=e.getBoundingClientRect(); if(!r.width) continue;
+    for(const [x,y] of [[.5,.5],[.1,.15],[.9,.15],[.1,.85],[.9,.85]]){const px=r.left+r.width*x, py=r.top+r.height*y; if(py<0||py>innerHeight) continue; const h=document.elementFromPoint(px,py); if(h&&h.closest('.arr-card')){out.push(k);break}}}
+  const c=document.querySelector('#arrStack .arr-card'); if(!c) return {covered:out, card:null};
+  const q=c.getBoundingClientRect(); const btn=[...c.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect(); const h=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2); return h&&(h===b||b.contains(h))});
+  return {covered:out, card:[Math.round(q.top),Math.round(q.bottom)], inview:q.top>=0&&q.bottom<=innerHeight&&q.left>=0&&q.right<=innerWidth, buttons:btn.every(Boolean)&&btn.length>=2}})()"""
+SIZES = [(320, 640), (375, 667), (430, 932), (1440, 900), (844, 390), (568, 320)]
+
+
+async def looks(w, label, details=True):
+    """the notice on screen at every size: covers nothing that matters, fully in view, its buttons reachable; at
+    568x320 its Details sheet's buttons too"""
+    bad = {}
+    for vw, vh in SIZES:
+        await w.pg.set_viewport_size({'width': vw, 'height': vh}); await w.wait(150)
+        c = await w.ev(COVER_JS)
+        if not c['card'] or c['covered'] or not c['inview'] or not c['buttons']: bad[f'{vw}x{vh}'] = c
+    check(f'{label}: at 320/375/430/1440 px and 844x390/568x320 it covers no balance, lock, mint, Receive or Send, and its buttons are on screen', not bad, bad)
+    if details:
+        await w.ev("document.querySelector('#arrStack .arr-card [data-act=arrMore]')?.click()"); await w.wait(350)
+        reach = await w.ev("""(()=>{const out={}; for(const s of ['#layer [data-act=arrNotes]','#layer [data-act=close]']){const e=[...document.querySelectorAll(s)].pop(); if(!e){out[s]='missing';continue} e.scrollIntoView({block:'center'}); const q=e.getBoundingClientRect();
+          const h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2); out[s]=q.top>=0&&q.bottom<=innerHeight&&h&&(h===e||e.contains(h))?'ok':'not reachable'} return out})()""")
+        check(f'{label}: at 568x320 its Details sheet has Open notes and OK on screen', all(v == 'ok' for v in reach.values()), reach)
+    await w.pg.set_viewport_size({'width': 390, 'height': 844}); await w.wait(150)
 
 
 async def shot(w, name):
@@ -385,7 +420,10 @@ async def main():
             for l in lines:
                 k = want_k.get(l['amount']) or ('token' if l['mint'] == FEE else '?')
                 kinds.setdefault(k, []).append(l)
-            sm = await summary_rows(r)
+            if shotname: await shot(r, shotname)
+            if label.startswith('closed'): await looks(r, f'{label}: the one-line summary', details=False)
+            sm = await summary_rows(r, keep=True)
+            if shotname: await shot(r, shotname + '-details')
             check(f'{label}: every kind arrived and is in the history', set(kinds) == set(KINDS), {k: [x['amount'] for x in v] for k, v in kinds.items()})
             check(f'{label}: a summary of what arrived while away', done and bool(sm), sm)
             exp = {k: [len(v), sum(x['amount'] for x in v)] for k, v in kinds.items()}
@@ -393,8 +431,7 @@ async def main():
             check(f'{label}: the summary is exactly those lines', bool(sm) and sorted(sm['ids']) == sorted(l['id'] for l in lines), (sm and sm['ids'], [l['id'] for l in lines]))
             check(f'{label}: the summary names each kind and the total', bool(sm) and all(LABEL[k] in sm['text'] for k in KINDS) and fmtn(sum(x['amount'] for x in lines)) in sm['text'], sm and sm['text'])
             check(f'{label}: no separate notice for them as well', not [c for c in await cards(r) if c['type'] == 'live'])
-            if shotname: await shot(r, shotname)
-            await r.ev("document.querySelector('#arrStack [data-act=arrNotes]')?.click()"); await r.wait(300)
+            await r.ev("document.querySelector('#layer [data-act=arrNotes]')?.click()"); await r.wait(300)
             check(f'{label}: the summary links to the notes (history)', await r.ev("!!document.querySelector('[data-act=tab][data-tab=history][aria-current]')") and not await r.ev("!!document.querySelector('#arrStack .arr-card[data-type=away]')"))
             await r.home(); await r.wait(300)
             return lines
@@ -486,10 +523,12 @@ async def main():
                 await settings(r); await r.ev("document.querySelector('#p_arrNotify')&&document.querySelector('#p_arrNotify')?.click()"); await r.wait(600)
             await r.home()
             # a detailed notification while unlocked (background tab), then the app locks
-            t_seen = int(time.time() * 1000)
+            t_seen = int(time.time() * 1000); await r.ev("__sys.length=0")
             await r.ev("__hide(true)"); a = next(amt); line = await arrive('npc', FREE, a, hidden=True)
             before = await r.ev(SYSN_JS)
-            check('locked: (a notification with the amount while unlocked)', any(fmtn(a) in n['body'] for n in before), before)
+            sysn = await r.ev("__sys")
+            check('with a PIN: a system notification never shows the amount or the mint, only "Money arrived. Open NUTCADE to see."',
+                  bool(sysn) and bool(before) and all(not re.search(r'\d|Mint|SAT', n['body'] + n['title']) and 'Open NUTCADE to see' in n['body'] for n in sysn + before), (sysn, before))
             async def lock(): await r.pg.reload(); await r.wait(1500)
             async def look_locked():
                 await r.wait(1500)
@@ -543,9 +582,10 @@ async def main():
             await d.until("/READY/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 30000); await d.ev("Nutcade.closeSheet()")
             await settings(d); await d.ev("document.querySelector('#p_arrNotify')?.click()"); await d.wait(600); await d.home(); await dismiss(d)
             # the real wallet gets ecash in a background tab (a detailed notification), then the app locks
-            await d.ev("__hide(true)"); await dm(p, dpk, 777, FREE)
+            await d.ev("__hide(true)"); await d.ev("__sys.length=0"); await dm(p, dpk, 777, FREE)
             ok = await d.until("Nutcade.S.txs.some(t=>t.amount===777&&t.status==='done')", 20000); await d.wait(1500)
             check('duress: (the real wallet got 777 SAT in a background tab)', ok)
+            check('duress PIN set up: the real wallet shows no system notification at all', ok and await d.ev("__sys.length") == 0 and not await d.ev(SYSN_JS), (await d.ev("__sys"), await d.ev(SYSN_JS)))
             real_ids = await d.ev("Nutcade.S.txs.map(t=>t.id)")
             await d.pg.reload(); await d.wait(1500)
             ns = await d.ev(SYSN_JS); body = await d.ev("document.body.innerText")
@@ -554,8 +594,13 @@ async def main():
             await unlock(d, DPIN); await settled(d)
             check('duress wallet: no summary of the real wallet\'s arrival', not await cards(d), await cards(d))
             check('duress wallet: its record of arrivals knows nothing of the real wallet', await has(d) and not await d.ev(f"(ids=>{{const j=JSON.stringify(NutArrivals.ledger()); return ids.some(i=>j.includes(i))}})({J(real_ids)})"))
-            a = 888; tok = await token_from(p, a, FREE); await claim(d, tok)
-            await d.until(f"Nutcade.S.txs.some(t=>t.amount===888&&t.status==='done')", 15000); await d.wait(1500)
+            a = 888; tok = await token_from(p, a, FREE)
+            async def slow(route): await asyncio.sleep(1.5); await route.continue_()
+            await d.pg.route(re.compile(re.escape(FREE) + r'/v1/swap$'), slow); await d.ev("__sys.length=0")
+            await claim(d, tok); await d.wait(200); await d.ev("__hide(true)")
+            await d.until(f"Nutcade.S.txs.some(t=>t.amount===888&&t.status==='done')", 15000); await d.wait(1500); await d.pg.unroute_all()
+            check('duress wallet: its arrival in a background tab shows no system notification either', await d.ev("__sys.length") == 0 and not await d.ev(SYSN_JS), await d.ev("__sys"))
+            await d.ev("__hide(false)"); await d.wait(300)
             cs = await cards(d)
             check('duress wallet: its own arrival gets a notice', len(cs) == 1 and '+888 SAT' in cs[0]['text'], cs)
             await shot(d, 'notice-duress-390')
@@ -580,18 +625,28 @@ async def main():
                 miss = [m for m in await r.ev("[...(window.__i18nMiss||[])]") if any(m in c['text'] for c in cs)]
                 check(f'{lang}: the notice is in the language, with 2,500 written its way', bool(cs) and ('+' + fmtn(2500, lang) + ' SAT') in txt and (lang == 'en' or LABEL['token'] not in txt) and not miss, (txt, miss))
                 await shot(r, f'notice-{lang}-390')
+                await looks(r, f'{lang}: the notice', details=False)
                 await dismiss(r)
                 pg0 = r.pg; await pg0.close()
                 await dm(p, rpk, 2500, FREE)
                 r = await wallet(b, ctx=r_ctx)
                 if await r.ev("!!document.querySelector('[data-pinpad]')"): await unlock(r)
                 await settled(r); await r.wait(400)
+                await looks(r, f'{lang}: the summary')
+                await r.ev("Nutcade.closeSheet()")
+                if not await r.ev("!!document.querySelector('#arrStack .arr-card[data-type=away]')"):   # (Details took the card: open the page again for the rest)
+                    pg0 = r.pg; await pg0.close(); await dm(p, rpk, 2500, FREE); r = await wallet(b, ctx=r_ctx)
+                    if await r.ev("!!document.querySelector('[data-pinpad]')"): await unlock(r)
+                    await settled(r); await r.wait(400)
+                await shot(r, f'summary-{lang}-390')
+                await r.pg.set_viewport_size({'width': 568, 'height': 320}); await r.wait(200); await shot(r, f'summary-{lang}-568x320'); await r.pg.set_viewport_size({'width': 390, 'height': 844})
                 sm = await summary_rows(r)
                 miss = [m for m in await r.ev("[...(window.__i18nMiss||[])]") if sm and m in sm['text']]
                 check(f'{lang}: the summary is in the language, numbers written its way', bool(sm) and fmtn(2500, lang) in sm['text'] and (lang == 'en' or 'while you were away' not in sm['text'].lower()) and not miss, (sm and sm['text'], miss))
                 check(f'{lang}: the summary doesn\'t rely on color alone (a sign and words)', bool(sm) and '+' in sm['text'])
-                await shot(r, f'summary-{lang}-390')
-                await dismiss(r)
+                await r.ev("Nutcade.closeSheet()"); await dismiss(r)
+                await settings(r); helptxt = await r.ev("(document.querySelector('#arrNotifyHelp')||{}).textContent||''"); await r.home()
+                check(f'{lang}: the notifications setting says what a PIN and a duress PIN change, in the language', bool(helptxt) and (('With a PIN' in helptxt and 'duress' in helptxt) if lang == 'en' else ('With a PIN' not in helptxt and 'PIN' in helptxt)), helptxt)
             await set_lang(r, 'en')
 
         # ---------- 320 and 1440 px ----------
@@ -607,9 +662,8 @@ async def main():
                 r = await wallet(b, ctx=r_ctx, vw=vw, vh=vh); await r.pg.set_viewport_size({'width': vw, 'height': vh})
                 if await r.ev("!!document.querySelector('[data-pinpad]')"): await unlock(r)
                 await settled(r); await r.wait(400)
-                ov = await no_overflow(r)
+                ov = await no_overflow(r); await shot(r, f'summary-{vw}')
                 check(f'{vw} px: the summary fits the screen', bool(await summary_rows(r)) and not ov, ov)
-                await shot(r, f'summary-{vw}')
                 await dismiss(r)
 
         # ---------- a phone held sideways; another tab; a game (or the till) filling the screen ----------
@@ -636,6 +690,26 @@ async def main():
             await r.ev("document.querySelector('[data-g=exit]')?.click()"); await r.wait(500)
             check('a game: back from it, the notice is there again', await r.ev("!!document.querySelector('#arrStack .arr-card') && getComputedStyle(document.querySelector('#arrStack')).display!=='none'"))
             await dismiss(r); await r.home(); await r.pg.set_viewport_size({'width': 390, 'height': 844})
+
+        # ---------- the till (cashier mode): its own sale is on its PAID! screen; any other arrival waits for after ----------
+        if want('widths') or want('game') or want('till'):
+            await dismiss(r); await r.home(); await r.use(FREE); await r.click('[data-act=cashier]'); await r.wait(300)
+            log0 = len(await r.ev(LOG_JS))
+            await dm(p, rpk, 1717, FREE)
+            await r.until("Nutcade.S.txs.some(t=>t.amount===1717&&t.status==='done')", 20000); await r.wait(2500)
+            other = await r.ev("Nutcade.S.txs.find(t=>t.amount===1717&&t.status==='done').id")
+            check('till open: a payment that is not the sale is not marked seen and not shown over the till', other in await pend(r, None) and not [e for e in (await r.ev(LOG_JS))[log0:] if other in e['ids']])
+            for k in '123': await r.click(f'.cashier [data-ck="{k}"]')
+            await r.click('.cashier [data-ck=charge]')
+            paid = await r.until("/PAID!/.test((document.querySelector('.cashier')||{}).innerText||'')", 25000); await r.wait(1500)
+            sale = await r.ev("(Nutcade.S.txs.find(t=>t.cashier&&t.amount===123)||{}).id")
+            check('till: (the sale went through)', paid and bool(sale))
+            await r.ev("document.querySelector('#cashExit').dispatchEvent(new PointerEvent('pointerdown'))"); await r.wait(1300)
+            check('till: (closed)', await r.ev("!document.querySelector('.cashier')"))
+            await r.until("!!document.querySelector('#arrStack .arr-card')", 8000); await r.wait(500)
+            ann = [i for e in (await r.ev(LOG_JS))[log0:] for i in e['ids']]
+            check('till closed: the other payment gets its notice now, the sale none (the till showed it)', ann == [other] and sale not in await pend(r, None), (ann, other, sale))
+            await dismiss(r)
 
         # ---------- a fresh wallet on a phone held sideways: its first deposit covers no screen's buttons (as r8 checks) ----------
         if want('widths') or want('game'):
