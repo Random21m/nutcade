@@ -282,9 +282,10 @@ const cornerPocket = (() => {
 
   let last = null;
   const api = {
-    id: 'cornerPocket', name: 'CORNER POCKET', year: '1984', blurb: 'Eight-ball pool. Pot your group, then the 8. Play the machine or a friend.', track: 'title',
+    id: 'cornerPocket', daily: true, name: 'CORNER POCKET', year: '1984', blurb: 'Eight-ball pool. Pot your group, then the 8. Play the machine or a friend.', track: 'title',
     help: 'drag back to aim · let go to shoot', keys: '← → aim · hold Space for power · release',
-    init(G) { last = newState(); return last; },
+    // The Daily Challenge is the same match for everyone: against the machine on MEDIUM, straight to the break (no menu to pick an easier level).
+    init(G) { last = newState(); const d = window.Arcade && window.Arcade.daily && window.Arcade.daily(); if (d && d.on) startMatch(last, 0, 1); return last; },
     update(s, G) {
       s.t++; if (s.msgT > 0) s.msgT--; if (s.sfxT > 0) s.sfxT--;
       tickFx(s.fx);

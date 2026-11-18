@@ -277,7 +277,7 @@ function renderPlayer(ctx, s) {
 
 /* ---------- the cabinet ---------- */
 const neonRoad = {
-  id: 'neonRoad', name: 'NEON ROAD', year: '1985', blurb: 'Race the clock down a neon highway. Pass traffic, hit every checkpoint.', track: 'drive',
+  id: 'neonRoad', daily: true, name: 'NEON ROAD', year: '1985', blurb: 'Race the clock down a neon highway. Pass traffic, hit every checkpoint.', track: 'drive',
   help: '◀ ▶ steer · ▲ boost · ▼ brake', keys: '← → steer · ↑ gas · ↓ brake',
   init(G) {
     const s = { t: 0, go: COUNT, goAt: -999, pos: 0, spd: 0, px: 0, steer: 0, tl: START_TIME * 60, stage: 1, lastSeg: 0, bump: 0, shake: 0, off: false, up: 0,

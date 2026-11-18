@@ -904,7 +904,7 @@ function openGame(id, opts) {
   // the screen re-fits whenever the space for it changes: switching to the slightly taller D-pad, or the hint
   // wrapping to two lines once it's translated, so the hint never sits on the game
   if (window.ResizeObserver) { fitObs = new ResizeObserver(() => fit()); fitObs.observe(view.querySelector('.screen-frame')); }
-  G = makeG(); mode = 'title'; frame = 0; st = null;
+  G = makeG(); mode = 'title'; frame = 0; st = null; lastT = 0; acc = 0;
   A().music('title');
   if (window.Nutcade) window.Nutcade.closeSheet();
   loop();
@@ -940,8 +940,9 @@ function endGame() {
     dres = window.Daily.finish(dlyRun, score, false); dlyRun = null;
     if (qualifies(cur.id, score)) addScore(cur.id, store.get('initials', 'AAA'), score);
   }
+  const v0 = view;
   setTimeout(() => {
-    if (!view) return;
+    if (!view || view !== v0) return;   // (left, or another cabinet opened since: this run's result screen is moot)
     if (dres) showDailyResult(score, dres);
     else if (chal) showChallengeResult(score);
     else if (qualifies(cur.id, score)) showEntry(score, seed);
@@ -1042,27 +1043,52 @@ function drawTitle() {
   text(ctx, T('CREDIT 99'), W / 2, 270, C.dim, 8, 'center');
 }
 function drawGhost() { if (!ghost || ghost.over || !cur.ghost) return; ctx.save(); ctx.globalAlpha = 0.38; try { cur.ghost(ghost.state, ctx); } catch (e) {} ctx.restore(); }
-function loop() {
-  raf = requestAnimationFrame(loop);
-  if (!view) return;
+/* The game clock. Every cabinet is written for 60 steps a second, and a replay is a list of steps, not of seconds. The
+   screen may refresh at 30, 60, 120 or 144 Hz, so the loop keeps an accumulator of real time (the requestAnimationFrame
+   timestamp) and runs a whole number of 1/60 s steps from it, then draws once. At 60 Hz that is one step a frame, at
+   120 Hz one step every other frame, at 30 Hz two a frame, so a game runs at the same speed on every screen.
+   A step is run only when a full 1/60 s has built up, never early, so a phone that returns from another tab, or
+   hitches, runs at most MAXCATCH steps to catch up and then drops the rest instead of spiralling. */
+const STEP = 1000 / 60, MAXCATCH = 5;
+let lastT = 0, acc = 0;
+function tick() {   // one 60 Hz step of the logic (nothing is drawn here); taps, key presses and swipes are consumed by the first step that sees them
   frame++;
   if (mode === 'title') {
-    drawTitle();
     if (pressed.has('a') || pressed.has('b') || tap) startGame();
   } else if (mode === 'play') {
     if (pressed.has('b')) { mode = 'pause'; A().sfx('blip'); }
-    else { if (rec) rec.push(Replay.code()); cur.update(st, G); if (ghost) ghost.step(); if (dlyRun && frame % 30 === 0) window.Daily.progress(dlyRun, G.score); if (frame % 30 === 0 && window.Trophies && st) try { window.Trophies.progress(cur.id, st, G.score); } catch (e) {} if (mode !== 'over' || st) { ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx); drawGhost(); } }
+    else { if (rec) rec.push(Replay.code()); cur.update(st, G); if (ghost) ghost.step(); if (dlyRun && frame % 30 === 0) window.Daily.progress(dlyRun, G.score); if (frame % 30 === 0 && window.Trophies && st) try { window.Trophies.progress(cur.id, st, G.score); } catch (e) {} }
   } else if (mode === 'pause') {
+    if (pressed.has('a') || pressed.has('b') || tap) { mode = 'play'; A().sfx('blip'); }
+  }
+  pressed.clear(); tap = null; swipe = null;
+}
+function render() {   // once per screen refresh
+  if (mode === 'title') drawTitle();
+  else if (mode === 'play') { if (st) { ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx); drawGhost(); } }
+  else if (mode === 'pause') {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx);
     ctx.fillStyle = 'rgba(5,3,12,.7)'; ctx.fillRect(0, 22, W, H - 22);
     text(ctx, T('PAUSED'), W / 2, 130, C.gold, 12, 'center'); text(ctx, T(matchMedia('(pointer:fine)').matches ? 'ENTER TO RESUME' : 'A OR TAP TO RESUME'), W / 2, 152, C.ink, 8, 'center');
-    if (pressed.has('a') || pressed.has('b') || tap) { mode = 'play'; A().sfx('blip'); }
   } else if (mode === 'over' || mode === 'entry') {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx);
     ctx.fillStyle = 'rgba(5,3,12,.6)'; ctx.fillRect(0, 22, W, H - 22);
     text(ctx, T('GAME OVER'), W / 2, 130, C.red, 12, 'center');
   }
-  pressed.clear(); tap = null; swipe = null;
+}
+function loop(now) {
+  raf = requestAnimationFrame(loop);
+  if (!view) return;
+  if (typeof now !== 'number') now = lastT + STEP;   // (the first call, made straight from openGame)
+  let dt = lastT ? now - lastT : STEP; lastT = now;
+  if (!(dt > 0) || dt > 250) dt = STEP;               // a clock that jumped, or a tab that just came back: don't count it
+  else if (Math.abs(dt - STEP) < 1.2) dt = STEP;      // 60 Hz screens report 16.4 to 16.9 ms: count it as exactly one step
+  acc += dt;
+  let n = 0;
+  while (acc >= STEP - 0.001 && n < MAXCATCH) { tick(); acc -= STEP; n++; if (!view) return; }
+  if (acc > STEP) acc = 0;                            // too far behind: drop the rest
+  if (acc < 0) acc = 0;
+  render();
 }
 
 /* ---------- arcade lobby ---------- */
@@ -1079,7 +1105,7 @@ function mountList(el) {
   const thumbs = [...el.querySelectorAll('[data-thumb]')].map(c => ({ c, x: c.getContext('2d'), g: GAMES.find(g => g.id === c.dataset.thumb) }));
   thumbs.forEach(t => t.x.imageSmoothingEnabled = false);
   let t = 0; const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const tick = () => { if (!el.isConnected) return; t++; if (!view) thumbs.forEach(o => o.g.thumb(o.x, t)); if (!reduce) lobbyRaf = requestAnimationFrame(tick); };
+  const tick = now => { if (!el.isConnected) return; const n = typeof now === 'number' ? Math.floor(now / STEP) : t + 1; if (n !== t) { t = n; if (!view) thumbs.forEach(o => o.g.thumb(o.x, t)); } if (!reduce) lobbyRaf = requestAnimationFrame(tick); };   // thumbnails animate at 60 a second on any screen
   tick();
 }
 function topLine() {

@@ -74,30 +74,45 @@ async def main():
             if await w.ev(f"Daily.seedOf('{d}')") != fnv('nutcade-daily-' + d): ok = False
         check('seed = FNV-1a of "nutcade-daily-<UTC date>" (matches an independent implementation)', ok)
         ids8 = ['swarm', 'maze', 'brick', 'rocks', 'hop', 'shield', 'nibble', 'flipper']
-        check('all 8 existing cabinets join the daily', sorted(await w.ev("Daily.eligible().map(g=>g.id)")) == sorted(ids8))
+        DAILY = ids8 + ['cornerPocket', 'neonRoad']   # the cabinets that join: the eight originals, Corner Pocket and Neon Road (both seeded); never Nut Poker
+        check('the 8 original cabinets, Corner Pocket and Neon Road join the daily', sorted(await w.ev("Daily.eligible().map(g=>g.id)")) == sorted(DAILY))
+        allids = await w.ev("Arcade.games.map(g => g.id)")
+        check('every cabinet in the arcade is either in the daily or Nut Poker', sorted(set(allids) - set(DAILY)) == ['poker'], allids)
+        check('Nut Poker is not flagged daily and is not eligible (its shuffle is truly random, so two phones could never play the same deal)',
+              await w.ev("Arcade.games.find(g => g.id === 'poker').daily !== true && !Daily.eligible().some(g => g.id === 'poker')"))
+        never = await w.ev("""(() => { const ids = Daily.eligible().map(g => g.id); const bad = []; let d = Date.parse('2026-01-01T00:00:00Z');
+          for (let i = 0; i < 1500; i++, d += 86400000) { const day = new Date(d).toISOString().slice(0, 10); if (Daily.pick(day, ids) === 'poker') bad.push(day); } return bad; })()""")
+        check('Nut Poker is never the daily cabinet (1,500 days checked)', never == [], never[:3])
+        check('with Poker flagged by mistake it still cannot be picked by the daily screen (it has no replays, so it is excluded by noChallenge too)',
+              await w.ev("(() => { const g = Arcade.games.find(x => x.id === 'poker'); const had = g.daily; g.daily = true; try { return !Daily.eligible().some(x => x.id === 'poker'); } finally { g.daily = had; } })()"))
         ok = True
         for d in dates:
-            if await w.ev(f"Daily.pick('{d}', {json.dumps(ids8)})") != py_pick(d, ids8): ok = False
+            if await w.ev(f"Daily.pick('{d}', {json.dumps(DAILY)})") != py_pick(d, DAILY): ok = False
         check("today's cabinet is picked from the date alone (matches an independent implementation)", ok)
-        check('the pick does not depend on the order of the list', await w.ev(f"Daily.pick('2026-11-18', {json.dumps(ids8)}) === Daily.pick('2026-11-18', {json.dumps(ids8[::-1])})"))
+        check('the pick does not depend on the order of the list', await w.ev(f"Daily.pick('2026-11-18', {json.dumps(DAILY)}) === Daily.pick('2026-11-18', {json.dumps(DAILY[::-1])})"))
         # a new cabinet joining changes only the days it wins
         days = [datetime.date(2026, 1, 1) + datetime.timedelta(i) for i in range(365)]
-        old = [py_pick(str(d), ids8) for d in days]; new = [py_pick(str(d), ids8 + ['poker']) for d in days]
+        old = [py_pick(str(d), ids8) for d in days]; new = [py_pick(str(d), ids8 + ['cornerPocket']) for d in days]
         changed = [i for i in range(365) if old[i] != new[i]]
-        check('a new cabinet only changes the days it wins itself', all(new[i] == 'poker' for i in changed) and 15 < len(changed) < 80, len(changed))
+        check('a new cabinet only changes the days it wins itself', all(new[i] == 'cornerPocket' for i in changed) and 15 < len(changed) < 80, len(changed))
         check('all 8 cabinets get picked over a year', len(set(old)) == 8)
         # the hook: daily:true joins, no flag stays out, init gets the seed
         r = await w.ev("""(() => { const gs = Arcade.games; const a = { id: 'fake1', name: 'FAKE ONE', daily: true, init() {}, update() {}, draw() {}, thumb() {} }, c = { id: 'fake2', name: 'FAKE TWO', init() {}, update() {}, draw() {}, thumb() {} };
           gs.push(a, c); const ids = Daily.eligible().map(g => g.id); gs.splice(gs.length - 2, 2); return [ids.includes('fake1'), ids.includes('fake2'), Daily.eligible().length]; })()""")
-        check('hook: a cabinet with daily:true joins, one without the flag does not', r == [True, False, 8], r)
+        check('hook: a cabinet with daily:true joins, one without the flag does not', r == [True, False, len(DAILY)], r)
         seen = await w.ev("""(() => { const g = Arcade.games.find(x => x.id === 'swarm'); const o = g.init; let got = []; g.init = function (G, seed) { got.push(seed); return o.call(this, G, seed); };
           Arcade.layout('swarm', 12345); g.init = o; return got; })()""")
         check('hook: init(G, seed) receives the run seed', seen == [12345], seen)
         det = await w.ev("""(async () => { const out = {}, code = i => [(i >> 5) % 3 === 0 ? 4 : (i >> 4) & 15 & 3 | 0, (i % 40 === 0) ? 16 : 0, 0, 112, 144, '', '', ''].join(',');
           const frames = Array.from({ length: 900 }, (_, i) => code(i)); const packed = await Arcade.replay.pack({ frames });
-          for (const g of Arcade.games) { const s = Daily.seedOf('2026-11-18'), o = Daily.seedOf('2026-11-19'); const a = await Arcade.replay.verify(g.id, s, packed, 0), c = await Arcade.replay.verify(g.id, s, packed, 0), d = await Arcade.replay.verify(g.id, o, packed, 0);
+          for (const g of Arcade.games.filter(g => g.daily)) { const s = Daily.seedOf('2026-11-18'), o = Daily.seedOf('2026-11-19'); const a = await Arcade.replay.verify(g.id, s, packed, 0), c = await Arcade.replay.verify(g.id, s, packed, 0), d = await Arcade.replay.verify(g.id, o, packed, 0);
             out[g.id] = [a.score === c.score && a.frames === c.frames, a.frames > 0, a.score, d.score]; } return out; })()""")
         check('every cabinet plays the same from the same day seed (same inputs, same score and frames)', all(v[0] and v[1] for v in det.values()), det)
+        same = await w.ev("""(() => { const out = {}; const seed = Daily.seedOf('2026-11-18'), other = Daily.seedOf('2026-11-19'); const real = Arcade.daily;
+          Arcade.daily = () => ({ on: true });   // Corner Pocket skips its menu in a daily run: the start is the rack and the break
+          try { for (const g of Arcade.games.filter(g => g.id === 'cornerPocket' || g.id === 'neonRoad')) { const a = Arcade.layout(g.id, seed), b = Arcade.layout(g.id, seed), c = Arcade.layout(g.id, other); out[g.id] = [a === b, a !== c, a.length]; } } finally { Arcade.daily = real; }
+          return out; })()""")
+        check('Corner Pocket and Neon Road start identically from the same seed (rack and break, road and traffic), and differently from another day\'s', all(v[0] and v[1] for v in same.values()) and len(same) == 2, same)
         check('another day\'s seed plays differently in most cabinets', sum(1 for v in det.values() if v[2] != v[3]) >= 3, det)
 
         # ---------- the lobby entry ----------
@@ -105,13 +120,13 @@ async def main():
         await arcade(w, T0)
         top = await w.ev("document.querySelector('#arcadeScreen').firstElementChild.hasAttribute('data-daily')")
         check('DAILY CHALLENGE entry is at the top of the arcade menu', top)
-        gid = py_pick('2026-11-18', ids8)
+        gid = py_pick('2026-11-18', DAILY)
         txt = await w.ev("document.querySelector('[data-daily]').innerText")
         name = await w.ev(f"Arcade.games.find(g=>g.id==='{gid}').name")
         check("shows today's cabinet", name in txt, txt[:120])
         check('shows a not-played-yet state and the countdown (12h 0m at noon UTC)', 'NOT PLAYED YET' in txt.upper() and '12h 0m' in txt, txt)
         check('share is disabled until there is an official score', await w.ev("document.querySelector('[data-daily-share]').disabled"))
-        check('lobby still lists the 8 cabinets', await w.ev("document.querySelectorAll('[data-game]').length") == 8)
+        check('lobby lists every cabinet', await w.ev("document.querySelectorAll('[data-game]').length") == await w.ev('Arcade.games.length'))
 
         # ---------- play: the first run counts ----------
         seed_seen = await w.ev("""(() => { const g = Arcade.games.find(x => x.id === '%s'); window.__seeds = []; if (!g.__oi) { g.__oi = g.init; g.init = function (G, seed) { window.__seeds.push(seed); return g.__oi.call(this, G, seed); }; } return 1; })()""" % gid)
@@ -244,7 +259,7 @@ async def main():
         txt = await w.ev("document.querySelector('[data-daily]').innerText")
         check('over midnight: the new day is fresh and unplayed', 'Dec 4, 2026' in txt and 'NOT PLAYED YET' in txt.upper(), txt)
         # a title screen left open across midnight moves on to the new day's cabinet
-        days_ids = [(d, py_pick(d, ids8)) for d in ['2026-12-10', '2026-12-11', '2026-12-12', '2026-12-13', '2026-12-14', '2026-12-15']]
+        days_ids = [(d, py_pick(d, DAILY)) for d in ['2026-12-10', '2026-12-11', '2026-12-12', '2026-12-13', '2026-12-14', '2026-12-15']]
         pair = next((a, c) for a, c in zip(days_ids, days_ids[1:]) if a[1] != c[1])
         await arcade(w, ms(2026, 12, int(pair[0][0][-2:]), 23, 59, 50))
         await w.click('[data-daily-play]'); await w.wait(300)
@@ -290,7 +305,7 @@ async def main():
             picks.setdefault(t, set()).add(lid)
             check(f'time zone {tz}, {date}: reset line says {want} your time', want in line.replace(' ', ' ') and 'midnight UTC' in line, line)
             if tz == 'America/Los_Angeles': check('time zone: late evening in Los Angeles (Nov 17 locally) is still the UTC day Nov 18', await z.ev("new Date(%d).toLocaleDateString('en-US')" % t) == '11/17/2026' and await z.ev("Daily.info().date") == '2026-11-18')
-            check(f'time zone {tz}: the date and cabinet are the UTC day\'s ({date})', date in await z.ev("Daily.info().date") and lid == py_pick(date, ids8) and 'UTC' in dline, dline)
+            check(f'time zone {tz}: the date and cabinet are the UTC day\'s ({date})', date in await z.ev("Daily.info().date") and lid == py_pick(date, DAILY) and 'UTC' in dline, dline)
             await z.ctx.close()
         check('the same UTC moment gives the same cabinet in every time zone', all(len(v) == 1 for v in picks.values()), picks)
 

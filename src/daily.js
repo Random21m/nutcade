@@ -14,13 +14,14 @@
      device-level like the arcade tables). Nothing is sent anywhere. The only network use is the Post button in the
      share sheet, which publishes one note you have just previewed.
 
-   THE HOOK FOR NEW CABINETS (Nut Poker, Corner Pocket, Neon Road, ...)
+   THE HOOK FOR NEW CABINETS (Corner Pocket and Neon Road joined this way; Nut Poker is truly random, so it does not)
    A cabinet joins the daily with one line in its object:   daily: true,
    It promises that all of its GAMEPLAY randomness comes from the engine's RNG (rnd(), ri(), RNG()), never from
    Math.random() (that is for sparks and stars only), so the same seed gives the same level. The seed also arrives as
    a second argument, init(G, seed), for a cabinet that wants its own generator, for example to shuffle a deck:
    `const deal = seeded(seed)`. Nothing else is needed: the daily panel, the title screen, the share note and the
-   history pick the cabinet up by themselves. A cabinet without the flag is simply never chosen. */
+   history pick the cabinet up by themselves. A cabinet without the flag is simply never chosen, and neither is one marked `noChallenge` (its play can't
+   be replayed, like Nut Poker's truly random deck), flag or not. */
 (() => {
 'use strict';
 const N = () => window.Nutcade;
@@ -84,7 +85,7 @@ function trustClock() { put(CLOCKKEY, { day: dateOf(now()) }); ver++; }
 
 /* ---------- today ---------- */
 let games = [], opener = null;
-const eligible = () => games.filter(g => g.daily === true);
+const eligible = () => games.filter(g => g.daily === true && !g.noChallenge);   // a cabinet that is random by design (noChallenge, like Nut Poker) can never be the daily, flagged or not
 const gameOf = id => games.find(g => g.id === id) || null;
 let live = null;   // the run being played right now: { date, id, seed, official, s }
 let cache = null;
