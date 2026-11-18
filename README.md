@@ -367,7 +367,7 @@ Posting the link on X and most social sites shows a large preview card automatic
 
 ## For maintainers
 
-The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm` and the offline helper `public/sw.js`. `public/index.html` is built from the files in [`src/`](src/README.md): edit those, run `python3 build.py`, and commit both. On every push to `main`, `.github/workflows/test-and-deploy.yml` checks that the page matches `src/`, runs the test suites, and then publishes `public/` to GitHub Pages with fresh checksums. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
+The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm`, the offline helper `public/sw.js` and the bundled libraries' licence texts `public/THIRD_PARTY_LICENSES.txt`. `public/index.html` is built from the files in [`src/`](src/README.md): edit those, run `python3 build.py`, and commit both. On every push to `main`, `.github/workflows/test-and-deploy.yml` checks that the page matches `src/`, runs the test suites, and then publishes `public/` to GitHub Pages with fresh checksums. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
 
 ## Made by
 
@@ -395,6 +395,7 @@ You can also tip from inside NUTCADE: **Settings → About → Support**. The sa
   - Fold-over cards, four to a page: front and back side by side, so plain one-sided printing lines up on any printer. **Printed tokens** (Notes) shows which were claimed (asked at the mint) and takes back unclaimed ones. Backups carry them like any token you sent.
   - **QR code center** (Settings → Look & sound): the NUTCADE acorn in the middle of every QR code NUTCADE shows and prints, at error correction H, read back and drawn plain where it wouldn't scan; animated codes stay plain. Or None.
   - Fixed: a busy (disabled) button could still be triggered by a click sent from a script; every button now ignores clicks while it is disabled.
+  - The full licence texts of every bundled library are now in `public/THIRD_PARTY_LICENSES.txt` (the bundle itself only carried the noble and scure notices).
 - **v1.14.0:** the **keyset check-up**: coins on a mint's retired or soon-expiring keys (NUT-02) are moved to its current keys, and many tiny coins are combined, through the journal (crash-safe, only what the mint signed is booked), within the mint's request limit, automatically when free and asked once with the fee shown when not; each mint's line in Mints says what happened, and the history gets one line with the fee the mint kept. Coins the mint no longer accepts at all are set aside out of the balance and offered again at each check-up. New coins are made on keys that don't expire soon when the mint has such keys. Fixes found on the way: a mint's "keyset has expired" answer is no longer shown as "That request expired"; a keyset refusal wrapped by the library counts as a refusal (the mint signed nothing); the duress PIN's wallet no longer gets a copy of the real wallet's record of its mint; a restore from the phrase, a backup import and settling a backup's open steps never count coins set aside as new; the piggy bank no longer rounds up "already spent elsewhere" lines. Two follow-ups to the v1.13.1 journal fix: a step whose request the mint signs in the last minutes before its record is a day old is checked once more before the record is dropped, also while NUTCADE stays open (it used to be dropped unchecked, its spent coins left in the balance until Remove spent ecash); and when the same coins were tried twice and the mint signed the later attempt, the history shows that step as itself instead of "Ecash already spent elsewhere" plus "Recovered with recovery phrase" (the balance was right either way). The check-up's coins already spent are dropped the same way as every spent coin, after any of this wallet's steps that reached the mint late is settled as itself.
   - Known issues in v1.14.0: the check-up looks at the coins in your balance; coins locked in an Extra Life move to the new keys at its next CONTINUE (automatic at half its time), and a token you sent but nobody claimed stays on the keys it was made with (take it back to move it). Tiny-coin combining only counts coins of at most 8 SAT. A coin worth less than the fee to move it stays where it is. The check-up runs when NUTCADE opens, on Refresh and at the regular background check (which asks the mint nothing when there is nothing to do), so keys a mint retires while the app stays open are noticed at the next opening or Refresh. The v1.13.1 and v1.13.0 known issues still apply.
 - **v1.13.2:** the **Arcade Update**: two new cabinets and a Daily Challenge, plus a fix for fast games on fast screens.
@@ -433,11 +434,11 @@ NUTCADE is open source under the [MIT License](LICENSE).
 
 ## Open-source components
 
-The page bundles these libraries (their license notices are at the end of the bundled script):
+The page bundles these libraries, unchanged. Their full licence texts, copied from the published packages, are in [`public/THIRD_PARTY_LICENSES.txt`](public/THIRD_PARTY_LICENSES.txt), which is served next to the app:
 
-- [cashu-ts](https://github.com/cashubtc/cashu-ts)
-- [noble-curves, noble-hashes, scure-base, scure-bip32, scure-bip39](https://paulmillr.com/noble/)
-- [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator)
+- [cashu-ts](https://github.com/cashubtc/cashu-ts) (MIT or Apache-2.0)
+- [noble-curves, noble-hashes, scure-base, scure-bip32, scure-bip39](https://paulmillr.com/noble/) (MIT)
+- [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) (MIT)
 - [zxing-wasm](https://github.com/Sec-ant/zxing-wasm) (MIT) with [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp) (Apache-2.0), the QR decoder
 - [jsQR](https://github.com/cozmo/jsQR) (Apache-2.0), the fallback QR decoder
 - [nostr-tools](https://github.com/nbd-wtf/nostr-tools) (Unlicense) and [noble-ciphers](https://github.com/paulmillr/noble-ciphers) (MIT), for signing Nostr events and NIP-44 encryption
