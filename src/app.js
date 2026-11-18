@@ -2551,6 +2551,7 @@ function viewSettings() {
       ${toggle('music', 'Arcade music', '')}
       ${toggle('crt', 'CRT scanlines', '')}
       ${toggle('btcSymbol', 'Show amounts as ₿', '₿1,000 instead of 1,000 SAT.')}
+      ${window.Arcade ? `<div class="sub">Arcade</div>${window.Arcade.initialsHTML()}` : ''}
       ${toggle('hideAmounts', 'Hide amounts', 'Shows ••• instead of amounts on the wallet, notes and mints screens. You can also tap your balance. Payment screens always show the real amount.')}
     </div>
 

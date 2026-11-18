@@ -597,6 +597,7 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .help-a p,.help-a ul{margin:0}
 .help-a ul{padding-left:18px;display:grid;gap:6px}
 .help-a li,.help-a p{overflow-wrap:anywhere}
+.ini-form{display:grid;gap:8px}.ini-err{color:var(--red);min-height:0}.ini-err:empty{display:none}
 .minfo-list{display:grid;gap:6px}
 .minfo-row{display:grid;gap:2px;overflow-wrap:anywhere}
 .minfo-row a,.sheet-body a:not(.btn){color:var(--cyan)}
