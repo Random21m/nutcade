@@ -123,7 +123,7 @@ Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons
 - **Privacy:** turn the live price and price chart on or off (prices come from Coinbase, in your currency), choose whether to check if sent tokens were claimed, and whether to receive ecash sent over Nostr
 - **Piggy bank:** turn round-ups on or off, choose what to round to, and empty the piggy bank
 - **Wallet tools:** cashier mode and today's till, move sats between mints, remove spent ecash and check stuck payments
-- **About:** version, links and donations
+- **About:** version, links and support
 
 ## Getting started
 
@@ -331,7 +331,7 @@ NUTCADE has no account, no tracking and no analytics. Your recovery phrase and n
 - **Coinbase**, for the price and chart, only while **Show Bitcoin price** is on
 - **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to send and receive game challenges with your contacts, to save your encrypted mint list when it changes and to look for it when you restore (turn this off in Settings → Backup), to receive payments for requests you made in the last 30 days, to deliver payments to requests you pay, to receive ecash friends send to your ecash address (turn this off in Settings → Privacy), and when you tap "Find mints people recommend". Payments you send over Nostr are signed with a one-time key, so they aren't linked to you. Challenges and their scores are signed with your NUTCADE Nostr key so friends know they're from you
 - **npub.cash**, only while your Lightning address is turned on. It sees the amounts and times of payments to your address, not the rest of your wallet
-- **The donation address** (strike.me), only when you tip from inside the app
+- **The support address** (strike.me), only when you tip from inside the app
 
 The **microphone** is used only while a Listen screen is open. The sound is decoded on your phone and nothing is recorded or sent anywhere.
 
@@ -359,7 +359,7 @@ NUTCADE is free and open source, and it stays that way. Supporting it is optiona
 
 **keywest@strike.me**
 
-You can also tip from inside NUTCADE: **Settings → About → Donate**. The same address and code are on that screen. Be wary of any other "NUTCADE donation" address.
+You can also tip from inside NUTCADE: **Settings → About → Support**. The same address and code are on that screen. Be wary of any other "NUTCADE support" address.
 
 ## Changelog
 

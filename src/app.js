@@ -2444,7 +2444,7 @@ function viewSettings() {
       <p class="th" style="margin:0">Reports are public on GitHub. Never paste your 12 words, your PIN or a token into one.</p>
       <div class="sub" style="color:var(--pink)">Support NUTCADE</div>
       <p class="th" style="margin:0">Free and open source. Tips over Lightning are optional and keep the cabinets lit.</p>
-      <button class="btn sm pink" data-act="support">Donate</button>
+      <button class="btn sm pink" data-act="support">Support</button>
     </div>
   </section>`;
 }
@@ -3532,7 +3532,7 @@ function openSupport() {
     <div class="field"><label>Lightning address</label><div class="row"><div class="code" style="flex:1;font-size:16px">${DONATE.address}</div><button class="btn sm" data-act="copy" data-text="${DONATE.address}">Copy</button></div></div>
     ${qrBlock('lightning:' + DONATE.lnurl, 'QR code for the Lightning address ' + DONATE.address)}
     <div class="field"><label>Same thing as a payment code (LNURL)</label><div class="code">${DONATE.lnurl}</div><button class="btn sm" data-act="copy" data-text="${DONATE.lnurl}">Copy LNURL</button></div>
-    <div class="notice">Be wary of any other "NUTCADE donation" address. The same address and code are in the project README on GitHub. Never send your backup or seed words to anyone, for any reason.</div>
+    <div class="notice">Be wary of any other "NUTCADE support" address. The same address and code are in the project README on GitHub. Never send your backup or seed words to anyone, for any reason.</div>
     <div id="sheetErr"></div>`);
 }
 async function lnAddressInvoice(address, sats, comment) {

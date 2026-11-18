@@ -84,6 +84,21 @@ async def main():
             if t == r['how'] or str(r['n']) not in t: bad[lang] = t
         await w.ev("const s=document.querySelector('#p_lang'); s.value='en'; s.dispatchEvent(new Event('change',{bubbles:true}))")
         check('GRAND TOUR text is translated, with the number, in Spanish, Portuguese, German and French', not bad, bad)
+        # Settings -> About: the button says Support (not Donate) in every language and fits a 320 px phone; its sheet says "support" too
+        await w.pg.set_viewport_size({'width': 320, 'height': 640})
+        want = {'en': ('Support', 'NUTCADE support'), 'es': ('Apoyar', 'apoyo a NUTCADE'), 'pt': ('Apoiar', 'apoio ao NUTCADE'), 'de': ('Unterstützen', 'NUTCADE-Unterstützung'), 'fr': ('Soutenir', 'soutien NUTCADE')}
+        bad = {}
+        for lang, (word, phrase) in want.items():
+            await w.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click()"); await w.wait(150)
+            await w.ev(f"const s=document.querySelector('#p_lang'); s.value='{lang}'; s.dispatchEvent(new Event('change',{{bubbles:true}}))"); await w.wait(250)
+            r = await w.ev("""(() => { const b = document.querySelector('[data-act=support]'); if (!b) return null; b.scrollIntoView(); const r = b.getBoundingClientRect();
+              return { text: b.innerText.trim(), fits: r.left >= 0 && r.right <= innerWidth && b.scrollWidth <= b.clientWidth + 1 && document.documentElement.scrollWidth <= innerWidth + 1, h: Math.round(r.height) }; })()""")
+            await w.ev("document.querySelector('[data-act=support]').click()"); await w.wait(300)
+            sheet = await w.ev("(document.querySelector('#layer .sheet')||{}).innerText||''")
+            if not r or r['text'].lower() != word.lower() or not r['fits'] or r['h'] < 30 or phrase not in sheet or 'donat' in (r['text'] + sheet).lower() or 'spende' in (r['text'] + sheet).lower().replace('unterstützung', '') or 'don ' in sheet.lower(): bad[lang] = (r, sheet[-260:])
+        await w.ev("Nutcade.closeSheet(); const s=document.querySelector('#p_lang'); s.value='en'; s.dispatchEvent(new Event('change',{bubbles:true}))")
+        await w.pg.set_viewport_size({'width': 390, 'height': 844})
+        check('Settings > About: the button reads Support (Apoyar, Apoiar, Unterstützen, Soutenir), fits at 320 px, and the sheet says "support", never "donation"', not bad, bad)
         check('no script errors in the arcade', not w.errs, w.errs[:3])
         await b.close()
 asyncio.run(main()); sys.exit(0 if results and all(r[1] for r in results) else 1)
