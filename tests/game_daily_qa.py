@@ -8,9 +8,9 @@ from playwright.async_api import async_playwright
 
 SHOTS = os.environ.get('SHOTS', '')
 FAKE_WS = """(() => { window.__ws = { mode: 'ok', made: 0, notes: [] };
-  class FakeWS { constructor(u) { this.url = u; window.__ws.made++; setTimeout(() => { if (window.__ws.mode === 'fail') { this.onerror && this.onerror(new Event('error')); this.onclose && this.onclose(); } else this.onopen && this.onopen(); }, 20); }
+  class FakeWS { constructor(u) { this.url = u; window.__ws.made++; setTimeout(() => { if (this._closed) return; if (window.__ws.mode === 'fail') { this.onerror && this.onerror(new Event('error')); this.onclose && this.onclose(); } else this.onopen && this.onopen(); }, 20); }
     send(m) { let d; try { d = JSON.parse(m); } catch (e) { return; } if (d[0] === 'EVENT' && d[1] && d[1].kind === 1) { window.__ws.notes.push(d[1]); setTimeout(() => this.onmessage && this.onmessage({ data: JSON.stringify(['OK', d[1].id, true, '']) }), 10); } }
-    close() {} }
+    close() { this._closed = true; } }   // (a socket closed before its 20 ms are up never opens, as a real one: the app drops its reference when it closes one, and the open would find it null)
   window.WebSocket = FakeWS; window.__i18nMiss = new Set(); })()"""
 PATCH = """window.__patch = (id, score) => { const g = Arcade.games.find(x => x.id === id); if (!g.__orig) g.__orig = g.update; window.__score = score; window.__hold = false;
   g.update = (s, G) => { if (!window.__hold) { G.addScore(window.__score); G.over(); } }; };

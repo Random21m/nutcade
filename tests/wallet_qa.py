@@ -1,14 +1,19 @@
 import os
 import asyncio, json, urllib.request, re, sys
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Error as PWError
 OUT=os.environ.get('QA_OUT','/tmp/qa-out')+'/'
 URL=os.environ.get('NUTCADE_URL','http://localhost:8099/index.html')
+NOSTR_PORT=os.environ.get('QA_NOSTR_PORT','3350')   # (the stand-in Nostr relay, mock_nostr.py)
 A,B,F,P='http://127.0.0.1:3338','http://127.0.0.1:3339','http://127.0.0.1:3340','http://127.0.0.1:3341'
 results=[]
 def check(name, ok, detail=''):
     results.append((name, bool(ok), detail)); print(('PASS ' if ok else 'FAIL ')+name+(' — '+str(detail) if detail else ''), flush=True)
 def invoice(n, mint=B):
     return json.loads(urllib.request.urlopen(urllib.request.Request(mint+'/v1/mint/quote/bolt11', data=json.dumps({'amount':n,'unit':'sat'}).encode(), headers={'Content-Type':'application/json'})).read())['request']
+def _gate_retryable(e):
+    """A Playwright error during a gate step is, almost always, 'the page re-rendered under us' (the element was detached, did not stay
+    checked, was replaced while being clicked, ...): try the step again. Only a closed page or browser is a real fault."""
+    return not any(t in str(e) for t in ('has been closed', 'Target closed', 'Browser closed', 'Connection closed'))
 class W:
     def __init__(s, pg, name): s.pg=pg; s.name=pg, name; s.errs=[]
     async def ev(s, js): return await s.pg.evaluate(js)
@@ -27,21 +32,82 @@ class W:
             if await s.ev(js): return True
             await s.wait(250)
         return False
-    async def create(s, wrong_first=False):
-        await s.pg.check('#ack'); await s.click('[data-act=gateCreate]'); await s.wait(400)
-        await s.until("!!(window.Nutcade && Nutcade.S && Nutcade.S.seed && Nutcade.S.seed.mnemonic)", 15000)   # (a slow machine: wait for the words, not a fixed time)
+    # ---- the setup gate (create a wallet / restore one) ----------------------------------------------------------------
+    # The app re-renders a whole gate screen (app.innerHTML) whenever anything calls render(): a ticked checkbox is gone and its
+    # button disabled again, typed words are gone, and every element handle taken before is detached. On a slow CI machine such a
+    # render can land between any two of our steps. So the gate helpers never hold an element handle across a step; they use
+    # locators (looked up again at the moment of use), wait for the screen state instead of for a fixed time, check the state
+    # in the same evaluate() that acts on it, and repeat a step whose effect did not arrive (GATE_TRIES times).
+    GATE_TRIES = 8
+    async def gate_step(s, act, done_js, tick=None, ms=6000):
+        """Press [data-act=act] (after ticking the checkbox #tick, if given) and wait until done_js is true. Safe to repeat: a step that
+        already took effect is not pressed again, and a press on a button that a re-render has disabled again does nothing."""
+        btn = f'[data-act={act}]'
+        press_js = """([tick, btn])=>{const c=tick&&document.querySelector(tick); if(c&&!c.checked) c.click();
+            const b=document.querySelector(btn); if(b&&!b.disabled){ b.click(); return true } return false}"""
+        last = None
+        for i in range(s.GATE_TRIES):
+            if await s.ev(done_js): return
+            try:
+                if i < s.GATE_TRIES // 2:   # (typed like a person: a real click on the checkbox, then on the button)
+                    if tick: await s.pg.locator(tick).check(timeout=4000)
+                    await s.pg.locator(btn).wait_for(state='attached', timeout=4000)
+                    await s.pg.evaluate("btn=>{const b=document.querySelector(btn); if(b&&!b.disabled) b.click()}", btn)
+                else:   # (a screen that keeps being redrawn: tick and press in ONE evaluate(), where nothing can redraw in between)
+                    await s.pg.evaluate(press_js, [tick, btn])
+            except PWError as e:
+                if not _gate_retryable(e): raise
+                last = e
+            if await s.until(done_js, ms): return
+        raise AssertionError(f'gate step {act}: no effect after {s.GATE_TRIES} tries (screen: {(await s.ev("document.body.innerText"))[:80]!r}; last error: {str(last)[:160]})')
+    async def gate_fill(s, vals, ms=6000):
+        """Type vals ({word index: text}) into the [data-cw] fields, and press Confirm in the same evaluate() that checks the fields
+        still hold them (a re-render between the typing and the click empties them: then type again). Returns the text that Confirm
+        left in #gateErr (read in that same evaluate(); a later redraw would clear it), once Confirm was pressed."""
+        check_js = """(vals)=>{const f=[...document.querySelectorAll('[data-cw]')]; const b=document.querySelector('[data-act=gateConfirm]');
+            if(!f.length||!b) return 'gone'; if(f.some(e=>!(e.dataset.cw in vals))) return 'other';
+            if(f.some(e=>e.value!==vals[e.dataset.cw])) return 'empty'; b.click(); const er=document.querySelector('#gateErr'); return 'ok:'+(er?er.innerText:'')}"""
+        set_js = """(vals)=>{const f=[...document.querySelectorAll('[data-cw]')]; if(!f.length) return 'gone';
+            for(const e of f){ if(e.dataset.cw in vals){ e.value=vals[e.dataset.cw]; e.dispatchEvent(new Event('input',{bubbles:true})) } } return 'set'}"""
+        last = None
+        for i in range(s.GATE_TRIES):
+            await s.until("!!document.querySelector('[data-act=gateConfirm]') && !!document.querySelector('[data-cw]')", ms)
+            try:
+                if i < s.GATE_TRIES // 2:   # (typed like a person, field by field)
+                    for k in await s.ev("[...document.querySelectorAll('[data-cw]')].map(e=>e.dataset.cw)"):
+                        if k in vals: await s.pg.locator(f'[data-cw="{k}"]').fill(vals[k], timeout=4000)
+                else:   # (a screen that keeps being redrawn: set the fields in the same evaluate() that presses Confirm)
+                    await s.pg.evaluate(set_js, vals)
+                r = await s.pg.evaluate(check_js, vals)
+                if r.startswith('ok:'): return r[3:]
+            except PWError as e:
+                if not _gate_retryable(e): raise
+                last = e
+        raise AssertionError(f'gate confirm: the words would not stay typed ({s.GATE_TRIES} tries; last error: {str(last)[:160]})')
+    async def gate_restore(s):
+        """From the welcome screen: tick the box, open the Restore sheet (its phrase box is there when this returns)."""
+        await s.gate_step('gateRestore', "!!document.querySelector('#phraseIn')", tick='#ack')
+    async def gate_new(s):
+        """From the welcome screen: tick the box and press Create; returns when the 12 words are on screen."""
+        await s.gate_step('gateCreate', "!!(window.Nutcade && Nutcade.S && Nutcade.S.seed && Nutcade.S.seed.mnemonic) && !!document.querySelector('#wrote')", tick='#ack')
+    async def create(s, wrong_first=False, ready_only=False):
+        """Creates the wallet through the setup gate and returns its 12 words (a string). ready_only: stop on the PLAYER 1 READY screen."""
+        await s.gate_new()
         phrase=await s.ev("Nutcade.S.seed.mnemonic"); words=phrase.split()
-        await s.pg.check('#wrote'); await s.click('[data-act=gateToConfirm]'); await s.wait(200)
-        await s.until("!!document.querySelector('[data-act=gateConfirm]') && !!document.querySelector('[data-cw]')", 15000)
+        await s.gate_step('gateToConfirm', "!!document.querySelector('[data-cw]')", tick='#wrote')
         if wrong_first:
-            for el in await s.pg.query_selector_all('[data-cw]'): await el.fill('zebra')
-            await s.click('[data-act=gateConfirm]'); await s.wait(300)
-            s.wrong_msg=await s.ev("(document.querySelector('#gateErr')||{}).innerText||''")
-        for el in await s.pg.query_selector_all('[data-cw]'):
-            i=int(await el.get_attribute('data-cw')); await el.fill(words[i])
-        await s.click('[data-act=gateConfirm]'); await s.wait(500)
-        s.done_shown=await s.ev("document.body.innerText.includes('PLAYER 1 READY')")
-        await s.click('[data-act=gateStart]'); await s.wait(400); await s.ev("Nutcade.closeSheet()")
+            s.wrong_msg = ''
+            for _ in range(4):   # (no message: the Confirm press was lost in a redraw; enter the wrong words again)
+                s.wrong_msg = await s.gate_fill({k: 'zebra' for k in await s.ev("[...document.querySelectorAll('[data-cw]')].map(e=>e.dataset.cw)")})
+                if s.wrong_msg.strip(): break
+        picks=await s.ev("[...document.querySelectorAll('[data-cw]')].map(e=>e.dataset.cw)")
+        await s.gate_fill({k: words[int(k)] for k in picks})
+        await s.until("!!document.querySelector('[data-act=gateStart]')", 15000)   # (the READY screen; not by its words, which are translated)
+        s.done_shown = await s.ev("document.body.innerText.includes('PLAYER 1 READY')")
+        if ready_only: return phrase
+        await s.gate_step('gateStart', "!!document.querySelector('.tabbar')")   # (no mint yet: it opens the Add-mint sheet, which is closed next)
+        await s.until("!!document.querySelector('#layer .sheet')", 1500); await s.ev("Nutcade.closeSheet()")
+        await s.until("!document.querySelector('#layer .sheet')", 3000)
         return phrase
     async def add_mint(s, url):
         await s.click('[data-act=tab][data-tab=wallet]'); await s.wait(100)
@@ -68,7 +134,10 @@ class W:
         await s.click('[data-act=send]'); await s.wait(150)
         await s.fill('#amtIn', str(amt));
         if note: await s.fill('#noteIn', note)
+        n0=await s.ev("Nutcade.S.txs.length")
         await s.click('[data-act=doSendEcash]'); await s.wait(1500)
+        # (a slow machine: the token is made a moment later; wait for the new history line to have it, or for the error)
+        await s.until(f"!!((document.querySelector('#sheetErr')||{{}}).innerText||'').trim() || !!document.querySelector('#limitLayer') || (Nutcade.S.txs.length>{n0} && !!Nutcade.S.txs[0].token)", 15000)
         e=await s.err(); tok=None
         if not e: tok=await s.ev("Nutcade.S.txs[0].token")
         await s.close(); return tok, e
@@ -103,7 +172,7 @@ def outside_net(t):
 async def newwallet(b, name):
     ctx=await b.new_context(viewport={'width':390,'height':844}, device_scale_factor=1, is_mobile=True, has_touch=True)
     # Nostr relays and npub.cash point at the local stand-ins (mock_nostr.py), so tests never touch public services.
-    await ctx.add_init_script("if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs',JSON.stringify({sound:true,crt:true,relays:['ws://127.0.0.1:3350/relay'],npcHost:'http://127.0.0.1:3350'}))")
+    await ctx.add_init_script("if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs',JSON.stringify({sound:true,crt:true,relays:['ws://127.0.0.1:"+NOSTR_PORT+"/relay'],npcHost:'http://127.0.0.1:"+NOSTR_PORT+"'}))")
     pg=await ctx.new_page(); w=W(pg,name)
     pg.on('pageerror', lambda e: w.errs.append('PAGEERROR '+str(e)))
     pg.on('console', lambda m: w.errs.append('CONSOLE '+m.text) if m.type=='error' and not outside_net(m.text) else None)
@@ -124,7 +193,7 @@ async def main():
         check('phrase marked backed up', await al.ev("Nutcade.S.seed.backedUp"))
         check('tab bar appears after setup', await al.ev("!!document.querySelector('.tabbar')"))
         # reload mid-setup resumes at words step (no new phrase)
-        mid=await newwallet(b,'mid'); await mid.pg.check('#ack'); await mid.click('[data-act=gateCreate]'); await mid.wait(300)
+        mid=await newwallet(b,'mid'); await mid.gate_new()
         p1=await mid.ev("Nutcade.S.seed.mnemonic"); await mid.pg.reload(); await mid.wait(800)
         check('reload during setup keeps same phrase and returns to words', await mid.ev("Nutcade.S.seed.mnemonic")==p1 and await mid.ev("!!document.querySelector('.words')") and not await mid.ev("!!document.querySelector('.tabbar')"))
         await mid.pg.context.close()
@@ -213,7 +282,7 @@ async def main():
             check('JSON restore brings same balance', await carol.bal()==total_alice, (await carol.bal(), total_alice))
         # phrase restore in fresh Dave
         dave=await newwallet(b,'dave')
-        await dave.pg.check('#ack'); await dave.click('[data-act=gateRestore]'); await dave.wait(200); await dave.fill('#phraseIn', phrase)
+        await dave.gate_restore(); await dave.fill('#phraseIn', phrase)
         check('phrase validator says valid', 'Valid' in await dave.ev("document.querySelector('#phraseOk').innerText"))
         await dave.ev("document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false)")
         await dave.pg.fill('#rmExtra', '\n'.join([A,B,F,P]))

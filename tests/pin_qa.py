@@ -13,11 +13,7 @@ async def main():
         b=await p.chromium.launch(**({'executable_path':os.environ['CHROME']} if os.environ.get('CHROME') else {}))
         w=await newwallet(b,'pin')
         # create wallet but stop on the ready screen to set a PIN there
-        await w.pg.check('#ack'); await w.click('[data-act=gateCreate]'); await w.wait(300)
-        words=(await w.ev("Nutcade.S.seed.mnemonic")).split(); phrase=' '.join(words)
-        await w.pg.check('#wrote'); await w.click('[data-act=gateToConfirm]'); await w.wait(150)
-        for el in await w.pg.query_selector_all('[data-cw]'): await el.fill(words[int(await el.get_attribute('data-cw'))])
-        await w.click('[data-act=gateConfirm]'); await w.wait(400)
+        phrase=await w.create(ready_only=True); words=phrase.split()
         check('ready screen offers Set a PIN', await w.ev("!!document.querySelector('.gate [data-act=pinSet]')"))
         await w.click('.gate [data-act=pinSet]'); await w.wait(200)
         await pin(w,'12345'); await w.wait(200); check('too-short PIN rejected', 'at least 6' in await w.ev("document.querySelector('#pinErr').innerText"))
@@ -90,7 +86,7 @@ async def main():
         # forgot PIN
         await w.click('[data-act=forgotPin]'); await w.wait(150); await w.fill('#confirmWord','RESET'); await w.click('[data-act=doReset]'); await w.wait(1200)
         check('forgot PIN resets to the start screen', await w.ev("!!document.querySelector('[data-act=gateCreate]') && !localStorage.getItem('nutcade:vault')"))
-        await w.pg.check('#ack'); await w.click('[data-act=gateRestore]'); await w.wait(150); await w.fill('#phraseIn', phrase)
+        await w.gate_restore(); await w.fill('#phraseIn', phrase)
         await w.ev("document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false)"); await w.pg.fill('#rmExtra', B)
         await w.click('[data-act=doRestorePhrase]'); await w.until("!!document.querySelector('.sheet-body .credit-num')", 60000)
         check('…and the 12 words bring the sats back', await w.bal()>=890, await w.bal())
