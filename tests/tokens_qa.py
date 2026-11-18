@@ -23,6 +23,10 @@ PIN = '135791'
 ENGLISH = ['HOW TO CLAIM', 'Whoever scans it first gets the sats', 'SCAN TO CLAIM', 'Print tokens', 'Open any Cashu wallet']
 LEDGER = """(u=>{let s=0;for(const t of Nutcade.S.txs){if(t.mint!==u||t.status==='failed'||t.status==='expired')continue;if(t.type==='in'){if(t.status==='done'||t.status==='claimed')s+=t.amount}else s-=t.amount+(t.fee||0)}return [s,(Nutcade.S.proofs[u]||[]).reduce((a,p)=>a+p.amount,0)]})"""
 PRINTED = "Nutcade.S.txs.filter(t=>t.print)"
+OVER_JS = """(()=>{const W=document.documentElement.clientWidth,out=[];for(const e of document.querySelectorAll('#app *, #layer *')){
+  if(!e.getClientRects().length||e.closest('.sr')||e.closest('.pt-preview'))continue;const r=e.getBoundingClientRect();if(r.right>W+1||r.left<-1)out.push((e.className||e.tagName)+':'+Math.round(r.left)+'..'+Math.round(r.right))}
+  for(const p of document.querySelectorAll('.pt-preview')){const r=p.getBoundingClientRect(); if(r.right>W+1||r.left<-1) out.push('pt-preview:'+Math.round(r.left)+'..'+Math.round(r.right))}
+  return out.slice(0,4)})()"""
 
 
 async def wallet(b, lang='en', theme=None, vw=390, vh=844):
@@ -470,6 +474,25 @@ async def main():
             check('logo: the score card that pays out uses the same QR (acorn, read back) and scans', r == [1, True], r)
             await w.pg.context.close()
         await section('logo', logo)
+
+        # ---------- every new screen in five languages at 320 px: nothing off screen, nothing left in English ----------
+        async def narrow():
+            for lang in LANGS:
+                w = await wallet(b, lang, vw=320, vh=640); await w.create(); await w.add_mint(NOFEE); await w.use(NOFEE); await w.receive_ln(3000)
+                await w.ev("window.__i18nMiss=new Set()"); over = {}
+                await open_print(w, NOFEE); over['print'] = await w.ev(OVER_JS)
+                await w.fill('#ptAmt', '128'); await w.fill('#ptCount', '2'); await w.click('[data-act=ptNext]'); await w.until("!!document.querySelector('[data-act=ptMake]')", 10000); over['cost'] = await w.ev(OVER_JS)
+                await w.click('[data-act=ptMake]'); await w.until("!!document.querySelector('.pt-ready')", 60000); await w.wait(400); over['ready'] = await w.ev(OVER_JS)
+                if lang == 'en': await w.pg.screenshot(path=os.path.join(OUT, 'tok-ready-320.png'), full_page=True)
+                await plist(w); over['list'] = await w.ev(OVER_JS)
+                await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=history]'); await w.wait(200); over['notes'] = await w.ev(OVER_JS)
+                await w.ev("document.querySelector('#txList [data-act=tx]').click()"); await w.wait(300); over['line'] = await w.ev(OVER_JS)
+                await w.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click()"); await w.wait(200); over['settings'] = await w.ev(OVER_JS)
+                miss = await w.ev("[...(window.__i18nMiss||[])]")
+                check(f'narrow {lang}: Print tokens, its cost, the ready screen, the list, the notes and Settings fit 320 px', not any(over.values()), {k: v for k, v in over.items() if v})
+                check(f'narrow {lang}: nothing new left untranslated', not miss, miss[:6])
+                await w.pg.context.close()
+        await section('narrow', narrow)
 
         # ---------- print preview pages, both styles, screenshots ----------
         async def pages():

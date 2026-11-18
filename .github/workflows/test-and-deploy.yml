@@ -61,6 +61,8 @@ jobs:
             suites: pinguard
           - name: r4-r6
             suites: r4,r5,r6
+          - name: tokens
+            suites: tokens
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out
