@@ -283,7 +283,8 @@ async function fundDecoyNow(dek, data, url, token) {
     async snapshot() { return Object.assign({}, ctrs); }, async setNext(id, n) { ctrs[id] = n; } };
   const w = new L.Wallet(url, { unit: 'sat', bip39seed: L.mnemonicToSeedSync(data.seed.mnemonic), counterSource: cs }); await w.loadMint();
   const ps = (w.decodeToken(cleanToken(token)).proofs || []), m = mintMax(url);
-  const op = { id: uid(), kind: 'receive', mint: url, inputs: [], amount: 0, note: '', locked: false, extra: false, txId: null, tx: null, follow: null, own: null, created: Date.now(), ctr: [], outs: [] };
+  const wait = (data.txs || []).find(t => t.incoming === cleanToken(token) && t.status === 'pending');   // (the token's line in that wallet: settled with the step, if it comes to that)
+  const op = { id: uid(), kind: 'receive', mint: url, inputs: ps.map(p => p.secret), amount: 0, note: '', locked: false, extra: false, txId: null, tx: null, follow: wait ? { k: 'incoming', txId: wait.id, reqId: null } : null, own: null, created: Date.now(), ctr: [], outs: [] };
   const prepared = await w.prepareSwapToReceive(cleanToken(token), { onCountersReserved: u => { if (u && u.count > 0) op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); } });
   const outs = (prepared.keepOutputs || []).length + (prepared.sendOutputs || []).length;
   if (m && (ps.length > m || outs > m)) return;   // (more than the mint takes in one request: claimed in parts when that wallet opens)
@@ -292,7 +293,13 @@ async function fundDecoyNow(dek, data, url, token) {
   data.txs = []; data.ops = [op]; await seal(data);
   let got;
   try { got = (await w.completeSwap(prepared)).keep; }
-  catch (e) { if (isRefusal(e)) { data.txs = fallback; data.ops = []; await seal(data); } throw e; }
+  // refused: the mint signed nothing for this request, and the token waits in that wallet as before. But "already
+  // pending" (another copy of this very request is at work at the mint) keeps the step in that wallet's journal too, so
+  // if that copy is signed, its coins are settled from the counters on record the first time it opens.
+  catch (e) {
+    if (isRefusal(e)) { data.txs = fallback; if (pendingRefusal(e)) { op.refused = 1; op.pendRef = 1; } else data.ops = []; await seal(data); }
+    throw e;
+  }
   const coins = plain(got), recvd = sum(coins);
   data.proofs = { [url]: coins }; data.ops = []; data.opsdone = [op.id];
   data.txs = [{ id: uid(), ts: Date.now(), type: 'in', method: 'ecash', amount: recvd, fee: Math.max(0, sum(ps) - recvd), mint: url, note: '', status: 'done' }];

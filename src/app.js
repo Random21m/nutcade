@@ -660,7 +660,9 @@ const legacyQuote = q => !q.ctr && !q.rec && !Object.prototype.hasOwnProperty.ca
 // a deposit's counter ranges: the ones on its record, then those of earlier tries whose outcome isn't known (no answer
 // came, or a refusal while another copy of that request could still be signed)
 const depCtrs = q => [q.ctr].concat(q.was || []).filter(Boolean);
-function retireCtr(q) { if (q.ctr) { q.was = [q.ctr].concat(q.was || []).slice(0, 4); delete q.ctr; } }
+// (every one is kept until the deposit is credited or closed: any of them may be the one the mint signs, however many
+// tries there were)
+function retireCtr(q) { if (q.ctr) { q.was = [q.ctr].concat(q.was || []); delete q.ctr; } }
 // "already pending": another copy of this very request (or another step with these coins) is being worked on at the mint
 const pendingRefusal = e => { const x = e && e.name === 'StaleKeysetError' && e.cause ? e.cause : e; return !!x && ([20005, 11004, 11002].includes(num(x.code)) || /\bpending\b/i.test(String(x.message || x.detail || ''))); };
 // issued, but not to this record: closed with what it already had (nothing), never with another step's coins
@@ -2512,7 +2514,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.14.0';
+const APP_VERSION = '1.14.1';
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
 const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
 const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-about', 'About']];
