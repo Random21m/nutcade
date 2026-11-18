@@ -9956,11 +9956,14 @@ function qrCanvas(text, mode, plain) {
     return c;
   } catch (e) { return null; }
 }
-// the app's own reader on a drawn code: zxing when it loads (served with the app), else jsQR
-async function qrRead(src) {
+// the app's own reader on a drawn code. Printing (zx): the bundled zxing reader (loaded when needed), jsQR where it can't
+// load. A code on screen: jsQR, which is already in the page (the WebAssembly reader isn't loaded into every page that
+// shows a QR code; it is still used if a scan already loaded it)
+async function qrRead(src, zx) {
   try {
     const d = frameData(src, 0); if (!d) return null;
-    if (await loadZxing()) { qrRead.by = 'zxing'; const r = await L.readBarcodes(d, ZX_OPTS); return r[0] && r[0].isValid && r[0].text ? r[0].text : null; }
+    const useZx = zx ? await loadZxing() : (zxReady ? await zxReady : false);
+    if (useZx) { qrRead.by = 'zxing'; const r = await L.readBarcodes(d, ZX_OPTS); return r[0] && r[0].isValid && r[0].text ? r[0].text : null; }
     qrRead.by = 'jsqr'; const r = L.jsQR(d.data, d.width, d.height, { inversionAttempts: 'dontInvert' }); return r && r.data ? r.data : null;
   } catch (e) { return null; }
 }
@@ -9981,7 +9984,7 @@ async function qrVerified(text, cell, o = {}) {
     const n = p.qr.getModuleCount(), q = o.quiet == null ? 4 : o.quiet, cl = typeof cell === 'function' ? cell(n + 2 * q) : cell;
     const c = document.createElement('canvas'); c.width = c.height = (n + 2 * q) * cl;
     qrDraw(c.getContext('2d'), p, 0, 0, cl, Object.assign({}, o, { quiet: q }));
-    if ((await qrRead(c)) === text) return { canvas: c, logo: p.logo, n, ok: true, by: qrRead.by };
+    if ((await qrRead(c, o.zxing)) === text) return { canvas: c, logo: p.logo, n, ok: true, by: qrRead.by };
     if (plain) return { canvas: c, logo: false, n, ok: false, by: qrRead.by };
   }
   return null;
@@ -10178,7 +10181,7 @@ async function ptImages(txs, style) {
   const ink = style === 'ink', out = [], check = [];
   for (const t of txs) {
     const text = ptText(t);
-    const r = await qrVerified(text, 8, { quiet: 4, ink, light: ink ? '#ffffff' : '#fff8e6', dark: ink ? '#000000' : '#0a0717' });
+    const r = await qrVerified(text, 8, { zxing: true, quiet: 4, ink, light: ink ? '#ffffff' : '#fff8e6', dark: ink ? '#000000' : '#0a0717' });
     check.push({ i: t.print.i, code: t.print.code, ok: !!(r && r.ok), logo: !!(r && r.logo), by: r && r.by });
     if (!r) { ptLast.check = check; const e = new Error(`Token #${t.print.code} is too long for one printed QR code, so nothing was printed. It is kept in Printed tokens: take it back, or send it another way.`); e.keep = true; throw e; }
     if (r.ok && r.n > ptMax()) { ptLast.check = check; const e = new Error(`The QR code of token #${t.print.code} is too dense to scan reliably on paper, so nothing was printed. It is kept in Printed tokens: take it back, or send it another way.`); e.keep = true; throw e; }
