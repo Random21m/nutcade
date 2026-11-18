@@ -13,7 +13,7 @@ announced twice (across reloads, tabs and restores).
 
 Uses two local test mints (ARR_FEE, default 3338, with input fees; ARR_FREE, default 3339, without) and mock_nostr.py
 (ARR_NOSTR, default ws://127.0.0.1:3350/relay; it also stands in for npub.cash). ARR_ONLY=a,b runs some sections
-(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, langs, widths, game, till). ARR_SHOTS: where screenshots go
+(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
 (default QA_OUT)."""
 import asyncio, json, os, re, time, urllib.request
 from playwright.async_api import async_playwright
@@ -253,7 +253,9 @@ COVER_JS = """(()=>{scrollTo(0,0); const out=[]; const sel={balance:'.credit-num
     for(const [x,y] of [[.5,.5],[.1,.15],[.9,.15],[.1,.85],[.9,.85]]){const px=r.left+r.width*x, py=r.top+r.height*y; if(py<0||py>innerHeight) continue; const h=document.elementFromPoint(px,py); if(h&&h.closest('.arr-card')){out.push(k);break}}}
   const c=document.querySelector('#arrStack .arr-card'); if(!c) return {covered:out, card:null};
   const q=c.getBoundingClientRect(); const btn=[...c.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect(); const h=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2); return h&&(h===b||b.contains(h))});
-  return {covered:out, card:[Math.round(q.top),Math.round(q.bottom)], inview:q.top>=0&&q.bottom<=innerHeight&&q.left>=0&&q.right<=innerWidth, buttons:btn.every(Boolean)&&btn.length>=2}})()"""
+  const big=c.querySelector('.arr-big'), br=big&&big.getBoundingClientRect();
+  const amount=!!big&&big.scrollWidth<=big.clientWidth+1&&br.left>=q.left-1&&br.right<=q.right+1&&br.right<=innerWidth;   // (shown in full: not cut, not outside the card)
+  return {covered:out, card:[Math.round(q.top),Math.round(q.bottom)], inview:q.top>=0&&q.bottom<=innerHeight&&q.left>=0&&q.right<=innerWidth, buttons:btn.every(Boolean)&&btn.length>=2, amount, text:big&&big.innerText}})()"""
 SIZES = [(320, 640), (375, 667), (430, 932), (1440, 900), (844, 390), (568, 320)]
 
 
@@ -264,8 +266,8 @@ async def looks(w, label, details=True):
     for vw, vh in SIZES:
         await w.pg.set_viewport_size({'width': vw, 'height': vh}); await w.wait(150)
         c = await w.ev(COVER_JS)
-        if not c['card'] or c['covered'] or not c['inview'] or not c['buttons']: bad[f'{vw}x{vh}'] = c
-    check(f'{label}: at 320/375/430/1440 px and 844x390/568x320 it covers no balance, lock, mint, Receive or Send, and its buttons are on screen', not bad, bad)
+        if not c['card'] or c['covered'] or not c['inview'] or not c['buttons'] or not c['amount']: bad[f'{vw}x{vh}'] = c
+    check(f'{label}: at 320/375/430/1440 px and 844x390/568x320 its amount shows in full, it covers no balance, lock, mint, Receive or Send, and its buttons are on screen', not bad, bad)
     if details:
         await w.ev("document.querySelector('#arrStack .arr-card [data-act=arrMore]')?.click()"); await w.wait(350)
         reach = await w.ev("""(()=>{const out={}; for(const s of ['#layer [data-act=arrNotes]','#layer [data-act=close]']){const e=[...document.querySelectorAll(s)].pop(); if(!e){out[s]='missing';continue} e.scrollIntoView({block:'center'}); const q=e.getBoundingClientRect();
@@ -647,6 +649,34 @@ async def main():
                 await r.ev("Nutcade.closeSheet()"); await dismiss(r)
                 await settings(r); helptxt = await r.ev("(document.querySelector('#arrNotifyHelp')||{}).textContent||''"); await r.home()
                 check(f'{lang}: the notifications setting says what a PIN and a duress PIN change, in the language', bool(helptxt) and (('With a PIN' in helptxt and 'duress' in helptxt) if lang == 'en' else ('With a PIN' not in helptxt and 'PIN' in helptxt)), helptxt)
+            await set_lang(r, 'en')
+
+        # ---------- big amounts (up to 9,999,999 SAT) and long labels: the amount is never cut, in every language ----------
+        if want('amounts'):
+            await r.use(FREE); await dismiss(r)
+            # (a long mint name, for the label line: only how it is shown here)
+            await r.ev(f"(()=>{{const m=Nutcade.S.mints.find(m=>m.url==={J(FREE)}); m.name='Mint B of the Very Long Name Cooperative'}})()")
+            for lang in ['en', 'es', 'pt', 'de', 'fr']:
+                await set_lang(r, lang); await dismiss(r)
+                await ln_invoice(r, 9999999, FREE)
+                await r.until("!!document.querySelector('#arrStack .arr-card')", 20000); await r.ev("Nutcade.closeSheet()"); await r.wait(300)
+                txt = (await cards(r) or [{'text': ''}])[0]['text']
+                check(f'{lang}, 9,999,999 SAT: (a notice)', ('+' + fmtn(9999999, lang) + ' SAT') in txt, txt)
+                await looks(r, f'{lang}, a 9,999,999 SAT notice with a long label', details=False)
+                if lang in ('en', 'fr'): await r.pg.set_viewport_size({'width': 320, 'height': 640}); await shot(r, f'notice-9999999-{lang}-320'); await r.pg.set_viewport_size({'width': 390, 'height': 844})
+                await dismiss(r)
+                # a summary of the same size: paid while the page is away, then opened again
+                blk = Block(); await blk.attach(r.pg, FREE); blk.on = True
+                await ln_invoice(r, 9999998, FREE); await r.ev("Nutcade.closeSheet()"); await r.wait(1500)
+                pg0 = r.pg; await pg0.close(); r = await wallet(b, ctx=r_ctx)
+                if await r.ev("!!document.querySelector('[data-pinpad]')"): await unlock(r)
+                await r.ev(f"(()=>{{const m=Nutcade.S.mints.find(m=>m.url==={J(FREE)}); m.name='Mint B of the Very Long Name Cooperative'}})()")
+                await settled(r); await r.wait(400)
+                txt = ([c for c in await cards(r) if c['type'] == 'away'] or [{'text': ''}])[0]['text']
+                check(f'{lang}, 9,999,998 SAT: (a summary)', fmtn(9999998, lang) in txt, txt)
+                if lang in ('en', 'pt'): await r.pg.set_viewport_size({'width': 320, 'height': 640}); await shot(r, f'summary-9999998-{lang}-320'); await r.pg.set_viewport_size({'width': 390, 'height': 844})
+                await looks(r, f'{lang}, a 9,999,998 SAT summary', details=False)
+                await dismiss(r)
             await set_lang(r, 'en')
 
         # ---------- 320 and 1440 px ----------
