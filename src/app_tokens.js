@@ -98,6 +98,13 @@ window.NutQR = { draw: qrDraw, plan: qrPlan, read: qrRead, verified: qrVerified 
    one: printed sides out for a two-sided token, printed sides in to keep the code hidden until it is handed over. */
 const PT_MAX = 20;
 const PT_MAX_MODULES = 133;   // a printed code at most 133 modules across (0.33 mm each at 44 mm): denser ones don't scan reliably on paper
+const ptMax = () => (window.NutTokens && +NutTokens.maxModules) || PT_MAX_MODULES;   // (the tests lower it to see a preset refused)
+const PT_PRESETS = [1000, 2100, 5000, 21000];
+/* The first-scan rule, shown before the first Print tokens: once for each wallet on each device (the flag is kept like
+   the other "seen" lists, raw: inside the vault with a PIN), so a wallet restored on another phone shows it again. */
+const ptWalletTag = () => S.seed ? hex(L.sha256(new TextEncoder().encode('nutcade-print-intro:' + S.seed.mnemonic))).slice(0, 16) : '';
+const ptIntroSeen = () => (raw.get('ptintro', []) || []).includes(ptWalletTag());
+function ptIntroDone() { const a = (raw.get('ptintro', []) || []).filter(x => x !== ptWalletTag()); a.push(ptWalletTag()); raw.set('ptintro', a.slice(-20)); }
 const ptUI = { mint: null, amount: 0, count: 0, style: 'arcade', est: null };
 const printedTxs = () => S.txs.filter(t => t.print && t.type === 'out');
 const PT_APP = 'random21m.github.io/nutcade';
@@ -147,17 +154,48 @@ const ptBadPlan = (url, amount, count, plan) => {
 const ptStyleName = s => s === 'ink' ? 'Ink saver' : '<span data-noi18n>Arcade</span>';   // (Arcade: the style's name, the same in every language)
 function openPrint() {
   if (needMint()) return;
+  if (!ptIntroSeen()) {
+    openSheet('Print tokens', `<div class="pt-intro"><div class="pb-h" style="text-align:center">BEFORE YOU PRINT</div>
+      <p class="pt-rule" style="margin:0">A printed token is cash. Whoever scans it first gets the sats. Keep it folded or hidden until you hand it over.</p>
+      <button class="btn solid gold block" data-act="ptIntroOk">I understand</button></div>`);
+    return;
+  }
   const m = activeMint(); ptUI.mint = m.url;
-  const n = printedTxs().length;
+  const n = printedTxs().length, fx = a => { const f = fiatOf(a); return f ? '≈ ' + f : ''; };
+  const pressed = a => String(ptUI.amount ? (PT_PRESETS.includes(ptUI.amount) ? ptUI.amount : 'other') : '') === String(a);
   openSheet('Print tokens', `<p style="margin:0">Hand sats over on paper, like arcade tokens. Each token is its own Cashu token with its own QR code: whoever scans it first gets its sats, with any Cashu wallet.</p>
     <div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
+    <div class="field"><label>Amount per token</label><div class="pt-presets" role="group" aria-label="Amount per token">
+      ${PT_PRESETS.map(a => `<div class="pt-pre"><button type="button" data-act="ptPreset" data-a="${a}" aria-pressed="${pressed(a)}"><span data-noi18n>${fmt(a)}</span></button><span class="pt-fiat tiny muted" data-a="${a}" data-noi18n>${esc(fx(a))}</span></div>`).join('')}
+      <div class="pt-pre"><button type="button" data-act="ptPreset" data-a="other" aria-pressed="${pressed('other')}">OTHER</button><span class="pt-fiat" data-a="other"></span></div></div>
+      <div class="tiny muted pt-pre-why"></div></div>
     <div class="row" style="gap:10px"><div class="field" style="flex:3"><label for="ptAmt">Amount per token (SAT)</label><input id="ptAmt" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off" value="${ptUI.amount || ''}"></div>
     <div class="field" style="flex:2"><label for="ptCount">How many (1 to 20)</label><input id="ptCount" class="inp" inputmode="numeric" autocomplete="off" value="${ptUI.count || 4}"></div></div>
     <div class="field"><label>Style</label><div class="seg pt-seg" role="group" aria-label="Style">${[['arcade', 'ARCADE'], ['ink', 'INK SAVER']].map(([k, l]) => `<button type="button" data-act="ptStyle" data-s="${k}" aria-pressed="${ptUI.style === k}"${k === 'arcade' ? ' data-noi18n' : ''}>${l}</button>`).join('')}</div>
       <div class="tiny muted" id="ptStyleHelp">${ptUI.style === 'ink' ? 'Black on white.' : 'Full color. The QR code is always dark on light.'}</div></div>
     <button class="btn solid gold block" data-act="ptNext">Next</button>
     ${n ? `<button class="linkbtn tiny" data-act="ptList" style="justify-self:start">Printed tokens (${n})</button>` : ''}
-    <div id="sheetErr"></div>`);
+    <div id="sheetErr"></div>`, body => {
+    const el = body.querySelector('#ptAmt');
+    if (el) el.addEventListener('input', () => { const v = satsOf('ptAmt'); body.querySelectorAll('[data-act=ptPreset]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.a === (PT_PRESETS.includes(v) ? String(v) : 'other')))); });
+    ptPresetCheck(m.url, body);
+  });
+}
+// each preset as this mint would make it (the receiver's fee coins too): one whose code would be too dense is disabled, saying why
+async function ptPresetInfo(url) {
+  const w = await getWallet(url);
+  return PT_PRESETS.map(a => { const { denoms } = ptOuts(w, a), modules = ptModules(url, w, denoms); return { a, coins: denoms.length, modules, fits: modules <= ptMax() }; });
+}
+async function ptPresetCheck(url, body) {
+  let info; try { info = await ptPresetInfo(url); } catch (e) { return; }
+  if (!body.isConnected) return;
+  const why = [];
+  for (const x of info) {
+    const b = body.querySelector(`[data-act=ptPreset][data-a="${x.a}"]`); if (!b) continue;
+    b.disabled = !x.fits;
+    if (!x.fits) why.push(`${money(x.a)} would need ${x.coins} coins here, too dense to scan reliably on paper.`);
+  }
+  const box = body.querySelector('.pt-pre-why'); if (box) box.innerHTML = why.map(t => `<div>${esc(t)}</div>`).join('');
 }
 function ptRead() {
   const amount = satsOf('ptAmt'); if (!amount || amount <= 0) throw new Error('Enter an amount in sats, like 1000.');
@@ -165,13 +203,13 @@ function ptRead() {
   if (!(count >= 1 && count <= PT_MAX)) throw new Error('Pick how many tokens: 1 to 20.');
   return { amount, count };
 }
-// a token of `coins` coins at this mint, as printed (no DLEQ), for its size only: is its code small enough for paper?
-// a token of exactly these coins (the receiver's fee coins too), as printed (no DLEQ): is its code small enough for paper?
-function ptFits(url, w, denoms) {
+// the size across of a token's code made of exactly these coins (the receiver's fee coins too), as printed (no DLEQ)
+function ptModules(url, w, denoms) {
   const r = k => hex(rnd(k)); let id; try { id = w.getOutputKeyset().id; } catch (e) { id = '00' + r(7); }
   const text = L.getEncodedToken({ mint: url, unit: 'sat', proofs: denoms.map(a => ({ id, amount: a, secret: r(32), C: '02' + r(32) })) });
-  try { return qrPlan(text, undefined, true).qr.getModuleCount() <= PT_MAX_MODULES; } catch (e) { return false; }
+  try { return qrPlan(text, undefined, true).qr.getModuleCount(); } catch (e) { return Infinity; }
 }
+const ptFits = (url, w, denoms) => ptModules(url, w, denoms) <= ptMax();
 async function ptSummary() { const { amount, count } = ptRead(); return ptShowCost(amount, count); }
 async function ptShowCost(amount, count) {
   const url = ptUI.mint;
@@ -240,7 +278,7 @@ async function ptImages(txs, style) {
     const r = await qrVerified(text, 8, { quiet: 4, ink, light: ink ? '#ffffff' : '#fff8e6', dark: ink ? '#000000' : '#0a0717' });
     check.push({ i: t.print.i, code: t.print.code, ok: !!(r && r.ok), logo: !!(r && r.logo), by: r && r.by });
     if (!r) { ptLast.check = check; const e = new Error(`Token #${t.print.code} is too long for one printed QR code, so nothing was printed. It is kept in Printed tokens: take it back, or send it another way.`); e.keep = true; throw e; }
-    if (r.ok && r.n > PT_MAX_MODULES) { ptLast.check = check; const e = new Error(`The QR code of token #${t.print.code} is too dense to scan reliably on paper, so nothing was printed. It is kept in Printed tokens: take it back, or send it another way.`); e.keep = true; throw e; }
+    if (r.ok && r.n > ptMax()) { ptLast.check = check; const e = new Error(`The QR code of token #${t.print.code} is too dense to scan reliably on paper, so nothing was printed. It is kept in Printed tokens: take it back, or send it another way.`); e.keep = true; throw e; }
     if (!r.ok) { ptLast.check = check; const e = new Error(`The QR code of token #${t.print.code} didn't read back, so nothing was printed. Your tokens are kept in Printed tokens: try printing again, or take them back.`); e.keep = true; throw e; }
     out.push({ t, src: r.canvas.toDataURL('image/png'), logo: r.logo });
   }
@@ -297,6 +335,8 @@ async function ptPrintNow(b) {
   const done = () => { window.removeEventListener('afterprint', done); setTimeout(endPrint, 0); };
   window.addEventListener('afterprint', done);
   try { window.print(); } catch (e) { done(); }
+  const r = document.querySelector('#layer .pt-ready');
+  if (r && !r.querySelector('.pt-after')) r.querySelector('[data-act=ptPrint]').insertAdjacentHTML('afterend', `<div class="notice cyan pt-after"><span>Nobody claimed it? Take it back any time in</span> <a href="#" class="pt-link" data-act="ptList">Notes → Printed tokens</a></div>`);
 }
 
 /* ---------- the Printed tokens list ---------- */
@@ -347,6 +387,7 @@ async function ptTakeOne(t) {
 window.NutTokens = {
   get lastCheck() { return ptLast.check; },
   get lastEstimate() { return ptUI.est; },
+  maxModules: PT_MAX_MODULES, presetInfo: url => ptPresetInfo(url || S.active),
   planNow: async (amount, count, url) => { url = url || S.active; const p = ptPlan(await getWallet(url), url, amount, count); return p && { spend: p.spend, fee: p.fee }; },
   preparePrint, endPrint, printed: () => printedTxs(),
   showQR: text => openSheet('QR code', qrBlock(text, 'QR code')),

@@ -146,7 +146,8 @@ async def main():
             w = await funded(b, [NOFEE], 3000)
             await w.home(); await w.click('[data-act=send]'); await w.wait(150)
             check('send: a Print tokens button on the Send screen (ecash)', await w.ev("!!document.querySelector('#layer [data-act=ptOpen]') && /print tokens/i.test(document.querySelector('#layer [data-act=ptOpen]').innerText)"))
-            await w.click('[data-act=ptOpen]'); await w.until("!!document.querySelector('#ptAmt')", 5000)
+            await w.click('[data-act=ptOpen]'); await w.until("!!document.querySelector('.pt-intro')", 5000); await w.click('[data-act=ptIntroOk]')   # (the first time: the first-scan rule)
+            await w.until("!!document.querySelector('#ptAmt')", 5000)
             t = await w.sheet_text()
             check('screen: amount per token, how many (1-20) and the two styles', await w.ev("!!document.querySelector('#ptAmt') && !!document.querySelector('#ptCount') && document.querySelectorAll('[data-act=ptStyle]').length===2") and 'ARCADE' in t.upper() and 'INK SAVER' in t.upper(), t[:300])
             # not by color alone: the chosen style says so in words / a mark, not just a color
