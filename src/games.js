@@ -689,7 +689,8 @@ const nutFlipper = {
   }
 };
 
-const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper];
+/*@@game_pool.js@@*/
+const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper, cornerPocket];
 // Cabinets kept in their own files (poker.js) register a factory in window.NutCabinets; each gets the helpers it draws with.
 for (const make of (window.NutCabinets || [])) GAMES.push(make({ W, H, C, spr, text, T, A, store, clamp, hiOf, qualifies, addScore }));
 // The challenger's ghost: their player drawn faintly over yours while you race their replay

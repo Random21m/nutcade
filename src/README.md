@@ -22,6 +22,7 @@
 | `chiptune.js` | The sound modem used by Send by sound (encoder, decoder, microphone and speaker) |
 | `games.js` | The arcade engine and eight cabinets (it also adds any cabinet an extra file registers in `window.NutCabinets`) |
 | `poker.js` | Nut Poker, the ninth cabinet: free-credit video poker (its own file; rules are unit-tested in `tests/game_poker_unit.js`) |
+| `game_pool.js` | Corner Pocket (8-ball pool), inlined inside `games.js` |
 | `trophies.js` | Trophies and share cards |
 | `price.js` | The live Bitcoin price chart |
 | `audio.js` | Sound effects and music |

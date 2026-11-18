@@ -8,7 +8,7 @@ async def main():
         b = await p.chromium.launch(**({'executable_path': os.environ['CHROME']} if os.environ.get('CHROME') else {}))
         w = await newwallet(b, 'arcade'); await w.create()
         await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(500)
-        check('arcade lists the 8 original cabinets (and any added since)', await w.ev("document.querySelectorAll('[data-game]').length") >= 8)
+        check('arcade lists every cabinet', await w.ev("document.querySelectorAll('[data-game]').length") >= len(GAMES))
         for g in GAMES:
             await w.ev(f"document.querySelector('[data-game={g}]').click()"); await w.wait(300)
             await w.pg.keyboard.press('Space'); await w.wait(200)
