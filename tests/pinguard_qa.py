@@ -24,6 +24,7 @@ GUARD = {   # the step: (how it starts, what shows once it went ahead, the pad's
     'export': ('exportToken', "/cashu[AB]/.test((document.querySelector('#layer .code')||{}).innerText||'')", 'Export ecash', 'Enter your PIN to export your ecash.'),
     'newseed': ('newSeedAsk', "!!document.querySelector('[data-act=doNewSeed]')", 'New recovery phrase', 'Enter your PIN to make a new recovery phrase.'),
 }
+# (seedCreate, another step with no button today, replaces the phrase at once: checked on its own, never let through)
 # (downloads are recorded, not saved; the steps with no button on screen today are started the way a button would)
 DL_JS = "window.__dl=[]; if(!window.__dlHook){window.__dlHook=1; document.addEventListener('click', e=>{ const a=e.target && e.target.closest && e.target.closest('a[download]'); if(a){ window.__dl.push(a.download); e.preventDefault(); } }, true)}"
 PAD = "!!document.querySelector('#layer [data-pinpad=guard]')"
@@ -222,6 +223,10 @@ async def main():
             await w.ev(f"Nutcade.openSheet('Form', {json.dumps(forms['doRestorePhrase'] + '<button data-act=doRestorePhrase>Go</button><div id=sheetErr></div>')})")
             await w.click('#layer [data-act=doRestorePhrase]'); await w.wait(1500)
             check('thief: once the Restore form that the PIN opened is closed, its pass is gone', await w.ev(snap) == s0)
+            await settings(w); await w.ev(act_js('seedCreate')); await w.wait(400)
+            check('thief: making a new phrase (seedCreate) asks for the PIN first', await w.ev(PAD) and await w.ev(snap) == s0)
+            await enter(w, WRONG); await w.ev("Nutcade.closeSheet(); localStorage.removeItem('nutcade:pinfails')")
+            check('thief: ... and a wrong PIN changes nothing', await w.ev(snap) == s0)
             check('thief: no request moved or looked for coins in all of that (no swap, melt or restore)', not hits, hits[:3])
             # the reset form, without the PIN: the wallet is still there after a reload
             await w.pg.reload(); await w.wait(700); await unlock(w)
