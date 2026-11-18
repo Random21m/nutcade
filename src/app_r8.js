@@ -154,6 +154,45 @@ function limitAsk(e, retry) {
 }
 function limitClose() { document.getElementById('limitLayer')?.remove(); limitRetry = null; if (pinUI.mode === 'limitOK') pinUI.mode = null; }
 
+/* ---------- PIN guard ----------
+   The spending limit protects an unlocked phone only if nothing hands over the whole wallet around it. So with a PIN,
+   every step that could do that asks for it first: showing the recovery phrase, the backup file (downloading it or
+   showing its text), importing a backup, restoring a wallet from 12 words, connecting an app (Wallet Connect),
+   resetting the wallet, exporting a mint's ecash and making a new phrase. (Changing the spending limit and every PIN
+   change already need it.) Restoring asks whatever the balance: the phrase decides where every later deposit, refund,
+   change and Lightning-address payment lands, not just today's sats.
+   The PIN asked is the open wallet's own (in the duress PIN's wallet, its PIN), through the same pad, check, wrong-PIN
+   count and wait as a payment over the limit, so every wallet asks the same way. Face ID / fingerprint isn't offered
+   here, as for the limit. A step that opens a form (restore, import, Wallet Connect, reset) asks before the form
+   opens, and the form's button goes ahead only while that same form is open. Without a PIN, and on the start screen
+   before a wallet exists, nothing is asked. */
+const GUARD = {
+  seed: ['Recovery phrase', 'Enter your PIN to see your 12 words.'],
+  backup: ['Backup file', 'Enter your PIN to get your backup file.'],
+  import: ['Import backup', 'Enter your PIN to import a backup.'],
+  restore: ['Restore wallet', 'Enter your PIN to restore a wallet from 12 words.'],
+  nwc: ['Connect an app', 'Enter your PIN to connect an app to this wallet.'],
+  reset: ['Reset wallet', 'Enter your PIN to reset this wallet.'],
+  export: ['Export ecash', 'Enter your PIN to export your ecash.'],
+  newseed: ['New recovery phrase', 'Enter your PIN to make a new recovery phrase.']
+};
+const guard = { run: null, pass: null };
+const guardOn = () => !!(vault.on && vault.open && (S.seed || totalBalance() > 0));
+function pinGuard(k, fn) {
+  guard.pass = null;
+  if (!guardOn()) return fn();
+  openPinSheet('guard', GUARD[k][0], { title: 'ENTER PIN', text: GUARD[k][1] });
+  guard.run = { k, fn, sheet: $('#layer .sheet') };
+}
+// the right PIN was entered on the guard's pad: the step goes ahead (a form it opens keeps the pass while it is open)
+function guardGo() {
+  const g = guard.run; guard.run = null; pinUI.mode = null;
+  if (!g || !g.sheet || !g.sheet.isConnected) return;
+  closeSheet(); g.fn();
+  const sheet = $('#layer .sheet'); guard.pass = sheet ? { k: g.k, sheet } : null;
+}
+const guardHeld = k => !guardOn() || !!(guard.pass && guard.pass.k === k && guard.pass.sheet.isConnected && guard.pass.sheet === $('#layer .sheet'));
+
 /* ---------- duress PIN ----------
    A second PIN that opens a small, separate wallet (its own 12 words, its own balance and history) instead of this
    one, for when someone forces you to unlock NUTCADE. The vault always has room for it: with a PIN set there is
@@ -345,6 +384,7 @@ async function pinMore(m, v, busy) {
   const check = async () => { busy('CHECKING…'); if (await pinToDek(v)) { raw.del('pinfails'); return true; } notePinFail(); pinError('That PIN is wrong.'); return false; };
   if (m === 'limitOK') { if (!(await check())) return; limitOK = { until: Date.now() + 120e3 }; const r = limitRetry; limitClose(); sfx('coin'); if (r) r(); return; }
   if (m === 'limitSave') { if (!(await check())) return; applyLimits(limWant.v); return; }
+  if (m === 'guard') { if (!(await check())) return; guardGo(); return; }
   if (m === 'duressOld') {
     if (!(await check())) return; duressUI.old = v;
     try { pinChangeCheck(); if (vault.decoy) throw pinChangeRefuse(); } catch (e) { return pinError(e.message); }   // (the duress PIN's wallet has no room for a duress PIN of its own)

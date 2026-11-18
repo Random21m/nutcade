@@ -2443,7 +2443,7 @@ async function pinSubmit() {
       setTimeout(() => backgroundTick(true).then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 300);
       return;
     }
-    if (m === 'limitOK' || m === 'limitSave' || /^duress/.test(m)) return pinMore(m, v, busy);
+    if (m === 'limitOK' || m === 'limitSave' || m === 'guard' || /^duress/.test(m)) return pinMore(m, v, busy);
     if (m === 'set') { pinUI.first = v; nextPad('setConfirm'); setBody(padHTML('CONFIRM PIN', 'Type the same PIN again.') + '<div id="sheetErr"></div>'); return; }
     if (m === 'setConfirm') {
       if (v !== pinUI.first) { nextPad('set'); setBody(padHTML('CHOOSE A PIN', "Those didn't match. Start again.") + '<div id="sheetErr"></div>'); return; }
@@ -3896,6 +3896,7 @@ function importsPanel() {
    journal records: a step whose answer hasn't come yet (a gift, a bounty, Extra Life, a hunt...) keeps its saved
    outputs and secrets, so the wallet restored from this backup settles it there. Settling is by secret at the mint, so
    the same step settled on both devices gives the same coins, never two sets. */
+const showBackupText = data => openSheet('Backup', `<div class="notice red">This contains your recovery phrase and spendable ecash. Keep it private.</div><div class="code" style="max-height:200px">${esc(data)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(data)}">Copy backup</button>`);
 const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: S.imports, quotes: S.quotes, requests: S.requests }, null, 1);
 const A = {
   close: () => closeSheet(),
@@ -3970,12 +3971,9 @@ const A = {
   reconcileTx: b => run(b, 'CHECKING', async () => { const t = txById(b.dataset.id); const p = S.pending.find(x => x.txId === t.id); if (!p) { toast('Nothing pending for this one', 'cyan'); return; } const r = await reconcile(p, { force: true }); const cp = (txById(t.id) || {}).changePending; toast(cp ? "Paid. Its change hasn't come back yet; NUTCADE keeps trying." : { paid: 'Payment confirmed', returned: 'Payment failed. Sats returned.', pending: 'Still in flight' }[r], r === 'pending' || cp ? 'gold' : 'lime'); closeSheet(); refresh(); }),
   reconcileAll: b => run(b, '…', async () => { for (const p of [...S.pending]) await reconcile(p, { force: true }).catch(() => {}); refresh(); }),
   pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } refresh(); sfx('blip'); },
-  backup: () => {
-    const data = backupData();
-    openSheet('Backup', `<div class="notice red">This contains your recovery phrase and spendable ecash. Keep it private.</div><div class="code" style="max-height:200px">${esc(data)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(data)}">Copy backup</button>`);
-  },
-  restore: () => openSheet('Import backup', `<div class="field"><span class="flabel">Backup file</span><div class="row filepick"><label class="btn sm violet"><span>Choose a file</span><input id="restoreFile" type="file" accept=".json,application/json"></label><span id="restoreFileName" class="tiny muted">No file chosen</span></div></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`),
-  doRestore: b => run(b, 'CHECKING', async () => {
+  backup: () => pinGuard('backup', () => showBackupText(backupData())),
+  restore: () => pinGuard('import', () => openSheet('Import backup', `<div class="field"><span class="flabel">Backup file</span><div class="row filepick"><label class="btn sm violet"><span>Choose a file</span><input id="restoreFile" type="file" accept=".json,application/json"></label><span id="restoreFileName" class="tiny muted">No file chosen</span></div></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`)),
+  doRestore: b => !guardHeld('import') ? closeSheet() : run(b, 'CHECKING', async () => {
     let d; try { d = JSON.parse(val('restoreIn')); } catch (e) { throw new Error("That isn't valid backup text."); }
     if (!d || d.app !== 'nutcade') throw new Error('Not a NUTCADE backup.');
     const waiting = await importBackup(d);
@@ -3988,9 +3986,9 @@ const A = {
   }),
   takeover: () => { try { chan && chan.postMessage({ t: 'takeover', id: TAB_ID }); } catch (e) {} location.reload(); },
   seedCreate: b => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (totalBalance() === 0) { S.seed.secured = true; store.set('seed', S.seed); } sfx('start'); render(); openShowPhrase(true); }),
-  seedShow: () => { if (!S.seed) return; openShowPhrase(!S.seed.backedUp); },
+  seedShow: () => { if (!S.seed) return; pinGuard('seed', () => openShowPhrase(!S.seed.backedUp)); },
   gateCreate: b => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (totalBalance() === 0) { S.seed.secured = true; store.set('seed', S.seed); } gate = { step: 'show' }; sfx('start'); render(); window.scrollTo(0, 0); }),
-  gateRestore: () => openRestore(),
+  gateRestore: () => pinGuard('restore', openRestore),   // (on the start screen nothing is asked: no wallet yet)
   gateToConfirm: () => { gate = { step: 'confirm', picks: pickWords() }; sfx('select'); render(); window.scrollTo(0, 0); const f = document.querySelector('[data-cw]'); if (f && !matchMedia('(pointer:coarse)').matches) f.focus(); },
   gateBack: () => { gate = { step: 'show' }; render(); window.scrollTo(0, 0); },
   gateConfirm: async b => {
@@ -4022,8 +4020,8 @@ const A = {
     render();
   }),
   secureAll: b => run(b, 'PROTECTING', async () => { const fee = await secureAll(); render(); toast(`Your ecash is now covered by your phrase${fee ? ` (fee ${money(fee)})` : ''}`, 'lime'); }),
-  seedRestore: () => openRestore(),
-  doRestorePhrase: b => run(b, 'RESTORING', async () => {
+  seedRestore: () => pinGuard('restore', openRestore),
+  doRestorePhrase: b => !guardHeld('restore') ? closeSheet() : run(b, 'RESTORING', async () => {
     const phrase = cleanPhrase(val('phraseIn'));
     if (!validPhrase(phrase)) throw new Error("That phrase isn't valid. Check each word's spelling and that you have all 12, in order.");
     const urls = [...document.querySelectorAll('[data-rmint]')].filter(i => i.checked).map(i => i.dataset.rmint)
@@ -4098,14 +4096,14 @@ const A = {
   }),
   jump: b => { const el = document.getElementById(b.dataset.id); if (el) el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); },
   setTheme: b => { S.prefs.theme = b.dataset.t; save(); refresh(); sfx('select'); },
-  backupDownload: () => {
+  backupDownload: () => pinGuard('backup', () => {
     const data = backupData();
     try {
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
       a.download = `nutcade-backup-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast('Backup file downloaded. Keep it private.', 'lime');
-    } catch (e) { A.backup(); }
-  },
+    } catch (e) { showBackupText(data); }
+  }),
   sweepOpen: () => {
     const urls = [...new Set(S.mints.map(m => m.url).concat(CURATED.filter(c => !c.test).map(c => c.url)))];
     openSheet('Restore ecash', `<p style="margin:0">Enter the other phrase. NUTCADE scans the mints you pick and moves any ecash it finds into this wallet, under your current phrase.</p>
@@ -4131,26 +4129,31 @@ const A = {
   p2pkNew: b => run(b, '…', async () => { newP2PK(); sfx('coin'); refresh(); toast('New P2PK key created', 'lime'); }),
   p2pkShow: b => { const k = S.p2pk[+b.dataset.i]; openSheet('Your P2PK key', `<p style="margin:0">Share this public key. Ecash locked to it can only be claimed by this wallet.</p>${qrBlock(k.pub, 'P2PK public key QR')}<div class="code">${esc(k.pub)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(k.pub)}">Copy key</button>`); },
   exportToken: () => {
-    const m = activeMint(); const ps = S.proofs[m.url] || [];
-    if (!ps.length) { toast('Nothing to export on this mint', 'gold'); return; }
-    const tok = L.getEncodedToken({ mint: m.url, proofs: ps, unit: 'sat' });
-    openSheet('Export ecash', `<div class="notice red">This token holds your entire ${esc(m.name)} balance (${money(sum(ps))}). Anyone who has it can spend it. After you claim it in another wallet, use Remove spent ecash here.</div>
+    const has = () => { const m = activeMint(); return m && (S.proofs[m.url] || []).length ? m : null; };
+    if (!has()) { toast('Nothing to export on this mint', 'gold'); return; }
+    pinGuard('export', () => {
+      const m = has(); if (!m) { toast('Nothing to export on this mint', 'gold'); return; }
+      const ps = S.proofs[m.url], tok = L.getEncodedToken({ mint: m.url, proofs: ps, unit: 'sat' });
+      openSheet('Export ecash', `<div class="notice red">This token holds your entire ${esc(m.name)} balance (${money(sum(ps))}). Anyone who has it can spend it. After you claim it in another wallet, use Remove spent ecash here.</div>
       <div class="code" style="max-height:160px">${esc(tok)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(tok)}">Copy token</button>`);
+    });
   },
   ctrBump: b => { counterSource.advanceToAtLeast(b.dataset.id, (S.counters[b.dataset.id] || 0) + 10); refresh(); },
-  newSeedAsk: () => openSheet('New recovery phrase', `<p style="margin:0">NUTCADE will create a new 12-word phrase, show it for you to write down, then move your ${money(totalBalance())} under it. The mint may charge a small fee for the move.</p>
+  newSeedAsk: () => pinGuard('newseed', () => openSheet('New recovery phrase', `<p style="margin:0">NUTCADE will create a new 12-word phrase, show it for you to write down, then move your ${money(totalBalance())} under it. The mint may charge a small fee for the move.</p>
     <div class="field"><label for="confirmWord">Type NEW to continue</label><input id="confirmWord" class="inp" autocomplete="off" autocapitalize="characters"></div>
-    <button class="btn solid red block" data-act="doNewSeed">Create new phrase</button><div id="sheetErr"></div>`),
+    <button class="btn solid red block" data-act="doNewSeed">Create new phrase</button><div id="sheetErr"></div>`)),
   doNewSeed: () => {
+    if (!guardHeld('newseed')) { closeSheet(); return; }
     if (val('confirmWord').trim().toUpperCase() !== 'NEW') { showErr(new Error('Type NEW to confirm.')); return; }
     setSeed(newMnemonic(), false); S.seed.secured = totalBalance() === 0; store.set('seed', S.seed);
     closeSheet(); gate = { step: 'show' }; render(); window.scrollTo(0, 0);
   },
-  resetAsk: () => openSheet('Reset wallet', `<div class="notice red">This deletes your recovery phrase, ecash, notes and history from this browser, then returns you to the start screen to create a new wallet or restore one. ${totalBalance() ? `If you don't have your 12 words and mint list, your ${money(totalBalance())} is lost forever.` : 'Your wallet is empty.'}</div>
+  resetAsk: () => pinGuard('reset', () => openSheet('Reset wallet', `<div class="notice red">This deletes your recovery phrase, ecash, notes and history from this browser, then returns you to the start screen to create a new wallet or restore one. ${totalBalance() ? `If you don't have your 12 words and mint list, your ${money(totalBalance())} is lost forever.` : 'Your wallet is empty.'}</div>
     ${S.mints.length ? `<div class="th">Your mints, to write down with your words:</div><div class="code" style="color:var(--ink)">${S.mints.map(m => esc(m.url)).join('<br>')}</div>` : ''}
     <div class="field"><label for="confirmWord">Type RESET to confirm</label><input id="confirmWord" class="inp" autocomplete="off" autocapitalize="characters"></div>
-    <button class="btn solid red block" data-act="doReset">Reset wallet</button><div id="sheetErr"></div>`),
+    <button class="btn solid red block" data-act="doReset">Reset wallet</button><div id="sheetErr"></div>`)),
   doReset: () => {
+    if (!guardHeld('reset')) { closeSheet(); return; }   // (Forgot PIN on the lock screen: the wallet isn't open, nothing to ask)
     if (val('confirmWord').trim().toUpperCase() !== 'RESET') { showErr(new Error('Type RESET to confirm.')); return; }
     if (vault.on && vault.open && vault.decoy) { resetPart().then(() => location.reload(), e => showErr(e)); return; }   // (the duress PIN's wallet is emptied; the real wallet is never touched)
     // the vault is closed first, so nothing written below can land in it (or bring it back); then every record of the

@@ -617,7 +617,8 @@ async def main():
             check('after all that: the real PIN still opens the real wallet, untouched', await d.ev("Nutcade.S.seed.mnemonic") == real_words)
             # Reset wallet inside the duress wallet: only that wallet starts over; the real one survives
             rb = await d.bal(); await d.pg.reload(); await d.wait(700); await unlock(d, DPIN)
-            await settings(d); await d.click('[data-act=resetAsk]'); await d.wait(200); await d.fill('#confirmWord', 'RESET'); await d.click('[data-act=doReset]'); await d.wait(2500)
+            await settings(d); await d.click('[data-act=resetAsk]'); await d.wait(200); await pad(d, DPIN, '#layer [data-pinpad=guard]'); await d.until("!!document.querySelector('#confirmWord')", 20000)   # (Reset asks for the open wallet's PIN: here the duress PIN)
+            await d.fill('#confirmWord', 'RESET'); await d.click('[data-act=doReset]'); await d.wait(2500)
             check('reset inside the duress wallet: the vault is still there (no plain wallet next to it)', await d.ev("!!localStorage.getItem('nutcade:vault') && !localStorage.getItem('nutcade:seed') && !localStorage.getItem('nutcade:proofs')"))
             await unlock(d, '555777')
             check('reset inside the duress wallet: the real wallet is all there', await d.ev("Nutcade.S.seed.mnemonic") == real_words and await d.bal() == rb, (await d.bal(), rb))
@@ -861,7 +862,8 @@ async def main():
                 if duress:
                     await settings(z); await z.click('[data-act=duressOpen]'); await z.wait(250); await pad(z, PIN); await z.wait(900); await pad(z, DPIN); await z.wait(300); await pad(z, DPIN)
                     await z.until("!!document.querySelector('#duressAmt')", 8000); await z.click('[data-act=duressMake]'); await z.until("/READY/.test(document.body.innerText)", 30000); await z.ev("Nutcade.closeSheet()")
-                await settings(z); await z.click('[data-act=resetAsk]'); await z.wait(200); await z.fill('#confirmWord', 'RESET'); await z.click('[data-act=doReset]'); await z.wait(2500)
+                await settings(z); await z.click('[data-act=resetAsk]'); await z.wait(200); await pad(z, PIN, '#layer [data-pinpad=guard]'); await z.until("!!document.querySelector('#confirmWord')", 20000)   # (Reset asks for the PIN first)
+                await z.fill('#confirmWord', 'RESET'); await z.click('[data-act=doReset]'); await z.wait(2500)
                 tag = 'PIN and duress PIN' if duress else 'PIN'
                 check(f'reset with a {tag}: no vault left, the start screen (not a dead lock screen)', await z.ev("!localStorage.getItem('nutcade:vault') && !!document.querySelector('[data-act=gateCreate]') && !document.querySelector('[data-pinpad]')"), await z.ev("[Object.keys(localStorage), document.body.innerText.slice(0,80)]"))
                 await z.pg.context.close()
