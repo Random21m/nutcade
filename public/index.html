@@ -10255,9 +10255,12 @@ function arrLedger() {
   const l = raw.get('arrivals', null);
   return l && l.v === 1 && Array.isArray(l.seen) && Array.isArray(l.pend) ? l : { v: 1, since: arrS().base, seen: [], pend: [] };
 }
+// Not money arriving: your own coins coming back by your own hand or the wallet's upkeep: a token (printed or not) you
+// took back, an Extra Life you cashed out, coins the keyset check-up set aside that the mint accepts again (upkeep).
+// (A gift or a payment request's sats that came back by themselves are still announced: "Came back to you".)
 function arrQual(t) {
-  return !!t && t.type === 'in' && t.status === 'done' && num(t.amount) > 0 && !t.move
-    && !/^(Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Back from the duress PIN's wallet$)/.test(t.note || '');
+  return !!t && t.type === 'in' && t.status === 'done' && num(t.amount) > 0 && !t.move && !t.upkeep
+    && !/^(Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Back from the duress PIN's wallet$|Reclaimed: |Extra Life cashed out)/.test(t.note || '');
 }
 // the kind, from the line (and, for npub.cash, its deposit record, which is gone once it is credited)
 function arrKind(t) {
@@ -10265,7 +10268,7 @@ function arrKind(t) {
   if (t.method === 'onchain') return 'onchain';
   if (t.method === 'ln') { const q = S.quotes.find(q => q.quote === t.quote); return (q && q.npc) || t.note === 'Lightning address' ? 'npc' : /^Swapped from /.test(t.note || '') ? 'token' : 'ln'; }
   if (t.reqId) return 'request';
-  return /^(Reclaimed: |Gift came back|Payment request couldn't be delivered|Extra Life cashed out)/.test(t.note || '') ? 'back' : 'token';
+  return /^(Gift came back|Payment request couldn't be delivered)/.test(t.note || '') ? 'back' : 'token';
 }
 // called right after a history line is written (addTx) or changed (updTx)
 function arrivalSeen(t) {
