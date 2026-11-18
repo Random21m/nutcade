@@ -3948,7 +3948,7 @@ const A = {
     toast(S.imports.length ? `Waiting to check with ${S.imports.map(r => (S.mints.find(m => m.url === r.mint) || {}).name || host(r.mint)).join(', ')}.` : 'Backup restored.', S.imports.length ? 'gold' : 'lime');
   }),
   takeover: () => { try { chan && chan.postMessage({ t: 'takeover', id: TAB_ID }); } catch (e) {} location.reload(); },
-  seedCreate: b => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (totalBalance() === 0) { S.seed.secured = true; store.set('seed', S.seed); } sfx('start'); render(); openShowPhrase(true); }),
+  seedCreate: b => pinGuard('newseed', () => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (totalBalance() === 0) { S.seed.secured = true; store.set('seed', S.seed); } sfx('start'); render(); openShowPhrase(true); })),   // (a new wallet has no PIN: nothing is asked)
   seedShow: () => { if (!S.seed) return; pinGuard('seed', () => openShowPhrase(!S.seed.backedUp)); },
   gateCreate: b => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (totalBalance() === 0) { S.seed.secured = true; store.set('seed', S.seed); } gate = { step: 'show' }; sfx('start'); render(); window.scrollTo(0, 0); }),
   gateRestore: () => pinGuard('restore', openRestore),   // (on the start screen nothing is asked: no wallet yet)
