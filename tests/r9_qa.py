@@ -24,6 +24,7 @@ NOSTR = os.environ.get('R9_NOSTR', 'ws://127.0.0.1:3350/relay')
 NPC = re.sub(r'^ws', 'http', NOSTR).rsplit('/', 1)[0]
 MPY = os.environ.get('MINT_PY', 'python3')
 MDIR = os.path.join(os.environ.get('QA_OUT', '/tmp/qa-out'), 'r9mints')
+HOLD = os.path.join(MDIR, 'holds')   # (tests/stub/sitecustomize.py: a file here holds a deposit's mint request at the mint)
 PIN, DPIN = '135791', '246802'
 LEDGER = """(u=>{let s=0;for(const t of Nutcade.S.txs){if(t.mint!==u||t.status==='failed'||t.status==='expired')continue;if(t.type==='in'){if(t.status==='done'||t.status==='claimed')s+=t.amount}else s-=t.amount+(t.fee||0)}return [s,(Nutcade.S.proofs[u]||[]).reduce((a,p)=>a+p.amount,0)]})"""
 MINTS = {FEE: ('Fee Mint', {}), FREE: ('Free Mint', {'MINT_INPUT_FEE_PPK': '0'}), LIM: ('Limit Mint', {'MINT_INPUT_FEE_PPK': '0', 'MINT_MAX_REQUEST_LENGTH': '128'}), AUX: ('Aux Mint', {'MINT_INPUT_FEE_PPK': '0'})}
@@ -37,7 +38,7 @@ def menv(u):
     name, extra = MINTS[u]; port = u.rsplit(':', 1)[1]
     e = dict(os.environ, MINT_BACKEND_BOLT11_SAT='FakeWallet', MINT_PRIVATE_KEY=f'nutcade-r9-{port}', MINT_LISTEN_HOST='127.0.0.1', MINT_LISTEN_PORT=port,
              MINT_DATABASE='data/mint', FAKEWALLET_BRR='TRUE', FAKEWALLET_DELAY_INCOMING_PAYMENT='0.5', FAKEWALLET_DELAY_OUTGOING_PAYMENT='0.5',
-             MINT_INFO_NAME=name, NUTCADE_PREIMAGE_DIR=os.path.join(MDIR, 'preimages'), PYTHONPATH=os.path.join(HERE, 'stub'))
+             MINT_INFO_NAME=name, NUTCADE_PREIMAGE_DIR=os.path.join(MDIR, 'preimages'), NUTCADE_HOLD_DIR=HOLD, PYTHONPATH=os.path.join(HERE, 'stub'))
     e.update(extra); return e
 def up(u):
     try: return b'pubkey' in urllib.request.urlopen(u + '/v1/info', timeout=2).read()
@@ -567,6 +568,14 @@ async def run(b, broken):
         await busy_mint(b, broken)
     await section('busy', busy)
 
+    async def race():
+        await deposit_race(b, broken)
+    await section('race', race)
+
+    async def stale():
+        await stale_busy(b, broken)
+    await section('stale', stale)
+
 
 # ---------------- 1.13.1 journal follow-ups (steps whose request reaches the mint late) ----------------
 def post_swap(u, body):
@@ -689,6 +698,207 @@ async def busy_mint(b, broken):
     await w.pg.unroute(u + '/v1/restore')
     await books(w, u, 'busy legacy', broken)
     check('no script errors (busy mint)', not w.errs, w.errs[:4]); await w.pg.context.close()
+
+
+# ---------------- a deposit's request refused while another copy of it is at work at the mint (1.14.1) ----------------
+CORS = {'Access-Control-Allow-Origin': '*'}
+def post_raw(u, path, body):
+    try:
+        q = urllib.request.Request(u + path, data=body.encode(), headers={'Content-Type': 'application/json'})
+        r = urllib.request.urlopen(q, timeout=90); return r.status, r.read().decode()
+    except urllib.error.HTTPError as e: return e.code, e.read().decode()
+def qstate(u, qid):
+    try: return json.loads(urllib.request.urlopen(f'{u}/v1/mint/quote/bolt11/{qid}', timeout=10).read())['state']
+    except Exception: return None
+def code_of(text):
+    try: return json.loads(text).get('code')
+    except Exception: return None
+# (writes what a test put into the wallet, as the app would have: NUTCADE reads it back before its next step)
+KEEP = "for (const k of ['txs','quotes','ops','proofs']) localStorage.setItem('nutcade:'+k, JSON.stringify(Nutcade.S[k])); localStorage.setItem('nutcade:gen', String(+(localStorage.getItem('nutcade:gen')||0)+1));"
+DEP_LINE = """(u=>Nutcade.S.txs.filter(t=>t.mint===u&&t.type==='in'&&t.method==='ln'&&t.amount!==1000).map(t=>({status:t.status,amount:t.amount,note:t.note})))"""
+DEP_REC = """(u=>Nutcade.S.quotes.filter(q=>q.mint===u).map(q=>({ctr:q.ctr||null,was:q.was||null,state:q.state||null})))"""
+TAGS = {'pending': '"already pending" (20005), the mint says PENDING', 'store': '"outputs are pending" (11004), the mint says PENDING',
+        'nostate': '"already pending", then the look at the quote fails', 'signed': '"already signed" (11003), the mint says ISSUED',
+        'lost': 'its answer lost, asked again with new counters, the lost request signed late', 'paid': 'refused, the mint says PAID',
+        'unpaid': 'refused, the mint says UNPAID'}
+
+
+def race_routes(u, st, mode):
+    """the page's mint requests for the deposit (post) and its looks at the quote (look), for one case"""
+    async def answer(route):
+        r = await route.fetch(); st['resp'].append((r.status, code_of(await r.text()))); await route.fulfill(response=r)
+    async def post(route):
+        if route.request.method != 'POST': await route.continue_(); return
+        body = route.request.post_data; st['bodies'].append(body); first = len(st['bodies']) == 1
+        st['qid'] = st['qid'] or json.loads(body)['quote']; qid = st['qid']
+        if first and mode in ('pending', 'store', 'nostate'):
+            hp = os.path.join(HOLD, 'mint-' + qid); open(hp, 'w').write('store' if mode == 'store' else 'pending')
+            st['other'] = asyncio.ensure_future(asyncio.to_thread(post_raw, u, '/v1/mint/bolt11', body))   # (the other copy: held at the mint)
+            for _ in range(400):
+                if os.path.exists(hp + '.held'): break
+                await asyncio.sleep(0.05)
+            st['held'] = os.path.exists(hp + '.held') and await asyncio.to_thread(qstate, u, qid) == 'PENDING'
+            if mode == 'nostate': st['arm'] = 'fail'   # (and the app's look at the quote right after the refusal fails)
+            await answer(route); st['done1'] = True; return
+        if first and mode == 'signed':   # the other copy got there first and was signed: the app's copy is "already signed"
+            st['other_now'] = await asyncio.to_thread(post_raw, u, '/v1/mint/bolt11', body)
+            await answer(route); st['done1'] = True; return
+        if mode == 'lost':
+            if body == st['bodies'][0]:   # its answer is lost (and the library's resends of it too)
+                st['done1'] = True
+                try: await route.abort()
+                except Exception: pass
+                return
+            if 'late' not in st:   # the app asks again, with new counters; the lost request reaches the mint first, late
+                st['late'] = await asyncio.to_thread(post_raw, u, '/v1/mint/bolt11', st['bodies'][0])
+                await answer(route); return
+        if first and mode in ('paid', 'unpaid'):   # turned down for another reason: nothing signed (the mint says PAID, or UNPAID)
+            if mode == 'unpaid': st['arm'] = 'unpaid'
+            st['done1'] = True
+            await route.fulfill(status=400, headers=CORS, content_type='application/json', body=J({'detail': 'test refusal', 'code': 20003})); return
+        await route.continue_()
+    async def look(route):
+        a = st['arm']
+        if route.request.method == 'GET' and a and st['qid'] and route.request.url.endswith(st['qid']):
+            st['arm'] = None
+            if a == 'fail':
+                await route.fulfill(status=500, headers=CORS, content_type='application/json', body='{"detail":"test failure"}'); return
+            r = await route.fetch(); d = json.loads(await r.text()); d['state'] = 'UNPAID'
+            await route.fulfill(status=200, headers=CORS, content_type='application/json', body=J(d)); return
+        await route.continue_()
+    return post, look
+
+
+async def deposit_race(b, broken):
+    """A 640 SAT deposit made with Receive. Its own mint request is turned down while an identical copy of that very
+    request (the library's resend of a request whose answer was lost, or a second copy of it) is at work at the mint,
+    or has been signed already. The overlap is forced, not timed: the copy is held at the mint (tests/stub) until the
+    app has had its answer. In every case the deposit is credited in full, to itself, with no line at 0."""
+    u = FREE; os.makedirs(HOLD, exist_ok=True)
+    for mode in [m for m in os.environ.get('R9_RACE', 'pending,store,nostate,signed,lost,paid,unpaid').split(',') if m]:
+        w = await fresh(b, u); await fund(w, u, 1000); b0 = await bal(w, u)
+        st = {'bodies': [], 'resp': [], 'arm': None, 'qid': None, 'other': None, 'done1': False}
+        post, look = race_routes(u, st, mode)
+        await w.pg.route(u + '/v1/mint/bolt11', post); await w.pg.route(u + '/v1/mint/quote/bolt11/*', look)
+        await w.home(); await w.click('[data-act=receive]'); await w.wait(150)
+        if await w.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await w.click('[data-act=recvMethod][data-m=ln]'); await w.wait(100)
+        await w.fill('#amtIn', '640'); await w.click('[data-act=doLnInvoice]')
+        for _ in range(240):
+            if st['done1']: break
+            await w.wait(250)
+        await w.wait(2500)   # (the app has had the answer and looked at the quote)
+        mid = dict(line=await w.ev(DEP_LINE + f"({J(u)})"), rec=await w.ev(DEP_REC + f"({J(u)})"))
+        tag = TAGS[mode]
+        if mode in ('pending', 'store', 'nostate'):
+            want = {'pending': 20005, 'store': 11004, 'nostate': 20005}[mode]
+            check(f'deposit race ({tag}): the other copy is held at the mint and the app is refused with {want}', st.get('held') and st['resp'] and st['resp'][0][1] == want, (st.get('held'), st['resp']))
+            check(f'deposit race ({tag}): the counters stay on the record and the deposit waits (not closed)', mid['rec'] and mid['rec'][0]['ctr'] and mid['line'] and mid['line'][0]['status'] == 'pending', mid)
+            try: os.remove(os.path.join(HOLD, 'mint-' + st['qid']))   # the other copy goes on: signed at those very counters
+            except Exception: pass
+            o = await st['other'] if st['other'] else None
+            check(f'deposit race ({tag}): the other copy is then signed (the mint says ISSUED)', o and o[0] == 200 and await asyncio.to_thread(qstate, u, st['qid']) == 'ISSUED', o and o[0])
+        elif mode == 'signed':
+            check(f'deposit race ({tag}): the other copy was signed and the app is refused with 11003', st.get('other_now', [0])[0] == 200 and st['resp'] and st['resp'][0][1] == 11003, (st.get('other_now', [0])[0], st['resp']))
+        elif mode == 'lost':
+            for _ in range(120):
+                if 'late' in st and st['resp']: break
+                await w.wait(250)
+            check(f'deposit race ({tag}): the late copy is signed, the new request refused', st.get('late', [0])[0] == 200 and st['resp'] and st['resp'][0][0] == 400, (st.get('late', [0])[0], st['resp']))
+        ok = await w.until(f"Nutcade.S.txs.some(t=>t.mint==={J(u)}&&t.type==='in'&&t.method==='ln'&&t.status==='done'&&t.amount===640) && !Nutcade.S.quotes.some(q=>q.mint==={J(u)})", 60000)
+        await w.wait(500)
+        end = dict(line=await w.ev(DEP_LINE + f"({J(u)})"), rec=await w.ev(DEP_REC + f"({J(u)})"), bal=await bal(w, u))
+        if mode in ('paid', 'unpaid'):
+            two = len(st['bodies']) >= 2 and json.loads(st['bodies'][0])['outputs'] != json.loads(st['bodies'][1])['outputs']
+            check(f'deposit race ({tag}): nothing was signed at the first counters, so it is asked again with new ones', two, len(st['bodies']))
+        check(f'deposit race ({tag}): the deposit is credited in full to itself (640 SAT), never closed at 0', ok and end['bal'] == b0 + 640 and [l['amount'] for l in end['line']] == [640], end)
+        check(f'deposit race ({tag}): no "Recovered" line', not await lines(w, u, 'Recovered'), await lines(w, u, 'Recovered'))
+        await w.pg.unroute(u + '/v1/mint/bolt11'); await w.pg.unroute(u + '/v1/mint/quote/bolt11/*')
+        await books(w, u, 'race ' + mode, broken)
+        check(f'no script errors (deposit race, {mode})', not w.errs, w.errs[:4]); await w.pg.context.close()
+    if os.environ.get('R9_RACE'): return
+    # a deposit step without coins going in (as an on-chain deposit is): its answer was "already pending" (or never came)
+    # and nothing is at its counters yet. It waits; once the other copy is signed there, it is credited to its line.
+    w = await fresh(b, u); await fund(w, u, 1000); b0 = await bal(w, u)
+    await w.ev(f"""(async([U])=>{{ const S=Nutcade.S; const kid=(await (await fetch(U+'/v1/keysets')).json()).keysets.find(k=>k.active&&k.unit==='sat').id;
+      const start=(S.counters[kid]||0)+500, id='dep'+Date.now();
+      S.txs.unshift({{id,ts:Date.now(),note:'',status:'pending',fee:0,type:'in',method:'onchain',amount:0,mint:U,quote:'q-'+id,request:'bc1qtest'}});
+      S.ops.push({{id:'op'+id,kind:'receive',mint:U,inputs:[],amount:640,note:'',locked:false,extra:false,txId:id,tx:null,follow:null,own:null,created:Date.now(),ctr:[{{id:kid,start,n:2}}],outs:[],refused:1,pendRef:1,dep:1}});
+      {KEEP} window.__dep={{id,op:'op'+id,kid,start}}; window.dispatchEvent(new Event('online')); }})([{J(u)}])""")
+    await w.wait(4000)
+    waiting = await w.ev("Nutcade.S.ops.some(o=>o.id===window.__dep.op) && (Nutcade.S.txs.find(t=>t.id===window.__dep.id)||{}).status==='pending'")
+    check('deposit step ("already pending", nothing at its counters yet): it waits, not closed with nothing', waiting)
+    await w.ev(f"""(async([U])=>{{ const S=Nutcade.S, d=window.__dep; const ws=new CashuLib.Wallet(U,{{unit:'sat',bip39seed:CashuLib.mnemonicToSeedSync(S.seed.mnemonic),counterInit:{{[d.kid]:d.start}}}}); await ws.loadMint();
+      const q=await ws.createMintQuoteBolt11(640); for(let i=0;i<60;i++){{await new Promise(r=>setTimeout(r,250)); if((await ws.checkMintQuoteBolt11(q.quote)).state==='PAID')break;}}
+      await ws.mintProofsBolt11(640,q.quote,{{keysetId:d.kid}}); window.dispatchEvent(new Event('online')); }})([{J(u)}])""")
+    ok = await w.until("!Nutcade.S.ops.some(o=>o.id===window.__dep.op) && (Nutcade.S.txs.find(t=>t.id===window.__dep.id)||{}).status==='done'", 90000)
+    t = await w.ev("Nutcade.S.txs.find(t=>t.id===window.__dep.id)")
+    check('deposit step: once the other copy is signed at its counters, the line gets exactly those 640 SAT, no "Recovered" line', ok and t and t['amount'] == 640 and await bal(w, u) == b0 + 640 and not await lines(w, u, 'Recovered'), (t, await bal(w, u)))
+    await books(w, u, 'race deposit step', broken)
+    check('no script errors (deposit step)', not w.errs, w.errs[:4]); await w.pg.context.close()
+    # a send refused "proofs are pending" (another copy of it is at work at the mint), that copy signed after the step was
+    # settled with nothing: the step waits aside and is booked as itself, never "spent elsewhere"
+    w = await fresh(b, u); await fund(w, u, 2000); await fund(w, u, 345); b0 = await bal(w, u)
+    got = {}
+    async def h(route):
+        if 'body' not in got:
+            got['body'] = route.request.post_data
+            await route.fulfill(status=400, headers=CORS, content_type='application/json', body=J({'detail': 'proofs are pending', 'code': 11002})); return
+        await route.continue_()
+    await w.pg.route(u + '/v1/swap', h)
+    await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '600'); await w.click('[data-act=doSendEcash]')
+    for _ in range(120):
+        if 'body' in got: break
+        await w.wait(250)
+    await w.until("Nutcade.S.ops.length===0", 30000); await w.wait(1500); await w.pg.unroute(u + '/v1/swap', h)
+    ol = await oplate(w)
+    check('send refused "proofs are pending": the step waits aside (its copy may still be signed)', got.get('body') and len(ol) == 1, ol)
+    stc = await asyncio.to_thread(post_swap, u, got['body']) if got.get('body') else None
+    await w.ev("Nutcade.closeSheet()")
+    ins = ol[0]['ins'] if ol else []
+    want = b0 - body_kept(got['body']) if got.get('body') else -1
+    ok = await w.until(f"(Nutcade.S.oplate||[]).length===0 && Nutcade.S.ops.length===0 && Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0)==={want} && !Object.values(Nutcade.S.proofs).flat().some(p=>{J(ins)}.includes(p.secret))", 150000)
+    check('send refused "proofs are pending", its copy signed: booked as itself (balance exact), no "spent elsewhere" line', stc == 200 and ok and not await lines(w, u, 'spent elsewhere'), (stc, await bal(w, u), want, await lines(w, u, 'spent elsewhere')))
+    await books(w, u, 'race send pending', broken)
+    check('no script errors (send pending)', not w.errs, w.errs[:4]); await w.pg.context.close()
+
+
+# ---------------- the check-up is never skipped for good (1.14.1) ----------------
+async def stale_busy(b, broken):
+    """A deposit record that looks like one being collected (one from before 1.12, one last seen PAID, one with its
+    counters kept while the mint said PENDING) keeps the check-up away while the regular check still looks at it (its
+    line under 14 days old); one older than that never does. And "Move them" never says done when it waited."""
+    u = FREE; w = await fresh(b, u); await fund(w, u, 1000)
+    for kind, extra in (('from before 1.12', ''), ('last seen PAID', ",rec:1,state:'PAID'"), ('counters kept, PENDING', ",rec:1,state:'PENDING',ctr:{id:'00',start:900,n:2}")):
+        await inject(w, u, 30); n0 = await count(w, u)
+        await w.ev(f"""(()=>{{const S=Nutcade.S, id='old'+Date.now();
+          S.txs.push({{id,ts:Date.now()-60e3,note:'',status:'pending',fee:0,type:'in',method:'ln',amount:100,mint:{J(u)},quote:'q-'+id,request:'lnbc1test'}});
+          S.quotes.push({{kind:'bolt11',quote:'q-'+id,request:'lnbc1test',amount:100,mint:{J(u)},txId:id{extra}}}); {KEEP} window.__old=id;}})()""")
+        await w.ev(f"Nutcade.r9.check({J(u)},{{startup:true}})"); await w.wait(500)
+        check(f'check-up beside a deposit ({kind}) under 14 days old: it waits (nothing combined)', await count(w, u) == n0, (await count(w, u), n0))
+        await w.ev("(()=>{const t=Nutcade.S.txs.find(t=>t.id===window.__old); t.ts=Date.now()-15*86400e3; " + KEEP + "})()")
+        await w.ev(f"Nutcade.r9.check({J(u)},{{startup:true}})"); await w.wait(500)
+        check(f'check-up beside a deposit ({kind}) over 14 days old: it runs (the small coins combined)', await count(w, u) < n0 - 16, (await count(w, u), n0, await status(w, u)))
+        await w.ev("Nutcade.S.quotes=Nutcade.S.quotes.filter(q=>q.txId!==window.__old); Nutcade.S.txs=Nutcade.S.txs.filter(t=>t.id!==window.__old); " + KEEP)
+        await books(w, u, 'stale ' + kind, broken)
+    # "Move them" while something is still being settled at the mint
+    await settings(w); await w.click('#p_ksAuto'); await w.wait(200)
+    await inject(w, u, 30); n0 = await count(w, u)
+    await w.ev(f"Nutcade.r9.check({J(u)},{{startup:true}})"); await w.wait(500)
+    t = await ask_panel(w, u)
+    check('Move them: asked (automatic off)', await w.ev(f"!!document.querySelector('[data-ksask=\"{u}\"] [data-act=ksMove]')"), t)
+    await w.ev(f"""(()=>{{const S=Nutcade.S, id='new'+Date.now();
+      S.txs.push({{id,ts:Date.now(),note:'',status:'pending',fee:0,type:'in',method:'ln',amount:100,mint:{J(u)},quote:'q-'+id,request:'lnbc1test'}});
+      S.quotes.push({{kind:'bolt11',quote:'q-'+id,request:'lnbc1test',amount:100,mint:{J(u)},txId:id,rec:1}}); {KEEP} window.__new=id;}})()""")
+    await w.ev("document.querySelector('#toast')&&(document.querySelector('#toast').hidden=true)")
+    await w.click(f'[data-ksask="{u}"] [data-act=ksMove]'); await w.until("!!document.querySelector('#toast:not([hidden])')", 10000); tt = await w.toast()
+    check('Move them while an invoice there is under an hour old: the toast says it runs at the next check, not "done"', 'next check' in tt and 'done' not in tt.lower() and await count(w, u) == n0, (tt, await count(w, u), n0))
+    await w.ev("Nutcade.S.quotes=Nutcade.S.quotes.filter(q=>q.txId!==window.__new); Nutcade.S.txs=Nutcade.S.txs.filter(t=>t.id!==window.__new); " + KEEP)
+    await w.ev("document.querySelector('#toast')&&(document.querySelector('#toast').hidden=true)")
+    await ask_panel(w, u); await w.click(f'[data-ksask="{u}"] [data-act=ksMove]'); await w.until("!!document.querySelector('#toast:not([hidden])')", 10000); tt = await w.toast()
+    check('Move them once nothing is open there: "Keyset check-up done", the coins combined', 'Keyset check-up done' in tt and await count(w, u) < n0 - 16, (tt, await count(w, u)))
+    await settings(w); await w.click('#p_ksAuto'); await w.wait(200)
+    await books(w, u, 'stale move', broken)
+    check('no script errors (stale)', not w.errs, w.errs[:4]); await w.pg.context.close()
 
 
 if __name__ == '__main__':

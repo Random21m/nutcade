@@ -68,3 +68,37 @@ if _pdir:
         _f.FakeWallet.pay_invoice = _pay
     except Exception as e:  # never stop the mint from starting
         print('sitecustomize: preimage patch failed', e)
+
+# Test-only: hold a deposit's mint request at the mint, so a test can force two copies of it to overlap there (the
+# race behind a "Mint quote already pending" answer) instead of hoping for the timing. With NUTCADE_HOLD_DIR set, a
+# file named mint-<quote id> in that folder holds that quote's mint request (up to 60 s, until the file is removed):
+# "pending" right after the mint marks the quote PENDING (an identical copy then gets 20005, quote pending), "store"
+# after it has also stored the request's outputs (an identical copy then gets 11004, outputs pending). While it holds,
+# the file mint-<quote id>.held exists.
+_hdir = os.environ.get('NUTCADE_HOLD_DIR')
+if _hdir:
+    try:
+        import asyncio as _ha, time as _ht
+        from cashu.mint import ledger as _hl
+        from cashu.mint.db import write as _hw
+        os.makedirs(_hdir, exist_ok=True)
+        async def _hold(qid, mode):
+            p = os.path.join(_hdir, 'mint-' + str(qid)); t = _ht.time()
+            while _ht.time() - t < 60:
+                try: m = open(p).read().strip()
+                except Exception: return
+                if m != mode: return
+                if not os.path.exists(p + '.held'): open(p + '.held', 'w').write(mode)   # (the test sees it is held here now)
+                await _ha.sleep(0.05)
+        _o_pend = _hw.DbWriteHelper._set_mint_quote_pending
+        async def _set_pending(self, quote_id, *a, **k):
+            r = await _o_pend(self, quote_id, *a, **k); await _hold(quote_id, 'pending'); return r
+        _hw.DbWriteHelper._set_mint_quote_pending = _set_pending
+        _o_store = _hl.Ledger._store_blinded_messages
+        async def _store(self, outputs, *a, **k):
+            r = await _o_store(self, outputs, *a, **k)
+            if k.get('mint_id'): await _hold(k['mint_id'], 'store')
+            return r
+        _hl.Ledger._store_blinded_messages = _store
+    except Exception as e:  # never stop the mint from starting
+        print('sitecustomize: hold patch failed', e)
