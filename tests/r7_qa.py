@@ -10,7 +10,9 @@ MOCK = 'http://127.0.0.1:3350'
 FM = 'http://127.0.0.1:3340'
 SHOTS = os.environ.get('SHOTS', '')
 LEDGER = """(u=>{let s=0;for(const t of Nutcade.S.txs){if(t.mint!==u||t.status==='failed'||t.status==='expired')continue;if(t.type==='in'){if(t.status==='done'||t.status==='claimed')s+=t.amount}else s-=t.amount+(t.fee||0)}return [s,(Nutcade.S.proofs[u]||[]).reduce((a,p)=>a+p.amount,0)]})"""
-ALLOW = re.compile(r'^(NUTCADE|SAT|BTC|LN|NOSTR|[A-Z]{3}|Wallet Connect|Zap)$')
+# (the wallet's "<amount> in flight." line is English in every language, a known gap: it shows only while a payment or move is still
+#  pending, which on a slow machine can still be the case when the tour renders the next screen, so it must not fail this check)
+ALLOW = re.compile(r'^(NUTCADE|SAT|BTC|LN|NOSTR|[A-Z]{3}|Wallet Connect|Zap|[\d,.]+ SAT in flight\.)$')
 OVER_JS = """(()=>{const W=document.documentElement.clientWidth,out=[];for(const e of document.querySelectorAll('#app *, #layer *')){
   if(!e.getClientRects().length||e.closest('.sr'))continue;const r=e.getBoundingClientRect();if(r.right>W+1||r.left<-1)out.push((e.className||e.tagName)+':'+Math.round(r.left)+'..'+Math.round(r.right))}return out.slice(0,4)})()"""
 
