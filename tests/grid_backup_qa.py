@@ -80,16 +80,22 @@ class Grid:
 
     async def snap(s, w): await s.awake(w); return await w.ev(SNAP + f"({json.dumps(s.M)},{json.dumps(s.O)})")
 
+    async def guard(s, w, pin='135791'):   # with a PIN, Download backup and Import backup ask for it first (the PIN guard)
+        await w.wait(250)
+        if await w.ev("!!document.querySelector('#layer [data-pinpad=guard]')"):
+            for k in pin: await w.click(f'#layer [data-pinpad=guard] [data-k="{k}"]')
+            await w.click('#layer [data-pinpad=guard] [data-k=ok]')
+
     async def backup(s, w):
         await s.awake(w)
         await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
-        async with w.pg.expect_download() as d: await w.pg.evaluate("document.querySelector('[data-act=backupDownload]').click()")
+        async with w.pg.expect_download() as d: await w.pg.evaluate("document.querySelector('[data-act=backupDownload]').click()"); await s.guard(w)
         return open(await (await d.value).path()).read()
 
     async def imp(s, w, data, settle=True):
         await s.awake(w)
         await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
-        await w.click('[data-act=restore]'); await w.wait(250); await w.pg.wait_for_selector('#restoreIn', timeout=60000); await w.pg.evaluate("v => { const t = document.querySelector('#restoreIn'); t.value = v; t.dispatchEvent(new Event('input', {bubbles: true})) }", data); await w.click('[data-act=doRestore]')
+        await w.click('[data-act=restore]'); await s.guard(w); await w.wait(250); await w.pg.wait_for_selector('#restoreIn', timeout=60000); await w.pg.evaluate("v => { const t = document.querySelector('#restoreIn'); t.value = v; t.dispatchEvent(new Event('input', {bubbles: true})) }", data); await w.click('[data-act=doRestore]')
         await w.until("!document.querySelector('#restoreIn')", 90000); er = await w.err(); await w.wait(600)
         if settle: await w.until("Nutcade.S.ops.length===0&&Nutcade.S.pending.length===0", 90000); await w.wait(1500)
         await w.ev("Nutcade.closeSheet()"); return er
