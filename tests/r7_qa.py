@@ -98,7 +98,7 @@ def quote_state(mint, quote):
 async def words_ok(w, mints):
     """a restore from the wallet's own 12 words finds nothing the wallet doesn't already show"""
     bal0, n0 = await w.bal(), await w.ev("Nutcade.S.txs.length")
-    await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=seedRestore]'); await w.wait(250)
+    await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=seedRestore]'); await w.wait(250); await guard_pin(w)
     await w.fill('#phraseIn', await w.ev("Nutcade.S.seed.mnemonic"))
     await w.ev(f"document.querySelectorAll('[data-rmint]').forEach(i=>{{i.checked={json.dumps(list(mints))}.includes(i.dataset.rmint)}})")
     await w.click('[data-act=doRestorePhrase]'); await w.until("/SCAN COMPLETE|CONTINUE/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 120000); t = await w.sheet_text()
@@ -156,12 +156,18 @@ async def zap_to(w, npub, amount, comment='', pay=True):
     return q, await w.sheet_text()
 
 
-async def make_nwc(w, name, per='none', sats=None, pin='135791'):
-    await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
-    await w.click('[data-act=nwcNew]'); await w.wait(200)
-    if await w.ev("!!document.querySelector('#layer [data-pinpad=guard]')"):   # with a PIN, Connect an app asks for it first (the PIN guard)
+async def guard_pin(w, pin='135791'):
+    """with a PIN, the steps that hand over the whole wallet (backup, import, restore, Connect an app...) ask for it first
+    (the PIN guard): enters it when that pad is up; does nothing without a PIN"""
+    await w.wait(200)
+    if await w.ev("!!document.querySelector('#layer [data-pinpad=guard]')"):
         for k in pin: await w.click(f'#layer [data-pinpad=guard] [data-k="{k}"]')
-        await w.click('#layer [data-pinpad=guard] [data-k=ok]'); await w.until("!!document.querySelector('#nwcName')", 20000)
+        await w.click('#layer [data-pinpad=guard] [data-k=ok]'); await w.until("!document.querySelector('#layer [data-pinpad=guard]')", 20000); await w.wait(250)
+
+
+async def make_nwc(w, name, per='none', sats=None):
+    await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
+    await w.click('[data-act=nwcNew]'); await w.wait(200); await guard_pin(w)
     await w.fill('#nwcName', name)
     if per != 'none':
         await w.pg.select_option('#nwcPer', per); await w.wait(100); await w.fill('#amtIn', str(sats))
@@ -460,7 +466,7 @@ async def main():
         await books(w, 'blocked nostr', broken)
         # the backup file carries the list, and an import restores it
         await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
-        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]')
+        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]'); await guard_pin(w)
         bk = json.loads(open(await (await dl.value).path()).read())
         check('block: the backup file includes the blocked list', any(x['url'] == B for x in bk.get('blocked', [])), bk.get('blocked'))
         nw = await wallet(b); await nw.create(); await nw.click('[data-act=tab][data-tab=settings]'); await nw.wait(100); await nw.click('[data-act=restore]'); await nw.wait(150)
@@ -875,7 +881,7 @@ async def main():
         await w.use(B); await w.receive_ln(4000); await w.use(A); await w.receive_ln(15000)   # (the split payment spent most of both mints)
         # restoring from the 12 words after all of the above finds nothing extra: every SAT is already accounted for
         bal0, n0 = await w.bal(), await w.ev("Nutcade.S.txs.length")
-        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=seedRestore]'); await w.wait(250)
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=seedRestore]'); await w.wait(250); await guard_pin(w)
         await w.fill('#phraseIn', await w.ev("Nutcade.S.seed.mnemonic"))
         await w.ev(f"document.querySelectorAll('[data-rmint]').forEach(i=>{{i.checked=[{json.dumps(A)},{json.dumps(B)},{json.dumps(FM)}].includes(i.dataset.rmint)}})")
         await w.click('[data-act=doRestorePhrase]'); await w.until("/SCAN COMPLETE|CONTINUE/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 120000); rtxt = await w.sheet_text()
@@ -1187,10 +1193,10 @@ async def main():
         await w.ev("const s=document.querySelector('#giftTo'); if (s) { s.value=''; s.dispatchEvent(new Event('change',{bubbles:true})) }")
         await w.fill('#giftKey', okey3); await w.fill('#amtIn', '333'); await w.click('[data-act=doSendEcash]'); await w.wait(2000)
         await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
-        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]')
+        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]'); await guard_pin(w)
         bk = open(await (await dl.value).path()).read(); bkd = json.loads(bk)
         nb = await wallet(b); await nb.create(); await nb.click('[data-act=tab][data-tab=settings]'); await nb.wait(150)
-        await nb.click('[data-act=restore]'); await nb.wait(150); await nb.pg.wait_for_selector('#restoreIn', timeout=60000); await nb.pg.evaluate("v => { const t = document.querySelector('#restoreIn'); t.value = v; t.dispatchEvent(new Event('input', {bubbles: true})) }", bk); await nb.click('[data-act=doRestore]')
+        await nb.click('[data-act=restore]'); await nb.wait(150); await guard_pin(nb); await nb.pg.wait_for_selector('#restoreIn', timeout=60000); await nb.pg.evaluate("v => { const t = document.querySelector('#restoreIn'); t.value = v; t.dispatchEvent(new Event('input', {bubbles: true})) }", bk); await nb.click('[data-act=doRestore]')
         okn = await nb.until("Nutcade.S.ops.length===0 && Nutcade.S.txs.some(t=>t.amount===333&&t.token&&t.status==='pending')", 60000); await nb.wait(800)
         await w.until("Nutcade.S.ops.length===0 && Nutcade.S.txs.some(t=>t.amount===333&&t.token)", 60000); await w.pg.unroute(f'{B}/v1/swap'); await w.wait(800)
         nbb = []; await books(nb, 'restored backup with an open step', nbb, (A, B, FM))
@@ -1212,7 +1218,7 @@ async def main():
         async def import_into(wal, text):
             await wal.ev("Nutcade.closeSheet()"); await wal.click('[data-act=tab][data-tab=settings]'); await wal.wait(150)
             await wal.ev("window.__toasts=[]; window.__tobs&&window.__tobs.disconnect(); window.__tobs=new MutationObserver(()=>{const t=document.querySelector('#toast:not([hidden])'); if(t&&t.innerText&&window.__toasts.slice(-1)[0]!==t.innerText) window.__toasts.push(t.innerText)}); window.__tobs.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true})")
-            await wal.click('[data-act=restore]'); await wal.wait(150); await wal.pg.wait_for_selector('#restoreIn', timeout=60000); await wal.pg.evaluate("v => { const t = document.querySelector('#restoreIn'); t.value = v; t.dispatchEvent(new Event('input', {bubbles: true})) }", text); await wal.click('[data-act=doRestore]')
+            await wal.click('[data-act=restore]'); await wal.wait(150); await guard_pin(wal); await wal.pg.wait_for_selector('#restoreIn', timeout=60000); await wal.pg.evaluate("v => { const t = document.querySelector('#restoreIn'); t.value = v; t.dispatchEvent(new Event('input', {bubbles: true})) }", text); await wal.click('[data-act=doRestore]')
             ok = await wal.until("!document.querySelector('#restoreIn')", 40000); await wal.wait(300); t = ' | '.join(await wal.ev("window.__toasts")); await wal.wait(1200)
             await wal.until("Nutcade.S.ops.length===0", 60000); await wal.wait(500)
             return ok, t
@@ -1224,7 +1230,7 @@ async def main():
             await w.ev("const s=document.querySelector('#giftTo'); if (s) { s.value=''; s.dispatchEvent(new Event('change',{bubbles:true})) }")
             await w.fill('#giftKey', okey5); await w.fill('#amtIn', '210'); await w.click('[data-act=doSendEcash]'); await w.wait(2000)
             await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
-            async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]')
+            async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]'); await guard_pin(w)
             old = open(await (await dl.value).path()).read()
             await w.until(f"Nutcade.S.ops.length===0 && Nutcade.S.txs.filter(t=>t.amount===210&&t.token&&t.mint==={json.dumps(M)}).length===1", 60000); await w.pg.unroute(f'{M}/v1/swap'); await w.wait(500)
             await w.send_ecash(150, 'spent after the backup'); await w.ev("Nutcade.closeSheet()")   # coins in the backup that are spent now
@@ -1249,7 +1255,7 @@ async def main():
         # (round 5, 1) restoring while one mint is down: the other mints come in at once; that mint's part waits aside
         # ("Waiting to check with ..."), and comes in once, when it answers, with history = balance
         await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
-        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]')
+        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]'); await guard_pin(w)
         bkx = open(await (await dl.value).path()).read(); wa, wb = await w.bal(A), await w.bal(B)
         nd = await wallet(b); await nd.create()
         async def mint_down(route):
@@ -1284,7 +1290,7 @@ async def main():
         await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraContinue]'); await w.wait(1500)
         kinds = await w.ev("Nutcade.S.ops.map(o=>o.follow&&o.follow.k).sort()")
         await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
-        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]')
+        async with w.pg.expect_download() as dl: await w.click('[data-act=backupDownload]'); await guard_pin(w)
         bks = open(await (await dl.value).path()).read()
         await w.until(f"Nutcade.S.ops.length===0 && Nutcade.S.extra.until > {xu0} && Nutcade.S.challenges.some(c=>c.seed===7171&&(c.bounties||[]).length===1)", 60000)
         await w.pg.unroute(f'{A}/v1/swap'); await w.pg.unroute(f'{B}/v1/swap'); await w.wait(800)
