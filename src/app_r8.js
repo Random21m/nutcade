@@ -321,7 +321,7 @@ async function duressOff() {
     for (const p of d.pending || []) if (p.proofs && p.proofs.length && !p.paid) toks.push(L.getEncodedToken({ mint: p.mint, proofs: p.proofs, unit: 'sat' }));
   }
   const ids = [];
-  for (const t of toks) { try { const meta = peekToken(t); if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint).catch(() => {}); ids.push(holdIncoming(t, "Back from the duress PIN's wallet").id); } catch (e) {} }
+  for (const t of toks) { try { const meta = peekToken(t); if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: true }).catch(() => {}); const h = holdIncoming(t, "Back from the duress PIN's wallet"); updTx(h.id, { mine: true }); ids.push(h.id); } catch (e) {} }
   save(); await vault.chain;
   rec.slot = fillerSlot(); raw.set('vault', rec);
   delete vault.data.duress; queueVaultWrite(); await vault.chain;
@@ -377,6 +377,14 @@ function quoteFitErr(url, amount) {
   if (belowMin(url)) return minErr(url);
   const m = mintMax(url); if (!m || amount == null || bitsOf(amount) <= m) return null;
   return minErr(url);
+}
+// what a restore did at a mint below the minimum: your sats there found (to move out), or nothing there (not kept). Never a silent 0.
+function lowRestored(urls) {
+  return [...new Set(urls.map(normUrl))].filter(u => belowMin(u)).map(u => {
+    const m = S.mints.find(x => x.url === u), name = esc((m || {}).name || host(u)), n = mintMax(u);
+    return m ? `<div class="notice red">${name} now accepts only ${n} coins per request; NUTCADE needs at least ${MIN_REQ}. Your sats there were found, but it takes no new deposits: move them to another mint.</div>`
+      : `<div class="notice red">${name} only accepts ${n} coins per request; NUTCADE needs at least ${MIN_REQ}. Nothing of yours was found there, so it wasn't added.</div>`;
+  }).join('');
 }
 function minNotice(url) {
   if (!belowMin(url)) return '';
@@ -641,8 +649,8 @@ function tokenParts(w, proofs, m) {
   };
   return go(0) ? parts.map(g => g.slice()) : null;
 }
-async function receiveInParts(w, meta, token, note, parts, own) {
-  const n = parts.length, lines = parts.map((g, i) => addTx({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true }));
+async function receiveInParts(w, meta, token, note, parts, own, mine) {
+  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true }, mine ? { mine: true } : {})));
   save();   // (every part is saved before the first is claimed: if NUTCADE closes in between, the rest are claimed later)
   let got = 0, last = null, err = null;
   for (const t of lines) {

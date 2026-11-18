@@ -276,7 +276,7 @@ function evenOut() {   // biggest mint down toward half, into the healthiest oth
   const tot = totalBalance(); if (S.mints.length < 2 || tot < 1000) return null;
   const by = S.mints.map(m => ({ m, bal: balanceOf(m.url) })).sort((a, b) => b.bal - a.bal);
   const top = by[0]; if (top.bal / tot <= 0.6 || !supports(top.m, 'melt', 'bolt11')) return null;
-  const to = by.slice(1).filter(x => supports(x.m, 'mint', 'bolt11') && !isBlocked(x.m.url) && (!health[x.m.url] || health[x.m.url].ok)).sort((a, b) => a.bal - b.bal)[0];
+  const to = by.slice(1).filter(x => supports(x.m, 'mint', 'bolt11') && !isBlocked(x.m.url) && !belowMin(x.m.url) && (!health[x.m.url] || health[x.m.url].ok)).sort((a, b) => a.bal - b.bal)[0];
   if (!to) return null;
   const amount = Math.floor(top.bal - tot / 2);
   return amount >= 10 ? { from: top.m.url, to: to.m.url, amount } : null;
@@ -286,6 +286,7 @@ function healthPanel() {
   const tot = totalBalance();
   const rows = S.mints.map((m, i) => ({ m, bal: balanceOf(m.url), col: SPREAD_COLS[i % SPREAD_COLS.length] }));
   const notes = [];
+  for (const r of rows) if (belowMin(r.m.url)) notes.push(`<div class="notice red">${esc(r.m.name)} now accepts only ${mintMax(r.m.url)} coins per request; NUTCADE needs at least ${MIN_REQ}. ${r.bal > 0 ? 'It takes no new deposits: move your sats there to another mint.' : 'It takes no new deposits.'}</div>`);   // (never "looking good" above it)
   for (const r of rows) if (r.bal > 0 && health[r.m.url] && !health[r.m.url].ok) notes.push(`<div class="notice red">${esc(r.m.name)} isn't answering and holds ${money(r.bal)}. If it stays down, those sats are stuck until it's back. Move them once it answers again.</div>`);
   const top = rows.slice().sort((a, b) => b.bal - a.bal)[0];
   const share = tot ? top.bal / tot : 0;

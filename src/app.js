@@ -322,7 +322,8 @@ async function restoreFromMint(url, onStep, opts = {}) {
 }
 async function restoreFromMintNow(url, onStep, opts) {
   await syncIfStale();
-  if (!S.mints.find(m => m.url === url)) await addMint(url);
+  const isNew = !S.mints.find(m => m.url === url);
+  if (isNew) await addMint(url, { dropped: true });   // (your sats there are found even if the mint now takes fewer coins per request than NUTCADE needs)
   const w = await getWallet(url);
   // Coins of a step still open at this mint belong to that step, never to "Recovered": payments (in flight here are
   // waited for; their change goes to them), swaps (settled from their record), deposits with counters on record
@@ -380,6 +381,10 @@ async function restoreFromMintNow(url, onStep, opts) {
     if (restoreDeposits[url]) restoreDeposits[url].delete(q.quote);
   }
   if (fresh.length) { addProofs(url, fresh); if (left) addTx({ type: 'in', method: 'ecash', amount: left, mint: url, note: 'Recovered with recovery phrase' }); }
+  // a mint below the minimum that this scan added and where nothing of yours is: not kept (the restore says so)
+  if (isNew && belowMin(url) && !balanceOf(url) && !S.txs.some(t => t.mint === url) && !S.pending.some(p => p.mint === url) && !S.ops.some(o => o.mint === url) && !S.quotes.some(q => q.mint === url)) {
+    S.mints = S.mints.filter(m => m.url !== url); delete S.proofs[url]; if (S.active === url) S.active = S.mints[0] ? S.mints[0].url : null;
+  }
   save();
   return sum(fresh);
 }
@@ -484,7 +489,7 @@ async function addMint(url, opts = {}) {
   let m = S.mints.find(x => x.url === url);
   const rec = { url, name: info.name || host(url), desc: info.description || '', methods: methodsOf(w) };
   const isNew = !m;
-  if (isNew && belowMin(url)) { const e = new Error(`${rec.name} only accepts ${mintMax(url)} coins per request; NUTCADE needs at least ${MIN_REQ}.`); e.keep = true; delete wallets[url]; throw e; }   // (it couldn't take deposits)
+  if (isNew && belowMin(url) && !opts.dropped) { const e = new Error(`${rec.name} only accepts ${mintMax(url)} coins per request; NUTCADE needs at least ${MIN_REQ}.`); e.keep = true; delete wallets[url]; throw e; }   // (it couldn't take deposits)
   if (m) Object.assign(m, rec); else { S.mints.push(rec); m = rec; }
   if (!S.proofs[url]) S.proofs[url] = [];
   if (!S.active || opts.activate) S.active = url;
@@ -661,16 +666,22 @@ async function receiveTokenNow(token, note, opts = {}) {
   const meta = peekToken(token);
   if (!opts.own && isBlocked(meta.mint)) throw blockedErr(meta.mint);   // your own token coming back is still yours
   if (meta.unit !== 'sat') throw new Error(`This token is in ${meta.unit}. NUTCADE handles sats only.`);
-  if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint);
+  // Your own sats coming back (a token of yours taken back, a gift, bounty or treasure nobody opened, an Extra Life
+  // cashed out, a part of one of those saved to claim later, the duress wallet's sats) and an Extra Life left to you
+  // (locked to this wallet's key: nobody else can ever move it) are claimed even at a mint below the minimum, in
+  // parts where needed. Anyone else's token there is new money in: refused.
+  const ownTx = S.txs.find(t => t.token === token && (t.status === 'pending' || t.status === 'claimed'));
+  const f0 = opts.follow || {}, mine = !!(opts.own || ownTx || f0.k === 'heir' || (f0.k === 'incoming' && (txById(f0.txId) || {}).mine));
+  if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: mine });
   const w = await getWallet(meta.mint);
-  if (belowMin(meta.mint)) throw minErr(meta.mint);   // (no new deposits at a mint below the minimum)
+  if (belowMin(meta.mint) && !mine) throw minErr(meta.mint);   // (no new deposits at a mint below the minimum)
   const sm = smallMint(meta.mint);   // a token with more coins than the mint takes in one request: claimed in parts
-  if (sm && !opts.part && !opts.follow) {   // (our own token taken back too)
+  if (sm && !opts.part && (!opts.follow || mine)) {   // (our own token taken back too)
     let ps = []; try { ps = w.decodeToken(token).proofs || []; } catch (e) {}
     if (ps.length > sm || bitsOf(Math.max(0, sum(ps) - feeOfPs(w, ps))) > sm) {
       const parts = tokenParts(w, ps, sm);
       if (!parts) throw new Error(`${host(meta.mint)} takes at most ${sm} coins per request and charges a fee to claim, so each part of this token gives back its coins less that fee, and for some of its coins that needs more than ${sm} coins back. It can't be claimed there in any parts. Nothing was spent: the token still holds its sats, for when the mint takes more coins per request.`);
-      if (parts.length > 1) return receiveInParts(w, meta, token, note, parts, opts.own ? S.txs.find(t => t.token === token && (t.status === 'pending' || t.status === 'claimed')) : null);
+      if (parts.length > 1) return receiveInParts(w, meta, token, note, parts, ownTx || null, mine);
     }
   }
   let res;
@@ -2049,7 +2060,10 @@ function fmtDate(ms, withTime) {
 // Notes NUTCADE writes itself (not ones you typed) are shown in your language.
 const AUTO_NOTE = /^(Sats for the duress PIN wallet$|Back from the duress PIN's wallet$|Mint fee for splitting a payment into smaller requests$|Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life( |$)|Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step|keeping Extra Life going)$|Ecash already spent elsewhere$|Payment request couldn't be delivered: the sats came back$|To |Zap to |Wallet Connect: |LNURL voucher$)|\((part \d+ of \d+|cancelled at the till)\)$/;
 function noteText(n) {
-  if (!n || !AUTO_NOTE.test(n)) return n;
+  if (!n) return n;
+  const pt = /^(?:(.*) )?\((part \d+ of \d+)\)$/.exec(n);   // a part's number in your language, whatever note comes before it (or none)
+  if (pt) return (pt[1] ? noteText(pt[1]) + ' ' : '') + '(' + tr(pt[2]) + ')';
+  if (!AUTO_NOTE.test(n)) return n;
   const m = /^(.*) \((part \d+ of \d+|cancelled at the till)\)$/.exec(n);   // your own words before the suffix stay as you typed them
   return m ? noteText(m[1]) + ' (' + tr(m[2]) + ')' : tr(n);
 }
@@ -3099,7 +3113,8 @@ async function sweepPhrase(phrase, urls, onStep) {
   let total = 0; const fails = [];
   for (const url of urls) {
     try {
-      if (!S.mints.find(m => m.url === url)) await addMint(url);
+      const isNew = !S.mints.find(m => m.url === url);
+      if (isNew) await addMint(url, { dropped: true });   // (sats of yours, found under another phrase: they come in even at a mint below the minimum)
       const other = new L.Wallet(url, { unit: 'sat', bip39seed: otherSeed });
       await other.loadMint();
       let found = [];
@@ -3112,13 +3127,20 @@ async function sweepPhrase(phrase, urls, onStep) {
         }
       }
       if (found.length) total += await mintLock(url, async () => {
-        const w = await getWallet(url);
-        const { r: mine, op } = await journaled(url, 'receive', { amount: sum(found), note: 'Restored from another phrase' }, (cb, o) => rRecv(o, w, found, { onCountersReserved: cb }));
-        addProofs(url, mine);
-        addTx({ type: 'in', method: 'ecash', amount: sum(mine), fee: Math.max(0, sum(found) - sum(mine)), mint: url, note: 'Restored from another phrase' });
-        closeOp(op); save();
-        return sum(mine);
+        const w = await getWallet(url), mm = mintMax(url);
+        // more coins than the mint takes in one request: in parts that fit (each its own step and line)
+        const parts = mm && (found.length > mm || bitsOf(Math.max(0, sum(found) - feeOfPs(w, found))) > mm) ? tokenParts(w, found, mm) : [found];
+        if (!parts) throw new Error(`${host(url)} takes at most ${mm} coins per request, and these coins can't be moved there in parts that size.`);
+        let got = 0;
+        for (const g of parts) {
+          const { r: mine, op } = await journaled(url, 'receive', { amount: sum(g), note: 'Restored from another phrase' }, (cb, o) => rRecv(o, w, g, { onCountersReserved: cb }));
+          addProofs(url, mine);
+          addTx({ type: 'in', method: 'ecash', amount: sum(mine), fee: Math.max(0, sum(g) - sum(mine)), mint: url, note: 'Restored from another phrase' });
+          closeOp(op); save(); got += sum(mine);
+        }
+        return got;
       });
+      else if (isNew && belowMin(url) && !balanceOf(url) && !S.txs.some(t => t.mint === url)) { S.mints = S.mints.filter(m => m.url !== url); delete S.proofs[url]; if (S.active === url) S.active = S.mints[0] ? S.mints[0].url : null; save(); }
     } catch (e) { fails.push(host(url)); }
   }
   return { total, fails };
@@ -3615,8 +3637,8 @@ function applyImport(u, coins, txs, pending, ops, quotes) {
 // single-flight way: one at a time, idempotent), not only at the next background check
 function settleImported({ ops, quotes, pending, txs = [], heirlooms = [], chals = [] }) {
   if (ops.length || quotes.length || pending.length || txs.length || heirlooms.length || chals.length) setTimeout(async () => {
-    for (const o of ops) { if (!S.mints.find(m => m.url === o.mint)) await addMint(o.mint).catch(() => {}); await settleOp(o.id).catch(() => {}); }
-    for (const q of quotes) { if (!S.mints.find(m => m.url === q.mint)) await addMint(q.mint).catch(() => {}); await checkQuote(q).catch(() => {}); }
+    for (const o of ops) { if (!S.mints.find(m => m.url === o.mint)) await addMint(o.mint, { dropped: true }).catch(() => {}); await settleOp(o.id).catch(() => {}); }
+    for (const q of quotes) { if (!S.mints.find(m => m.url === q.mint)) await addMint(q.mint, { dropped: true }).catch(() => {}); await checkQuote(q).catch(() => {}); }
     for (const p of pending) await reconcile(p, { force: true }).catch(() => {});
     await closeSpentImported({ txs, heirlooms, chals }).catch(() => {});
     refresh();
@@ -3863,12 +3885,13 @@ const A = {
       try { total += await restoreFromMint(u, line); } catch (e) { fails.push(host(u)); }
     }
     if (!S.active && S.mints[0]) S.active = S.mints[0].url; save();
+    const lows = lowRestored(list);
     sfx(total ? 'levelup' : 'blip'); render();
     setBody(`<div style="text-align:center;display:grid;gap:12px">
       <div style="font-family:var(--f-display);font-size:16px;color:${total ? 'var(--lime)' : 'var(--gold)'}">${total ? 'CONTINUE!' : 'SCAN COMPLETE'}</div>
       <div class="credit-num" style="font-size:28px">${fmt(total)}<small>${unitTag()}</small></div>
       <p style="margin:0">${total ? 'Recovered and back in your wallet.' : 'No unspent ecash was found on those mints for this phrase.'}</p>
-      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}. Try those again later from Mints → Find lost ecash.</div>` : ''}
+      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}. Try those again later from Mints → Find lost ecash.</div>` : ''}${lows}
       <button class="btn solid gold block" data-act="close">Continue</button></div>`);
   }),
   findLost: b => run(b, 'SCANNING', async () => {
@@ -3943,10 +3966,11 @@ const A = {
     if (!urls.length) throw new Error('Pick at least one mint to scan.');
     const log = $('#restoreLog');
     const { total, fails } = await sweepPhrase(phrase, urls, t => { if (log) log.textContent = t; });
+    const lows = lowRestored(urls);
     sfx(total ? 'levelup' : 'blip'); refresh();
     setBody(`<div style="text-align:center;display:grid;gap:12px"><div style="font-family:var(--f-display);font-size:16px;color:${total ? 'var(--lime)' : 'var(--gold)'}">${total ? 'BONUS ROUND!' : 'SCAN COMPLETE'}</div>
       <div class="credit-num" style="font-size:28px">${fmt(total)}<small>${unitTag()}</small></div><p style="margin:0">${total ? 'Moved into this wallet.' : 'No unspent ecash was found for that phrase.'}</p>
-      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}.</div>` : ''}<button class="btn solid gold block" data-act="close">Continue</button></div>`);
+      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}.</div>` : ''}${lows}<button class="btn solid gold block" data-act="close">Continue</button></div>`);
   }),
   p2pkNew: b => run(b, '…', async () => { newP2PK(); sfx('coin'); refresh(); toast('New P2PK key created', 'lime'); }),
   p2pkShow: b => { const k = S.p2pk[+b.dataset.i]; openSheet('Your P2PK key', `<p style="margin:0">Share this public key. Ecash locked to it can only be claimed by this wallet.</p>${qrBlock(k.pub, 'P2PK public key QR')}<div class="code">${esc(k.pub)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(k.pub)}">Copy key</button>`); },
@@ -4221,7 +4245,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u) => sendEcash(a, n, l, u || S.active), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), moveQuote: (f, t, a) => moveQuote(f, t, a) } };
+window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), moveQuote: (f, t, a) => moveQuote(f, t, a) } };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}

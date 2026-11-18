@@ -938,6 +938,123 @@ async def main():
             await d.ev(NOALLOW); await d.pg.context.close()
         await section('r2decoy', r2_decoy)
 
+        # ======================= round 3: your own sats at a mint that dropped below 128 always come back =======================
+        HEIR_NPUB = 'npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6'
+        PUBKEY_JS = "(()=>{const k=crypto.getRandomValues(new Uint8Array(32)); return Array.from(CashuLib.getPubKeyFromPrivKey(k),x=>x.toString(16).padStart(2,'0')).join('')})()"
+        async def restore_words(r, words, url, sel='gateRestore'):
+            if sel == 'gateRestore': await r.ev("Nutcade.closeSheet()"); await r.pg.check('#ack')
+            else: await settings(r)
+            await r.click(f'[data-act={sel}]'); await r.until("!!document.querySelector('#phraseIn')", 5000)
+            await r.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); document.querySelector('#rmExtra').value={json.dumps(url)}}})()")
+            await r.click('[data-act=doRestorePhrase]'); await r.until("/SCAN COMPLETE|CONTINUE!/.test((document.querySelector('.sheet-body')||{}).innerText||'') || !!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 120000); await r.wait(1000)
+            return await r.sheet_text()
+        def dropper(D, seen, on=False, limit=3):   # (makes a mint say, and enforce, at most `limit` items per request once st['on'])
+            st = {'on': on}
+            async def h(route):
+                rq = route.request; ep = rq.url.split('/v1/')[-1]
+                try:
+                    if not st['on']: return await route.fallback()
+                    if ep == 'info' and rq.method == 'GET':
+                        r = await route.fetch(); j = await r.json(); j['max_array_length'] = limit; return await route.fulfill(response=r, body=json.dumps(j))
+                    if rq.method == 'POST':
+                        j = json.loads(rq.post_data or '{}'); n = max([len(j[k]) for k in ('inputs', 'outputs', 'Ys') if isinstance(j.get(k), list)] or [0])
+                        seen[ep] = max(seen.get(ep, 0), n)
+                        if n > limit: return await route.fulfill(status=422, body=json.dumps({'detail': [{'type': 'too_long', 'msg': f'List should have at most {limit} items after validation, not {n}'}]}), headers={'content-type': 'application/json'})
+                    await route.fallback()
+                except Exception:
+                    try: await route.fallback()
+                    except Exception: pass
+            return st, h
+        async def r3_own():
+            for D, tag in ((B, 'no fee'), (A, 'fee')):
+                O = C
+                seen = {}; w = await wallet(b); dst, dh = dropper(D, seen); await w.pg.route(f'{D}/v1/**', dh); words = await w.create(); await w.add_mint(D); await w.use(D)
+                for a in (3584, 448, 56, 7): await w.receive_ln(a)
+                await settings(w); await w.click('[data-act=contactsOpen]'); await w.wait(150); await w.click('[data-act=contactEdit]'); await w.wait(150)
+                await w.fill('#cName', 'Heir D'); await w.fill('#cNostr', HEIR_NPUB); await w.click('[data-act=contactSave]'); await w.wait(300); await w.ev("Nutcade.closeSheet()")
+                tok, e = await w.send_ecash(300)
+                tid = await w.ev("(Nutcade.S.txs.find(t=>t.token&&!t.lockUntil)||{}).id")
+                if not tid: check(f'r3 own {tag}: set-up send', False, (e, await w.bal(D), await w.ev("Nutcade.S.txs.map(t=>[t.type,t.amount,t.status,t.note])"))); continue
+                tv = await w.ev(f"Nutcade.S.txs.find(t=>t.id==='{tid}').sent.reduce((s,p)=>s+p.amount,0)")
+                await w.home(); await w.click('[data-act=extraOpen]'); await w.until("!!document.querySelector('#xlTo')", 5000)
+                await w.ev("const s=document.querySelector('#xlTo'); s.value=[...s.options].find(o=>o.text==='Heir D').value; s.dispatchEvent(new Event('change',{bubbles:true}))")
+                await w.fill('#amtIn', '300'); await w.click('[data-act=extraStart]'); xl = await w.until("!!Nutcade.S.extra", 25000); await w.wait(800); await w.ev("Nutcade.closeSheet()")
+                xv = await w.ev("Nutcade.S.extra ? Nutcade.S.extra.proofs.reduce((s,p)=>s+p.amount,0) : 0")
+                # a gift, a bounty and a treasure locked until two seconds from now (the app is told their date is far off, so it waits)
+                locked = {}
+                for kind, amt in (('gift', 300), ('bounty', 200), ('hunt', 200)):
+                    pub = await w.ev(PUBKEY_JS); hl = await w.ev("(async()=>{const h=await crypto.subtle.digest('SHA-256', crypto.getRandomValues(new Uint8Array(32))); return Array.from(new Uint8Array(h),x=>x.toString(16).padStart(2,'0')).join('')})()")
+                    txx = {'lockUntil': int(time.time() * 1000) + 3600e3, 'giftTo': 'Friend'}
+                    if kind == 'bounty': txx['bounty'] = 'r3b'
+                    if kind == 'hunt': txx['hunt'] = pub[2:]
+                    o = {'locktime': int(time.time()) + 2, 'txx': txx}
+                    if kind == 'bounty': o['hashlock'] = hl
+                    r = await w.ev(f"Nutcade.r8.sendEcash({amt}, {json.dumps(kind)}, {json.dumps(pub)}, {json.dumps(D)}, {json.dumps(o)}).then(t=>t.id, e=>'ERR '+e.message)")
+                    locked[kind] = r
+                await w.wait(4000)
+                b0 = await w.bal(D)
+                # the mint drops to 3 coins per request
+                dst['on'] = True; await w.pg.reload(); await w.wait(2500); await w.ev("Nutcade.closeSheet()")
+                check(f'r3 own {tag}: set-up (a 300 token, an Extra Life, a gift, a bounty and a treasure, all before the drop)', bool(tok) and xl and all(not str(v).startswith('ERR') for v in locked.values()) and await w.ev(f"Nutcade.r8.mintMax({json.dumps(D)})") == 3, (e, xl, locked))
+                await w.click('[data-act=tab][data-tab=history]'); await w.wait(300); await w.ev(f"document.querySelector('#txList [data-id=\"{tid}\"]').click()"); await w.wait(400)
+                has = await w.ev("!!document.querySelector('#layer [data-act=reclaim]')")
+                if has: await w.click('#layer [data-act=reclaim]'); await w.until(f"Nutcade.S.txs.find(t=>t.id==='{tid}').status==='reclaimed' || !!((document.querySelector('#sheetErr')||{{}}).innerText||'').trim()", 60000); await w.wait(1500)
+                e = await w.err(); await w.ev("Nutcade.closeSheet()"); back = await w.bal(D) - b0
+                check(f'r3 own {tag}: M1 your own unclaimed token, made before the mint dropped below 128, is taken back (in parts, no request over 3)', has and back >= tv - 6 and max(seen.values() or [0]) <= 3, (has, back, tv, e[:200], seen))
+                b1 = await w.bal(D); e = ''
+                if xl:
+                    await settings(w); await w.click('[data-act=extraOpen]'); await w.wait(300); await w.click('[data-act=extraCash]'); await w.wait(200); await w.click('[data-act=extraCashGo]')
+                    await w.until("!Nutcade.S.extra || !!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 60000); await w.wait(1500); e = await w.err(); await w.ev("Nutcade.closeSheet()")
+                got = await w.bal(D) - b1
+                check(f'r3 own {tag}: M2 an Extra Life set aside before the drop is cashed back in (no request over 3)', xl and got >= xv - 6 and not await w.ev("!!Nutcade.S.extra") and max(seen.values() or [0]) <= 3, (got, xv, e[:200], seen))
+                b2 = await w.bal(D)
+                await w.ev("Nutcade.S.txs.filter(t=>t.lockUntil&&t.status==='pending').forEach(t=>t.lockUntil=Date.now()-60000)")
+                n = await w.ev("Nutcade.r8.refundExpired()"); await w.wait(1500)
+                st = await w.ev(f"Object.fromEntries(Object.entries({json.dumps(locked)}).map(([k,id])=>[k,(Nutcade.S.txs.find(t=>t.id===id)||{{}}).status]))")
+                for kind, amt in (('gift', 300), ('bounty', 200), ('hunt', 200)):
+                    check(f'r3 own {tag}: M2 a {kind} nobody opened, made before the drop, comes back', st.get(kind) == 'reclaimed', (st, n))
+                got = await w.bal(D) - b2
+                check(f'r3 own {tag}: M2 the gift, bounty and treasure bring their sats back (no request over 3)', got >= 700 - 15 and max(seen.values() or [0]) <= 3, (got, seen))
+                l, pp = await w.ev(LEDGER + f"({json.dumps(D)})"); check(f'r3 own {tag}: history = balance after all of it', l == pp, (l, pp))
+                held = await w.bal(D)
+                # someone else's token of that mint is still refused (no new money in)
+                fz = await wallet(b); await fz.create(); await fz.add_mint(D); await fz.use(D); await fz.receive_ln(100); tk, _ = await fz.send_ecash(50); await fz.pg.context.close()
+                await w.home(); _, e, _ = await w.receive_token(tk)
+                check(f'r3 own {tag}: someone else\'s token of that mint is still refused (no new money in)', 'no new deposits' in e and await w.bal(D) == held, e)
+                await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=mints]'); await w.wait(300); await w.click('[data-act=healthCheck]'); await w.wait(2500)
+                hp = await w.ev("(document.querySelector('#mintHealth')||{}).innerText||''")
+                check(f'r3 own {tag}: L2 with the only mint dropped, the health panel says so (not "looking good")', 'Looking good' not in hp and 'now accepts only 3' in hp, hp[:300])
+                # M3: a new phone restoring from the 12 words finds the sats there, with the mint in its "dropped" state
+                seen.clear(); r = await wallet(b); await r.pg.route(f'{D}/v1/**', dropper(D, seen, True)[1])
+                txt = await restore_words(r, words, D)
+                rb = await r.bal(D); listed = await r.ev(f"Nutcade.S.mints.some(m=>m.url==={json.dumps(D)})")
+                check(f'r3 own {tag}: M3 a 12-word restore on a new phone finds the sats at a mint below 128 (never a silent 0), and says it takes no new deposits', rb == held and listed and 'were found' in txt and 'no new deposits' in txt and max(seen.values() or [0]) <= 3, (rb, held, listed, txt[:300], seen))
+                await r.ev("Nutcade.closeSheet()"); await r.click('[data-act=tab][data-tab=mints]'); await r.wait(800)
+                check(f'r3 own {tag}: M3 the restored mint shows its notice (move your sats out)', 'Move your sats out' in await r.ev("document.querySelector('#app').innerText"))
+                r2 = await wallet(b); txt2 = await restore_words(r2, words, O)
+                check(f'r3 own {tag}: M3 restoring at a mint below 128 where nothing of yours is: says so, and the mint isn\'t added', 'Nothing of yours was found there' in txt2 and not await r2.ev(f"Nutcade.S.mints.some(m=>m.url==={json.dumps(O)})"), txt2[:300])
+                await r2.pg.context.close()
+                bk = await w.ev("Nutcade.r8.backupData()")
+                y = await wallet(b); await y.pg.route(f'{D}/v1/**', dropper(D, {}, True)[1]); await y.create(); res = await y.ev(f"Nutcade.r8.importBackup(JSON.parse({json.dumps(bk)})).then(()=>'ok', e=>'ERR '+e.message)"); await y.wait(3000)
+                check(f'r3 own {tag}: a backup import brings the sats at a mint below 128 (listed, with its notice)', await y.bal(D) == held and await y.ev(f"Nutcade.S.mints.some(m=>m.url==={json.dumps(D)})"), (res, await y.bal(D), held))
+                await y.pg.context.close(); await r.pg.context.close()
+                # sweep from another phrase: the sats come in at that mint, in parts
+                seen.clear(); x = await wallet(b); await x.pg.route(f'{D}/v1/**', dropper(D, seen, True)[1]); await x.create()
+                await settings(x); await x.click('[data-act=sweepOpen]'); await x.until("!!document.querySelector('#phraseIn')", 5000)
+                await x.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); document.querySelector('#rmExtra').value={json.dumps(D)}}})()")
+                await x.click('[data-act=doSweep]'); await x.until("/SCAN COMPLETE|BONUS ROUND/.test((document.querySelector('.sheet-body')||{}).innerText||'') || !!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 120000); await x.wait(1000)
+                txt3 = await x.sheet_text(); xb = await x.bal(D)
+                check(f'r3 own {tag}: sweeping another phrase brings its sats at a mint below 128 (in parts, no request over 3)', xb >= held - 40 and 'were found' in txt3 and max(seen.values() or [0]) <= 3, (xb, held, txt3[:300], await x.err(), seen))
+                await books(x, f'r3 sweep {tag}', broken, (D,)); await x.pg.context.close(); await w.pg.context.close()
+            # L1: a part's number reads in your language, also with no note before it
+            for lang, want in (('es', 'parte 1 de 2'), ('pt', 'parte 1 de 2'), ('de', 'Teil 1 von 2'), ('fr', 'partie 1 sur 2')):
+                z = await wallet(b, 375, 667, lang); await z.create(); await z.add_mint(B)
+                await z.ev(f"Nutcade.S.txs.unshift({{id:'p1', ts:Date.now(), type:'in', method:'ecash', amount:5, mint:{json.dumps(B)}, note:'(part 1 of 2)', status:'done', fee:0}}); Nutcade.render()")
+                await z.ev("Nutcade.closeSheet()"); await z.click('[data-act=tab][data-tab=history]'); await z.wait(400); t = await z.ev("document.querySelector('#app').innerText")
+                check(f'L1 {lang}: "(part 1 of 2)" with no note before it is in your language', want in t and 'part 1 of 2' not in t, re.findall(r'.{0,20}1.{0,12}2\)', t)[:3])
+                await z.pg.context.close()
+        await section('r3own', r3_own)
+
         check('round 8: the books add up everywhere (history = balance)', not broken, broken)
         print('SUMMARY', sum(1 for r in results if r[1]), 'passed,', sum(1 for r in results if not r[1]), 'failed')
         await b.close()
