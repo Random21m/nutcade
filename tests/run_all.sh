@@ -3,9 +3,9 @@
 #   bash tests/run_all.sh                  every suite (all mints)
 #   bash tests/run_all.sh --only r7,r8     only those suites, and only the mints they need
 #   (names are the suite file names, with or without the _qa suffix: wallet, crash, pin, games_smoke, round2,
-#    v16, r3 ... r8, grid_backup, polish. The CI runs the suites as parallel jobs this way.)
+#    v16, r3 ... r8, grid_backup, polish, tokens. The CI runs the suites as parallel jobs this way.)
 set -uo pipefail
-ALL="wallet_qa crash_qa pin_qa games_smoke round2_qa v16_qa r3_qa r4_qa r5_qa r6_qa r7_qa grid_backup_qa polish_qa r8_qa"
+ALL="wallet_qa crash_qa pin_qa games_smoke round2_qa v16_qa r3_qa r4_qa r5_qa r6_qa r7_qa grid_backup_qa polish_qa r8_qa tokens_qa"
 SUITES="$ALL"; ONLY=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -26,6 +26,7 @@ fi
 # the mints each suite needs (a suite that adds no mint of its own still gets the wallet_qa defaults, 3338-3341)
 ports_for() { case "$1" in
   r7_qa|grid_backup_qa|polish_qa) echo "3338 3339 3340" ;;
+  tokens_qa) echo "3338 3339" ;;
   r8_qa) echo "3338 3339 3340 3342 3343 3344" ;;
   *) echo "3338 3339 3340 3341" ;; esac; }
 if [ -n "$ONLY" ]; then PORTS=$(for s in $SUITES; do ports_for "$s"; done | tr ' ' '\n' | sort -u | tr '\n' ' '); else PORTS=""; fi
