@@ -664,14 +664,14 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .arr-row{display:flex;align-items:center;gap:8px;min-width:0}
 .arr-ico{flex:none;font-family:var(--f-display);font-size:13px;color:var(--lime)}
 .arr-card[data-type=away] .arr-ico{color:var(--cyan)}
-.arr-big{flex:0 1 auto;min-width:0;font-family:var(--f-display);font-size:13px;line-height:1.4;color:var(--lime);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.arr-big{flex:none;font-family:var(--f-display);font-size:clamp(10px,3.6vw,13px);line-height:1.4;color:var(--lime);white-space:nowrap}   /* never cut: up to +9,999,999 SAT fits at 320 px */
 .arr-sp{flex:1}
-.arr-more{flex:none;min-height:30px;padding:4px 9px}
-.arr-x{flex:none;width:30px;height:30px;margin:-4px -4px -4px 0;border:0;background:transparent;color:var(--dim);font-size:22px;line-height:1;cursor:pointer}
+.arr-more{flex:none;min-height:28px;padding:3px 8px;font-size:8px}
+.arr-x{flex:none;width:30px;height:24px;margin:-4px -4px -4px 0;border:0;background:transparent;color:var(--dim);font-size:22px;line-height:1;cursor:pointer}
 .arr-x:hover,.arr-x:focus-visible{color:var(--ink)}
-.arr-sub{display:flex;gap:10px;min-width:0;white-space:nowrap;overflow:hidden}
-.arr-what{color:var(--ink);overflow:hidden;text-overflow:ellipsis;min-width:0}
-.arr-mint{color:var(--dim);overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+.arr-sub{display:flex;align-items:center;gap:10px;min-width:0;white-space:nowrap}
+.arr-what{flex:0 0 auto;max-width:62%;color:var(--ink);overflow:hidden;text-overflow:ellipsis}   /* (what came keeps its room; a long mint name gives way first) */
+.arr-mint{flex:0 1 auto;min-width:0;color:var(--dim);overflow:hidden;text-overflow:ellipsis}
 /* Details (a sheet) */
 .arr-details{display:grid;gap:10px}
 .arr-note{color:var(--dim);font-size:17px}
@@ -10434,8 +10434,9 @@ function arrCardHTML(type, items) {
   const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
   const sub = type === 'away' ? '<span class="arr-what">While you were away</span>'
     : one ? `<span class="arr-what">${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span>` : `<span class="arr-what">${esc(arrCount(items.length))}</span>`;
-  return `<div class="arr-row"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-big" data-noi18n>+${esc(money(total))}</span><span class="arr-sp"></span><button type="button" class="btn sm arr-more" data-act="arrMore">Details</button><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
-    <div class="arr-sub">${sub}</div>`;
+  // (the amount has the first line to itself and is never cut; the second line, what came, gives way instead)
+  return `<div class="arr-row"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-big" data-noi18n>+${esc(money(total))}</span><span class="arr-sp"></span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
+    <div class="arr-sub">${sub}<span class="arr-sp"></span><button type="button" class="btn sm arr-more" data-act="arrMore">Details</button></div>`;
 }
 function arrDetailsHTML(type, items) {
   const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
