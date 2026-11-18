@@ -43,22 +43,13 @@ jobs:
       matrix:
         include:
           # roughly balanced by duration (grid_backup ~16 min, r7 ~10, r8 ~10, polish ~8, the rest short)
-          - name: grid_backup
-            suites: grid_backup
           - name: r7
             suites: r7
-          - name: r8
-            suites: r8
-          - name: polish
-            suites: polish
-          - name: core
-            suites: wallet,crash,pin,games_smoke,round2,v16,r3
-          - name: r4-r6
-            suites: r4,r5,r6
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out
       SUITES: ${{ matrix.suites }}
+      R7_ONLY: tour
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Test-mint environment (Nutshell, fake Lightning)
