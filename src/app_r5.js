@@ -352,7 +352,7 @@ async function inspectMint(url) {
   if (info && info.pubkey) {
     if (l.pub && l.pub !== info.pubkey && !(l.pubChanged && l.pubChanged.to === info.pubkey)) l.pubChanged = { from: l.pub, to: info.pubkey, at: now };
     if (!l.pub) l.pub = info.pubkey;
-    l.info = { name: info.name || '', version: info.version || '', contact: (info.contact || []).length, motd: info.motd || '', tos: !!info.tos_url, nuts: Object.keys(info.nuts || {}).length };
+    l.info = mintInfoOf(info);   // (what the report card used, plus the contact, terms and description Mints → Details shows: see app_trust.js)
   }
   if (ks && Array.isArray(ks.keysets)) {
     const had = Object.keys(l.keysets).length;

@@ -586,3 +586,17 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
   .sheet .pinpad .th{font-size:17px;line-height:1.15}
   .lim-sheet{gap:6px} .lim-sheet .pb-h{font-size:13px} .lim-sheet .lim-msg,.lim-sheet .th{font-size:17px;line-height:1.15}
 }
+/* Trust & help: hide amounts, Help & FAQ, mint details */
+.credit-num.tap{cursor:pointer;-webkit-tap-highlight-color:transparent;min-height:44px;display:flex;align-items:center}
+.credits .lockbtn{flex:none}
+.help{display:grid;gap:8px}
+.help details{border:1px solid var(--grid);border-radius:var(--r);background:var(--panel-2,transparent)}
+.help summary{cursor:pointer;color:var(--cyan);font-size:20px;line-height:1.2;padding:12px;min-height:44px;overflow-wrap:anywhere}
+.help summary:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.help-a{display:grid;gap:8px;padding:0 12px 12px;font-size:19px;line-height:1.2}
+.help-a p,.help-a ul{margin:0}
+.help-a ul{padding-left:18px;display:grid;gap:6px}
+.help-a li,.help-a p{overflow-wrap:anywhere}
+.minfo-list{display:grid;gap:6px}
+.minfo-row{display:grid;gap:2px;overflow-wrap:anywhere}
+.minfo-row a,.sheet-body a:not(.btn){color:var(--cyan)}

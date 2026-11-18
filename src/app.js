@@ -9,7 +9,10 @@ const sum = ps => (ps || []).reduce((t, p) => t + num(p.amount), 0);
 // Amounts group digits the way the app's language does: 30,000 (English), 30.000 (es, pt, de), 30 000 (fr).
 // Only for showing numbers; amounts are always stored, sent and parsed as plain integers.
 const numLocale = () => { try { return ({ en: 'en-US', es: 'es-ES', pt: 'pt-BR', de: 'de-DE', fr: 'fr-FR' })[LANG] || 'en-US'; } catch (e) { return 'en-US'; } };
-const fmt = n => Math.round(num(n)).toLocaleString(numLocale(), { useGrouping: 'always' });
+// "Hide amounts" (Settings and the balance): while the main screens are drawn (and only then: see render()) every amount
+// reads •••. Payment sheets, tokens and anything you type are never masked, so you always see what you are about to send.
+let maskAmounts = false;
+const fmt = n => maskAmounts ? '•••' : Math.round(num(n)).toLocaleString(numLocale(), { useGrouping: 'always' });
 const fmtEn = n => Math.round(num(n)).toLocaleString('en-US');   // share cards and share text, which are in English
 const unitTag = () => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '' : 'SAT';
 const money = n => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '₿' + fmt(n) : fmt(n) + ' SAT';
@@ -41,7 +44,7 @@ const lsGet = (k, d) => { try { const v = localStorage.getItem('nutcade:' + k); 
 const lsSet = (k, v) => { try { localStorage.setItem('nutcade:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } };
 const lsDel = k => { try { localStorage.removeItem('nutcade:' + k); } catch (e) {} };
 // the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
-const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto'];
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck'];
 const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const walletPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const inVault = k => vault.on && !devKey(k);
@@ -1401,7 +1404,7 @@ function pickLang() {
   for (const x of nav) { if (x === 'en') return 'en'; if (I18N[x]) return x; }
   return 'en';
 }
-const NUMRE = /\d[\d,.\u00a0\u202f]*/g, NUMEND = /\d(?:[\d,.\u00a0\u202f]*\d)?/g;
+const NUMRE = /(?:\d[\d,.\u00a0\u202f]*|•••)/g, NUMEND = /(?:\d(?:[\d,.\u00a0\u202f]*\d)?|•••)/g;   // (a hidden amount, •••, takes a number's place)
 function tr(s) {
   if (LANG === 'en' || !s) return s;
   const d = I18N[LANG]; if (!d) return s; if (!d.done) d.done = new Set();
@@ -1411,8 +1414,8 @@ function tr(s) {
   for (const re of [NUMRE, NUMEND]) { if (out !== undefined) break; const nums = []; const key = core.replace(re, x => { nums.push(x); return '{#}'; }); if (nums.length && d.t[key] !== undefined) { let i = 0; out = d.t[key].replace(/\{#\}/g, () => nums[i++] ?? ''); } }
   if (out === undefined && d.re) for (const [re, rep_] of d.re) { const mm = re.exec(core); if (mm) { const miss = window.__i18nMiss; window.__i18nMiss = null; try { out = rep_.replace(/\$(\d)/g, (_, k) => tr(mm[+k] || '')); } finally { window.__i18nMiss = miss; } break; } }
   if (out === undefined && core.includes('₿')) {   // "₿67 in your piggy bank" uses the "67 SAT in your piggy bank" translation
-    const asSat = core.replace(/₿(\d[\d,.\u00a0\u202f]*\d|\d)/g, '$1 SAT'); let t = asSat; if (asSat !== core) { const miss = window.__i18nMiss; window.__i18nMiss = null; try { t = tr(asSat); } finally { window.__i18nMiss = miss; } }
-    if (t !== asSat) out = t.replace(/(\d[\d,.\u00a0\u202f]*\d|\d) SAT/g, '₿$1');
+    const asSat = core.replace(/₿(\d[\d,.\u00a0\u202f]*\d|\d|•••)/g, '$1 SAT'); let t = asSat; if (asSat !== core) { const miss = window.__i18nMiss; window.__i18nMiss = null; try { t = tr(asSat); } finally { window.__i18nMiss = miss; } }
+    if (t !== asSat) out = t.replace(/(\d[\d,.\u00a0\u202f]*\d|\d|•••) SAT/g, '₿$1');
   }
   // an amount like "0,15 $US" or "12 CHF" has nothing to translate, so it isn't reported as missing
   if (out === undefined) { if (window.__i18nMiss && !(/\d/.test(core) && core.replace(/[^A-Za-z]/g, '').length <= 3)) { if (!d.vals) d.vals = new Set(Object.values(d.t)); if (!d.vals.has(core) && !d.done.has(core)) window.__i18nMiss.add(core); } return s; }
@@ -2100,6 +2103,7 @@ function render() {
     if (window.PriceChart) window.PriceChart.disconnect();
     return;
   }
+  trustBoot();
   if (needsGate()) {
     const gv = viewGate();
     app.innerHTML = `<div class="wrap" style="padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))">
@@ -2109,11 +2113,14 @@ function render() {
     if (window.NutAudio) window.NutAudio.stopMusic();
     return;
   }
-  if (tab === 'wallet') body = viewWallet();
-  else if (tab === 'arcade') body = `<section class="screen" id="arcadeScreen"></section>`;
-  else if (tab === 'history') body = viewHistory();
-  else if (tab === 'mints') body = viewMints();
-  else body = viewSettings();
+  maskAmounts = !!S.prefs.hideAmounts;   // (only while the screens below are written; a failure here must not leave amounts hidden everywhere)
+  try {
+    if (tab === 'wallet') body = viewWallet();
+    else if (tab === 'arcade') body = `<section class="screen" id="arcadeScreen"></section>`;
+    else if (tab === 'history') body = viewHistory();
+    else if (tab === 'mints') body = viewMints();
+    else body = viewSettings();
+  } finally { maskAmounts = false; }
   // a redraw replaces every button: the one with keyboard focus gets it back afterwards, or focus would fall to
   // the page (a background refresh just after a sheet closed used to drop focus that had just been returned)
   const fa = document.activeElement, fsel = fa && fa !== document.body && app.contains(fa) && fa.dataset && fa.dataset.act
@@ -2194,7 +2201,7 @@ function viewGate() {
       <ul class="gate-list">
         <li><b>A Bitcoin wallet.</b> NUTCADE holds sats as Cashu ecash: fast, private, and sent like a text.</li>
         <li><b>Your keys, your sats.</b> A 12-word recovery phrase is the only way to get your sats back if this device is lost.</li>
-        <li><b>An arcade.</b> Eight cabinets of free play once you're in.</li>
+        <li><b>An arcade.</b> Ten cabinets of free play once you're in.</li>
       </ul>
       ${legacy ? `<div class="notice">You already hold ${money(totalBalance())} here from before recovery phrases. Creating your phrase moves that ecash under it so it's protected too.</div>` : ''}
       <label class="ack" for="ack"><input id="ack" type="checkbox" data-gatecheck="ack"><span>I understand NUTCADE is new, experimental software, that mints hold the Bitcoin behind my ecash, and that my 12 words are the only way to recover my sats.</span></label>
@@ -2269,7 +2276,7 @@ function viewWallet() {
   const m = activeMint();
   const nag = S.seed && !S.seed.backedUp ? `<div class="notice red row between" style="flex-wrap:wrap"><span>Your recovery phrase isn't backed up yet.</span><button class="btn sm red" data-act="seedShow">Back up now</button></div>` : '';
   const legacy = S.seed && !S.seed.secured && totalBalance() > 0 && S.seed.backedUp ? `<div class="notice row between" style="flex-wrap:wrap"><span>${money(totalBalance())} here isn't covered by your phrase yet.</span><button class="btn sm gold" data-act="secureAll">Protect it</button></div>` : '';
-  if (!m) return `<section class="screen">${nag}${legacy}
+  if (!m) return `<section class="screen">${nag}${legacy}${trustNotices()}
     <div class="credits" style="text-align:center;justify-items:center"><div class="label">Credits</div><div class="credit-num">0<small>${unitTag()}</small></div>
     <div class="spinner" style="font-size:11px">INSERT MINT TO START</div></div>
     <div class="panel"><p style="margin:0">NUTCADE holds Bitcoin as Cashu ecash. A mint issues the ecash, so pick one first. Try a test mint if you want to play with fake sats.</p>
@@ -2281,10 +2288,10 @@ function viewWallet() {
   </section>`;
   const bal = balanceOf(m.url), tot = totalBalance(), po = pendingOut();
   const recent = S.txs.slice(0, 4);
-  return `<section class="screen">${nag}${legacy}
+  return `<section class="screen">${nag}${legacy}${trustNotices()}
     <div class="credits">
-      <div class="row between"><span class="label">Credits</span><span class="row" style="gap:10px">${tot !== bal ? `<span class="tiny muted">All mints ${money(tot)}</span>` : ''}${vault.on ? '<button class="lockbtn" data-act="lockNow" aria-label="Lock wallet" title="Lock wallet"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2h1v8H4V7zm1 0h4V5a2 2 0 0 0-4 0zm1 3v3h2v-3z"/></svg></button>' : ''}</span></div>
-      <div class="credit-num" aria-live="polite">${S.prefs.btcSymbol ? '₿' : ''}${fmt(bal)}<small>${unitTag()}</small></div>
+      <div class="row between"><span class="label">Credits</span><span class="row" style="gap:10px">${tot !== bal ? `<span class="tiny muted">All mints ${money(tot)}</span>` : ''}${hideBtn()}${vault.on ? '<button class="lockbtn" data-act="lockNow" aria-label="Lock wallet" title="Lock wallet"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2h1v8H4V7zm1 0h4V5a2 2 0 0 0-4 0zm1 3v3h2v-3z"/></svg></button>' : ''}</span></div>
+      <div class="credit-num tap" data-act="hideToggle" title="${S.prefs.hideAmounts ? 'Tap to show amounts' : 'Tap to hide amounts'}" aria-live="polite">${S.prefs.btcSymbol ? '₿' : ''}${fmt(bal)}<small>${unitTag()}</small></div>
       ${fiatOf(bal) ? `<div class="tiny muted fiat" data-sats="${bal}">≈ ${fiatOf(bal)}</div>` : ''}
       ${piggySaved() ? `<div class="tiny piggy-line">${pigSVG('tiny')}<span>${money(piggySaved())} in your piggy bank · ${money(Math.max(0, tot - piggySaved()))} to spend</span></div>` : ''}
       <button class="mint-pill" data-act="pickMint" aria-label="${tr('Change mint')}"><span class="dot"></span><span>${esc(m.name)}</span><span class="muted">▾</span></button>
@@ -2336,6 +2343,7 @@ function viewMints() {
       ${blockedNotice(m.url)}${minNotice(m.url)}${ksLine(m)}
       <div class="row" style="flex-wrap:wrap">${m.url === S.active ? '<span class="chip ecash">ACTIVE</span>' : `<button class="btn sm lime" data-act="useMint" data-url="${esc(m.url)}">Use</button>`}${isBlocked(m.url) ? '<span class="chip failed">BLOCKED</span>' : ''}
       <button class="btn sm" data-act="refreshMint" data-url="${esc(m.url)}">Refresh</button>
+      <button class="btn sm" data-act="mintInfo" data-url="${esc(m.url)}">Details</button>
       ${isBlocked(m.url) ? `<button class="btn sm gold" data-act="unblockMint" data-url="${esc(m.url)}">Unblock</button>` : `<button class="btn sm" data-act="blockMint" data-url="${esc(m.url)}">Block</button>`}
       <button class="btn sm red" data-act="removeMint" data-url="${esc(m.url)}">Remove</button></div></div>`).join('')}</div>`
       : `<div class="empty-state"><b>NO MINTS</b>Add a mint to start holding ecash.</div>`}
@@ -2480,7 +2488,7 @@ document.addEventListener('visibilitychange', () => {
 const APP_VERSION = '1.14.0';
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
 const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
-const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-about', 'About']];
+const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-help', 'Help'], ['set-about', 'About']];
 const toggle = (k, label, help) => `<label class="toggle set" for="p_${k}"><span><span class="tl">${label}</span>${help ? `<span class="th">${help}</span>` : ''}</span><input id="p_${k}" type="checkbox" data-act="pref" data-k="${k}" ${S.prefs[k] ? 'checked' : ''}></label>`;
 function viewSettings() {
   const inflight = S.pending.length;   // (a paid payment still waiting for its change counts: Check stuck payments retries it)
@@ -2504,12 +2512,14 @@ function viewSettings() {
       <div class="row between tiny"><span>Recovery phrase backed up</span><span style="color:${S.seed && S.seed.backedUp ? 'var(--lime)' : 'var(--red)'}">${S.seed && S.seed.backedUp ? 'YES' : 'NOT YET'}</span></div>
       <div class="row between tiny"><span>Protected from browser clean-up</span><span style="color:${persisted ? 'var(--lime)' : 'var(--gold)'}">${persisted ? 'YES' : persisted === false ? 'NOT GRANTED' : 'CHECKING'}</span></div>
       ${persisted ? '' : '<div class="th">On iPhone, add NUTCADE to your home screen so Safari keeps its data.</div>'}
+      ${backupHealth()}
       <div class="row wrap"><button class="btn sm gold" data-act="seedShow">Show recovery phrase</button><button class="btn sm violet" data-act="findLost">Find lost ecash</button><button class="btn sm" data-act="sweepOpen">Restore ecash from another phrase</button></div>
       <div class="sub">Mint list on Nostr</div>
       ${toggle('nostrBackup', 'Back up my mint list to Nostr', 'Saves the list of mints you use, encrypted with a key from your 12 words, so restoring finds them for you. Works with cashu.me.')}
       ${S.prefs.nostrBackup ? `<div class="row between tiny"><span>Last backup</span><span style="color:${S.prefs.mintBackupAt ? 'var(--lime)' : 'var(--gold)'}">${mintBackupState === 'saving' ? 'SAVING…' : S.prefs.mintBackupAt ? timeAgo(S.prefs.mintBackupAt * 1000).toUpperCase() : mintBackupState === 'failed' ? 'RELAYS DIDN\'T ANSWER' : 'NOT YET'}</span></div><button class="btn sm" data-act="mintBackupNow">Back up now</button>` : ''}
       <div class="sub">Backup file</div>
       <p class="th" style="margin:0">Your phrase, ecash, notes and history in one file. Anyone with it can spend your sats.</p>
+      ${backupFileRow()}
       <div class="row wrap"><button class="btn sm gold" data-act="backupDownload">Download backup</button><button class="btn sm" data-act="restore">Import backup</button></div>
       <div class="sub">Restore a wallet</div>
       <p class="th" style="margin:0">Moving from another wallet? Use the 12 words from a previous NUTCADE or another Cashu wallet like cashu.me. Any sats in this wallet move into the restored one.</p>
@@ -2541,6 +2551,7 @@ function viewSettings() {
       ${toggle('music', 'Arcade music', '')}
       ${toggle('crt', 'CRT scanlines', '')}
       ${toggle('btcSymbol', 'Show amounts as ₿', '₿1,000 instead of 1,000 SAT.')}
+      ${toggle('hideAmounts', 'Hide amounts', 'Shows ••• instead of amounts on the wallet, notes and mints screens. You can also tap your balance. Payment screens always show the real amount.')}
     </div>
 
     <div class="panel" id="set-privacy"><span class="h2">Privacy</span>
@@ -2563,8 +2574,11 @@ function viewSettings() {
       <div class="row wrap"><button class="btn sm violet" data-act="clean">Remove spent ecash</button><button class="btn sm" data-act="reconcileAll">Check stuck payments${inflight ? ` (${inflight})` : ''}</button></div>
     </div>
 
+    ${helpPanel()}
+
     <div class="panel" id="set-about"><span class="h2">About</span>
       <dl class="kv"><dt>Version</dt><dd>${APP_VERSION}</dd><dt>Works with</dt><dd>Any Cashu wallet</dd></dl>
+      ${updatePanel()}
       <div class="row wrap"><a class="btn sm" href="https://github.com/Random21m/nutcade" target="_blank" rel="noopener">Source on GitHub</a><a class="btn sm" href="https://cashu.space" target="_blank" rel="noopener">What is Cashu?</a><a class="btn sm" href="https://github.com/Random21m/nutcade/issues/new?template=bug.yml" target="_blank" rel="noopener">Report a problem</a></div>
       <p class="th" style="margin:0">Reports are public on GitHub. Never paste your 12 words, your PIN or a token into one.</p>
       <div class="sub" style="color:var(--pink)">Support NUTCADE</div>
@@ -2585,7 +2599,7 @@ async function fetchPrice(force) {
     if (rate > 0) { price = { rate, at: Date.now(), cur: S.prefs.currency }; if (!$('#layer .sheet') && tab === 'wallet') refresh(); }
   } catch (e) {}
 }
-const fiatOf = sats => (S.prefs.fiat && price.rate && price.cur === S.prefs.currency) ? (sats / 1e8 * price.rate).toLocaleString(numLocale(), { style: 'currency', currency: S.prefs.currency }) : null;
+const fiatOf = sats => (!maskAmounts && S.prefs.fiat && price.rate && price.cur === S.prefs.currency) ? (sats / 1e8 * price.rate).toLocaleString(numLocale(), { style: 'currency', currency: S.prefs.currency }) : null;
 
 /* P2PK keys */
 function newP2PK() {
@@ -3689,6 +3703,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_r8.js@@*/
 /*@@app_daily.js@@*/
 /*@@app_r9.js@@*/
+/*@@app_trust.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4066,7 +4081,7 @@ const A = {
     try {
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
       a.download = `nutcade-backup-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast('Backup file downloaded. Keep it private.', 'lime');
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000); S.prefs.backupFileAt = Date.now(); save(); if (tab === 'settings' && !$('#layer .sheet')) refresh(); toast('Backup file downloaded. Keep it private.', 'lime');
     } catch (e) { A.backup(); }
   },
   sweepOpen: () => {
@@ -4232,6 +4247,7 @@ const A = {
 /*@@app_r7_actions.js@@*/
 /*@@app_r8_actions.js@@*/
 /*@@app_r9_actions.js@@*/
+/*@@app_trust_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;

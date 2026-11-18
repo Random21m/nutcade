@@ -1,15 +1,93 @@
 {
+  "id": "/nutcade/",
   "name": "NUTCADE",
   "short_name": "NUTCADE",
-  "description": "A Cashu ecash wallet with a 1980s arcade built in.",
+  "description": "A Bitcoin wallet for Cashu ecash, Lightning and on-chain payments, protected by a 12-word recovery phrase, with ten retro arcade cabinets built in. It works offline and has no account and no tracking.",
+  "lang": "en",
+  "categories": [
+    "finance",
+    "games",
+    "utilities"
+  ],
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#0a0717",
   "theme_color": "#0a0717",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshots/01-lightning.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Loading sats over Lightning: a 1UP and a coin shower"
+    },
+    {
+      "src": "screenshots/02-arcade.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Star Swarm, one of the arcade cabinets"
+    },
+    {
+      "src": "screenshots/03-trophies.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "The trophy room"
+    },
+    {
+      "src": "screenshots/04-send.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Sending sats to a friend"
+    },
+    {
+      "src": "screenshots/05-sound.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Send by sound: one phone plays the coins, the other listens"
+    },
+    {
+      "src": "screenshots/06-cashier.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Cashier mode: a paid sale"
+    },
+    {
+      "src": "screenshots/07-languages.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "The wallet in English, Spanish, Portuguese, German and French"
+    },
+    {
+      "src": "screenshots/08-pin.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "The PIN lock"
+    }
   ]
 }

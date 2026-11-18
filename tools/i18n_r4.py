@@ -1166,7 +1166,8 @@ LANGS = ['es', 'pt', 'de', 'fr']
 
 # Numbers on screen are already written the language's way ("2,500" en, "2.500" de/es/pt, "2 500" fr with a narrow
 # no-break space), so a pattern's number matches any of them: digits with , . or a (narrow) no-break space between.
-NUM = r'\d(?:[\d,.\u00a0\u202f]*\d)?'
+# A hidden amount (•••) takes a number's place too.
+NUM = r'(?:\d(?:[\d,.\u00a0\u202f]*\d)?|•••)'   # (••• is a hidden amount: Settings, Hide amounts)
 def numpat(p):
     return p.replace(r'[\d,]+', NUM).replace(r'\d+', NUM)
 
