@@ -55,6 +55,8 @@ jobs:
             suites: wallet,crash,pin,games_smoke,round2,v16,r3
           - name: r4-r6
             suites: r4,r5,r6
+          - name: arrive
+            suites: arrive
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out
