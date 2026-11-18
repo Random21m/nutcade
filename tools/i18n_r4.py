@@ -895,6 +895,20 @@ ROWS = [
 ("Report a problem", "Informar de un problema", "Relatar um problema", "Problem melden", "Signaler un problème"),
 ("Reports are public on GitHub. Never paste your 12 words, your PIN or a token into one.", "Los informes son públicos en GitHub. Nunca pegues en uno tus 12 palabras, tu PIN ni un token.", "Os relatos são públicos no GitHub. Nunca cole neles suas 12 palavras, seu PIN ou um token.", "Meldungen sind auf GitHub öffentlich. Füge nie deine 12 Wörter, deine PIN oder ein Token ein.", "Les signalements sont publics sur GitHub. Ne collez jamais vos 12 mots, votre PIN ni un jeton dedans."),
 ("The mint says some of this ecash was already spent, but it still shows your coins as unspent, so nothing was removed. Try again in a moment.", "El mint dice que parte de este ecash ya se gastó, pero aún muestra tus monedas como no gastadas, así que no se quitó nada. Inténtalo de nuevo en un momento.", "O mint diz que parte deste ecash já foi gasto, mas ainda mostra suas moedas como não gastas, então nada foi removido. Tente de novo em instantes.", "Der Mint sagt, ein Teil dieses Ecash sei schon ausgegeben, zeigt deine Münzen aber noch als nicht ausgegeben, also wurde nichts entfernt. Versuch es gleich noch einmal.", "Le mint dit qu'une partie de cet ecash a déjà été dépensée, mais il montre encore vos pièces comme non dépensées, donc rien n'a été retiré. Réessayez dans un instant."),
+# --- Neon Road ---
+("NEON ROAD", "NEON ROAD", "NEON ROAD", "NEON ROAD", "NEON ROAD"),
+("Race the clock down a neon highway. Pass traffic, hit every checkpoint.", "Gana al reloj en una autopista de neón. Adelanta coches y llega a cada control.", "Corra contra o relógio numa estrada de neon. Passe os carros e chegue a cada checkpoint.", "Renne gegen die Uhr über eine Neon-Autobahn. Überhole Autos, erreiche jeden Kontrollpunkt.", "Battez la montre sur une autoroute au néon. Doublez les voitures, franchissez chaque point de contrôle."),
+("◀ ▶ steer · ▲ boost · ▼ brake", "◀ ▶ girar · ▲ turbo · ▼ frenar", "◀ ▶ virar · ▲ turbo · ▼ frear", "◀ ▶ lenken · ▲ Gas · ▼ Bremse", "◀ ▶ diriger · ▲ turbo · ▼ freiner"),
+("← → steer · ↑ gas · ↓ brake", "← → girar · ↑ gas · ↓ frenar", "← → virar · ↑ acelerar · ↓ frear", "← → lenken · ↑ Gas · ↓ Bremse", "← → diriger · ↑ gaz · ↓ frein"),
+("STAGE {#}", "ETAPA {#}", "ETAPA {#}", "ETAPPE {#}", "ÉTAPE {#}"),
+("GO!", "¡YA!", "VAI!", "LOS!", "PARTEZ !"),
+("CHECKPOINT !", "¡CONTROL!", "CHECKPOINT!", "KONTROLLPUNKT!", "CHECKPOINT !"),
+("+{#} SEC", "+{#} SEG", "+{#} SEG", "+{#} SEK", "+{#} SEC"),
+("TIME UP!", "¡SE ACABÓ!", "TEMPO ESGOTADO!", "ZEIT ABGELAUFEN!", "TEMPS ÉCOULÉ !"),
+("TOUCH A SIDE TO STEER", "TOCA UN LADO PARA GIRAR", "TOQUE UM LADO PARA VIRAR", "ZUM LENKEN SEITE ANTIPPEN", "TOUCHEZ UN CÔTÉ: VIRAGE"),
+("TOUCH THE TOP TO BRAKE", "TOCA ARRIBA PARA FRENAR", "TOQUE EM CIMA PARA FREAR", "OBEN ANTIPPEN ZUM BREMSEN", "TOUCHEZ LE HAUT: FREIN"),
+("ARROWS TO STEER", "FLECHAS PARA GIRAR", "SETAS PARA VIRAR", "PFEILE ZUM LENKEN", "FLÈCHES: DIRECTION"),
+("UP GAS / DOWN BRAKE", "ARRIBA GAS / ABAJO FRENO", "CIMA ACELERA / BAIXO FREIA", "HOCH GAS / RUNTER BREMSE", "HAUT GAZ / BAS FREIN"),
 ]
 
 # Patterns for sentences that carry names or dates. $1, $2… are filled in (and translated again if they're known words).
@@ -985,7 +999,7 @@ RE = [
 # ===== 1.11 polish, round 2 =====
 (r"^(Lightning invoice|Bitcoin address|Ecash token|Payment request|Lightning address|Ecash address|Ecash payment request|Heir's copy|P2PK public key|Challenge link|Ecash payment) QR$", "Código QR: $1", "QR code: $1", "QR-Code: $1", "QR code : $1"),
 (r"^(Lightning invoice|Bitcoin address|Ecash token|Payment request|Lightning address|Ecash address|Ecash payment request|Heir's copy|P2PK public key|Challenge link|Ecash payment) QR, animated$", "Código QR animado: $1", "QR code animado: $1", "Animierter QR-Code: $1", "QR code animé : $1"),
-(r"^(STAR SWARM|NUT MAZE|BRICK BLITZ|VOID ROCKS|HOP LANES|SKY SHIELD|NIBBLE|NUT FLIPPER) game screen$", "Pantalla del juego $1", "Tela do jogo $1", "Spielbildschirm $1", "Écran du jeu $1"),
+(r"^(STAR SWARM|NUT MAZE|BRICK BLITZ|VOID ROCKS|HOP LANES|SKY SHIELD|NIBBLE|NUT FLIPPER|NEON ROAD) game screen$", "Pantalla del juego $1", "Tela do jogo $1", "Spielbildschirm $1", "Écran du jeu $1"),
 (r"^QR code for the Lightning address (.+)$", "Código QR de la dirección Lightning $1", "QR code do endereço Lightning $1", "QR-Code der Lightning-Adresse $1", "QR code de l'adresse Lightning $1"),
 (r"^Bitcoin price in ([A-Z]{3}) over (\w+): now (.+), high (.+), low (.+)\. Use left and right arrow keys to read values\.$", "Precio de Bitcoin en $1 en $2: ahora $3, máximo $4, mínimo $5. Usa las flechas izquierda y derecha para leer los valores.", "Preço do Bitcoin em $1 em $2: agora $3, máxima $4, mínima $5. Use as setas esquerda e direita para ler os valores.", "Bitcoin-Preis in $1 über $2: jetzt $3, Hoch $4, Tief $5. Mit den Pfeiltasten links und rechts liest du die Werte.", "Prix du Bitcoin en $1 sur $2 : maintenant $3, haut $4, bas $5. Utilisez les flèches gauche et droite pour lire les valeurs."),
 (r"^(.+) already has this Lightning address\. Edit that contact instead\.$", "$1 ya tiene esta dirección Lightning. Edita ese contacto.", "$1 já tem este endereço Lightning. Edite esse contato.", "$1 hat diese Lightning-Adresse schon. Bearbeite diesen Kontakt.", "$1 a déjà cette adresse Lightning. Modifiez ce contact."),
