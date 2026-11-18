@@ -154,6 +154,8 @@ async def main():
             check('screen: an amount of 0 refused', bool(await w.err()), await w.err())
             await w.fill('#ptAmt', '2000'); await w.fill('#ptCount', '2'); await w.click('[data-act=ptNext]'); await w.wait(400)
             e = await w.err(); check('screen: more than the balance refused before anything is made', 'Not enough' in e or 'more than' in e, e)
+            await w.fill('#ptAmt', '1048575'); await w.fill('#ptCount', '1'); await w.click('[data-act=ptNext]'); await w.wait(400)
+            e = await w.err(); check('screen: an amount of 20 coins (1,048,575) refused before anything is made: its code would be too dense on paper', 'too dense' in e and '20 coins' in e, e)
             check('screen: nothing made by the refusals', await w.ev(f"{PRINTED}.length") == 0 and await w.ev("Nutcade.S.ops.length") == 0)
             await w.pg.context.close()
         await section('screen', screen)
