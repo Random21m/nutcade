@@ -97,6 +97,7 @@ window.NutQR = { draw: qrDraw, plan: qrPlan, read: qrRead, verified: qrVerified 
    (double-sided printing lines up differently on every printer). Cut along the dashed lines, fold on the dotted
    one: printed sides out for a two-sided token, printed sides in to keep the code hidden until it is handed over. */
 const PT_MAX = 20;
+const PT_MAX_MODULES = 133;   // a printed code at most 133 modules across (0.33 mm each at 44 mm): denser ones don't scan reliably on paper
 const ptUI = { mint: null, amount: 0, count: 0, style: 'arcade', est: null };
 const printedTxs = () => S.txs.filter(t => t.print && t.type === 'out');
 const PT_APP = 'random21m.github.io/nutcade';
@@ -139,8 +140,15 @@ function ptRead() {
   if (!(count >= 1 && count <= PT_MAX)) throw new Error('Pick how many tokens: 1 to 20.');
   return { amount, count };
 }
+// a token of `coins` coins at this mint, as printed (no DLEQ), for its size only: is its code small enough for paper?
+function ptFits(url, coins) {
+  const r = k => hex(rnd(k)), id = Object.keys(S.counters)[0] || '00' + r(7);
+  const text = L.getEncodedToken({ mint: url, unit: 'sat', proofs: Array.from({ length: coins }, (_, i) => ({ id, amount: 2 ** (i % 16), secret: r(32), C: '02' + r(32) })) });
+  try { return qrPlan(text, undefined, true).qr.getModuleCount() <= PT_MAX_MODULES; } catch (e) { return false; }
+}
 async function ptSummary() {
   const { amount, count } = ptRead(), url = ptUI.mint;
+  if (!ptFits(url, bitsOf(amount))) throw new Error(`A ${money(amount)} token needs ${bitsOf(amount)} coins, and its QR code would be too dense to scan reliably on paper. Pick an amount made of fewer coins: ${fmt(1024)} or ${fmt(2048)} are one coin each, ${fmt(1000)} is six.`);
   if (isOffline()) throw new Error("Making tokens needs the mint, and you're offline. Try again online.");
   const w = await getWallet(url), est = ptEstimate(w, url, amount, count);
   if (!est) throw new Error(`${count} × ${money(amount)} plus the mint's fees is more than this mint holds (${money(balanceOf(url))}).`);
@@ -189,6 +197,7 @@ async function ptImages(txs, style) {
     const r = await qrVerified(text, 8, { quiet: 4, ink, light: ink ? '#ffffff' : '#fff8e6', dark: ink ? '#000000' : '#0a0717' });
     check.push({ i: t.print.i, code: t.print.code, ok: !!(r && r.ok), logo: !!(r && r.logo) });
     if (!r) { ptLast.check = check; const e = new Error(`Token #${t.print.code} is too long for one printed QR code, so nothing was printed. It is kept in Printed tokens: take it back, or send it another way.`); e.keep = true; throw e; }
+    if (r.ok && r.n > PT_MAX_MODULES) { ptLast.check = check; const e = new Error(`The QR code of token #${t.print.code} is too dense to scan reliably on paper, so nothing was printed. It is kept in Printed tokens: take it back, or send it another way.`); e.keep = true; throw e; }
     if (!r.ok) { ptLast.check = check; const e = new Error(`The QR code of token #${t.print.code} didn't read back, so nothing was printed. Your tokens are kept in Printed tokens: try printing again, or take them back.`); e.keep = true; throw e; }
     out.push({ t, src: r.canvas.toDataURL('image/png'), logo: r.logo });
   }

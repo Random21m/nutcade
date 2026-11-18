@@ -61,6 +61,11 @@ ROWS = [
  "Schneide entlang der gestrichelten Linien. Falte jede Karte an der gepunkteten Linie, bedruckte Seiten nach außen: Vorder- und Rückseite eines Tokens. Falte sie andersherum, um den Code bis zur Übergabe zu verdecken.",
  "Découpez le long des tirets. Pliez chaque carte sur la ligne pointillée, faces imprimées vers l'extérieur : le recto et le verso d'un jeton. Pliez-la dans l'autre sens pour garder le code caché jusqu'à ce que vous le remettiez."),
 ("Print", "Imprimir", "Imprimir", "Drucken", "Imprimer"),
+("A {#} SAT token needs {#} coins, and its QR code would be too dense to scan reliably on paper. Pick an amount made of fewer coins: {#} or {#} are one coin each, {#} is six.",
+ "Un token de {#} SAT necesita {#} monedas, y su código QR sería demasiado denso para escanearse bien en papel. Elige una cantidad con menos monedas: {#} o {#} son una moneda cada una, {#} son seis.",
+ "Um token de {#} SAT precisa de {#} moedas, e o QR code ficaria denso demais para escanear bem no papel. Escolha um valor com menos moedas: {#} ou {#} são uma moeda cada, {#} são seis.",
+ "Ein Token über {#} SAT braucht {#} Münzen, und sein QR-Code wäre zu dicht, um auf Papier zuverlässig gescannt zu werden. Wähle einen Betrag aus weniger Münzen: {#} oder {#} sind je eine Münze, {#} sind sechs.",
+ "Un jeton de {#} SAT nécessite {#} pièces, et son QR code serait trop dense pour se scanner de façon fiable sur papier. Choisissez un montant fait de moins de pièces : {#} ou {#} font une pièce chacun, {#} en fait six."),
 ("Make the tokens again to print them.", "Vuelve a preparar los tokens para imprimirlos.", "Prepare os tokens de novo para imprimi-los.", "Bereite die Tokens erneut vor, um sie zu drucken.", "Préparez à nouveau les jetons pour les imprimer."),
 # --- on paper ---
 ("TOKEN", "TOKEN", "TOKEN", "TOKEN", "JETON"),
@@ -131,6 +136,11 @@ RE = [
  "Não foi possível alcançar $1. Nada mudou para os tokens dele: verifique de novo quando ele responder.",
  "$1 war nicht erreichbar. Für seine Tokens hat sich nichts geändert: prüfe erneut, wenn er antwortet.",
  "Impossible de joindre $1. Rien n'a changé pour ses jetons : vérifiez à nouveau quand il répondra."),
+(r"^The QR code of token #(\S+) is too dense to scan reliably on paper, so nothing was printed\. It is kept in Printed tokens: take it back, or send it another way\.$",
+ "El código QR del token #$1 es demasiado denso para escanearse bien en papel, así que no se imprimió nada. Queda en Tokens impresos: recupéralo o envíalo de otra forma.",
+ "O QR code do token #$1 é denso demais para escanear bem no papel, então nada foi impresso. Ele fica em Tokens impressos: pegue-o de volta ou envie de outro jeito.",
+ "Der QR-Code von Token #$1 ist zu dicht, um auf Papier zuverlässig gescannt zu werden, daher wurde nichts gedruckt. Es bleibt unter Gedruckte Tokens: hol es zurück oder sende es anders.",
+ "Le QR code du jeton #$1 est trop dense pour se scanner de façon fiable sur papier : rien n'a été imprimé. Il reste dans Jetons imprimés : reprenez-le, ou envoyez-le autrement."),
 (r"^QR code of token #(\S+)$", "Código QR del token #$1", "QR code do token #$1", "QR-Code von Token #$1", "QR code du jeton #$1"),
 ]
 
