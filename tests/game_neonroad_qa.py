@@ -42,6 +42,12 @@ async def steps(w, n):
     t0 = await w.ev("window.__st.t")
     await w.until(f"window.__st.t >= {t0 + n}", 60000)
 
+async def track_peak(w, on):
+    """records the highest speed of every game step while on (window.__peak). A car that crosses the lane during the hold is hit, and a hit slows
+    the car to about 50 whatever the keys do; whether a hit happens depends on how many steps ran before, which varies with the machine's load
+    (that is how 'the up arrow speeds up' failed in CI). The highest speed of the hold is what the key does."""
+    await w.ev("(()=>{const g=Arcade.games.find(x=>x.id==='neonRoad'); if(!g.__c){const ou=g.update; g.update=function(s,G){ const r=ou.call(this,s,G); if(window.__track) window.__peak=Math.max(window.__peak||0,s.spd); return r}; g.__c=1} window.__peak=0; window.__track=" + ('true' if on else 'false') + "})()")
+
 async def wait_go(w):
     ok = await w.until("window.__st&&window.__st.go===0", 8000); await w.wait(100); return ok
 
@@ -129,10 +135,10 @@ async def main():
         await w.pg.keyboard.down('KeyA'); await steps(w, 30)
         steer = await w.ev("window.__st.steer"); await w.pg.keyboard.up('KeyA')
         check('play: A steers left', steer < -0.4, steer)
-        await w.ev('window.__st.px = 0'); await w.pg.keyboard.down('ArrowUp'); await steps(w, 150)
-        sp = await w.ev("window.__st.spd"); await w.pg.keyboard.up('ArrowUp')
+        await w.ev('window.__st.px = 0'); await track_peak(w, True); await w.pg.keyboard.down('ArrowUp'); await steps(w, 150)
+        sp = await w.ev("window.__peak"); await w.pg.keyboard.up('ArrowUp'); await track_peak(w, False)
         check('play: the up arrow speeds up', sp > 100, sp)
-        await w.pg.keyboard.down('ArrowUp'); await w.ev('window.__st.px = 0'); await steps(w, 72); await w.pg.keyboard.up('ArrowUp'); sp = await w.ev('window.__st.spd')
+        await w.pg.keyboard.down('ArrowUp'); await steps(w, 72); await w.pg.keyboard.up('ArrowUp'); sp = await w.ev('window.__st.spd')
         await w.pg.keyboard.down('ArrowDown'); await steps(w, 54)
         sp2 = await w.ev("window.__st.spd"); await w.pg.keyboard.up('ArrowDown')
         check('play: the down arrow brakes', sp2 < sp * 0.7, (sp, sp2))
