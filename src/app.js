@@ -3554,6 +3554,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_r6.js@@*/
 /*@@app_r7.js@@*/
 /*@@app_r8.js@@*/
+/*@@app_daily.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
