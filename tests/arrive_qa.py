@@ -255,7 +255,8 @@ COVER_JS = """(()=>{scrollTo(0,0); const out=[]; const sel={balance:'.credit-num
   const q=c.getBoundingClientRect(); const btn=[...c.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect(); const h=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2); return h&&(h===b||b.contains(h))});
   const big=c.querySelector('.arr-big'), br=big&&big.getBoundingClientRect();
   const amount=!!big&&big.scrollWidth<=big.clientWidth+1&&br.left>=q.left-1&&br.right<=q.right+1&&br.right<=innerWidth;   // (shown in full: not cut, not outside the card)
-  return {covered:out, card:[Math.round(q.top),Math.round(q.bottom)], inview:q.top>=0&&q.bottom<=innerHeight&&q.left>=0&&q.right<=innerWidth, buttons:btn.every(Boolean)&&btn.length>=2, amount, text:big&&big.innerText}})()"""
+  const out2=[...c.querySelectorAll('*')].filter(e=>{const r=e.getBoundingClientRect(); return r.width&&(r.left<q.left-1||r.right>q.right+1)}).map(e=>(e.className||e.tagName)+' '+Math.round(e.getBoundingClientRect().right)+'>'+Math.round(q.right));
+  return {covered:out, outside:out2, card:[Math.round(q.top),Math.round(q.bottom)], inview:q.top>=0&&q.bottom<=innerHeight&&q.left>=0&&q.right<=innerWidth, buttons:btn.every(Boolean)&&btn.length>=2, amount, text:big&&big.innerText}})()"""
 SIZES = [(320, 640), (375, 667), (430, 932), (1440, 900), (844, 390), (568, 320)]
 
 
@@ -266,8 +267,8 @@ async def looks(w, label, details=True):
     for vw, vh in SIZES:
         await w.pg.set_viewport_size({'width': vw, 'height': vh}); await w.wait(150)
         c = await w.ev(COVER_JS)
-        if not c['card'] or c['covered'] or not c['inview'] or not c['buttons'] or not c['amount']: bad[f'{vw}x{vh}'] = c
-    check(f'{label}: at 320/375/430/1440 px and 844x390/568x320 its amount shows in full, it covers no balance, lock, mint, Receive or Send, and its buttons are on screen', not bad, bad)
+        if not c['card'] or c['covered'] or not c['inview'] or not c['buttons'] or not c['amount'] or c['outside']: bad[f'{vw}x{vh}'] = c
+    check(f'{label}: at 320/375/430/1440 px and 844x390/568x320 its amount shows in full, nothing sticks out of the card, it covers no balance, lock, mint, Receive or Send, and its buttons are on screen', not bad, bad)
     if details:
         await w.ev("document.querySelector('#arrStack .arr-card [data-act=arrMore]')?.click()"); await w.wait(350)
         reach = await w.ev("""(()=>{const out={}; for(const s of ['#layer [data-act=arrNotes]','#layer [data-act=close]']){const e=[...document.querySelectorAll(s)].pop(); if(!e){out[s]='missing';continue} e.scrollIntoView({block:'center'}); const q=e.getBoundingClientRect();
@@ -664,6 +665,14 @@ async def main():
                 check(f'{lang}, 9,999,999 SAT: (a notice)', ('+' + fmtn(9999999, lang) + ' SAT') in txt, txt)
                 await looks(r, f'{lang}, a 9,999,999 SAT notice with a long label', details=False)
                 if lang in ('en', 'fr'): await r.pg.set_viewport_size({'width': 320, 'height': 640}); await shot(r, f'notice-9999999-{lang}-320'); await r.pg.set_viewport_size({'width': 390, 'height': 844})
+                await dismiss(r)
+                # the longest kind, "Wallet Connect invoice", with the long mint name
+                await nwc_invoice(nwc_uri, 9999997)
+                await r.until("!!document.querySelector('#arrStack .arr-card')", 20000); await r.wait(300)
+                txt = (await cards(r) or [{'text': ''}])[0]['text']
+                check(f'{lang}, 9,999,997 SAT Wallet Connect invoice: (a notice)', fmtn(9999997, lang) in txt, txt)
+                await looks(r, f'{lang}, a 9,999,997 SAT Wallet Connect notice with a long mint name', details=False)
+                if lang in ('de', 'pt'): await r.pg.set_viewport_size({'width': 320, 'height': 640}); await shot(r, f'notice-nwc-{lang}-320'); await r.pg.set_viewport_size({'width': 390, 'height': 844})
                 await dismiss(r)
                 # a summary of the same size: paid while the page is away, then opened again
                 blk = Block(); await blk.attach(r.pg, FREE); blk.on = True
