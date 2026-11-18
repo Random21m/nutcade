@@ -49,6 +49,8 @@ jobs:
             suites: r7
           - name: r8
             suites: r8
+          - name: r9
+            suites: r9
           - name: polish
             suites: polish
           - name: games
