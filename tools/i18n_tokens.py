@@ -59,6 +59,12 @@ ROWS = [
  "Schneide entlang der gestrichelten Linien. Falte jede Karte an der gepunkteten Linie, bedruckte Seiten nach außen: Vorder- und Rückseite eines Tokens. Falte sie andersherum, um den Code bis zur Übergabe zu verdecken.",
  "Découpez le long des tirets. Pliez chaque carte sur la ligne pointillée, faces imprimées vers l'extérieur : le recto et le verso d'un jeton. Pliez-la dans l'autre sens pour garder le code caché jusqu'à ce que vous le remettiez."),
 ("Print", "Imprimir", "Imprimir", "Drucken", "Imprimer"),
+("STOPPED AFTER {#} OF {#}", "DETENIDO TRAS {#} DE {#}", "PARADO DEPOIS DE {#} DE {#}", "GESTOPPT NACH {#} VON {#}", "ARRÊTÉ APRÈS {#} SUR {#}"),
+("Nothing more was made.", "No se creó nada más.", "Nada mais foi criado.", "Mehr wurde nicht erstellt.", "Rien de plus n'a été créé."),
+("Print what was made", "Imprimir lo creado", "Imprimir o que foi criado", "Erstelltes drucken", "Imprimer ce qui a été créé"),
+("Your balance changed since, so the cost was worked out again. Check it and tap Make again.", "Tu saldo cambió desde entonces, así que se volvió a calcular el coste. Revísalo y vuelve a tocar Crear.", "Seu saldo mudou desde então, então o custo foi recalculado. Confira e toque em Criar de novo.", "Dein Guthaben hat sich seitdem geändert, daher wurden die Kosten neu berechnet. Prüfe sie und tippe noch einmal auf Erstellen.", "Votre solde a changé entre-temps : le coût a été recalculé. Vérifiez-le et touchez à nouveau Créer."),
+("Another payment changed the coins at this mint during the batch, so the next token would cost more than shown.", "Otro pago cambió las monedas de este mint durante el lote, así que el siguiente token costaría más de lo indicado.", "Outro pagamento mudou as moedas deste mint durante o lote, então o próximo token custaria mais do que o mostrado.", "Eine andere Zahlung hat während des Stapels die Münzen bei diesem Mint verändert, das nächste Token würde mehr kosten als angezeigt.", "Un autre paiement a modifié les pièces de ce mint pendant le lot : le jeton suivant coûterait plus que prévu."),
+("These coins are no longer here. Nothing was sent.", "Estas monedas ya no están aquí. No se envió nada.", "Essas moedas não estão mais aqui. Nada foi enviado.", "Diese Münzen sind nicht mehr da. Es wurde nichts gesendet.", "Ces pièces ne sont plus là. Rien n'a été envoyé."),
 ("A {#} SAT token needs {#} coins, and its QR code would be too dense to scan reliably on paper. Pick an amount made of fewer coins: {#} or {#} are one coin each, {#} is six.",
  "Un token de {#} SAT necesita {#} monedas, y su código QR sería demasiado denso para escanearse bien en papel. Elige una cantidad con menos monedas: {#} o {#} son una moneda cada una, {#} son seis.",
  "Um token de {#} SAT precisa de {#} moedas, e o QR code ficaria denso demais para escanear bem no papel. Escolha um valor com menos moedas: {#} ou {#} são uma moeda cada, {#} são seis.",
@@ -139,6 +145,7 @@ RE = [
  "O QR code do token #$1 é denso demais para escanear bem no papel, então nada foi impresso. Ele fica em Tokens impressos: pegue-o de volta ou envie de outro jeito.",
  "Der QR-Code von Token #$1 ist zu dicht, um auf Papier zuverlässig gescannt zu werden, daher wurde nichts gedruckt. Es bleibt unter Gedruckte Tokens: hol es zurück oder sende es anders.",
  "Le QR code du jeton #$1 est trop dense pour se scanner de façon fiable sur papier : rien n'a été imprimé. Il reste dans Jetons imprimés : reprenez-le, ou envoyez-le autrement."),
+(r"^(.+) takes too few coins per request to print tokens from it\.$", "$1 acepta muy pocas monedas por solicitud para imprimir tokens desde él.", "$1 aceita poucas moedas por pedido para imprimir tokens a partir dele.", "$1 nimmt zu wenige Münzen pro Anfrage an, um davon Tokens zu drucken.", "$1 accepte trop peu de pièces par requête pour imprimer des jetons depuis ce mint."),
 (r"^QR code of token #(\S+)$", "Código QR del token #$1", "QR code do token #$1", "QR-Code von Token #$1", "QR code du jeton #$1"),
 ]
 
