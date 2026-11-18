@@ -176,7 +176,7 @@ const CSS = `.daily{border-color:var(--gold);margin-bottom:14px}
 .daily .dscore{font-family:var(--f-display);font-size:13px;color:var(--lime);line-height:1.5}
 .daily .dscore.none{font-size:9px;color:var(--pink)}
 .daily .dcol{display:grid;gap:6px;min-width:0}
-.daily .dlab{font-family:var(--f-display);font-size:8px;letter-spacing:1px;color:var(--dim);line-height:1.5;overflow-wrap:anywhere}
+.daily .dlab{font-family:var(--f-display);font-size:9px;letter-spacing:1px;color:var(--dim);line-height:1.5;overflow-wrap:anywhere}
 .daily .dline{font-size:18px;color:var(--ink);overflow-wrap:anywhere}
 .daily .dbtns{display:flex;flex-wrap:wrap;gap:8px}
 .daily .dbtns .btn{flex:1 1 120px}
