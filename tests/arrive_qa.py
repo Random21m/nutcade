@@ -13,7 +13,7 @@ announced twice (across reloads, tabs and restores).
 
 Uses two local test mints (ARR_FEE, default 3338, with input fees; ARR_FREE, default 3339, without) and mock_nostr.py
 (ARR_NOSTR, default ws://127.0.0.1:3350/relay; it also stands in for npub.cash). ARR_ONLY=a,b runs some sections
-(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
+(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, own, langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
 (default QA_OUT)."""
 import asyncio, json, os, re, time, urllib.request
 from playwright.async_api import async_playwright
@@ -651,6 +651,43 @@ async def main():
                 await settings(r); helptxt = await r.ev("(document.querySelector('#arrNotifyHelp')||{}).textContent||''"); await r.home()
                 check(f'{lang}: the notifications setting says what a PIN and a duress PIN change, in the language', bool(helptxt) and (('With a PIN' in helptxt and 'duress' in helptxt) if lang == 'en' else ('With a PIN' not in helptxt and 'PIN' in helptxt)), helptxt)
             await set_lang(r, 'en')
+
+        # ---------- your own coins coming back are not money arriving (1.14 keyset check-up, 1.15 printed tokens) ----------
+        if want('own'):
+            await r.ev("Nutcade.closeSheet()"); await r.use(FREE); await dismiss(r)
+            log0 = len(await r.ev(LOG_JS)); n_in = lambda: r.ev("Nutcade.S.txs.filter(t=>t.type==='in'&&t.status==='done').length")
+            # coins the check-up set aside (the mint refused them then), offered again and accepted: a line "Coins the mint accepts again"
+            got = await r.ev(f"""(async()=>{{const u={J(FREE)}; const m=Nutcade.S.mints.find(m=>m.url===u); if(m&&!m.ks) m.ks={{}}; const ks=Nutcade.r9.status(u); const ps=Nutcade.S.proofs[u]; const k=ps.filter(p=>p.amount>=64).slice(0,2); if(!ks||k.length<2) return 'setup';
+              const ids=new Set(k.map(p=>p.secret)); Nutcade.S.proofs[u]=ps.filter(p=>!ids.has(p.secret)); ks.aside=(ks.aside||[]).concat(k); ks.asideAt=Date.now();
+              await Nutcade.r9.check(u, {{manual:true}}); return Nutcade.S.txs.find(t=>t.note==='Coins the mint accepts again'&&t.type==='in')||'none'}})()""")
+            await r.wait(1500)
+            check('keyset check-up: (coins set aside came back, with their own line)', isinstance(got, dict) and got.get('upkeep') and got.get('status') == 'done', got)
+            check('keyset check-up: coins set aside coming back are not announced as money arriving (they are your own)', isinstance(got, dict) and not [e for e in (await r.ev(LOG_JS))[log0:] if got['id'] in e['ids']] and got['id'] not in await pend(r, got['id']) and not await cards(r))
+            # printed tokens: one taken back, one claimed by someone else
+            await r.home(); await r.click('[data-act=send]'); await r.wait(150)
+            await r.click('[data-act=ptOpen]'); await r.until("!!document.querySelector('#ptAmt') || !!document.querySelector('.pt-intro')", 5000)
+            if await r.ev("!!document.querySelector('.pt-intro')"): await r.click('[data-act=ptIntroOk]'); await r.until("!!document.querySelector('#ptAmt')", 5000)
+            await r.fill('#ptAmt', '100'); await r.fill('#ptCount', '2'); await r.click('[data-act=ptNext]')
+            await r.until("!!document.querySelector('[data-act=ptMake]') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 20000)
+            await r.click('[data-act=ptMake]'); await r.until("!!document.querySelector('.pt-ready') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 120000); await r.wait(300)
+            bid = await r.ev("(document.querySelector('.pt-ready')||{dataset:{}}).dataset.b||null")
+            toks = await r.ev(f"Nutcade.S.txs.filter(t=>t.print&&t.print.b==={J(bid)})") if bid else []
+            check('printed tokens: (two made)', len(toks) == 2, (bid, len(toks)))
+            if len(toks) == 2:
+                log0 = len(await r.ev(LOG_JS)); await r.ev("Nutcade.closeSheet()"); await r.click('[data-act=tab][data-tab=history]'); await r.wait(150)
+                await r.click('[data-act=ptList]'); await r.until("!!document.querySelector('.pt-list')", 5000)
+                await r.click(f'[data-act=ptTake][data-id="{toks[0]["id"]}"]'); await r.until(f"Nutcade.S.txs.some(t=>t.type==='in'&&t.status==='done'&&/^Reclaimed: /.test(t.note||'')&&t.ts>Date.now()-60000)", 20000); await r.wait(1500)
+                back = await r.ev("Nutcade.S.txs.find(t=>t.type==='in'&&/^Reclaimed: /.test(t.note||''))")
+                check('printed token taken back: (its line)', bool(back) and back['status'] == 'done', back)
+                check('printed token taken back: not announced as money arriving', bool(back) and not [e for e in (await r.ev(LOG_JS))[log0:] if back['id'] in e['ids']] and back['id'] not in await pend(r, back['id']))
+                n0 = await n_in(); log1 = len(await r.ev(LOG_JS))
+                await claim(p, toks[1]['token']); await p.until("!document.querySelector('#layer .spinner')", 20000); await p.ev("Nutcade.closeSheet()")
+                await r.ev("Nutcade.closeSheet()"); await r.click('[data-act=tab][data-tab=history]'); await r.wait(150)
+                await r.click('[data-act=ptList]'); await r.until("!!document.querySelector('.pt-list')", 5000); await r.ev("document.querySelector('[data-act=ptCheck]')?.click()")
+                await r.until(f"(Nutcade.S.txs.find(t=>t.id==={J(toks[1]['id'])})||{{}}).status==='claimed'", 20000); await r.wait(1500)
+                check('printed token claimed by someone else: (marked claimed here)', await r.ev(f"Nutcade.S.txs.find(t=>t.id==={J(toks[1]['id'])}).status") == 'claimed')
+                check('printed token claimed by someone else: nothing announced here (no new line coming in, no notice)', await n_in() == n0 and len(await r.ev(LOG_JS)) == log1)
+            await r.ev("Nutcade.closeSheet()"); await dismiss(r); await r.home()
 
         # ---------- big amounts (up to 9,999,999 SAT) and long labels: the amount is never cut, in every language ----------
         if want('amounts'):
