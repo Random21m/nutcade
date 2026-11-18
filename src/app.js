@@ -1661,17 +1661,7 @@ function celebrate(dir, amount) {
 }
 
 /* ---------- QR ---------- */
-function qrCanvas(text, mode) {
-  try {
-    const qr = L.qrcode(0, text.length > 600 ? 'L' : 'M');
-    qr.addData(text, mode); qr.make();
-    const n = qr.getModuleCount(), sc = 4, q = 2;
-    const c = document.createElement('canvas'); c.width = c.height = (n + q * 2) * sc;
-    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.fillStyle = '#0a0717';
-    for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) x.fillRect((k + q) * sc, (r + q) * sc, sc, sc);
-    return c;
-  } catch (e) { return null; }
-}
+/* tokens: qrCanvas(text, mode, plain) is in app_tokens.js (the acorn in the middle, read back) */
 function slimToken(t) {
   const d = L.getDecodedToken(t, Object.keys(S.counters));
   return L.getEncodedToken({ mint: d.mint, unit: d.unit || 'sat', memo: d.memo, proofs: d.proofs.map(p => { const o = Object.assign({}, p); delete o.dleq; return o; }) });
@@ -1687,7 +1677,7 @@ function qrBlock(text, label) {
     let t = text;
     if (/^cashuB/.test(text) && text.length > QR_STATIC_MAX) { try { t = slimToken(text); } catch (e) {} }
     const c = t.length <= QR_STATIC_MAX ? qrCanvas(t) : null;
-    if (c) { c.setAttribute('aria-label', tr(label || 'QR code')); el.appendChild(c); return; }
+    if (c) { c.setAttribute('aria-label', tr(label || 'QR code')); el.appendChild(c); qrVerify(el, c, t, label); return; }   // tokens: read back
     animatedQR(el, t, label);
   }, 0);
   return `<div class="qr" id="${id}"></div>`;
@@ -1697,12 +1687,12 @@ function qrBlock(text, label) {
 function animatedQR(el, text, label) {
   if (!window.NutUR) { el.outerHTML = '<div class="notice cyan">Too long for one QR code. Use Copy or Play as sound instead.</div>'; return; }
   const enc = NutUR.encoder(text, 150); let n = 0;
-  el.classList.add('qr-anim'); el.setAttribute('role', 'img'); el.setAttribute('aria-label', tr((label || 'QR code') + ', animated'));
+  el.classList.add('qr-anim'); el.dataset.logo = '0'; el.setAttribute('role', 'img'); el.setAttribute('aria-label', tr((label || 'QR code') + ', animated'));
   el.insertAdjacentHTML('afterend', `<div class="tiny muted qr-anim-note" style="text-align:center">Animated QR · ${enc.count} parts · scan with NUTCADE or cashu.me</div>`);
   const step = async () => {
     if (!el.isConnected) return;
     const part = (await enc.next()).toUpperCase();
-    const c = qrCanvas(part, 'Alphanumeric') || qrCanvas(part);
+    const c = qrCanvas(part, 'Alphanumeric', true) || qrCanvas(part, undefined, true);   // tokens: animated codes stay plain
     if (c && el.isConnected) { el.replaceChildren(c); el.dataset.part = String(++n); }
     setTimeout(step, 200);
   };
@@ -2036,7 +2026,7 @@ function txRow(t) {
   const sign = t.type === 'in' ? '+' : '-';   // the pixel font's hyphen sits mid-height; its − glyph falls back to the baseline
   const method = { ln: 'LN', ecash: 'ECASH', onchain: 'ON-CHAIN', fee: 'FEE' }[t.method];
   const moved = !(t.status === 'failed' || t.status === 'expired');   // a failed or expired payment moved nothing: its amount is struck through
-  const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '') + (t.nwc ? '<span class="chip ecash">NWC</span>' : '') + (t.zap ? '<span class="chip claimed">ZAP</span>' : '') + (t.refused && t.status === 'pending' && isBlocked(t.mint) ? '<span class="chip failed">BLOCKED</span>' : '');
+  const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.print ? '<span class="chip ecash">PRINTED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '') + (t.nwc ? '<span class="chip ecash">NWC</span>' : '') + (t.zap ? '<span class="chip claimed">ZAP</span>' : '') + (t.refused && t.status === 'pending' && isBlocked(t.mint) ? '<span class="chip failed">BLOCKED</span>' : '');
   const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : t.method === 'fee' ? '-' + fmt(t.fee) : (moved ? sign : '') + fmt(t.amount);
   const wide = amt.length > 11;   // a huge amount gets its own line under the note instead of squeezing the chips
   return `<button class="tx ${t.type}" data-act="tx" data-id="${t.id}"><span class="ico" aria-hidden="true">${t.type === 'in' ? '↓' : '↑'}</span>
@@ -2058,7 +2048,7 @@ function fmtDate(ms, withTime) {
   catch (e) { return d.toDateString(); }
 }
 // Notes NUTCADE writes itself (not ones you typed) are shown in your language.
-const AUTO_NOTE = /^(Sats for the duress PIN wallet$|Back from the duress PIN's wallet$|Mint fee for splitting a payment into smaller requests$|Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life( |$)|Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step|keeping Extra Life going)$|Ecash already spent elsewhere$|Payment request couldn't be delivered: the sats came back$|To |Zap to |Wallet Connect: |LNURL voucher$)|\((part \d+ of \d+|cancelled at the till)\)$/;
+const AUTO_NOTE = /^(Sats for the duress PIN wallet$|Back from the duress PIN's wallet$|Mint fee for splitting a payment into smaller requests$|Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life( |$)|Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step|keeping Extra Life going)$|Ecash already spent elsewhere$|Payment request couldn't be delivered: the sats came back$|To |Zap to |Wallet Connect: |LNURL voucher$|Printed token \d+ of \d+$)|\((part \d+ of \d+|cancelled at the till)\)$/;
 function noteText(n) {
   if (!n) return n;
   const pt = /^(?:(.*) )?\((part \d+ of \d+)\)$/.exec(n);   // a part's number in your language, whatever note comes before it (or none)
@@ -2206,7 +2196,7 @@ function viewHistory() {
   const counts = {}; S.txs.forEach(t => tagsOf(t.note).forEach(g => { counts[g] = (counts[g] || 0) + 1; }));
   const tags = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 14);
   return `<section class="screen">
-    <div class="row between"><div style="display:grid;gap:4px"><h2 class="h2">Notes</h2><span class="tiny muted">${noted}/${S.txs.length} noted</span></div>${S.txs.length ? '<button class="btn sm" data-act="csv">Export CSV</button>' : ''}</div>
+    <div class="row between"><div style="display:grid;gap:4px"><h2 class="h2">Notes</h2><span class="tiny muted">${noted}/${S.txs.length} noted</span></div><span class="row" style="gap:6px">${S.txs.some(t => t.print) ? '<button class="btn sm violet" data-act="ptList">Printed tokens</button>' : ''}${S.txs.length ? '<button class="btn sm" data-act="csv">Export CSV</button>' : ''}</span></div>
     <div class="field"><label for="hq">Search notes</label><input id="hq" class="inp" type="search" placeholder="pizza, rent, Satoshi…" value="${esc(histQuery)}" data-input="hq" autocomplete="off"></div>
     <div class="seg three" role="group" aria-label="Filter">${[['all', 'ALL'], ['in', 'IN'], ['out', 'OUT']].map(([k, l]) => `<button data-act="hf" data-f="${k}" aria-pressed="${histFilter === k}">${l}</button>`).join('')}</div>
     ${tags.length ? `<div class="tagrow" role="group" aria-label="Tags">${tags.map(([g, n]) => `<button class="tag" data-noi18n data-act="htag" data-tag="${esc(g)}" aria-pressed="${histTag === g}">#${esc(g)} <span>${n}</span></button>`).join('')}</div>` : `<div class="tiny muted">Tip: add #tags to notes, like #food or #rent, to group them.</div>`}
@@ -2431,6 +2421,7 @@ function viewSettings() {
       ${toggle('music', 'Arcade music', '')}
       ${toggle('crt', 'CRT scanlines', '')}
       ${toggle('btcSymbol', 'Show amounts as ₿', '₿1,000 instead of 1,000 SAT.')}
+      <div class="field"><label>QR code center</label><div class="seg pt-seg" role="group" aria-label="QR code center">${[['none', 'NONE'], ['acorn', 'NUTCADE ACORN']].map(([k, l]) => `<button data-act="qrLogo" data-v="${k}" aria-pressed="${(S.prefs.qrLogo || 'acorn') === k}">${l}</button>`).join('')}</div><div class="th">The acorn in the middle of the QR codes NUTCADE shows and prints. A code that wouldn't scan with it shows plain, and animated codes stay plain.</div></div>
     </div>
 
     <div class="panel" id="set-privacy"><span class="h2">Privacy</span>
@@ -3316,7 +3307,8 @@ function openSend(method = 'ecash') {
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="High score bet with Alex"></div>
     ${giftFields()}
     <button class="btn solid pink block" data-act="doSendEcash">Create token</button>
-    <button class="linkbtn tiny" data-act="reqPayOpen" style="justify-self:start">Pay a payment request instead</button>`;
+    <button class="btn block violet" data-act="ptOpen">Print tokens</button>
+    <button class="linkbtn tiny" data-act="reqPayOpen" style="justify-self:start">Pay a payment request instead</button>`;   // tokens: Print tokens
   else if (method === 'ln') inner = supports(m, 'melt', 'bolt11') ? `
     <div class="field"><div class="row between"><label for="destIn">Invoice or Lightning address</label><button class="btn sm violet" data-act="scan" data-hint="Point at a Lightning invoice or address."><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h5v1H2v4H1zm9 0h5v5h-1V2h-4zM1 10h1v4h4v1H1zm13 0h1v5h-5v-1h4zM4 4h3v3H4zm5 0h3v3H9zM4 9h3v3H4zm5 0h1v1H9zm2 0h1v1h-1zm-2 2h1v1H9zm2 1h1v1h-1z"/></svg>Scan</button></div><textarea id="destIn" class="inp" placeholder="lnbc… or name@domain.com" autocomplete="off" spellcheck="false"></textarea></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Coffee"></div>
@@ -3454,8 +3446,8 @@ function openTx(id) {
     <button class="btn solid gold block" data-act="saveNote" data-id="${t.id}">Save note</button>
     <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(TX_STATUS[t.status] || t.status)}</dd>${t.fee && t.method !== 'fee' ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
     <dt>Mint</dt><dd data-noi18n>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd data-noi18n>${fmtDate(t.ts, true)}</dd>
-    ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.nwcName ? `<dt>App</dt><dd data-noi18n>${esc(t.nwcName)}</dd>` : ''}${t.lnurlw ? `<dt>Voucher</dt><dd data-noi18n>${esc(t.lnurlw)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
-    ${extra}<div id="sheetErr"></div>`);
+    ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.nwcName ? `<dt>App</dt><dd data-noi18n>${esc(t.nwcName)}</dd>` : ''}${t.lnurlw ? `<dt>Voucher</dt><dd data-noi18n>${esc(t.lnurlw)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.print ? `<dt>Printed token</dt><dd data-noi18n>#${esc(t.print.code)}</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
+    ${extra}${t.print ? '<button class="btn block" data-act="ptList">Printed tokens</button>' : ''}<div id="sheetErr"></div>`);   // tokens
 }
 
 
@@ -3576,6 +3568,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_r6.js@@*/
 /*@@app_r7.js@@*/
 /*@@app_r8.js@@*/
+/*@@app_tokens.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4112,6 +4105,7 @@ const A = {
 /*@@app_r6_actions.js@@*/
 /*@@app_r7_actions.js@@*/
 /*@@app_r8_actions.js@@*/
+/*@@app_tokens_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;

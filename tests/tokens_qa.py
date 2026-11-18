@@ -84,6 +84,7 @@ async def batch(w, bid):
 async def show_print(w, bid, shot=None, style=None):
     """the print pages as the printer gets them (print media), with a screenshot"""
     await w.ev(f"NutTokens.preparePrint({json.dumps(bid)}{', ' + json.dumps(style) if style else ''})"); await w.wait(300)
+    vp = w.pg.viewport_size; await w.pg.set_viewport_size({'width': 794, 'height': 1123})   # (an A4 page at 96 dpi)
     await w.pg.emulate_media(media='print'); await w.wait(250)
     info = await w.ev("""(()=>{const P=document.querySelector('#tokPrint'); if(!P) return null;
       const vis=e=>{const r=e.getBoundingClientRect(); const s=getComputedStyle(e); return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none'};
@@ -96,7 +97,7 @@ async def show_print(w, bid, shot=None, style=None):
         style: P.className}})()""")
     if shot:
         await w.pg.screenshot(path=os.path.join(OUT, shot), full_page=True)
-    await w.pg.emulate_media(media='screen'); await w.ev("NutTokens.endPrint()"); await w.wait(100)
+    await w.pg.emulate_media(media='screen'); await w.pg.set_viewport_size(vp); await w.ev("NutTokens.endPrint()"); await w.wait(100)
     return info
 
 
@@ -138,10 +139,10 @@ async def main():
         async def screen():
             w = await funded(b, [NOFEE], 3000)
             await w.home(); await w.click('[data-act=send]'); await w.wait(150)
-            check('send: a Print tokens button on the Send screen (ecash)', await w.ev("!!document.querySelector('#layer [data-act=ptOpen]') && /Print tokens/.test(document.querySelector('#layer [data-act=ptOpen]').innerText)"))
+            check('send: a Print tokens button on the Send screen (ecash)', await w.ev("!!document.querySelector('#layer [data-act=ptOpen]') && /print tokens/i.test(document.querySelector('#layer [data-act=ptOpen]').innerText)"))
             await w.click('[data-act=ptOpen]'); await w.until("!!document.querySelector('#ptAmt')", 5000)
             t = await w.sheet_text()
-            check('screen: amount per token, how many (1-20) and the two styles', await w.ev("!!document.querySelector('#ptAmt') && !!document.querySelector('#ptCount') && document.querySelectorAll('[data-act=ptStyle]').length===2") and 'Arcade' in t and 'Ink saver' in t, t[:300])
+            check('screen: amount per token, how many (1-20) and the two styles', await w.ev("!!document.querySelector('#ptAmt') && !!document.querySelector('#ptCount') && document.querySelectorAll('[data-act=ptStyle]').length===2") and 'ARCADE' in t.upper() and 'INK SAVER' in t.upper(), t[:300])
             # not by color alone: the chosen style says so in words / a mark, not just a color
             await w.click('[data-act=ptStyle][data-s=ink]'); await w.wait(80)
             on = await w.ev("[...document.querySelectorAll('[data-act=ptStyle]')].map(b=>[b.dataset.s,b.getAttribute('aria-pressed'),getComputedStyle(b,'::before').content])")
@@ -160,7 +161,7 @@ async def main():
         # ---------- the grid: 1 and many x fee / no fee x both styles x 5 languages ----------
         async def grid():
             for li, lang in enumerate(LANGS):
-                w = await funded(b, [FEE, NOFEE], 4000, lang)
+                w = await funded(b, [FEE, NOFEE], 9000, lang)
                 await w.ev("window.__i18nMiss=new Set()")
                 for mi, mint in enumerate((FEE, NOFEE)):
                     for ci, count in enumerate((1, 4)):
@@ -197,7 +198,9 @@ async def main():
                             check(f'grid {tag}: front and back in the language (no English left)', not [s for s in ENGLISH if s in txt] and 'random21m.github.io/nutcade' in txt, [s for s in ENGLISH if s in txt])
                         decoded = [await read_img(w, s) for s in (info['imgs'] if info else [])]
                         ok_dec = len(decoded) == count and all(d and d.startswith('cashuB') for d in decoded)
-                        same = ok_dec and all(await w.ev(f"(()=>{{const a=CashuLib.getDecodedToken({json.dumps(d)}).proofs.map(p=>p.secret).sort().join(), b=Nutcade.S.txs.find(t=>t.id==={json.dumps(t['id'])}).sent.map(p=>p.secret).sort().join(); return a===b}})()") for d, t in zip(decoded, txs))
+                        same = ok_dec
+                        for d, t in (zip(decoded, txs) if ok_dec else []):
+                            same = same and await w.ev(f"(()=>{{const a=CashuLib.getDecodedToken({json.dumps(d)}, Object.keys(Nutcade.S.counters)).proofs.map(p=>p.secret).sort().join(), b=Nutcade.S.txs.find(t=>t.id==={json.dumps(t['id'])}).sent.map(p=>p.secret).sort().join(); return a===b}})()")
                         check(f'grid {tag}: every printed QR reads back (second reader) as its own token', ok_dec and same, [d and d[:20] for d in decoded])
                 miss = await w.ev("[...(window.__i18nMiss||[])]")
                 check(f'grid {lang}: no untranslated text on the new screens and pages', not miss, miss[:8])
@@ -404,26 +407,35 @@ async def main():
                 check(f'logo {theme}: the QR center setting (None / NUTCADE acorn), acorn by default', await w.ev("(()=>{Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); return [...document.querySelectorAll('[data-act=qrLogo]')].map(b=>b.dataset.v+':'+b.getAttribute('aria-pressed')).join()})()") == 'none:false,acorn:true')
                 # sizes: a short code (Lightning address), a token (medium), a long token, an animated one
                 small = 'lightning:' + 'a' * 30 + '@example.com'
-                medium = await w.ev("NutTokens.sampleToken(4)"); long_ = await w.ev("NutTokens.sampleToken(9)"); huge = await w.ev("NutTokens.sampleToken(40)")
+                medium = await w.ev("NutTokens.sampleToken(1)"); long_ = await w.ev("NutTokens.sampleToken(3)"); huge = await w.ev("NutTokens.sampleToken(40)")
                 for label, text in (('small', small), ('medium', medium), ('long', long_)):
                     r = await w.ev(f"NutTokens.showQR({json.dumps(text)})"); await w.until("!!document.querySelector('#layer .qr[data-check]') && document.querySelector('#layer .qr').dataset.check!=='pending'", 15000)
                     q = await w.ev("(()=>{const e=document.querySelector('#layer .qr'); const c=e.querySelector('canvas'); return {logo:e.dataset.logo, check:e.dataset.check, ecl:c&&c.dataset.ecl, len: c&&c.width}})()")
                     dec = await w.ev("(async()=>{const c=document.querySelector('#layer .qr canvas'); const d=c.getContext('2d').getImageData(0,0,c.width,c.height); const r=CashuLib.jsQR(d.data,c.width,c.height); return r?r.data:null})()")
                     want_logo = q['logo'] == '1'
-                    check(f'logo {theme} {label} ({len(text)} chars): {"acorn shown at error correction H" if want_logo else "plain (too dense for a logo)"}, read back by the app, scans', q['check'] == 'ok' and dec == (text if label != 'small' else text) and (q['ecl'] == 'H') == want_logo and (want_logo or label == 'long'), (q, dec and dec[:20]))
+                    check(f'logo {theme} {label} ({len(text)} chars): {"the acorn, at error correction H" if label != 'long' else "plain: with the acorn it would be too dense (over 117 modules)"}, read back by the app, scans', q['check'] == 'ok' and dec == (text if label != 'small' else text) and (q['ecl'] == 'H') == want_logo and want_logo == (label != 'long'), (q, dec and dec[:20]))
                     if label in ('small', 'medium'): check(f'logo {theme} {label}: the acorn is on by default', want_logo, q)
                     await w.pg.screenshot(path=os.path.join(OUT, f'logo-{theme}-{label}.png')) if label == 'medium' else None
                 await w.ev(f"NutTokens.showQR({json.dumps(huge)})"); await w.until("!!document.querySelector('#layer .qr-anim canvas')", 15000); await w.wait(700)
                 check(f'logo {theme}: a big animated QR (BC-UR) stays plain', await w.ev("(()=>{const e=document.querySelector('#layer .qr-anim'); const c=e.querySelector('canvas'); return e.dataset.logo!=='1' && c.dataset.logo!=='1'})()"))
                 # a QR that would not scan with the logo falls back to plain
-                await w.ev("NutTokens._breakLogo=true"); await w.ev(f"NutTokens.showQR({json.dumps(medium)})"); await w.until("document.querySelector('#layer .qr') && ['ok','fail'].includes(document.querySelector('#layer .qr').dataset.check)", 15000)
+                await w.ev("NutTokens._logoScale=0.62"); await w.ev(f"NutTokens.showQR({json.dumps(medium)})"); await w.until("document.querySelector('#layer .qr') && ['ok','fail'].includes(document.querySelector('#layer .qr').dataset.check)", 15000)
                 q = await w.ev("(()=>{const e=document.querySelector('#layer .qr'); return {logo:e.dataset.logo, check:e.dataset.check, fell:e.dataset.fallback}})()")
                 check(f'logo {theme}: a logo QR that would not scan falls back to plain (read back)', q['logo'] == '0' and q['check'] == 'ok' and q['fell'] == '1', q)
-                await w.ev("NutTokens._breakLogo=false")
-                # every QR the app shows: the Lightning address QR, a token, a payment request
-                await w.ev("Nutcade.closeSheet()"); tok, e = await w.send_ecash(100); await w.ev(f"document.querySelector('[data-act=tab][data-tab=history]').click()"); await w.wait(150)
-                await w.ev("document.querySelector('#txList [data-act=tx]').click()"); await w.until("!!document.querySelector('#layer .qr[data-check=ok]')", 15000)
-                check(f'logo {theme}: a sent token\'s QR on its notes line has the acorn', await w.ev("document.querySelector('#layer .qr').dataset.logo==='1'"))
+                await w.ev("NutTokens._logoScale=0")
+                # every QR the app shows goes the same way: the ecash address, a P2PK key, a sent token on its notes line
+                await w.ev("Nutcade.closeSheet()"); await w.ev("document.querySelector('[data-act=tab][data-tab=wallet]').click()"); await w.wait(150)
+                if not await w.ev("Nutcade.S.p2pk.length"): await w.ev("(()=>{const b=document.createElement('button'); b.dataset.act='p2pkNew'; document.body.appendChild(b); b.click(); b.remove()})()"); await w.until("Nutcade.S.p2pk.length>0", 5000); await w.ev("Nutcade.closeSheet()")
+                for act in ('myAddrQR', 'p2pkShow'):
+                    await w.ev(f"(()=>{{const b=document.createElement('button'); b.dataset.act='{act}'; b.dataset.i='0'; document.body.appendChild(b); b.click(); b.remove()}})()")
+                    await w.until("!!document.querySelector('#layer .qr') && ['ok','fail'].includes(document.querySelector('#layer .qr').dataset.check)", 15000)
+                    q = await w.ev("(()=>{const e=document.querySelector('#layer .qr'); return {logo:e.dataset.logo, check:e.dataset.check, ecl:e.querySelector('canvas').dataset.ecl}})()")
+                    check(f'logo {theme}: {act} QR: the acorn at H, read back', q == {'logo': '1', 'check': 'ok', 'ecl': 'H'}, q)
+                    await w.ev("Nutcade.closeSheet()")
+                tok, e = await w.send_ecash(100); await w.ev(f"document.querySelector('[data-act=tab][data-tab=history]').click()"); await w.wait(150)
+                await w.ev("document.querySelector('#txList [data-act=tx]').click()"); await w.until("!!document.querySelector('#layer .qr') && ['ok','fail'].includes(document.querySelector('#layer .qr').dataset.check)", 15000)
+                q = await w.ev("(()=>{const e=document.querySelector('#layer .qr'); return {logo:e.dataset.logo, check:e.dataset.check, ecl:e.querySelector('canvas').dataset.ecl, n:document.querySelector('#layer .code').innerText.length}})()")
+                check(f'logo {theme}: a sent token on its notes line: read back, and the acorn only if it stays within 117 modules at H', q['check'] == 'ok' and (q['logo'] == '1') == (q['ecl'] == 'H'), q)
                 # None: no logo anywhere, plain error correction
                 await w.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click()"); await w.wait(150); await w.click('[data-act=qrLogo][data-v=none]'); await w.wait(150)
                 check(f'logo {theme}: None saved', await w.ev("Nutcade.S.prefs.qrLogo") == 'none')
@@ -439,13 +451,18 @@ async def main():
                 await w.pg.context.close()
             # the score card that pays out (trophies) and the treasure hunt cards use the same QR
             w = await wallet(b); await w.create()
-            check('logo: the loaded score card QR uses the shared QR drawing (logo + read back)', await w.ev("!!(window.NutQR && NutQR.draw) && /NutQR/.test(String(window.Trophies && window.Trophies.renderCard || '') + document.documentElement.innerHTML.slice(0,0)) || !!(window.NutQR && NutQR.cardUsesLogo)"))
+            r = await w.ev("""(async()=>{let n=0; const v=NutQR.verified; NutQR.verified=(...a)=>{n++; return v(...a)}; const url='https://random21m.github.io/nutcade/#load=abc123def456';
+              const o={kind:'trophy', d:Trophies.DEFS[0], loaded:{url, amount:21, until:Date.now()+864e5}, at:Date.now()};
+              let r; try { r=await Trophies.renderCard(o); } finally { NutQR.verified=v; }
+              const i=new Image(); i.src=r.url; await i.decode(); const c=document.createElement('canvas'); c.width=i.naturalWidth; c.height=i.naturalHeight; const x=c.getContext('2d'); x.drawImage(i,0,0);
+              const d=x.getImageData(0,0,c.width,c.height); const q=CashuLib.jsQR(d.data,c.width,c.height); return [n, !!q && q.data===url]})()""")
+            check('logo: the score card that pays out uses the same QR (acorn, read back) and scans', r == [1, True], r)
             await w.pg.context.close()
         await section('logo', logo)
 
         # ---------- print preview pages, both styles, screenshots ----------
         async def pages():
-            w = await funded(b, [FEE], 5000)
+            w = await funded(b, [FEE], 9000)
             s, e, bid = await make(w, FEE, 1000, 6, 'arcade')
             for style in ('arcade', 'ink'):
                 info = await show_print(w, bid, f'print-sheet-{style}.png', style)
