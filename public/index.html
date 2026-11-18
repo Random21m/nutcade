@@ -3461,7 +3461,7 @@ async function restoreFromMintNow(url, onStep, opts) {
   // waited for; their change goes to them), swaps (settled from their record), deposits with counters on record
   // (left out of this scan; each one settles itself as that deposit).
   for (const p of S.pending.filter(p => p.mint === url && p.id !== opts.except)) await reconcile(p, { force: true }).catch(() => {});
-  await lateCheck(url).catch(() => {});
+  await lateCheck(url, true).catch(() => {});
   for (const o of S.ops.filter(o => o.mint === url && o.id !== opts.except)) await settleOp(o.id).catch(() => {});
   const keysets = w.keyChain.getKeysets().filter(k => k.unit === 'sat');
   let found = [];
@@ -4386,16 +4386,26 @@ async function settleOpNow(id) {
    mint late. Its record comes back and is settled again, so what the mint signed for it is booked to it, never as
    "spent elsewhere". Records older than a day are dropped. Not while another open step or payment holds its coins. */
 const LATE_MS = 86400e3;
-async function lateCheck(url) {
+// How often the waiting steps at a mint are checked on the regular round, by the age of the newest one: soon at
+// first (a late request usually arrives within seconds), then less and less, every 12 minutes after the first hour.
+const lateGap = age => age < 5 * 60e3 ? 25e3 : age < 15 * 60e3 ? 60e3 : age < 60 * 60e3 ? 3 * 60e3 : 12 * 60e3;
+const lateSeen = new Map();   // mint -> when its waiting steps were last checked here
+// One state check per mint for all its waiting steps (in pieces the mint takes), never while offline or hidden, and
+// on the regular round only when due. A restore or a clean-up of spent coins asks at once (force).
+async function lateCheck(url, force) {
+  url = normUrl(url);
   const now = Date.now(), all = S.oplate || [], keep = all.filter(r => now - r.lateAt < LATE_MS);
   if (keep.length !== all.length) { S.oplate = keep; save(); }
+  const here = keep.filter(r => r.mint === url); if (!here.length) return;
+  if (!force && (isOffline() || document.hidden || now - (lateSeen.get(url) || 0) < lateGap(now - Math.max(...here.map(r => r.lateAt))))) return;
   const busy = new Set(S.ops.flatMap(o => o.inputs).concat(S.pending.flatMap(p => (p.proofs || []).map(x => x.secret))));
-  for (const r of keep.filter(r => r.mint === normUrl(url))) {
-    if (r.inputs.some(s => busy.has(s)) || S.ops.some(o => o.id === r.id)) continue;
-    const w = await getWallet(r.mint);
-    const st = await inTime(w.checkProofsStates(r.inputs.map(s => ({ secret: s }))), 30000);
-    if (!st.some(x => x && (x.state === 'SPENT' || x.state === 'PENDING'))) continue;
-    if (!(S.oplate || []).some(x => x.id === r.id)) continue;
+  const rs = here.filter(r => !r.inputs.some(s => busy.has(s)) && !S.ops.some(o => o.id === r.id)); if (!rs.length) return;
+  lateSeen.set(url, now);
+  const w = await getWallet(url), ys = [...new Set(rs.flatMap(r => r.inputs))];
+  const st = await inTime(w.checkProofsStates(ys.map(s => ({ secret: s }))), 30000), stOf = new Map(ys.map((s, i) => [s, st[i] && st[i].state]));
+  for (const r of rs) {
+    if (!r.inputs.some(s => stOf.get(s) === 'SPENT' || stOf.get(s) === 'PENDING')) continue;
+    if (!(S.oplate || []).some(x => x.id === r.id) || S.ops.some(o => o.id === r.id)) continue;
     const op = Object.assign({}, r); delete op.lateAt; op.late = 1;
     S.oplate = S.oplate.filter(x => x.id !== r.id); S.ops.push(op); save();
     await settleOp(op.id).catch(() => {});
@@ -4404,7 +4414,7 @@ async function lateCheck(url) {
 /* Coins the mint says are already spent (spent elsewhere, or by a step that never recorded its result) are dropped
    from the balance with a history line saying so, after any open record at that mint has been settled first. */
 async function pruneSpent(url) {
-  await lateCheck(url).catch(() => {});
+  await lateCheck(url, true).catch(() => {});
   for (const o of S.ops.filter(o => o.mint === url)) await settleOp(o.id);
   const w = await getWallet(url), ps = S.proofs[url] || []; if (!ps.length) return 0;
   const st = await inTime(w.checkProofsStates(ps), 30000);
@@ -10281,7 +10291,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), moveQuote: (f, t, a) => moveQuote(f, t, a) } };
+window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a) } };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}

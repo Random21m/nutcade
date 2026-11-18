@@ -1202,6 +1202,33 @@ async def main():
                     if not only or k in only or (k + ':' + tag) in only: await fn(D, tag)
         await section('journal', journal)
 
+        async def jr_poll():
+            # steps waiting aside (three sends that failed for lack of network) are checked with ONE request per mint per
+            # check, less and less often as they age, and never while offline
+            D = B; w = await wallet(b); ctx = w.pg.context; await w.create(); await w.add_mint(D); await w.use(D); await w.receive_ln(2000)
+            async def cut(route):
+                try: await route.abort('internetdisconnected')
+                except Exception: pass
+            for i in range(3):
+                await ctx.route(f'{D}/v1/swap', cut)
+                await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', str(100 + i)); await w.click('[data-act=doSendEcash]'); await w.wait(2500)
+                await ctx.unroute(f'{D}/v1/swap', cut); await w.ev("Nutcade.closeSheet()"); await w.until("Nutcade.S.ops.length===0", 30000)
+            n = await w.ev("(Nutcade.S.oplate||[]).length"); ys = await w.ev(f"new Set((Nutcade.S.oplate||[]).flatMap(r=>r.inputs)).size")
+            await w.ev("window.__cs=[]; {const f=window.fetch; window.fetch=(i,o)=>{const u=String((i&&i.url)||i); if(/\\/v1\\/checkstate/.test(u)){let k=0; try{k=JSON.parse(o&&o.body||'{}').Ys.length}catch(e){} window.__cs.push([Date.now(),k])} return f(i,o)}}")
+            await w.home(); await w.wait(65000); cs = await w.ev("window.__cs")
+            check(f'waiting steps: {n} of them on one mint are checked with one request each time (in 65 s: {len(cs)} requests, each with all {ys} coins)', n == 3 and 1 <= len(cs) <= 3 and all(k == ys for _, k in cs), (n, ys, cs))
+            gaps = await w.ev("Nutcade.r8.lateGap ? [60e3, 10*60e3, 30*60e3, 2*3600e3].map(a=>Nutcade.r8.lateGap(a)) : null")
+            check('waiting steps: checked soon at first, then less often, about every 12 minutes after the first hour', bool(gaps) and gaps[0] <= 30e3 and gaps[0] <= gaps[1] <= gaps[2] <= gaps[3] and 10 * 60e3 <= gaps[3] <= 15 * 60e3, gaps)
+            await w.ev("Nutcade.S.oplate.forEach(r=>r.lateAt=Date.now()-2*3600e3); window.__cs=[]"); await w.wait(65000); cs1 = await w.ev("window.__cs.length")
+            f1 = await w.ev(f"Nutcade.r8.lateCheck ? Nutcade.r8.lateCheck({json.dumps(D)}, true).then(()=>window.__cs.length) : -1")
+            check('waiting steps: two hours old, the next regular rounds ask nothing (the next check is minutes away), while a clean-up asks at once, in one request', cs1 == 0 and f1 == 1, (cs1, f1))
+            await w.ev("Nutcade.S.oplate.forEach(r=>r.lateAt=Date.now()); window.__cs=[]"); await ctx.set_offline(True); await w.wait(65000)
+            cs2 = await w.ev("window.__cs.length"); await ctx.set_offline(False)
+            check('waiting steps: nothing is asked while offline', cs2 == 0, cs2)
+            check('waiting steps: the balance is untouched and nothing is "spent elsewhere"', await w.bal(D) == 2000 and not await w.ev(SE_JS + f"({json.dumps(D)})"), await w.bal(D))
+            await w.pg.context.close()
+        await section('jrpoll', jr_poll)
+
         check('round 8: the books add up everywhere (history = balance)', not broken, broken)
         print('SUMMARY', sum(1 for r in results if r[1]), 'passed,', sum(1 for r in results if not r[1]), 'failed')
         await b.close()
