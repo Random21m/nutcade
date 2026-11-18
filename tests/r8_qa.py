@@ -1071,6 +1071,137 @@ async def main():
                 await z.pg.context.close()
         await section('r3flight', r3_flight)
 
+        # ======================= the journal: a step the mint signed is never booked as "spent elsewhere" =======================
+        def post_json(url, body):
+            q = urllib.request.Request(url, data=body.encode(), headers={'Content-Type': 'application/json'})
+            try: return 200, json.loads(urllib.request.urlopen(q, timeout=20).read())
+            except urllib.error.HTTPError as e:
+                try: return e.code, json.loads(e.read())
+                except Exception: return e.code, None
+        class SwapPx:
+            """on a mint's /v1/swap: pass | drop (held, never forwarded) | sign502 / signabort (the mint signs, the page gets a
+            502 or a dropped connection) | refuse (the mint signs, the page gets 400 code 11001) | twin (the same request reaches
+            the mint first, as from another phone holding this wallet; the page's own copy then gets the mint's real answer)"""
+            def __init__(s): s.pol = []; s.log = []; s.held = []
+            async def h(s, route):
+                rq = route.request; a = s.pol.pop(0) if s.pol else 'pass'; rec = {'act': a, 'body': rq.post_data or '', 'st': None}; s.log.append(rec)
+                try:
+                    if a == 'drop': s.held.append(route); return
+                    if a == 'twin': rec['twin'] = (await asyncio.to_thread(post_json, rq.url, rec['body']))[0]
+                    r = await route.fetch(); rec['st'] = r.status
+                    if a == 'sign502': return await route.fulfill(status=502, body='Bad Gateway')
+                    if a == 'signabort': return await route.abort('connectionreset')
+                    if a == 'refuse': return await route.fulfill(status=400, content_type='application/json', body=json.dumps({'detail': 'Token already spent.', 'code': 11001}))
+                    await route.fulfill(response=r)
+                except Exception as e: rec['err'] = repr(e)[:200]
+            def kept(s):   # what the mint kept of the request it signed (its fee)
+                for x in s.log:
+                    if x['st'] == 200 or x.get('twin') == 200:
+                        d = json.loads(x['body']); return sum(int(p['amount']) for p in d['inputs']) - sum(int(o['amount']) for o in d['outputs'])
+                return 0
+        async def nut19(route):   # the mint lists POST /v1/swap as cached (NUT-19): the library resends it after a 5xx or a lost connection
+            try:
+                r = await route.fetch(); d = await r.json(); d.setdefault('nuts', {})['19'] = {'ttl': 3600, 'cached_endpoints': [{'method': 'POST', 'path': '/v1/swap'}]}
+                await route.fulfill(response=r, body=json.dumps(d))
+            except Exception: pass
+        SE_JS = "(u=>Nutcade.S.txs.filter(t=>t.mint===u&&t.note==='Ecash already spent elsewhere').map(t=>t.amount))"
+        UNSP_JS = "(async u=>{const w=new CashuLib.Wallet(u,{unit:'sat'}); await w.loadMint(); const ps=Nutcade.S.proofs[u]||[]; if(!ps.length) return true; const st=await w.checkProofsStates(ps); return st.every(s=>s.state==='UNSPENT')})"
+        OUT_JS = "(u=>Nutcade.S.txs.filter(t=>t.mint===u&&t.type==='out'&&t.status==='pending'&&t.sent).reduce((s,t)=>s+t.sent.reduce((a,p)=>a+p.amount,0),0))"
+        async def jr_wallet(D, info=None):
+            w = await wallet(b); px = SwapPx(); await w.pg.context.route(f'{D}/v1/swap', px.h)
+            if info: await w.pg.context.route(f'{D}/v1/info', info)
+            words = await w.create(); await w.add_mint(D); await w.use(D)
+            for a in (2000, 345): await w.receive_ln(a)
+            return w, px, words
+        async def jr_after(w, D, tag, b0, px, mustwork=False, tok=None, e=None):
+            await w.until("Nutcade.S.ops.length===0", 90000); await w.wait(1500)
+            bal = await w.bal(D); out = await w.ev(OUT_JS + f"({json.dumps(D)})"); se = await w.ev(SE_JS + f"({json.dumps(D)})"); kept = px.kept()
+            l, pp = await w.ev(LEDGER + f"({json.dumps(D)})"); unsp = await w.ev(UNSP_JS + f"({json.dumps(D)})")
+            acts = [(x['act'], x['st'], x.get('twin'), x.get('resp', '')) for x in px.log]
+            check(f'journal {tag}: the mint signed it, so the balance is exact ({bal} + {out} in a token = {b0} - fee {kept}), every coin held is unspent, no "spent elsewhere" line, history = balance', bal + out == b0 - kept and unsp and not se and l == pp and kept >= 0 and any(x[1] == 200 or x[2] == 200 for x in acts), (bal, out, b0, kept, unsp, se, l, pp, acts))
+            if mustwork: check(f'journal {tag}: and the send goes through as if the answer had come (the token is shown, no error)', bool(tok) and not e and out >= 300, (e, out))
+        async def jr_answers(D, tag):
+            for act, info, name in (('sign502', nut19, 'NUT-19 resend after a 502'), ('signabort', nut19, 'NUT-19 resend after a dropped connection'), ('refuse', None, 'refused with 11001 after the mint signed'), ('twin', None, 'two phones send the same request at once')):
+                w, px, _ = await jr_wallet(D, info); b0 = await w.bal(D); px.pol = [act]
+                tok, e = await w.send_ecash(300)
+                await jr_after(w, D, f'{tag}, {name}', b0, px, True, tok, e)
+                await books(w, f'journal {tag} {name}', broken, (D,)); await w.pg.context.close()
+            # crash variant: refused after signing, and the tab is killed before it can do anything with the answer
+            w, px, _ = await jr_wallet(D); b0 = await w.bal(D); px.pol = ['refuse']
+            await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '300'); await w.click('[data-act=doSendEcash]')
+            for _ in range(80):
+                if px.log and px.log[-1]['st']: break
+                await asyncio.sleep(0.1)
+            ctx = w.pg.context; await w.pg.close(run_before_unload=False); w.pg = await ctx.new_page(); await w.pg.goto(URL); await w.wait(1500)
+            await jr_after(w, D, f'{tag}, refused after signing and the tab killed at once', b0, px)
+            await w.pg.context.close()
+        async def jr_late(D, tag):
+            for at in [x for x in ('restore1', 'restore2', 'pending', 'closed') if not os.environ.get('JR_LATE') or x in os.environ['JR_LATE'].split(',')]:
+                name = {'restore1': 'it signs after the reopened tab\'s first restore request', 'restore2': 'it signs after the second restore request', 'pending': 'the mint is still working on it (PENDING) when the reopened tab checks', 'closed': 'it signs after the reopened tab settled the step'}[at]
+                w, px, words = await jr_wallet(D); b0 = await w.bal(D); px.pol = ['drop']
+                await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '300'); await w.click('[data-act=doSendEcash]')
+                for _ in range(100):
+                    if px.held: break
+                    await asyncio.sleep(0.1)
+                await asyncio.sleep(0.3); body = px.log[-1]['body']; ctx = w.pg.context
+                for r in px.held:   # (aborted first: a request still held when the page closes can be let through)
+                    try: await r.abort()
+                    except Exception: pass
+                px.held = []; await w.pg.close(run_before_unload=False)
+                late = {'armed': True, 'n': 0, 'st': None}
+                async def post():
+                    late['armed'] = False; late['st'], late['resp'] = await asyncio.to_thread(post_json, f'{D}/v1/swap', body)
+                async def hook(route):
+                    try:
+                        r = await route.fetch(); late['n'] += 1
+                        if at == 'pending' and late['armed']:
+                            d0 = await r.json(); await post(); return await route.fulfill(response=r, body=json.dumps({'states': [dict(x, state='PENDING') for x in d0.get('states', [])]}))
+                        if late['armed'] and at in ('restore1', 'restore2') and late['n'] == int(at[-1]): await post()
+                        await route.fulfill(response=r)
+                    except Exception:
+                        try: await route.fallback()
+                        except Exception: pass
+                ep = f"{D}/v1/{'checkstate' if at == 'pending' else 'restore'}"
+                if at != 'closed': await ctx.route(ep, hook)
+                w.pg = await ctx.new_page(); await w.pg.goto(URL); await w.wait(1500); await w.until("Nutcade.S.ops.length===0", 90000)
+                if at != 'closed': await ctx.unroute(ep, hook)
+                else:
+                    await w.wait(1000); await post(); await w.wait(500); await w.pg.reload(); await w.wait(2500)
+                px.log.append({'act': 'late', 'body': body, 'st': late['st'], 'resp': str(late.get('resp'))[:160]})
+                await jr_after(w, D, f'{tag}, {name}', b0, px)
+                bw = await w.bal(D); await w.pg.context.close()
+                r = await wallet(b); await r.pg.check('#ack'); await r.click('[data-act=gateRestore]'); await r.until("!!document.querySelector('#phraseIn')", 5000)
+                await r.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); document.querySelector('#rmExtra').value={json.dumps(D)}}})()")
+                await r.click('[data-act=doRestorePhrase]'); await r.until("/SCAN COMPLETE|CONTINUE!/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 120000); await r.wait(800)
+                check(f'journal {tag}, {name}: 12 words on a new phone find the same {bw}', await r.bal(D) == bw, (await r.bal(D), bw))
+                await r.pg.context.close()
+        async def jr_foreign(D, tag):
+            # truly foreign: a phone holding the same wallet spends the coins differently while this one's step never reached the mint
+            w, px, words = await jr_wallet(D); b0 = await w.bal(D); px.pol = ['drop']
+            await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '300'); await w.click('[data-act=doSendEcash]')
+            for _ in range(100):
+                if px.held: break
+                await asyncio.sleep(0.1)
+            ins = sum(int(p['amount']) for p in json.loads(px.log[-1]['body'])['inputs']); ctx = w.pg.context
+            for r in px.held:
+                try: await r.abort()
+                except Exception: pass
+            px.held = []; await w.pg.close(run_before_unload=False)
+            o = await wallet(b); await o.pg.check('#ack'); await o.click('[data-act=gateRestore]'); await o.until("!!document.querySelector('#phraseIn')", 5000)
+            await o.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); document.querySelector('#rmExtra').value={json.dumps(D)}}})()")
+            await o.click('[data-act=doRestorePhrase]'); await o.until("/SCAN COMPLETE|CONTINUE!/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 120000); await o.wait(800); await o.ev("Nutcade.closeSheet()")
+            ob = await o.bal(D); tk, e = await o.send_ecash(ob - 10); await o.pg.context.close()
+            w.pg = await ctx.new_page(); await w.pg.goto(URL); await w.wait(1500); await w.until("Nutcade.S.ops.length===0", 90000); await w.wait(1500)
+            se = await w.ev(SE_JS + f"({json.dumps(D)})"); bal = await w.bal(D); l, pp = await w.ev(LEDGER + f"({json.dumps(D)})")
+            check(f'journal {tag}: coins another phone spent differently are still "spent elsewhere" (nothing of the step credited)', bool(tk) and sum(se) >= ins and bal <= b0 - ins and l == pp, (e, se, ins, bal, b0, l, pp))
+            await w.pg.context.close()
+        async def journal():
+            only = [x for x in os.environ.get('JR_ONLY', '').split(',') if x]
+            for D, tag in ((B, 'no fee'), (A, 'fee')):
+                for k, fn in (('answers', jr_answers), ('late', jr_late), ('foreign', jr_foreign)):
+                    if not only or k in only or (k + ':' + tag) in only: await fn(D, tag)
+        await section('journal', journal)
+
         check('round 8: the books add up everywhere (history = balance)', not broken, broken)
         print('SUMMARY', sum(1 for r in results if r[1]), 'passed,', sum(1 for r in results if not r[1]), 'failed')
         await b.close()
