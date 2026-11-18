@@ -18,7 +18,9 @@ Object.assign(A, {
     toast(r.got ? `${r.got} claimed since the last check` : 'No new claims', 'cyan');
   }),
   ptTake: b => run(b, 'TAKING BACK', async () => {
-    const t = txById(b.dataset.id); if (!t || t.status !== 'pending') { ptListOpen(true); return; }
+    const t = txById(b.dataset.id); if (!t) { ptListOpen(true); return; }
+    if (t.status === 'claimed') { ptListOpen(true); const e = new Error(`Someone already claimed token #${t.print ? t.print.code : ''}, so there is nothing to take back. Your balance didn't change.`); e.keep = true; throw e; }   // (found claimed meanwhile)
+    if (t.status !== 'pending') { ptListOpen(true); return; }
     try { await ptTakeOne(t); } finally { ptListOpen(true); refresh(); }
     sfx('coin'); toast('Token taken back', 'lime');
   }),
