@@ -658,7 +658,7 @@ async def main():
             sw1 = await g.ev("performance.getEntriesByType('resource').filter(e=>/3344\\/v1\\/swap/.test(e.name)).length")
             check('NUT-06 at 128: a send that the usual pick would make of over 128 coins takes the biggest coins instead: one swap, at most 128 coins in', n0 >= 160 and tok and not e and sw1 - sw0 == 1 and max(seen.values() or [0]) <= 128, (n0, e, sw1 - sw0, seen))
             l, pp = await g.ev(LEDGER + f"({json.dumps(CM)})"); check('NUT-06 at 128: history = balance', l == pp, (l, pp))
-            m = await wallet(b); await m.pg.route(f'{CM}/v1/**', size_watch(seen)); await m.pg.check('#ack'); await m.click('[data-act=gateRestore]'); await m.until("!!document.querySelector('#phraseIn')", 5000)
+            m = await wallet(b); await m.pg.route(f'{CM}/v1/**', size_watch(seen)); await m.gate_restore()
             await m.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(gw)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); document.querySelector('#rmExtra').value={json.dumps(CM)}}})()")
             await m.click('[data-act=doRestorePhrase]'); await m.until(f"(Nutcade.S.proofs[{json.dumps(CM)}]||[]).length>0", 120000); await m.wait(1500)
             check('NUT-06 at 128: restoring from the 12 words finds the coins, at most 128 outputs per request', await m.bal(CM) > 0 and 0 < seen.get('restore', 0) <= 128, (await m.bal(CM), seen.get('restore')))
@@ -918,7 +918,7 @@ async def main():
             await settings(d); await d.click('[data-act=duressOpen]'); await d.wait(250); await pad(d, PIN); await d.wait(900); await pad(d, DPIN); await d.wait(300); await pad(d, DPIN)
             await d.until("!!document.querySelector('#duressAmt')", 8000); await d.fill('#duressAmt', '300'); await d.click('[data-act=duressMake]'); await d.until("/READY/.test(document.body.innerText)", 30000); await d.ev("Nutcade.closeSheet()")
             real = await d.bal()
-            r = await wallet(b); await r.ev("Nutcade.closeSheet()"); await r.pg.check('#ack'); await r.click('[data-act=gateRestore]'); await r.until("!!document.querySelector('#phraseIn')", 5000)
+            r = await wallet(b); await r.ev("Nutcade.closeSheet()"); await r.gate_restore()
             await r.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); const x=document.querySelector('#rmExtra'); x.value={json.dumps(B)}}})()")
             await r.click('[data-act=doRestorePhrase]'); await r.until("/SCAN COMPLETE/.test(document.body.innerText) || Object.values(Nutcade.S.proofs).flat().length>0", 120000); await r.wait(3000)
             found = await r.bal(); await r.pg.context.close()
@@ -942,9 +942,8 @@ async def main():
         HEIR_NPUB = 'npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6'
         PUBKEY_JS = "(()=>{const k=crypto.getRandomValues(new Uint8Array(32)); return Array.from(CashuLib.getPubKeyFromPrivKey(k),x=>x.toString(16).padStart(2,'0')).join('')})()"
         async def restore_words(r, words, url, sel='gateRestore'):
-            if sel == 'gateRestore': await r.ev("Nutcade.closeSheet()"); await r.pg.check('#ack')
-            else: await settings(r)
-            await r.click(f'[data-act={sel}]'); await r.until("!!document.querySelector('#phraseIn')", 5000)
+            if sel == 'gateRestore': await r.ev("Nutcade.closeSheet()"); await r.gate_restore()
+            else: await settings(r); await r.click(f'[data-act={sel}]'); await r.until("!!document.querySelector('#phraseIn')", 5000)
             await r.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); document.querySelector('#rmExtra').value={json.dumps(url)}}})()")
             await r.click('[data-act=doRestorePhrase]'); await r.until("/SCAN COMPLETE|CONTINUE!/.test((document.querySelector('.sheet-body')||{}).innerText||'') || !!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 120000); await r.wait(1000)
             return await r.sheet_text()
@@ -1170,7 +1169,7 @@ async def main():
                 px.log.append({'act': 'late', 'body': body, 'st': late['st'], 'resp': str(late.get('resp'))[:160]})
                 await jr_after(w, D, f'{tag}, {name}', b0, px)
                 bw = await w.bal(D); await w.pg.context.close()
-                r = await wallet(b); await r.pg.check('#ack'); await r.click('[data-act=gateRestore]'); await r.until("!!document.querySelector('#phraseIn')", 5000)
+                r = await wallet(b); await r.gate_restore()
                 await r.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); document.querySelector('#rmExtra').value={json.dumps(D)}}})()")
                 await r.click('[data-act=doRestorePhrase]'); await r.until("/SCAN COMPLETE|CONTINUE!/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 120000); await r.wait(800)
                 check(f'journal {tag}, {name}: 12 words on a new phone find the same {bw}', await r.bal(D) == bw, (await r.bal(D), bw))
@@ -1187,7 +1186,7 @@ async def main():
                 try: await r.abort()
                 except Exception: pass
             px.held = []; await w.pg.close(run_before_unload=False)
-            o = await wallet(b); await o.pg.check('#ack'); await o.click('[data-act=gateRestore]'); await o.until("!!document.querySelector('#phraseIn')", 5000)
+            o = await wallet(b); await o.gate_restore()
             await o.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={json.dumps(words)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); document.querySelector('#rmExtra').value={json.dumps(D)}}})()")
             await o.click('[data-act=doRestorePhrase]'); await o.until("/SCAN COMPLETE|CONTINUE!/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 120000); await o.wait(800); await o.ev("Nutcade.closeSheet()")
             ob = await o.bal(D); tk, e = await o.send_ecash(ob - 10); await o.pg.context.close()

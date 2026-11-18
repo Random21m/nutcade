@@ -96,7 +96,7 @@ async def main():
 
         # restore on a fresh device: Find my mints on Nostr
         r = await newwallet(b, 'restorer')
-        await r.pg.check('#ack'); await r.click('[data-act=gateRestore]'); await r.wait(200)
+        await r.gate_restore()
         await r.fill('#phraseIn', phrase); await r.click('[data-act=findMints]')
         await r.until("document.querySelector('#nostrMints') && document.querySelector('#nostrMints').innerText.length>5", 9000)
         info = await r.ev("document.querySelector('#nostrMints').innerText")
@@ -110,7 +110,7 @@ async def main():
         await r.pg.context.close()
         # a phrase with no backup says so
         r2 = await newwallet(b, 'nobackup')
-        await r2.pg.check('#ack'); await r2.click('[data-act=gateRestore]'); await r2.wait(200)
+        await r2.gate_restore()
         await r2.fill('#phraseIn', 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about')
         await r2.click('[data-act=findMints]')
         await r2.until("document.querySelector('#nostrMints').innerText.length>5", 9000)
