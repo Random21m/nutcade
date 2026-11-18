@@ -2,7 +2,7 @@
 
 ## What happens automatically
 
-Every push to `main` runs the GitHub Actions workflow `.github/workflows/test-and-deploy.yml`. Its **test** job comes first:
+Every push runs the GitHub Actions workflow `.github/workflows/test-and-deploy.yml`; only a push to `main` deploys. Its **test** jobs come first. The suites are split into parallel jobs (grid_backup, r7, r8, polish, and two groups of the shorter ones), each starting only the mints it needs through `tests/run_all.sh --only ...`, so the whole run takes about 20 minutes. Each job does this:
 
 1. Four local Nutshell test mints start with fake Lightning: a normal one (with input fees), a no-fee one, one where every payment fails, and one where every payment stays pending. `tests/mock_nostr.py` starts a stand-in Nostr relay and npub.cash server, so the tests never touch public services. The two normal mints accept multi-path payments through a small test-only patch (`tests/stub/sitecustomize.py`).
 2. The browser suites run against them:
@@ -16,9 +16,9 @@ Every push to `main` runs the GitHub Actions workflow `.github/workflows/test-an
    - `tests/r4_qa.py`: sending by sound (through a simulated microphone), refundable gifts, bill split, mint health and moving sats, cashier mode, challenges, piggy bank, and the new screens in every language
    - `tests/r7_qa.py`: LNURL-withdraw vouchers (limits, service errors, timeouts, expiry, double taps), blocked mints (refusals, Unblock, backup and restore), Nostr Wallet Connect (every method, NIP-44 and NIP-04, budgets, revoke, the PIN vault) and zaps, against stand-in LNURL services and an NWC app in `mock_nostr.py`, plus the new screens in every language
    - `tests/polish_qa.py`: layout at 320, 375 and 430 px in every language (game controls, the PIN pad, the tab bar), tap-target and text sizes, toasts, themes, units, dates and translations, and centered dialogs on a computer
-3. Only if every check passes does the **deploy** job publish `public/` to https://random21m.github.io/nutcade/ and write `SHA256SUMS.txt` next to the app.
+3. Only on `main`, and only if the page check and every test job pass, does the **deploy** job publish `public/` to https://random21m.github.io/nutcade/ and write `SHA256SUMS.txt` next to the app.
 
-Logs and screenshots from each run are kept for a week as the run's `qa-out` artifact (Actions tab → the run → Artifacts).
+Logs and screenshots from each run are kept for a week as the run's `qa-out-<job>` artifacts (Actions tab → the run → Artifacts).
 
 ## Making a change
 
@@ -34,6 +34,8 @@ You need Python 3.12 and Chromium, which Playwright installs for you.
 python3 -m venv /tmp/mint && /tmp/mint/bin/pip install -r tests/mint-requirements.txt && /tmp/mint/bin/pip install --no-deps cashu==0.21.0 bip32==4.0
 python3 -m venv /tmp/qa && /tmp/qa/bin/pip install playwright==1.48.0 && /tmp/qa/bin/playwright install chromium
 MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh
+# or only some suites (and only the mints they need), e.g. the ones of one CI job:
+MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh --only r7,r8
 ```
 
 ## Cutting a release
