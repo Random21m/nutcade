@@ -612,23 +612,26 @@ async def main():
                 await shot(r, f'summary-{vw}')
                 await dismiss(r)
 
-        # ---------- a game (or the till) fills the screen: the notices wait under it, its controls stay reachable ----------
+        # ---------- a phone held sideways; another tab; a game (or the till) filling the screen ----------
         if want('widths') or want('game'):
+            REACH = """(sel=>{const e=document.querySelector(sel); if(!e) return 'missing'; e.scrollIntoView({block:'center'}); const q=e.getBoundingClientRect();
+              if(q.top<0||q.bottom>innerHeight) return 'off screen'; const h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2); return h&&(h===e||e.contains(h))?'ok':'covered'})"""
             await r.pg.set_viewport_size({'width': 844, 'height': 390}); await dismiss(r)
             tok = await token_from(p, 1500, FREE); await claim(r, tok)
             await r.until("!document.querySelector('#layer .spinner')", 15000); await r.wait(1500); await r.ev("Nutcade.closeSheet()")
-            shown = bool(await cards(r))
-            REACH = """(sel=>{const e=document.querySelector(sel); if(!e) return 'missing'; e.scrollIntoView({block:'center'}); const q=e.getBoundingClientRect();
-              if(q.top<0||q.bottom>innerHeight) return 'off screen'; const h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2); return h&&(h===e||e.contains(h))?'ok':'covered'})"""
             for vw, vh in ((844, 390), (568, 320)):
-                await r.pg.set_viewport_size({'width': vw, 'height': vh}); await settings(r)
-                g = await r.ev(REACH + "('[data-act=limOpen]')"); h = await r.ev("document.querySelector('#arrStack .arr-card').getBoundingClientRect().height")
-                check(f'sideways {vw}x{vh}: a notice is compact and leaves the screen usable (a button mid-screen not covered)', shown and g == 'ok' and h < vh / 3, (g, h))
+                await r.pg.set_viewport_size({'width': vw, 'height': vh}); await r.wait(200)
+                g = await r.ev(REACH + "('[data-act=send]')"); h = await r.ev("(document.querySelector('#arrStack .arr-card')||{getBoundingClientRect:()=>({height:-1})}).getBoundingClientRect().height")
+                check(f'sideways {vw}x{vh}: a notice is compact and leaves the screen usable', 0 < h < vh / 3 and g == 'ok', (g, h))
                 if vw == 568: await shot(r, 'notice-568x320')
-            await r.home(); await r.pg.set_viewport_size({'width': 844, 'height': 390})
-            await r.click('[data-act=tab][data-tab=arcade]'); await r.wait(200); await r.ev("document.querySelector('[data-game=swarm]').click()"); await r.wait(800)
-            g = await r.ev("""(sel=>{const e=document.querySelector(sel); if(!e) return 'missing'; const q=e.getBoundingClientRect();
-              const h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2); return h&&(h===e||e.contains(h))?'ok':'covered'})('[data-g=exit]')""")
+            await r.wait(1200); await settings(r)
+            check('another tab: going there closes a notice you have seen', not await cards(r), await cards(r))
+            await r.pg.set_viewport_size({'width': 844, 'height': 390})
+            await r.click('[data-act=tab][data-tab=arcade]'); await r.wait(300)
+            await dm(p, rpk, 1600, FREE); await r.until("!!document.querySelector('#arrStack .arr-card')", 20000); await r.wait(300)
+            shown = bool(await cards(r))
+            await r.ev("document.querySelector('[data-game=swarm]').click()"); await r.wait(800)
+            g = await r.ev(REACH.replace("e.scrollIntoView({block:'center'}); ", '') + "('[data-g=exit]')")
             check('a game: a notice on screen waits under it (the exit stays reachable)', shown and g == 'ok', (shown, g))
             await r.ev("document.querySelector('[data-g=exit]')?.click()"); await r.wait(500)
             check('a game: back from it, the notice is there again', await r.ev("!!document.querySelector('#arrStack .arr-card') && getComputedStyle(document.querySelector('#arrStack')).display!=='none'"))
