@@ -82,8 +82,16 @@ const ksBackoff = ks => { ks.tries = (ks.tries || 0) + 1; return Date.now() + Ma
    swap takes the wallet's next counters and its clean-up books spent coins, so neither may happen while a deposit is
    being collected (or may be, any moment: an invoice under an hour old, one the mint says is paid, one with counters
    on record, one from before 1.12), while a payment, a journaled step, a backup's waiting part or a restore scan is
-   open there. It runs at the next check once they have settled (it is asked again at every regular check). */
-const quoteBusy = q => { if (busyQuotes.has(q.quote)) return true; if (q.kind !== 'bolt11') return false; const t = txById(q.txId); return q.state === 'PAID' || q.state === 'ISSUED' || !!q.ctr || legacyQuote(q) || (!!t && t.status === 'pending' && Date.now() - num(t.ts) < 60 * 60e3); };
+   open there. It runs at the next check once they have settled (it is asked again at every regular check).
+   A deposit counts only while the regular check still looks at it (its line under 14 days old, as in mintTick): an
+   older one is never collected on its own (only while it is being checked, which counts above), so it can't keep the
+   check-up away for good. */
+const quoteBusy = q => {
+  if (busyQuotes.has(q.quote)) return true;
+  const t = txById(q.txId); if (q.kind !== 'bolt11' || Date.now() - num(t && t.ts) >= QUOTE_AGE) return false;
+  return q.state === 'PAID' || q.state === 'ISSUED' || q.state === 'PENDING' || depCtrs(q).length > 0 || legacyQuote(q) || (!!t && t.status === 'pending' && Date.now() - num(t.ts) < 60 * 60e3);
+};
+const ksSkipped = new Map();   // mint -> when the check-up last waited for something open there (for "Move them")
 function ksBusy(url) {
   return S.ops.some(o => o.mint === url) || S.pending.some(p => p.mint === url) || (S.imports || []).some(r => r.mint === url)
     || S.quotes.some(q => q.mint === url && quoteBusy(q)) || flights.has('restore:' + url);
@@ -93,7 +101,7 @@ function ksCheck(url, opts = {}) { url = normUrl(url); if (!ksMint(url)) return 
 async function ksNow(url, opts) {
   const m = ksMint(url); if (!m || !S.seed) return null;
   const ks = m.ks || (m.ks = {}), now = Date.now(), deep = !!(opts.startup || opts.manual || opts.agree);
-  if (ksBusy(url)) return ks;   // (whatever is being collected or settled here goes first; the check-up comes after it)
+  if (ksBusy(url)) { ksSkipped.set(url, now); return ks; }   // (whatever is being collected or settled here goes first; the check-up comes after it)
   if (!deep && ks.due && now < ks.due) return ks;
   let w; try { w = await getWallet(url); } catch (e) { ks.due = ksBackoff(ks); save(); return ks; }   // (mint down: nothing changes, nothing to alarm about; asked again later)
   if (deep && (ks.aside || []).length) await ksBack(w, url, ks).catch(() => {});
@@ -106,7 +114,7 @@ async function ksNow(url, opts) {
   let st; try { st = await inTime(w.checkProofsStates(cand), 30000); } catch (e) { ks.due = ksBackoff(ks); save(); return ks; }
   const spent = new Set(cand.filter((p, i) => st[i] && st[i].state === 'SPENT').map(p => p.secret)), held = new Set(cand.filter((p, i) => st[i] && st[i].state !== 'UNSPENT').map(p => p.secret));
   const res = { n: 0, t: 0, k: 0, fee: 0, aside: 0, asideA: 0, spentN: 0, spentA: 0, why: '' };
-  if (ksBusy(url)) return ks;   // (something started meanwhile: next time)
+  if (ksBusy(url)) { ksSkipped.set(url, now); return ks; }   // (something started meanwhile: next time)
   if (spent.size) { await ksPrune(url, cand, res); plan = ksPlan(w, url, now); }
   const old = plan.old.filter(p => !held.has(p.secret)), tidy = plan.tidy.filter(p => !held.has(p.secret));
   const auto = S.prefs.ksAuto !== false, fAll = ksFee(w, url, old.concat(tidy), plan.known), fOld = ksFee(w, url, old, plan.known);
@@ -122,7 +130,7 @@ async function ksNow(url, opts) {
   if (res.n || res.t) ks.last = { at: now, n: res.n, t: res.t, k: res.k, fee: res.fee };
   if (res.spentN) ks.spent = { at: now, n: res.spentN, a: res.spentA };
   if (res.why) { Object.assign(ks, { at: now, st: res.why, due: ksBackoff(ks) }); save(); return ks; }
-  if (res.busy) { save(); return ks; }
+  if (res.busy) { ksSkipped.set(url, now); save(); return ks; }
   ks.tries = 0; ks.due = 0;
   // what is left to ask about: the coins not moved now that a swap would move (never ones worth less than their fee)
   const moved = new Set(move.map(p => p.secret)), mine = new Set((S.proofs[url] || []).map(p => p.secret)), left = p => !moved.has(p.secret) && mine.has(p.secret);

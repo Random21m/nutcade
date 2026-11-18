@@ -362,7 +362,7 @@ async function restoreFromMintNow(url, onStep, opts) {
   // used already, by another device with the same phrase, so the coins there are that device's, found here like any
   // others.)
   const ex = opts.except, owned = new Set(), looked = new Set(), rkey = c => `${c.id}:${c.start}:${c.n}`;
-  const ranges = () => [].concat(S.pending.filter(p => p.mint === url && p.ctr && !p.changeDone && p.id !== ex).map(p => p.ctr), S.ops.filter(o => o.mint === url && o.id !== ex).flatMap(o => o.ctr), S.quotes.filter(q => q.mint === url && q.ctr && q.quote !== ex).map(q => q.ctr));
+  const ranges = () => [].concat(S.pending.filter(p => p.mint === url && p.ctr && !p.changeDone && p.id !== ex).map(p => p.ctr), S.ops.filter(o => o.mint === url && o.id !== ex).flatMap(o => o.ctr), S.quotes.filter(q => q.mint === url && q.quote !== ex).flatMap(depCtrs));
   for (let i = 0; i < 5; i++) {
     const todo = ranges().filter(c => !looked.has(rkey(c))); if (!todo.length) break;
     for (const c of todo) { looked.add(rkey(c)); const r = await restoreRange(w, url, c.start, c.n, c.id); for (const p of r.proofs || []) owned.add(p.secret); }
@@ -572,19 +572,34 @@ async function checkQuoteNow(id, txId) {
           if (!k) throw new Error("This payment is locked to a key this wallet doesn't have.");
           cfg = { privkey: k };
         }
-        // the counters the new coins are signed for are on the deposit's record before the mint is asked
-        const onCountersReserved = u => { if (u && u.count > 0) { q.ctr = { id: u.keysetId, start: u.start, n: u.count }; save(); } };
-        let proofs;
-        try { proofs = await withRepair(q.mint, () => w.mintProofsBolt11(q.amount, r, Object.assign({}, cfg, { onCountersReserved })), { except: q.quote }); }
-        catch (e) {
-          if (isRefusal(e) && q.ctr) {
-            // refused, but the mint did issue this deposit (an identical request got there first, as when the library
-            // resends one whose answer was lost): its coins are at its counters, at exactly its amount
+        // the counters the new coins are signed for are on the deposit's record before the mint is asked (those of an
+        // earlier try whose outcome isn't known stay on it too: that request may still be signed)
+        const onCountersReserved = u => { if (u && u.count > 0) { retireCtr(q); q.ctr = { id: u.keysetId, start: u.start, n: u.count }; save(); } };
+        /* Refused: what the mint did with this deposit decides.
+           - ISSUED: an identical request got there first (the library resends one whose answer was lost, or another
+             copy of it was sent): its coins are at its counters, at exactly its amount.
+           - UNPAID or PAID, and the refusal isn't "already pending": nothing was signed at those counters for it.
+           - Anything else (PENDING, an "already pending" answer, or the mint can't be asked now): another copy of this
+             very request may still be signed at exactly those counters. They stay on its record and the deposit
+             waits; the next check credits it from them once the mint says ISSUED. (Never closed at 0 for this.) */
+        const ISSUED = {}, WAIT = {};
+        const once = async () => {
+          try { return await w.mintProofsBolt11(q.amount, r, Object.assign({}, cfg, { onCountersReserved })); }
+          catch (e) {
+            if (!isRefusal(e) || !q.ctr) throw e;
             const st = await w.checkMintQuoteBolt11(q.quote).catch(() => null);
-            if (st && st.state === 'ISSUED') { const got = await creditDepositRange(w, q).catch(() => null); if (got != null && !S.quotes.some(x => x.quote === q.quote)) { refresh(); document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote })); if (got) toast(`+${money(got)} received`, 'lime'); return 'paid'; } }
-            else { delete q.ctr; save(); }   // (refused: nothing was signed at those counters for it)
+            if (st && st.state && q.state !== st.state) { q.state = st.state; save(); }
+            if (st && st.state === 'ISSUED') return ISSUED;
+            if (!st || !(st.state === 'UNPAID' || st.state === 'PAID') || pendingRefusal(e)) return WAIT;
+            retireCtr(q); save(); throw e;   // (nothing signed for it there; "already signed" then catches the counters up below, and it is asked again)
           }
-          throw e;
+        };
+        const proofs = await withRepair(q.mint, once, { except: q.quote });
+        if (proofs === WAIT) return 'waiting';
+        if (proofs === ISSUED) {
+          const got = await creditDepositRange(w, q).catch(() => null);
+          if (got != null && !S.quotes.some(x => x.quote === q.quote)) { refresh(); document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote })); if (got) toast(`+${money(got)} received`, 'lime'); return 'paid'; }
+          return 'waiting';
         }
         const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
         S.proofs[q.mint] = (S.proofs[q.mint] || []).concat(plain(proofs).filter(p => !held.has(p.secret)));
@@ -605,7 +620,7 @@ async function checkQuoteNow(id, txId) {
         // is taken for it.
         let got = 0;
         try {
-          if (q.ctr) got = await creditDepositRange(w, q);
+          if (depCtrs(q).length) got = await creditDepositRange(w, q);
           else if (legacyQuote(q)) { await restoreFromMint(q.mint, null, { deposits: [q] }); got = num((txById(q.txId) || {}).amount); }
           else closeDepositEmpty(q);
         } catch (e) { return 'waiting'; }
@@ -615,14 +630,15 @@ async function checkQuoteNow(id, txId) {
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         return 'paid';
       }
-      if (q.expiry && Date.now() / 1000 > q.expiry) { dropQuote(q); updTx(q.txId, { status: 'expired' }); refresh(); return 'expired'; }
+      // (never while the mint is still working on a request for it: that request may yet be signed)
+      if (r.state !== 'PENDING' && q.expiry && Date.now() / 1000 > q.expiry) { dropQuote(q); updTx(q.txId, { status: 'expired' }); refresh(); return 'expired'; }
       return 'waiting';
     } else {
       const r = await w.checkMintQuoteOnchain(q.quote);
       const avail = num(r.amount_paid) - num(r.amount_issued);
       if (avail > 0) {
         const t0 = txById(q.txId);
-        const { r: proofs, op } = await journaled(q.mint, 'receive', { amount: avail, note: t0 ? t0.note : '', txId: t0 && t0.status === 'pending' ? q.txId : null }, cb => w.mintProofsOnchain(avail, r, q.privkey, { onCountersReserved: cb }));
+        const { r: proofs, op } = await journaled(q.mint, 'receive', { amount: avail, note: t0 ? t0.note : '', txId: t0 && t0.status === 'pending' ? q.txId : null, dep: 1 }, cb => w.mintProofsOnchain(avail, r, q.privkey, { onCountersReserved: cb }));
         const got = sum(proofs);
         addProofs(q.mint, proofs);
         const t = txById(q.txId);
@@ -641,6 +657,12 @@ function dropQuote(q) { S.quotes = S.quotes.filter(x => x.quote !== q.quote); sa
 // a deposit with no counters on record made on this device before 1.12 (only then could the mint have issued it to
 // this record without them); not one from a backup, nor one made or seen waiting by 1.12.1 or later
 const legacyQuote = q => !q.ctr && !q.rec && !Object.prototype.hasOwnProperty.call(q, 'impLine');
+// a deposit's counter ranges: the ones on its record, then those of earlier tries whose outcome isn't known (no answer
+// came, or a refusal while another copy of that request could still be signed)
+const depCtrs = q => [q.ctr].concat(q.was || []).filter(Boolean);
+function retireCtr(q) { if (q.ctr) { q.was = [q.ctr].concat(q.was || []).slice(0, 4); delete q.ctr; } }
+// "already pending": another copy of this very request (or another step with these coins) is being worked on at the mint
+const pendingRefusal = e => { const x = e && e.name === 'StaleKeysetError' && e.cause ? e.cause : e; return !!x && ([20005, 11004, 11002].includes(num(x.code)) || /\bpending\b/i.test(String(x.message || x.detail || ''))); };
 // issued, but not to this record: closed with what it already had (nothing), never with another step's coins
 function closeDepositEmpty(q) {
   const was = txById(q.txId);
@@ -649,11 +671,16 @@ function closeDepositEmpty(q) {
 }
 // an interrupted deposit with its counters on record: exactly its coins, credited to it, in one write
 async function creditDepositRange(w, q) {
-  const r = await restoreRange(w, q.mint, q.ctr.start, q.ctr.n, q.ctr.id);
-  // the mint signs a deposit's amount exactly; other coins at these counters were signed for another request (by a
-  // device holding this wallet): not this deposit's, so it is closed with nothing
-  const all = sum(r.proofs || []);
-  if (all && q.amount != null && all !== num(q.amount)) { closeDepositEmpty(q); return 0; }
+  // the mint signs a deposit's amount exactly, at one of its counter ranges; other coins at these counters were signed
+  // for another request (by a device holding this wallet): not this deposit's, so it is closed with nothing
+  let r = { proofs: [] }, other = false;
+  for (const c of depCtrs(q)) {
+    const x = await restoreRange(w, q.mint, c.start, c.n, c.id), all = sum(x.proofs || []);
+    if (!all) continue;
+    if (q.amount == null || all === num(q.amount)) { r = x; other = false; break; }
+    other = true;
+  }
+  if (other) { closeDepositEmpty(q); return 0; }
   const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
   let found = (r.proofs || []).filter(p => !held.has(p.secret)), away = [];
   if (found.length) { const st = await inTime(w.checkProofsStates(found), 30000); away = found.filter((p, i) => st[i] && st[i].state === 'SPENT'); found = found.filter((p, i) => st[i] && st[i].state === 'UNSPENT'); }
@@ -1047,7 +1074,8 @@ const opsRunning = new Set(), opRetry = new Set();
 const closeOp = op => { S.ops = S.ops.filter(o => o.id !== op.id); S.opsdone = [op.id].concat((S.opsdone || []).filter(x => x !== op.id)).slice(0, 300); };
 async function journaled(url, kind, info, run) {
   const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, follow: info.follow || null, own: info.own || null, created: Date.now(), ctr: [], outs: [] };
-  if (info.lim && info.lim.id) op.lim = { id: info.lim.id, a: info.lim.a, at: Date.now() };   // (counts toward the spending limit until it settles)
+  if (info.lim && info.lim.id) op.lim = { id: info.lim.id, a: info.lim.a, at: Date.now() };
+  if (info.dep) op.dep = 1;   // (a deposit's mint request: no coins go in)   // (counts toward the spending limit until it settles)
   S.ops.push(op); save();
   const onCountersReserved = u => { if (u && u.count > 0) { op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); save(); } };
   opsRunning.add(op.id);
@@ -1064,7 +1092,7 @@ async function journaled(url, kind, info, run) {
   } catch (e0) {
     let e = e0;
     opsRunning.delete(op.id);
-    if (isRefusal(e) && (op.ctr.length || op.outs.length)) { op.refused = 1; save(); }   // the mint refused it: it signed nothing for it
+    if (isRefusal(e) && (op.ctr.length || op.outs.length)) { op.refused = 1; if (pendingRefusal(e)) op.pendRef = 1; save(); }   // the mint refused it: it signed nothing for it (but "already pending": another copy of it may still be signed)
     if (!op.ctr.length && !op.outs.length) { closeOp(op); save(); }   // never reached the mint: nothing to settle
     else setTimeout(() => settleOp(op.id).catch(() => {}), 0);   // asked, and the answer is an error or never came: the mint decides
     if (op.outs.length) {   // the request went out: the mint may have done it, so nothing may act as if it hadn't (no offline fallback)
@@ -1144,6 +1172,7 @@ async function settleOp(id) {
   }
   return S.ops.some(o => o.id === id) ? 'open' : 'done';
 }
+const DEP_WAIT_MS = 15 * 60e3;
 async function settleOpNow(id) {
   await syncIfStale();
   const op = S.ops.find(o => o.id === id); if (!op || opsRunning.has(id)) return 'done';
@@ -1180,6 +1209,11 @@ async function settleOpNow(id) {
      of a request whose answer was lost, or the same request from another device holding this wallet), or, for a
      deposit, exactly its amount at its counters. */
   if (op.refused && !((all && allIn) || exactDeposit)) foreign = true;
+  /* A deposit's mint request (no coins go in, so no coin state tells whether the mint is still at work on it) with
+     nothing at its counters yet, whose answer never came or was "already pending": that request, or another copy of
+     it, may still be signed there. It waits, asked again with backoff, for up to 15 minutes before it is closed with
+     nothing. */
+  if (op.dep && !outs.length && (!op.refused || op.pendRef) && Date.now() - num(op.created) < DEP_WAIT_MS) return later();
   /* Only what the mint signed for THIS step is its: never coins at its counters the mint refused it (it answered
      with an error) or signed for another request (a device holding this wallet used the same counters). Those
      count as nothing signed here: a claim or deposit received nothing, and coins of ours it spent were spent by
@@ -1266,8 +1300,9 @@ async function settleOpNow(id) {
     rest(removed - added - fee0);
   }
   // nothing signed and no coin of it spent: the request may still be on its way to a slow mint (from a tab that was
-  // closed). Its record waits aside for a day; if its coins turn up spent, it is settled again (lateCheck)
-  if (!op.refused && !outs.length && op.inputs.length && !nSpent(st)) S.oplate = (S.oplate || []).filter(x => x.id !== op.id).concat([Object.assign({}, op, { lateAt: Date.now() })]).slice(-50);
+  // closed), or another copy of it may still be at work there (the mint refused this one as "already pending"). Its
+  // record waits aside for a day; if its coins turn up spent, it is settled again (lateCheck)
+  if ((!op.refused || op.pendRef) && !outs.length && op.inputs.length && !nSpent(st)) S.oplate = (S.oplate || []).filter(x => x.id !== op.id).concat([Object.assign({}, op, { lateAt: Date.now() })]).slice(-50);
   closeOp(op); save();
   return 'settled';
 }
@@ -4304,8 +4339,9 @@ function backgroundTick(startup) {
 }
 // Each mint's work runs on its own (and every mint request has a time limit), so a mint that never answers can't hold
 // up the other mints or the other checks (gift refunds, Extra Life, heir claims, bounties, "was my token claimed").
+const QUOTE_AGE = 14 * 86400000;   // a deposit is checked on the regular round while its line is younger than this
 async function mintTick(url, startup) {
-  const now = Date.now(), maxAge = 14 * 86400000;
+  const now = Date.now(), maxAge = QUOTE_AGE;
   // (each step has a time limit of its own too: one that joins a check already in flight, say one stuck on a mint
   // from the last round, is left behind after it, and the rest of this mint's work goes on)
   const step = p => inTime(p, STEP_MS);
