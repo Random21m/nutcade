@@ -1040,7 +1040,8 @@ RE = [
 (r"^(.+) already has this Nostr address\. Edit that contact instead\.$", "$1 ya tiene esta dirección de Nostr. Edita ese contacto.", "$1 já tem este endereço Nostr. Edite esse contato.", "$1 hat diese Nostr-Adresse schon. Bearbeite diesen Kontakt.", "$1 a déjà cette adresse Nostr. Modifiez ce contact."),
 # ----- round 5 -----
 (r"^Asking (.+) for (.+)…$", "Preguntando a $1 por $2…", "Pedindo a $1 $2…", "Frage $1 nach $2…", "Demande de $2 à $1…"),
-(r"^(.+) \(part (\d+) of (\d+)\)$", "$1 (parte $2 de $3)", "$1 (parte $2 de $3)", "$1 (Teil $2 von $3)", "$1 (part $2 sur $3)"),
+(r"^(.+) \(part (\d+) of (\d+)\)$", "$1 (parte $2 de $3)", "$1 (parte $2 de $3)", "$1 (Teil $2 von $3)", "$1 (partie $2 sur $3)"),
+(r"^\(part (\d+) of (\d+)\)$", "(parte $1 de $2)", "(parte $1 de $2)", "(Teil $1 von $2)", "(partie $1 sur $2)"),   # a part's history line when the note is empty
 (r"^Scanning (.+) · keyset (\w+)…$", "Revisando $1 · keyset $2…", "Verificando $1 · keyset $2…", "Durchsuche $1 · Keyset $2…", "Analyse de $1 · keyset $2…"),
 (r"^Swapped from (.+)$", "Intercambiado desde $1", "Trocado de $1", "Getauscht von $1", "Échangé depuis $1"),
 (r"^Swap into (.+)$", "Intercambiar a $1", "Trocar para $1", "In $1 tauschen", "Échanger vers $1"),

@@ -36,6 +36,7 @@ const ICON = {
 };
 
 const done = t => t.method !== 'fee' && ['done', 'claimed', 'reclaimed'].includes(t.status);   // a mint's fee line isn't a payment you made
+const cabinets = () => (window.Arcade && window.Arcade.games) || [];
 const DEFS = [
   { id: 'first-in', name: 'FIRST COIN', how: 'Receive your first sats.', icon: 'coin', col: '#ffcf3a', w: s => s.txs.some(t => t.type === 'in' && done(t) && t.amount > 0) },
   { id: 'first-out', name: 'PLAYER 2 JOINS', how: 'Send sats to someone.', icon: 'up', col: '#ff3d8b', w: s => s.txs.some(t => t.type === 'out' && done(t)) },
@@ -61,7 +62,8 @@ const DEFS = [
   { id: 'g-nibble', game: 'nibble', name: 'LONG BOI', how: 'Grow to length 30 in Nibble.', icon: 'snake', col: '#9dff3a', g: s => s.body && s.body.length >= 30 },
   { id: 'g-flipper', game: 'flipper', name: 'SILVER BALL', how: 'Light all three N-U-T lanes in Nut Flipper.', icon: 'ball', col: '#ffcf3a', g: s => s.mult >= 2 },
   { id: 'g-pocket', game: 'cornerPocket', name: 'EIGHT BALL ACE', how: 'Beat the machine at Corner Pocket.', icon: 'ball', col: '#2de2ff', g: s => !!s.won },
-  { id: 'tour', name: 'GRAND TOUR', how: 'Play all 8 cabinets.', icon: 'stick', col: '#ff9a1f', p: p => Object.keys(p.by || {}).length >= 8 },
+  // Every cabinet in the arcade, counted from the GAMES list (window.Arcade.games), so a new cabinet moves the goalposts without an edit here. Players who earned it earlier keep it (trophies are never taken back).
+  { id: 'tour', name: 'GRAND TOUR', get how() { return 'Play all ' + (cabinets().length || 8) + ' cabinets.'; }, icon: 'stick', col: '#ff9a1f', p: p => { const c = cabinets(); return c.length > 0 && c.every(g => (p.by || {})[g.id] > 0); } },
   { id: 'rat', name: 'ARCADE RAT', how: 'Play 50 games.', icon: 'stick', col: '#ff3d8b', p: p => (p.n || 0) >= 50 },
   { id: 'top5', name: 'TOP FIVE', how: 'Put your initials on a high-score table.', icon: 'star', col: '#ffcf3a', x: 'hiscore' },
   { id: 'big', name: 'FIVE DIGITS', how: 'Score 10,000 in any game.', icon: 'five', col: '#ff3d8b', x: 'big' }

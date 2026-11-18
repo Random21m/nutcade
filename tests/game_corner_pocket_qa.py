@@ -194,6 +194,15 @@ async def main():
           return {a, c}; }""")
         check('a recorded game replays frame for frame (same result twice)', rep['a']['score'] == rep['c']['score'] and rep['a']['frames'] == rep['c']['frames'] and rep['a']['frames'] > 3000, rep)
 
+        # ---- the POWER label stays readable over the bar's fill ----
+        await ev("document.querySelector('[data-g=exit]')&&document.querySelector('[data-g=exit]').click()"); await open_game(pg); await tap(pg, 'Space'); await pg.wait_for_timeout(200)   # a fresh match, at the break
+        rec = await ev("""(async()=>{ const rec=[]; const P=CanvasRenderingContext2D.prototype, orig=P.fillText; const want=Nutcade.tr('POWER');
+          P.fillText=function(t,x,y){ if(t===want) rec.push([x,y,this.fillStyle]); return orig.apply(this,arguments); };
+          const s=NutPool.cur(); s.pw=0.6; await new Promise(r=>setTimeout(r,150)); P.fillText=orig; return rec; })()""")
+        dark = [r for r in rec if r[2] == '#05030c']; white = [r for r in rec if r[2] == '#ffffff']
+        offs = {(r[0] - white[-1][0], r[1] - white[-1][1]) for r in dark} if white else set()
+        check('POWER is drawn with a dark outline all round (4 sides and corners), then the white label on top', bool(white) and rec[-1][2] == '#ffffff' and {(-1, 0), (1, 0), (0, -1), (0, 1)} <= offs, rec[-9:])
+
         # ---- five languages: every line drawn on the canvas fits ----
         await ev("document.querySelector('[data-g=exit]')&&document.querySelector('[data-g=exit]').click()")
         for lang in LANGS:

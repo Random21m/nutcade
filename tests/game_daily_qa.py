@@ -17,6 +17,12 @@ PATCH = """window.__patch = (id, score) => { const g = Arcade.games.find(x => x.
 window.__unpatch = id => { const g = Arcade.games.find(x => x.id === id); if (g.__orig) { g.update = g.__orig; g.__orig = null; } };
 0"""
 
+WORDS = """(() => { const el = document.querySelector('#dyText'), tn = el.firstChild, txt = tn.textContent, cs = getComputedStyle(el), inner = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const bad = [], re = /\\S+/g; let m;
+  while ((m = re.exec(txt))) { const r = document.createRange(); r.setStart(tn, m.index); r.setEnd(tn, m.index + m[0].length); if (r.getClientRects().length < 2) continue;
+    const s = document.createElement('span'); s.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:' + cs.font; s.textContent = m[0]; document.body.appendChild(s); const wide = s.getBoundingClientRect().width > inner; s.remove();
+    if (!wide) bad.push(m[0]); }   // a word may be cut only when it is wider than the whole line
+  return bad; })()"""
 def ms(y, mo, d, h=0, mi=0, s=0): return int(datetime.datetime(y, mo, d, h, mi, s, tzinfo=datetime.timezone.utc).timestamp() * 1000)
 
 def fnv(s):
@@ -163,6 +169,10 @@ async def main():
         before = await w.ev("__ws.notes.length")
         await w.click('[data-daily-share]'); await w.wait(300)
         pv = await w.ev("document.querySelector('#dyText').innerText")
+        check('the note preview wraps at spaces, never in the middle of a word (390 px)', await w.ev(WORDS) == [], await w.ev(WORDS))
+        await w.pg.set_viewport_size({'width': 320, 'height': 640}); await w.wait(200)
+        check('the note preview wraps at spaces on a 320 px phone (only the link may be cut, and only if it does not fit)', await w.ev(WORDS) == [], await w.ev(WORDS))
+        await w.pg.set_viewport_size({'width': 390, 'height': 844}); await w.wait(200)
         nm = name.title()
         check('preview shows the note and the app link', pv == f"NUTCADE Daily Challenge Nov 18: {nm} 12,340 🕹️ #nutcade\nhttps://random21m.github.io/nutcade/", pv)
         check('opening the preview sends nothing', await w.ev("__ws.notes.length") == before)
@@ -325,6 +335,7 @@ async def main():
             check(f'{lang}: the lobby entry shows the date and number the {lang} way', exp[lang][1] in panel and exp[lang][0].split(' ')[0] in panel, panel)
             await z.click('[data-daily-share]'); await z.wait(300)
             pv = await z.ev("document.querySelector('#dyText').innerText")
+            check(f'{lang}: the note preview wraps at spaces, never in the middle of a word', await z.ev(WORDS) == [], await z.ev(WORDS))
             check(f'{lang}: the note is in {lang}, with the date and score written the {lang} way', pv.startswith(exp[lang][2]) and exp[lang][1] in pv and pv.endswith('🕹️ #nutcade\nhttps://random21m.github.io/nutcade/'), pv)
             sheet = await z.sheet_text()
             if lang != 'en': check(f'{lang}: the share sheet is translated (no English left)', 'Preview of your note' not in sheet and 'Nothing is sent' not in sheet and 'Copy text' not in sheet and 'relay' not in sheet.replace('relé', '').replace('relais', '') .lower().replace('relays', 'x') or lang in ('pt', 'de'), sheet[:200])

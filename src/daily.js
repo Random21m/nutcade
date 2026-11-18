@@ -181,7 +181,7 @@ const CSS = `.daily{border-color:var(--gold);margin-bottom:14px}
 .daily .dbtns{display:flex;flex-wrap:wrap;gap:8px}
 .daily .dbtns .btn{flex:1 1 120px}
 .daily .dbtns .btn.solid{flex-basis:100%}
-.dy-note{white-space:pre-wrap;word-break:normal;overflow-wrap:anywhere;color:var(--ink)}
+.code.dy-note{white-space:pre-wrap;word-break:normal;overflow-wrap:break-word;color:var(--ink)}   /* wrap at spaces; a word (the link) is cut only if it is wider than the whole line. (.code alone says break-all, and this sheet loads first, so it needs the extra class to win) */
 .dy-hist{display:grid;gap:4px;font-size:18px}
 .dy-hist div{display:grid;grid-template-columns:minmax(0,5.5em) minmax(0,1fr) auto;gap:8px;align-items:center;min-height:30px;border-bottom:1px solid var(--grid)}
 .dy-hist div span:last-child{font-family:var(--f-display);font-size:10px;color:var(--gold)}`;

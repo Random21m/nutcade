@@ -207,9 +207,10 @@ async def main():
                 bad = {}
                 for pad in ['stick', 'dpad']:
                     await g.ev(f"localStorage.setItem('nutcade:pad',JSON.stringify('{pad}')); document.querySelector('[data-act=tab][data-tab=arcade]').click()"); await g.wait(150)
-                    for gid in ['swarm', 'flipper']:
+                    for gid, nostick in await g.ev("Arcade.games.map(c => [c.id, !!c.noStick])"):   # every cabinet the arcade has (a card cabinet has no stick or D-pad)
                         await g.ev(f"document.querySelector('[data-game={gid}]').click()"); await g.wait(250)
                         for sel in ['.abtn.a', '.abtn.b', '.stick, .dpad', '[data-g=pad]', '[data-g=exit]']:
+                            if nostick and sel in ('.stick, .dpad', '[data-g=pad]'): continue
                             r = await g.ev(f"({INVIEW})('{sel}')")
                             if r != 'ok': bad[f'{pad}/{gid} {sel}'] = r
                         o = await g.ev(OVER_JS)

@@ -454,6 +454,7 @@ const cornerPocket = (() => {
     c.fillStyle = C.violet; c.fillRect(CL - 8, 266, CR - CL + 16, 14); c.fillStyle = '#05030c'; c.fillRect(CL - 7, 267, CR - CL + 14, 12);
     const bw = CR - CL + 14, fill = Math.round(bw * s.pw);
     for (let x = 0; x < fill; x += 4) { const f = x / bw; c.fillStyle = f < 0.5 ? C.lime : f < 0.8 ? C.gold : C.red; c.fillRect(CL - 7 + x, 267, Math.min(3, fill - x), 12); }
+    for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) text(c, t('power'), W / 2 + ox, 270 + oy, '#05030c', 8, 'center');   // a dark outline keeps POWER readable over the green, gold and red fill
     text(c, t('power'), W / 2, 270, C.white, 8, 'center');
     G.hud(null, s.mode === 1 ? t('p2') : t(LVK[s.lv[1]]));
     if (s.ph === 'end') drawEnd(s, G, c);
