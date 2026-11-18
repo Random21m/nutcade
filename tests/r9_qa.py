@@ -13,7 +13,7 @@ off x a crash before and after the swap (and between parts) x two devices with o
 once) x a backup taken before and imported after (same wallet, a new device, a backup holding the open step) x the
 duress PIN's wallet x a mint that is down x coins already spent elsewhere x a 128-item mint with hundreds of coins x
 the spending limit x five languages."""
-import asyncio, json, math, os, re, shutil, subprocess, sys, time, urllib.request
+import asyncio, json, math, os, re, shutil, subprocess, sys, time, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 from wallet_qa import W, check, results, URL, outside_net
 
@@ -83,7 +83,14 @@ async def wallet(b, lang='en', vw=375):
     ctx = await b.new_context(viewport={'width': vw, 'height': 740}, device_scale_factor=1, is_mobile=True, has_touch=True, accept_downloads=True)
     prefs = {'sound': False, 'music': False, 'crt': False, 'lang': lang, 'relays': [NOSTR], 'npcHost': NPC}
     await ctx.add_init_script("window.__i18nMiss=new Set(); if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs'," + J(J(prefs)) + ")")
-    pg = await ctx.new_page(); w = W(pg, 'r9'); w.swaps = []
+    pg = await ctx.new_page(); w = W(pg, 'r9'); w.swaps = []; w.ctx = ctx
+    await attach(w, pg)
+    await pg.goto(URL); await pg.wait_for_timeout(700)
+    return w
+
+
+async def attach(w, pg):
+    w.pg = pg
     pg.on('pageerror', lambda e: w.errs.append('PAGEERROR ' + str(e)))
     pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and not outside_net(m.text) and not re.search(r'status of (4\d\d|5\d\d)|ERR_ABORTED|net::|Failed to fetch', m.text) else None)
     def req(r):
@@ -92,8 +99,6 @@ async def wallet(b, lang='en', vw=375):
             except Exception: d = {}
             w.swaps.append((r.url.rsplit('/v1/', 1)[0], len(d.get('inputs', [])), len(d.get('outputs', [])), sorted({o.get('id') for o in d.get('outputs', [])})))
     pg.on('request', req)
-    await pg.goto(URL); await pg.wait_for_timeout(700)
-    return w
 
 
 async def fresh(b, *mints, lang='en'):
@@ -551,6 +556,72 @@ async def run(b, broken):
         check('no script errors (duress)', not d.errs, d.errs[:4])
         await d.pg.context.close()
     await section('decoy', decoy)
+
+    async def journal():
+        await journal_followups(b, broken)
+    await section('journal', journal)
+
+
+# ---------------- 1.13.1 journal follow-ups (steps whose request reaches the mint late) ----------------
+def post_swap(u, body):
+    try:
+        q = urllib.request.Request(u + '/v1/swap', data=body.encode(), headers={'Content-Type': 'application/json'})
+        return urllib.request.urlopen(q, timeout=20).status
+    except urllib.error.HTTPError as e: return e.code
+def body_kept(body): d = json.loads(body); return sum(int(p['amount']) for p in d['inputs']) - sum(int(o['amount']) for o in d['outputs'])
+
+
+async def drop_send(w, u, amt):
+    """a send whose request never reaches the mint, and NUTCADE is killed meanwhile; then opened again (the step is
+    settled with nothing signed and waits aside). Returns the request, to be delivered to the mint late."""
+    got = {}
+    async def h(route): got.setdefault('body', route.request.post_data); got.setdefault('route', route)   # (held: never forwarded)
+    await w.ctx.route(u + '/v1/swap', h)
+    await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', str(amt)); await w.click('[data-act=doSendEcash]')
+    for _ in range(120):
+        if 'body' in got: break
+        await w.wait(250)
+    await w.wait(400)
+    try: await got['route'].abort()   # (aborted before the tab is killed, or the browser may still deliver it)
+    except Exception: pass
+    await w.pg.close(run_before_unload=False); await w.ctx.unroute(u + '/v1/swap', h)
+    pg = await w.ctx.new_page(); await attach(w, pg); await pg.goto(URL); await pg.wait_for_timeout(1500)
+    await w.until("Nutcade.S.ops.length===0", 60000); await w.wait(500)
+    return got.get('body')
+
+
+async def oplate(w): return await w.ev("(Nutcade.S.oplate||[]).map(o=>({id:o.id,ins:o.inputs,lateAt:o.lateAt}))")
+
+
+async def journal_followups(b, broken):
+    # a) near the 24 h end: a waiting step whose request the mint signs in the last minutes before it is a day old,
+    #    with NUTCADE left open: it is checked once more before it is dropped, and settled as itself
+    w = await fresh(b, FREE); await fund(w, FREE, 2000); await fund(w, FREE, 345); b0 = await bal(w, FREE)
+    body = await drop_send(w, FREE, 600); ol = await oplate(w)
+    check('24 h end: the interrupted send waits aside (nothing signed yet)', len(ol) == 1 and body, ol)
+    # its record is made 23 h 59 min 15 s old, and NUTCADE opens again (that check finds nothing yet)
+    await w.ev("(()=>{for(const o of Nutcade.S.oplate)o.lateAt=Date.now()-(24*3600e3-45e3); localStorage.setItem('nutcade:oplate',JSON.stringify(Nutcade.S.oplate)); localStorage.setItem('nutcade:gen',String(+(localStorage.getItem('nutcade:gen')||0)+1))})()")
+    await w.pg.reload(); await w.wait(4000); await w.home()
+    check('24 h end: still waiting after the opening check', len(await oplate(w)) == 1)
+    st = await asyncio.to_thread(post_swap, FREE, body)
+    ins = ol[0]['ins'] if ol else []
+    ok = await w.until(f"(Nutcade.S.oplate||[]).length===0 && Nutcade.S.ops.length===0 && Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0)==={b0 - body_kept(body)} && !Object.values(Nutcade.S.proofs).flat().some(p=>{J(ins)}.includes(p.secret))", 150000)
+    se = await lines(w, FREE, 'spent elsewhere')
+    check('24 h end: the request the mint signed in the last minute is settled as itself while NUTCADE stays open (one last check before the record is dropped)', st == 200 and ok and not se, (st, await bal(w, FREE), b0 - body_kept(body), await oplate(w), se))
+    check('24 h end: every coin left in the balance is unspent', await w.ev(f"(async()=>{{const w=new CashuLib.Wallet({J(FREE)},{{unit:'sat'}}); await w.loadMint(); const ps=Nutcade.S.proofs[{J(FREE)}]||[]; return (await w.checkProofsStates(ps)).every(s=>s.state==='UNSPENT')}})()"))
+    await books(w, FREE, 'journal 24h', broken); await w.pg.context.close()
+    # b) two waiting steps on the same single coin; the NEWER one's request is the one the mint signs late
+    w = await fresh(b, FREE); await fund(w, FREE, 1024); b0 = await bal(w, FREE)
+    body1 = await drop_send(w, FREE, 300); body2 = await drop_send(w, FREE, 500); ol = await oplate(w)
+    check('shared coin: two waiting steps on the same coin', len(ol) == 2 and set(ol[0]['ins']) == set(ol[1]['ins']), ol)
+    st = await asyncio.to_thread(post_swap, FREE, body2)
+    await w.pg.reload(); await w.wait(1500); await w.until("Nutcade.S.ops.length===0 && (Nutcade.S.oplate||[]).length===0", 60000); await w.wait(1000)
+    await w.pg.reload(); await w.wait(1500); await w.until("Nutcade.S.ops.length===0", 60000); await w.wait(1000)
+    L = await w.ev(f"Nutcade.S.txs.filter(t=>t.mint==={J(FREE)}).map(t=>[t.note,t.type,t.amount,t.fee])")
+    check(f'shared coin: balance exact ({b0 - body_kept(body2)})', st == 200 and await bal(w, FREE) == b0 - body_kept(body2), (st, await bal(w, FREE)))
+    check('shared coin: the step the mint signed is booked as itself: no "spent elsewhere" + "Recovered" pair', not await lines(w, FREE, 'spent elsewhere') and not await lines(w, FREE, 'Recovered'), L)
+    await books(w, FREE, 'journal shared', broken)
+    check('no script errors (journal follow-ups)', not w.errs, w.errs[:4]); await w.pg.context.close()
 
 
 if __name__ == '__main__':
