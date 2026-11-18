@@ -689,11 +689,12 @@ const nutFlipper = {
   }
 };
 
-/*@@game_pool.js@@*/
-const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper, cornerPocket];
-// Cabinets kept in their own files (poker.js) register a factory in window.NutCabinets; each gets the helpers it draws with.
-for (const make of (window.NutCabinets || [])) GAMES.push(make({ W, H, C, spr, text, T, A, store, clamp, hiOf, qualifies, addScore }));
-window.ArcadeKit = { W, H, C, Math, spr, text, T, rnd, ri, clamp, boom, tickFx, drawFx, add(g) { GAMES.push(g); if (window.Nutcade) window.Nutcade.render(); } };
+const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper];
+// Every cabinet kept in its own file (game_*.js, loaded before this one) registers a factory in window.NutCabinets; each is
+// called once, in script order, with the kit below and returns its cabinet object. See "Adding a cabinet" in src/README.md.
+const KIT = { W, H, C, Math, A, T, store, spr, text, rnd, ri, clamp, boom, tickFx, drawFx, hiOf, qualifies, addScore,
+  RNG: () => RNG(), withSeed(seed, fn) { const keep = RNG; RNG = seeded(seed >>> 0); try { return fn(); } finally { RNG = keep; } } };
+for (const make of (window.NutCabinets || [])) GAMES.push(make(KIT));
 // The challenger's ghost: their player drawn faintly over yours while you race their replay
 starSwarm.ghost = (s, ctx) => { if (!s.p.dead) spr(ctx, SHIP, s.p.x, s.p.y, { c: C.white, w: C.white, p: C.white }); };
 brickBlitz.ghost = (s, ctx) => { ctx.fillStyle = C.white; ctx.fillRect(s.pad.x, s.pad.y, s.pad.w, s.pad.h); ctx.fillRect(s.ball.x - 2, s.ball.y - 2, 4, 4); };

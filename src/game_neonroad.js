@@ -3,10 +3,9 @@
    farthest to nearest for painting). The whole road is built from the seeded RNG in init(), so a seed gives the same road.
    update() uses only + - * / (no sin/cos) and RNG, so replays and challenges give the same run on every phone.
    Nothing is allocated while the game runs: the projection and the scratch rows are typed arrays made once. */
-(function () {
+(window.NutCabinets = window.NutCabinets || []).push(function (K) {
 'use strict';
-const K = window.ArcadeKit; if (!K) return;
-const { W, H, C, text, T, rnd, ri, clamp, boom, tickFx, drawFx } = K;
+const { W, H, C, Math, text, T, rnd, ri, clamp, boom, tickFx, drawFx } = K;
 
 const SEG = 200, ROADW = 900, CAMH = 1000, CAMD = 0.84, DRAW = 100, CS = 0.6;   // segment length, road half width, camera
 const HOR = 118, KY = 150, HW2 = W / 2;                                        // horizon row, vertical scale
@@ -407,5 +406,5 @@ const neonRoad = {
     drawCar(ctx, CAR_BIG, PLAYER_PAL, 56 + Math.sin(t / 40) * 6, 79, 28, h, 0);
   }
 };
-K.add(neonRoad);
-})();
+return neonRoad;
+});

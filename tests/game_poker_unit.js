@@ -1,6 +1,6 @@
 // Nut Poker rules: unit tests (node tests/game_poker_unit.js). Prints PASS/FAIL lines like the Python suites; exits 1 on any failure.
 const assert = require('assert');
-const P = require('../src/poker.js');
+const P = require('../src/game_poker.js');
 let bad = 0;
 const check = (name, fn) => { try { fn(); console.log('PASS', name); } catch (e) { bad++; console.log('FAIL', name, '-', e.message); } };
 const R = { 2: 0, 3: 1, 4: 2, 5: 3, 6: 4, 7: 5, 8: 6, 9: 7, 10: 8, J: 9, Q: 10, K: 11, A: 12 }, S = { s: 0, h: 1, d: 2, c: 3 };

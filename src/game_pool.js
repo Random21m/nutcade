@@ -1,10 +1,13 @@
 /* =====================================================================
    GAME 9: CORNER POCKET (top-down 8-ball pool, 1 or 2 players)
-   Inlined into games.js (see the marker there), so it shares the engine's helpers: C, T, text, rnd, clamp, boom...
+   A cabinet file (see src/README.md): it registers a factory in window.NutCabinets and games.js calls it with the shared kit (C, T, text, rnd, clamp, boom...).
    The simulation (everything update() does) uses only + - * / and sqrt plus the deterministic Math above, and takes
    its randomness from RNG, so a replay plays out the same on every phone. Aim is a unit vector, never an angle
    (atan2 may round differently between browsers); draw-only code may use anything.
 ===================================================================== */
+(window.NutCabinets = window.NutCabinets || []).push(function (K) {
+'use strict';
+const { W, H, C, Math, A, T, text, rnd, ri, clamp, boom, tickFx, drawFx, RNG, withSeed } = K;
 const cornerPocket = (() => {
   const R = 4, DD = 8, DD2 = 64, NB = 16, ST = 5;                 // ball radius, diameter, balls (0 = cue), sub-steps a frame
   const CL = 30, CR = 194, CT = 52, CB = 254, CX = 112, CY = 153;   // the cloth
@@ -503,8 +506,7 @@ const cornerPocket = (() => {
 
   // a self-contained match with no screen, for tests: the same code that runs on a phone, driven by two machine players
   function selfplay(seed, l0, l1, maxFrames) {
-    const keep = RNG; RNG = seeded(seed >>> 0);
-    try {
+    return withSeed(seed >>> 0, () => {
       const Gs = { score: 0, over() { this.done = true; }, addScore(n) { this.score += n; }, sfx() {}, held: () => false, hit: () => false, ptr: { down: false, x: 0, y: 0 }, tap: null, done: false };
       const s = newState(); startMatch(s, 1, 1); s.ai = [true, true]; s.lv = [l0, l1]; aiThink(s);
       let frames = 0, bad = 0, lastPh = '', shots = 0, wins = -1, pots = 0;
@@ -516,8 +518,10 @@ const cornerPocket = (() => {
       }
       let potted = 0; for (let i = 1; i < NB; i++) if (s.st[i] === 2) potted++;
       return { done: Gs.done, frames, bad, winner: s.winner, reason: s.reason, shots: s.shots[0] + s.shots[1], potted, grp: s.grp.slice(), ph: s.ph };
-    } finally { RNG = keep; }
+    });
   }
   window.NutPool = { cur: () => last, selfplay, tx: TX, geom: { CL, CR, CT, CB, CX, CY, HEADY, FOOTY, R } };
   return api;
 })();
+return cornerPocket;
+});
