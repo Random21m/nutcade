@@ -690,6 +690,8 @@ const nutFlipper = {
 };
 
 const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper];
+// Cabinets kept in their own files (poker.js) register a factory in window.NutCabinets; each gets the helpers it draws with.
+for (const make of (window.NutCabinets || [])) GAMES.push(make({ W, H, C, spr, text, T, A, store, clamp, hiOf, qualifies, addScore }));
 // The challenger's ghost: their player drawn faintly over yours while you race their replay
 starSwarm.ghost = (s, ctx) => { if (!s.p.dead) spr(ctx, SHIP, s.p.x, s.p.y, { c: C.white, w: C.white, p: C.white }); };
 brickBlitz.ghost = (s, ctx) => { ctx.fillStyle = C.white; ctx.fillRect(s.pad.x, s.pad.y, s.pad.w, s.pad.h); ctx.fillRect(s.ball.x - 2, s.ball.y - 2, 4, 4); };
@@ -708,7 +710,8 @@ let rec = null, lastReplay = null, ghost = null;   // this game's inputs, frame 
 const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', Space: 'a', KeyZ: 'a', KeyX: 'a', KeyJ: 'a', Enter: 'b', KeyP: 'b', Escape: 'esc' };
 function press(k) { if (!keys[k]) pressed.add(k); keys[k] = true; }
 function release(k) { keys[k] = false; }
-window.addEventListener('keydown', e => { if (!view || e.target.tagName === 'INPUT') return; const k = KEYMAP[e.code]; if (!k) return; e.preventDefault(); if (k === 'esc') { closeGame(); return; } press(k); });
+window.addEventListener('keydown', e => { if (!view || e.target.tagName === 'INPUT') return; if (cur && cur.onKey && cur.onKey(e.code, st, mode, e)) { e.preventDefault(); return; }   // a cabinet may take a key for itself (poker: D and Enter deal)
+  const k = KEYMAP[e.code]; if (!k) return; e.preventDefault(); if (k === 'esc') { closeGame(); return; } press(k); });
 window.addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) release(k); });
 window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; if (mode === 'play') mode = 'pause'; });
 document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'play') mode = 'pause'; });
@@ -770,13 +773,13 @@ const Replay = {
   },
   // play a replay to the end and report the score it reaches
   async verify(id, seed, packed, score) {
-    const g = GAMES.find(x => x.id === id); if (!g) return { ok: false, why: 'game' };
+    const g = GAMES.find(x => x.id === id); if (!g || g.noChallenge) return { ok: false, why: 'game' };
     let runs; try { runs = await Replay.unpack(packed); } catch (e) { return { ok: false, why: 'replay' }; }
     const sim = stepper(g, seed >>> 0, runs); let n = 0;
     while (sim.step()) { if (++n % 4000 === 0) await new Promise(r => setTimeout(r, 0)); }
     return { ok: sim.done && sim.g.score === Math.floor(score), score: sim.g.score, frames: sim.frames, ended: sim.done };
   },
-  ghost(id, seed, runs) { const g = GAMES.find(x => x.id === id); try { return g && runs ? stepper(g, seed >>> 0, runs) : null; } catch (e) { return null; } }
+  ghost(id, seed, runs) { const g = GAMES.find(x => x.id === id); try { return g && !g.noChallenge && runs ? stepper(g, seed >>> 0, runs) : null; } catch (e) { return null; } }
 };
 
 function makeG() {
@@ -850,13 +853,13 @@ function bindStick(root) {
 function openGame(id, opts) {
   cur = GAMES.find(g => g.id === id); if (!cur) return;
   closeGame(true);
-  chal = opts && opts.challenge ? opts.challenge : null;
+  chal = opts && opts.challenge && !cur.noChallenge ? opts.challenge : null;   // (free-credit cabinets have no replays, so no challenges)
   view = document.createElement('div'); view.className = 'game-view'; view.setAttribute('role', 'dialog'); view.setAttribute('aria-label', cur.name);
   view.innerHTML = `<div class="game-top"><button class="btn sm red" data-g="exit">Exit</button><div class="ttl">${cur.name}</div><button class="btn sm" data-g="mute" aria-label="Toggle sound">${(window.NutPrefs || {}).sound === false ? 'SND OFF' : 'SND ON'}</button></div>
     <div class="screen-frame"><canvas id="gameCanvas" width="${W}" height="${H}" aria-label="${T(cur.name + ' game screen')}"></canvas></div>
-    <div class="pad touch-only"><div class="hint"><span>${cur.help}</span><button class="padswap" data-g="pad">${store.get('pad', 'stick') === 'stick' ? 'Use D-pad' : 'Use joystick'}</button></div>
-    <div class="pad-row">${padHTML()}<div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause"><span data-noi18n>II</span></button><button class="abtn a" data-k="a" aria-label="A button"><span data-noi18n>A</span></button></div></div></div>
-    <div class="pad-keys"><span>${cur.keys}</span> · <span>Enter pause</span> · <span>Esc exit</span></div><div id="entry"></div>`;
+    <div class="pad touch-only${cur.noStick ? ' nostick' : ''}"><div class="hint"><span>${cur.help}</span><button class="padswap" data-g="pad"${cur.noStick ? ' hidden' : ''}>${store.get('pad', 'stick') === 'stick' ? 'Use D-pad' : 'Use joystick'}</button></div>
+    <div class="pad-row"${cur.noStick ? ' style="justify-content:center"' : ''}>${cur.noStick ? '' : padHTML()}<div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause"><span data-noi18n>II</span></button><button class="abtn a" data-k="a" aria-label="A button"><span data-noi18n>A</span></button></div></div></div>
+    <div class="pad-keys"><span>${cur.keys}</span> · <span>${cur.onKey ? 'P pause' : 'Enter pause'}</span> · <span>Esc exit</span></div><div id="entry"></div>`;
   document.body.appendChild(view);
   document.body.style.overflow = 'hidden';
   if (window.Nutcade && window.Nutcade.holdToasts) window.Nutcade.holdToasts();   // nothing lands on the controls
@@ -899,6 +902,7 @@ function openGame(id, opts) {
   loop();
 }
 function closeGame(silent) {
+  if (!silent && view && cur && cur.onExit && st && (mode === 'play' || mode === 'pause')) try { cur.onExit(st, G); } catch (e) {}   // a run left unfinished still saves its best
   cancelAnimationFrame(raf); raf = 0; RNG = Math.random; ghost = null; rec = null;
   if (fitObs) { fitObs.disconnect(); fitObs = null; }
   if (view) { view.remove(); view = null; window.removeEventListener('resize', fit); document.body.style.overflow = ''; }
@@ -920,7 +924,7 @@ function endGame() {
     if (!view) return;
     if (chal) showChallengeResult(score);
     else if (qualifies(cur.id, score)) showEntry(score, seed);
-    else if (score > 0 && canChallenge()) showOver(score, seed);
+    else if (score > 0 && canChallenge() && !cur.noChallenge) showOver(score, seed);
     else { mode = 'title'; A().music('title'); }
   }, 1800);
 }
@@ -978,7 +982,7 @@ function showEntry(score, seed) {
     box.innerHTML = `<div class="scrim" style="align-items:center"><div class="sheet initials" style="border-radius:8px;border-bottom:3px solid var(--cyan);max-width:340px">
       <div style="font-family:var(--f-display);font-size:12px;color:var(--lime)">SCORE SAVED</div>
       <div style="font-family:var(--f-display);font-size:18px">${pad6(score)} ${n}</div>
-      <button class="btn solid gold block" data-g="card">Share score card</button>${canChallenge() ? '<button class="btn block violet" data-g="chal">Challenge a friend</button>' : ''}<button class="btn block" data-g="again">Continue</button></div></div>`;
+      <button class="btn solid gold block" data-g="card">Share score card</button>${canChallenge() && !cur.noChallenge ? '<button class="btn block violet" data-g="chal">Challenge a friend</button>' : ''}<button class="btn block" data-g="again">Continue</button></div></div>`;
     const g = cur;
     const cb = box.querySelector('[data-g=chal]'); if (cb) cb.onclick = () => challengeFromHere(g, seed, score, n);
     box.querySelector('[data-g=again]').onclick = () => { box.innerHTML = ''; mode = 'title'; A().music('title'); };

@@ -45,6 +45,7 @@ button{cursor:pointer}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .pad-keys{display:none;font-size:18px;color:var(--dim);text-align:center}
 @media (pointer:fine){.pad.touch-only{display:none}.pad-keys{display:block}}
+@media (orientation:landscape) and (max-height:520px){.pad.nostick{display:none}}   /* a card cabinet taps its own buttons, so a phone on its side gives the table the whole height */
 .marquee h1{margin:0;font-family:var(--f-display);font-size:clamp(28px,9vw,40px);letter-spacing:2px;color:var(--gold);
   text-shadow:3px 3px 0 var(--pink),6px 6px 0 var(--violet),0 0 18px var(--gold);text-shadow:3px 3px 0 var(--pink),6px 6px 0 var(--violet),0 0 18px color-mix(in srgb,var(--gold) 60%,transparent)}
 .marquee .sub{margin-top:12px;font-family:var(--f-display);font-size:9px;letter-spacing:3px;color:var(--cyan)}

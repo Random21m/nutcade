@@ -20,7 +20,8 @@
 | `app_r8_actions.js` | Round 8 button handlers, also inlined inside `app.js` |
 | `ur.js` | Animated QR codes: a BC-UR encoder and decoder (`ur:bytes`, multipart fountain codes), compatible with cashu.me |
 | `chiptune.js` | The sound modem used by Send by sound (encoder, decoder, microphone and speaker) |
-| `games.js` | The arcade engine and eight cabinets |
+| `games.js` | The arcade engine and eight cabinets (it also adds any cabinet an extra file registers in `window.NutCabinets`) |
+| `poker.js` | Nut Poker, the ninth cabinet: free-credit video poker (its own file; rules are unit-tested in `tests/game_poker_unit.js`) |
 | `trophies.js` | Trophies and share cards |
 | `price.js` | The live Bitcoin price chart |
 | `audio.js` | Sound effects and music |
