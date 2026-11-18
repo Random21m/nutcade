@@ -134,10 +134,13 @@ async def main():
         ok = await w.until(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(g1['id'])}).status==='reclaimed'", 15000)
         check('gift: taken back with your refund key', ok and await w.bal(A) >= before + 395, (await w.bal(A)) - before)
         g2 = await short_gift(250, 3)
-        await w.close(); await w.wait(34000)
-        before = await w.bal(A)
-        await w.ev("window.dispatchEvent(new Event('online'))")
-        ok = await w.until(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(g2['id'])}).status==='reclaimed'", 20000)
+        await w.close()
+        before = await w.bal(A)   # (taken before the wait: the 30 s check-up may refund the gift during it, and that counts too; on a slow machine it often does)
+        await w.wait(34000)
+        ok = False
+        for _ in range(7):   # (the 'online' nudge starts a check-up, but one already running on a slow machine absorbs it: nudge again until the gift is back)
+            await w.ev("window.dispatchEvent(new Event('online'))")
+            if await w.until(f"Nutcade.S.txs.find(t=>t.id==={json.dumps(g2['id'])}).status==='reclaimed'", 3500): ok = True; break
         check('gift: an unclaimed gift comes back on its own after the date', ok and await w.bal(A) >= before + 245, (await w.bal(A)) - before)
         await st.pg.context.close()
 

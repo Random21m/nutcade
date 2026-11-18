@@ -70,10 +70,11 @@ class W:
         raise AssertionError(f'gate step {act}: no effect after {s.GATE_TRIES} tries (screen: {(await s.ev("document.body.innerText"))[:80]!r}; last error: {str(last)[:160]})')
     async def gate_fill(s, vals, ms=6000):
         """Type vals ({word index: text}) into the [data-cw] fields, and press Confirm in the same evaluate() that checks the fields
-        still hold them (a re-render between the typing and the click empties them: then type again). Returns when Confirm was pressed."""
+        still hold them (a re-render between the typing and the click empties them: then type again). Returns the text that Confirm
+        left in #gateErr (read in that same evaluate(); a later redraw would clear it), once Confirm was pressed."""
         check_js = """(vals)=>{const f=[...document.querySelectorAll('[data-cw]')]; const b=document.querySelector('[data-act=gateConfirm]');
             if(!f.length||!b) return 'gone'; if(f.some(e=>!(e.dataset.cw in vals))) return 'other';
-            if(f.some(e=>e.value!==vals[e.dataset.cw])) return 'empty'; b.click(); return 'ok'}"""
+            if(f.some(e=>e.value!==vals[e.dataset.cw])) return 'empty'; b.click(); const er=document.querySelector('#gateErr'); return 'ok:'+(er?er.innerText:'')}"""
         set_js = """(vals)=>{const f=[...document.querySelectorAll('[data-cw]')]; if(!f.length) return 'gone';
             for(const e of f){ if(e.dataset.cw in vals){ e.value=vals[e.dataset.cw]; e.dispatchEvent(new Event('input',{bubbles:true})) } } return 'set'}"""
         last = None
@@ -85,7 +86,8 @@ class W:
                         if k in vals: await s.pg.locator(f'[data-cw="{k}"]').fill(vals[k], timeout=4000)
                 else:   # (a screen that keeps being redrawn: set the fields in the same evaluate() that presses Confirm)
                     await s.pg.evaluate(set_js, vals)
-                if await s.pg.evaluate(check_js, vals) == 'ok': return
+                r = await s.pg.evaluate(check_js, vals)
+                if r.startswith('ok:'): return r[3:]
             except PWError as e:
                 if not _gate_retryable(e): raise
                 last = e
@@ -102,10 +104,10 @@ class W:
         phrase=await s.ev("Nutcade.S.seed.mnemonic"); words=phrase.split()
         await s.gate_step('gateToConfirm', "!!document.querySelector('[data-cw]')", tick='#wrote')
         if wrong_first:
-            for _ in range(4):   # (the message is gone again if the screen was redrawn: enter the wrong words again)
-                await s.gate_fill({k: 'zebra' for k in await s.ev("[...document.querySelectorAll('[data-cw]')].map(e=>e.dataset.cw)")})
-                if await s.until("!!((document.querySelector('#gateErr')||{}).innerText||'').trim()", 3000): break
-            s.wrong_msg=await s.ev("(document.querySelector('#gateErr')||{}).innerText||''")
+            s.wrong_msg = ''
+            for _ in range(4):   # (no message: the Confirm press was lost in a redraw; enter the wrong words again)
+                s.wrong_msg = await s.gate_fill({k: 'zebra' for k in await s.ev("[...document.querySelectorAll('[data-cw]')].map(e=>e.dataset.cw)")})
+                if s.wrong_msg.strip(): break
         picks=await s.ev("[...document.querySelectorAll('[data-cw]')].map(e=>e.dataset.cw)")
         await s.gate_fill({k: words[int(k)] for k in picks})
         s.done_shown = await s.until("document.body.innerText.includes('PLAYER 1 READY')", 15000)
