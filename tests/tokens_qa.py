@@ -485,6 +485,90 @@ async def main():
             await w.pg.context.close()
         await section('logo', logo)
 
+        # ---------- recheck findings: the fee shown is a true "up to", a stop mid-batch never remakes, coins incl. fee coins ----------
+        async def money2():
+            async def slow(w, sec):
+                async def h(route):
+                    await asyncio.sleep(sec); await route.continue_()
+                await w.pg.route('**/v1/swap', h); return h
+            # F1: on the fee mint the fee paid is never more than the "up to" shown; the same coins always give the same number
+            w = await funded(b, [FEE], 30000); await w.receive_ln(9000); await w.receive_ln(777)
+            for amount, count in ((63, 20), (255, 12), (127, 15), (524, 8), (21, 20), (63, 20), (1000, 5), (33, 17)):
+                if await w.bal(FEE) < amount * count * 1.1 + 100: break
+                ests = []
+                for _ in range(4):
+                    await open_print(w, FEE); await w.fill('#ptAmt', str(amount)); await w.fill('#ptCount', str(count)); await w.click('[data-act=ptNext]')
+                    await w.until("!!document.querySelector('[data-act=ptMake]') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 20000)
+                    ests.append((await w.ev("NutTokens.lastEstimate") or {}).get('fee'))
+                b0 = await w.bal(FEE); await w.click('[data-act=ptMake]')
+                await w.until("!!document.querySelector('.pt-ready') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 240000); await w.wait(300)
+                bid = await w.ev("(document.querySelector('.pt-ready')||{dataset:{}}).dataset.b||null"); txs = await batch(w, bid) if bid else []
+                paid = b0 - await w.bal(FEE) - amount * len(txs); lines = sum(t.get('fee', 0) for t in txs)
+                check(f'money2 fee {count}x{amount}: paid {paid} <= shown "up to {ests[-1]}", and the same coins give the same number every time {sorted(set(ests))}', bid and len(txs) == count and paid == lines and ests[-1] is not None and paid <= ests[-1] and len(set(ests)) == 1, (await w.err(), len(txs), paid, lines, ests))
+                await w.ev("Nutcade.closeSheet()")
+            check('money2 fee: history = balance', not await books(w, (FEE,)), await books(w, (FEE,)))
+            # F1: the spending limit uses the number shown: a day limit of exactly what is shown lets the batch through
+            for trial in range(3):
+                await open_print(w, FEE); await w.fill('#ptAmt', '63'); await w.fill('#ptCount', '20'); await w.click('[data-act=ptNext]'); await w.until("!!document.querySelector('[data-act=ptMake]')", 20000)
+                est = await w.ev("NutTokens.lastEstimate")
+                await w.ev(f"Nutcade.S.limits={{per:0, day: Nutcade.r8.spentDay() + {est['spend']}}}")
+                await w.click('[data-act=ptMake]'); await w.until("!!document.querySelector('.pt-ready') || !!document.querySelector('#limitLayer') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 240000); await w.wait(300)
+                ok = await w.ev("!!document.querySelector('.pt-ready')"); lay = await w.ev("(document.querySelector('#limitLayer')||{}).innerText||''")
+                check(f'money2 limit {trial}: a day limit of exactly the cost shown ({est["spend"]}) lets the batch through, and it stays within it', ok and await w.ev("Nutcade.r8.spentDay() <= Nutcade.S.limits.day"), (lay[:160], await w.err()))
+                await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); Nutcade.S.limits=null; Nutcade.closeSheet()")
+            await w.pg.context.close()
+            # F2: the limit runs out in the middle of a batch (another payment used the day): what was made is never made again
+            for withpin in (False, True):
+                w = await funded(b, [NOFEE], 6000)
+                if withpin:
+                    await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=pinSet]'); await w.wait(200)
+                    for _ in range(2):
+                        for k in PIN: await w.click(f'[data-pinpad] [data-k="{k}"]')
+                        await w.click('[data-pinpad] [data-k=ok]'); await w.wait(300)
+                    await w.until("Nutcade.vault.on && Nutcade.vault.open", 20000); await w.ev("Nutcade.closeSheet()")
+                await w.ev("Nutcade.S.limits={per:0, day:5000}")
+                h = await slow(w, 0.8)
+                await open_print(w, NOFEE); await w.fill('#ptAmt', '100'); await w.fill('#ptCount', '5'); await w.click('[data-act=ptNext]'); await w.until("!!document.querySelector('[data-act=ptMake]')", 20000)
+                await w.click('[data-act=ptMake]'); await w.until(f"{PRINTED}.length>=2", 30000)
+                await w.ev("Nutcade.S.limits.day = Nutcade.r8.spentDay() + 50")   # (as if another payment used up the day meanwhile)
+                await w.until("!!document.querySelector('.pt-stopped') || !!document.querySelector('#limitLayer') || !!document.querySelector('.pt-ready')", 60000); await w.wait(600)
+                if withpin and await w.ev("!!document.querySelector('#limitLayer [data-pinpad]')"):
+                    for k in PIN: await w.click(f'#limitLayer [data-pinpad] [data-k="{k}"]')
+                    await w.click('#limitLayer [data-pinpad] [data-k=ok]'); await w.wait(4000)
+                await w.pg.unroute('**/v1/swap', h)
+                n = await w.ev(f"{PRINTED}.length"); txt = (await w.sheet_text()) + await w.ev("(document.querySelector('#limitLayer')||{}).innerText||''")
+                check(f'money2 mid-batch limit (PIN {withpin}): no token made twice, never more than the 5 asked for', 2 <= n < 5 and len(set(await w.ev(f"{PRINTED}.map(t=>t.print.i)"))) == n, n)
+                check(f'money2 mid-batch limit (PIN {withpin}): the screen says exactly how many were made ({n} of 5), not "nothing was sent"', f'{n} of 5' in txt and 'Nothing was sent' not in txt, txt[:300])
+                await w.ev("document.querySelector('#limitLayer [data-act=limitNo]')?.click(); document.querySelector('.pt-stopped [data-act=ptReprint]')?.click()"); await w.until("!!document.querySelector('.pt-ready')", 30000)
+                check(f'money2 mid-batch limit (PIN {withpin}): the {n} made can be printed from the stop screen', await w.ev("!!document.querySelector('.pt-ready') && NutTokens.lastCheck.length") == n)
+                await w.until("Nutcade.S.ops.length===0", 20000)
+                check(f'money2 mid-batch limit (PIN {withpin}): history = balance, nothing left open', not await books(w, (NOFEE,)) and await w.ev("Nutcade.S.ops.length") == 0)
+                await w.pg.context.close()
+            # F3: the coins actually in the token (the receiver's fee coin too) decide whether its code fits on paper
+            w = await funded(b, [FEE, NOFEE], 6000)
+            for mint, ok_ in ((FEE, False), (NOFEE, True)):
+                n0 = await w.ev(f"{PRINTED}.length"); b0 = await w.bal(mint)
+                await open_print(w, mint); await w.fill('#ptAmt', '1023'); await w.fill('#ptCount', '2'); await w.click('[data-act=ptNext]'); await w.wait(1500)
+                e = await w.err(); can = await w.ev("!!document.querySelector('[data-act=ptMake]')")
+                if ok_: check('money2 density: 1,023 SAT on the no-fee mint (10 coins) fits and is offered', can, e)
+                else: check('money2 density: 1,023 SAT on the fee mint (10 coins + the fee coin = 11) is refused before anything is made, counting 11', not can and 'too dense' in e and '11 coins' in e and await w.ev(f"{PRINTED}.length") == n0 and await w.bal(mint) == b0, e)
+                await w.ev("Nutcade.closeSheet()")
+            await w.pg.context.close()
+            # O1: a click on a disabled button does nothing (here Make while a batch is being made, and Create token)
+            w = await funded(b, [NOFEE], 3000); h = await slow(w, 0.6)
+            await open_print(w, NOFEE); await w.fill('#ptAmt', '50'); await w.fill('#ptCount', '3'); await w.click('[data-act=ptNext]'); await w.until("!!document.querySelector('[data-act=ptMake]')", 20000)
+            await w.ev("(()=>{const b=document.querySelector('[data-act=ptMake]'); b.click(); setTimeout(()=>b.dispatchEvent(new MouseEvent('click',{bubbles:true})),200)})()")
+            await w.until("!!document.querySelector('.pt-ready')", 60000); await w.wait(2500)
+            check('money2 disabled: a click on Make while it is making does nothing (one batch of 3)', await w.ev(f"{PRINTED}.length") == 3, await w.ev(f"{PRINTED}.length"))
+            await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '40')
+            n0 = await w.ev("Nutcade.S.txs.length")
+            await w.ev("(()=>{const b=document.querySelector('[data-act=doSendEcash]'); b.click(); setTimeout(()=>b.dispatchEvent(new MouseEvent('click',{bubbles:true})),150)})()"); await w.wait(4000)
+            check('money2 disabled: a click on Create token while it is making the token does nothing (one token)', await w.ev(f"Nutcade.S.txs.length - {n0}") == 1, await w.ev(f"Nutcade.S.txs.slice(0,3).map(t=>[t.amount,t.note])"))
+            await w.pg.unroute('**/v1/swap', h)
+            check('money2 disabled: history = balance', not await books(w, (NOFEE,)))
+            await w.pg.context.close()
+        await section('money2', money2)
+
         # ---------- every new screen in five languages at 320 px: nothing off screen, nothing left in English ----------
         async def narrow():
             for lang in LANGS:
