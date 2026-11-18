@@ -2635,6 +2635,7 @@ function viewSettings() {
       ${toggle('crt', 'CRT scanlines', '')}
       ${toggle('btcSymbol', 'Show amounts as ₿', '₿1,000 instead of 1,000 SAT.')}
       <div class="field"><label>QR code center</label><div class="seg pt-seg" role="group" aria-label="QR code center">${[['none', 'NONE'], ['acorn', 'NUTCADE ACORN']].map(([k, l]) => `<button data-act="qrLogo" data-v="${k}" aria-pressed="${(S.prefs.qrLogo || 'acorn') === k}">${l}</button>`).join('')}</div><div class="th">The acorn in the middle of the QR codes NUTCADE shows and prints. A code that wouldn't scan with it shows plain, and animated codes stay plain.</div></div>
+      ${window.Arcade ? `<div class="sub">Arcade</div>${window.Arcade.initialsHTML()}` : ''}
       ${toggle('hideAmounts', 'Hide amounts', 'Shows ••• instead of amounts on the wallet, notes and mints screens. You can also tap your balance. Payment screens always show the real amount.')}
     </div>
 

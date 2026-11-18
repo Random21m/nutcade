@@ -735,6 +735,81 @@ async def main():
                     await w.pg.context.close()
         await section('mintinfo_layout', mintinfo_lang_layout)
 
+        # ======================= your initials =======================
+        HOOK = "(()=>{const g=Arcade.games.find(x=>x.id==='neonRoad');if(!g.__h){const od=g.draw;g.draw=function(s,G,c){window.__st=s;return od.call(this,s,G,c)};g.__h=1}})()"
+        async def play_neon(w):
+            """Plays Neon Road for a few seconds and lets the clock run out: the new-high-score dialog opens."""
+            await tab(w, 'arcade'); await w.click('[data-game=neonRoad]'); await w.wait(300); await w.ev(HOOK); await w.wait(300); await w.pg.keyboard.press('Space'); await w.wait(300)
+            await w.until("window.__st&&window.__st.go===0", 8000); await w.pg.keyboard.down('ArrowUp'); await w.wait(2500); await w.pg.keyboard.up('ArrowUp')
+            await w.ev("window.__st.tl = 40"); await w.wait(900)
+            return await w.until("!!document.querySelector('#ini')", 8000)
+        async def set_ini(w, text, rename=True, where='#app'):
+            await w.ev(f"(()=>{{const f=document.querySelector({J(where)}+' [data-ini-form]'); f.querySelector('[data-ini-in]').value={J(text)}; f.querySelector('[data-ini-ren]').checked={J(rename)}}})()")
+            await w.ev(f"document.querySelector({J(where)}+' [data-ini-form] button[type=submit]').click()"); await w.wait(300)
+        async def initials():
+            w = await wallet(b); await w.create(); await tab(w, 'arcade')
+            check('initials: the Arcade screen has a Your initials panel, showing AAA until you change it', await w.ev("document.querySelector('#arcadeScreen [data-ini-in]').value")=='AAA' and 'Your initials' in await w.ev("document.querySelector('#arcadeScreen').innerText"))
+            await w.ev("NutStore.set('scores:swarm',[{n:'AAA',s:500,t:1},{n:'ZZZ',s:300,t:2},{n:'AAA',s:100,t:3}])")
+            for bad in ('AB', '', '$$$', 'ABCD', 'A B', '\u00c9AB'):
+                await set_ini(w, bad); st = await w.ev("NutStore.get('initials','AAA')"); er = await w.ev("document.querySelector('#arcadeScreen [data-ini-err]').innerText")
+                check(f'initials: {bad!r} is refused with a message, and nothing changes', st == 'AAA' and 'exactly 3 letters or numbers' in er, (st, er))
+            await w.pg.keyboard.press('Escape'); await w.pg.fill('#arcadeScreen [data-ini-in]', 'ab9c'); v = await w.ev("document.querySelector('#arcadeScreen [data-ini-in]').value")
+            check('initials: typing filters to capitals and numbers, at most 3', v == 'AB9', v)
+            await set_ini(w, 'bob')
+            check('initials: lower case is accepted and stored as capitals (device storage)', await w.ev("NutStore.get('initials')")=='BOB' and await w.ev("localStorage.getItem('nutcade:initials')")=='"BOB"')
+            sc = await w.ev("NutStore.get('scores:swarm').map(e=>e.n+':'+e.s)")
+            check('initials: with "rename my past scores" on (the default) the old entries are renamed and others are not', sc == ['BOB:500', 'ZZZ:300', 'BOB:100'], sc)
+            check('initials: the lobby shows the new name, and a toast confirms', 'BOB' in await w.ev("document.querySelector('#arcadeScreen .scores').innerText") and 'saved' in await w.toast())
+            check('initials: the rename box is on by default', await w.ev("document.querySelector('#arcadeScreen [data-ini-ren]').checked"))
+            await set_ini(w, 'CAT', rename=False)
+            sc = await w.ev("NutStore.get('scores:swarm').map(e=>e.n+':'+e.s)")
+            check('initials: with it off, past scores keep their old initials and only the next ones change', sc == ['BOB:500', 'ZZZ:300', 'BOB:100'] and await w.ev("NutStore.get('initials')")=='CAT', sc)
+            ok = await play_neon(w)
+            check('initials: the next new high score asks with the current initials already filled in', ok and await w.ev("document.querySelector('#ini').value")=='CAT')
+            await w.ev("document.querySelector('#ini').value=''"); await w.ev("document.querySelector('#entry form button[type=submit]').click()"); await w.wait(400)
+            check('initials: an empty entry keeps the current initials (it does not reset to AAA)', await w.ev("NutStore.get('initials')")=='CAT' and await w.ev("NutStore.get('scores:neonRoad')[0].n")=='CAT', await w.ev("NutStore.get('scores:neonRoad')"))
+            await w.ev("document.querySelector('[data-g=exit]') && document.querySelector('[data-g=exit]').click()"); await w.wait(300)
+            await tab(w, 'arcade'); await set_ini(w, 'dog', rename=False)
+            ok = await play_neon(w)
+            check('initials: after a change the next score is offered, and saved, under the new initials', ok and await w.ev("document.querySelector('#ini').value")=='DOG')
+            await w.ev("document.querySelector('#entry form button[type=submit]').click()"); await w.wait(400)
+            check('initials: ...in the table', 'DOG' in await w.ev("NutStore.get('scores:neonRoad').map(e=>e.n)"))
+            await w.ev("document.querySelector('[data-g=exit]') && document.querySelector('[data-g=exit]').click()"); await w.wait(300)
+            await tab(w, 'settings'); await w.click('[data-act=jump][data-id=set-look]'); await w.wait(200)
+            check('initials: Settings, Look & sound has the same setting', await w.ev("!!document.querySelector('#set-look [data-ini-form]') && document.querySelector('#set-look [data-ini-in]').value")=='DOG')
+            await set_ini(w, 'x9z', where='#set-look'); await tab(w, 'arcade')
+            check('initials: changed from Settings it shows on the Arcade screen too (one setting)', await w.ev("document.querySelector('#arcadeScreen [data-ini-in]').value")=='X9Z')
+            await w.ev("NutStore.set('initials','!!')"); await tab(w, 'wallet'); await tab(w, 'arcade')
+            check('initials: a damaged stored value shows as AAA instead of breaking', await w.ev("document.querySelector('#arcadeScreen [data-ini-in]').value")=='AAA')
+            blk = SRC['games.js'][SRC['games.js'].index('/* ---------- your initials'):SRC['games.js'].index("toast('Initials saved.'")]
+            check('initials: it never touches sats, tokens or credits (the code only writes the initials and the score tables; the wallet is unchanged)', sorted(re.findall(r"store\.set\(('[^']+'(?: \+ [a-z.]+)?)", blk)) == ["'initials'", "'scores:' + g.id"] and await w.ev("Nutcade.S.txs.length")==0 and not re.search(r'proofs|S\.|Nutcade|getWallet', blk.replace('window.Nutcade.render', '').replace('window.Nutcade.toast', '').replace('window.Nutcade', '')), re.findall(r"store\.set\(('[^']+'(?: \+ [a-z.]+)?)", blk))
+            check('initials: no page errors', not w.errs, w.errs[:3])
+            await w.pg.context.close()
+        await section('initials', initials)
+
+        async def initials_lang_layout():
+            for lang in LANGS:
+                w = await wallet(b, lang=lang); await w.create(); await tab(w, 'arcade')
+                await set_ini(w, 'ab'); await w.ev("window.__i18nMiss=new Set(); Nutcade.render()"); await w.wait(300)
+                await tab(w, 'arcade'); await set_ini(w, 'ab')
+                await tab(w, 'settings'); await set_ini(w, '??', where='#set-look')
+                await tab(w, 'arcade'); miss = await w.ev("[...window.__i18nMiss]")
+                t = await w.ev("document.querySelector('#arcadeScreen').innerText")
+                check(f'initials, {lang}: the panel, the labels and the error are translated', not miss and (lang == 'en' or 'Your initials' not in t and 'Save initials' not in t), miss or t[-160:])
+                await w.pg.context.close()
+            for th in THEMES:
+                for (vw, vh) in ((320, 640), (640, 320)):
+                    w = await wallet(b, vw=vw, vh=vh); await w.create()
+                    await w.ev(f"Nutcade.S.prefs.theme={J(th)}; Nutcade.render()"); await tab(w, 'arcade'); await set_ini(w, 'ab')
+                    await w.ev("document.querySelector('#arcadeScreen [data-ini-form]').scrollIntoView()"); await w.wait(150)
+                    l = await lay(w, 'arcade'); check(f'initials, {th} {vw}x{vh}: the Arcade panel with its error message fits', not l, l)
+                    if th == 'neon': await shot(w, f'initials_arcade_{vw}x{vh}')
+                    await tab(w, 'settings'); await w.click('[data-act=jump][data-id=set-look]'); await w.wait(200); await set_ini(w, 'ab', where='#set-look')
+                    l = await lay(w, 'settings'); check(f'initials, {th} {vw}x{vh}: Settings, Look & sound fits', not l, l)
+                    if th == 'phosphor': await shot(w, f'initials_settings_{vw}x{vh}')
+                    await w.pg.context.close()
+        await section('initials_layout', initials_lang_layout)
+
         # ======================= nothing about money changed =======================
         async def money():
             code = {k: v for k, v in SRC.items()}

@@ -47,6 +47,34 @@ const scoresOf = id => store.get('scores:' + id, []);
 function qualifies(id, s) { const l = scoresOf(id); return s > 0 && (l.length < 5 || s > l[l.length - 1].s); }
 function addScore(id, n, s) { const l = scoresOf(id); l.push({ n: (n || 'AAA').toUpperCase().slice(0, 3), s, t: Date.now() }); l.sort((a, b) => b.s - a.s); store.set('scores:' + id, l.slice(0, 5)); }
 const hiOf = id => (scoresOf(id)[0] || { s: 0 }).s;
+/* ---------- your initials ----------
+   One stored name ('initials', a device key) is used by the new-high-score dialog, the Daily Challenge, Nut Poker's exit and the
+   challenges you play. You can change it any time (the Arcade screen, Settings). "Rename my past scores" only rewrites this
+   phone's own high-score tables; challenges already sent and notes already posted keep the initials they went with. */
+const INI_RE = /^[A-Z0-9]{3}$/;
+const myInitials = () => { const v = String(store.get('initials', 'AAA') || ''); return INI_RE.test(v) ? v : 'AAA'; };
+function setInitials(raw, rename) {
+  const n = String(raw == null ? '' : raw).toUpperCase();
+  if (!INI_RE.test(n)) return null;   // exactly 3 letters or numbers
+  const old = myInitials(); store.set('initials', n);
+  if (rename && old !== n) for (const g of GAMES) { const l = scoresOf(g.id); let ch = false; for (const e of l) if (e && e.n === old) { e.n = n; ch = true; } if (ch) store.set('scores:' + g.id, l); }
+  return n;
+}
+function initialsHTML() {
+  return `<form class="ini-form" data-ini-form><div class="row between tiny"><span>Your initials</span><span style="color:var(--gold)" data-noi18n>${esc6(myInitials())}</span></div>
+    <p class="th" style="margin:0">Shown on your high scores and on the challenges you play. Scores you already sent to friends keep the initials they were sent with.</p>
+    <div class="field"><label for="iniSet">New initials (3 letters or numbers)</label><input id="iniSet" class="inp" data-ini-in maxlength="3" value="${esc6(myInitials())}" autocomplete="off" autocapitalize="characters" spellcheck="false" data-noi18n></div>
+    <label class="toggle set" for="iniRen"><span><span class="tl">Also rename my past scores on this phone</span></span><input id="iniRen" type="checkbox" data-ini-ren checked></label>
+    <div class="ini-err tiny" role="alert" data-ini-err></div>
+    <button class="btn sm gold" type="submit">Save initials</button></form>`;
+}
+document.addEventListener('input', e => { const i = e.target.closest && e.target.closest('[data-ini-in]'); if (i) { i.value = i.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); const er = i.closest('form').querySelector('[data-ini-err]'); if (er) er.textContent = ''; } });
+document.addEventListener('submit', e => {
+  const f = e.target.closest && e.target.closest('[data-ini-form]'); if (!f) return; e.preventDefault();
+  const n = setInitials(f.querySelector('[data-ini-in]').value, f.querySelector('[data-ini-ren]').checked), er = f.querySelector('[data-ini-err]');
+  if (!n) { if (er) er.textContent = 'Use exactly 3 letters or numbers.'; A().sfx('err'); return; }
+  A().sfx('coin'); if (window.Nutcade) { window.Nutcade.render(); window.Nutcade.toast('Initials saved.', 'lime'); }
+});
 
 /* =====================================================================
    GAME 1: STAR SWARM (fixed shooter)
@@ -1007,7 +1035,7 @@ const esc6 = s => String(s || '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<'
 function showEntry(score, seed) {
   mode = 'entry';
   const box = view.querySelector('#entry');
-  const last = store.get('initials', 'AAA');
+  const last = myInitials();
   box.innerHTML = `<div class="scrim" style="align-items:center"><form class="sheet initials" style="border-radius:8px;border-bottom:3px solid var(--cyan);max-width:340px">
     <div style="font-family:var(--f-display);font-size:12px;color:var(--gold)">NEW HIGH SCORE</div>
     <div style="font-family:var(--f-display);font-size:18px">${pad6(score)}</div>
@@ -1016,7 +1044,7 @@ function showEntry(score, seed) {
     <button class="btn solid gold block" type="submit">Save score</button></form></div>`;
   const inp = box.querySelector('#ini'); inp.focus(); inp.select();
   inp.addEventListener('input', () => { inp.value = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
-  box.querySelector('form').addEventListener('submit', e => { e.preventDefault(); const n = (inp.value || 'AAA').padEnd(3, 'A'); store.set('initials', n); addScore(cur.id, n, score); A().sfx('coin');
+  box.querySelector('form').addEventListener('submit', e => { e.preventDefault(); const n = (inp.value || last).padEnd(3, 'A'); store.set('initials', n); addScore(cur.id, n, score); A().sfx('coin');
     box.innerHTML = `<div class="scrim" style="align-items:center"><div class="sheet initials" style="border-radius:8px;border-bottom:3px solid var(--cyan);max-width:340px">
       <div style="font-family:var(--f-display);font-size:12px;color:var(--lime)">SCORE SAVED</div>
       <div style="font-family:var(--f-display);font-size:18px">${pad6(score)} ${n}</div>
@@ -1099,7 +1127,8 @@ function mountList(el) {
   el.innerHTML = `${window.Daily ? window.Daily.html() : ''}<div class="row between"><h2 class="h2">Arcade · ${GAMES.length} cabinets</h2><span class="tiny muted">Free play</span></div>
     <div class="cabinets">${GAMES.map(g => `<button class="cab" data-game="${g.id}" aria-label="Play ${g.name}"><canvas width="112" height="84" data-thumb="${g.id}"></canvas>
       <span class="nm" data-noi18n>${g.name}</span><span class="ds">${g.blurb}</span><span class="hs"><span>HI</span> <span data-noi18n>${hiOf(g.id) ? pad6(hiOf(g.id)) + ' ' + scoresOf(g.id)[0].n : '------'}</span></span></button>`).join('')}</div>
-    <div class="panel"><span class="h2">Hall of fame</span><div class="scores">${GAMES.map(g => { const s = scoresOf(g.id)[0]; return `<div><span style="color:var(--dim)" data-noi18n>${g.name.split(' ')[0]}</span><span data-noi18n>${s ? s.n : '---'}</span><span>${s ? pad6(s.s) : '------'}</span>${s ? `<button class="sharebtn" data-card="${g.id}" aria-label="Share ${g.name} score card"><svg viewBox="0 0 8 8" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M5 0h3v3H7V2L4 5 3 4l3-3H5zM0 2h4v1H1v4h4V4h1v4H0z"/></svg></button>` : '<span></span>'}</div>`; }).join('')}</div></div>`;
+    <div class="panel"><span class="h2">Hall of fame</span><div class="scores">${GAMES.map(g => { const s = scoresOf(g.id)[0]; return `<div><span style="color:var(--dim)" data-noi18n>${g.name.split(' ')[0]}</span><span data-noi18n>${s ? s.n : '---'}</span><span>${s ? pad6(s.s) : '------'}</span>${s ? `<button class="sharebtn" data-card="${g.id}" aria-label="Share ${g.name} score card"><svg viewBox="0 0 8 8" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M5 0h3v3H7V2L4 5 3 4l3-3H5zM0 2h4v1H1v4h4V4h1v4H0z"/></svg></button>` : '<span></span>'}</div>`; }).join('')}</div></div>
+    <div class="panel"><span class="h2">Your initials</span>${initialsHTML()}</div>`;
   if (window.Daily) window.Daily.bind(el);
   el.querySelectorAll('[data-game]').forEach(b => b.onclick = () => { A().sfx('select'); openGame(b.dataset.game); });
   el.querySelectorAll('[data-card]').forEach(b => b.onclick = () => { const g = GAMES.find(x => x.id === b.dataset.card); const s = scoresOf(g.id)[0]; A().sfx('select'); if (window.Trophies && s) window.Trophies.openCard({ kind: 'score', game: g, score: s.s, initials: s.n, at: s.t }); });
@@ -1116,6 +1145,6 @@ function topLine() {
 // layout(id, seed): the starting state a seed gives, so tests can check that a challenge replays the same layout
 function layout(id, seed) { const g = GAMES.find(x => x.id === id); if (!g || view) return null; const keep = RNG; RNG = seeded(seed); const c0 = ctx; try { return JSON.stringify(g.init(makeG(), seed)); } finally { RNG = keep; ctx = c0; } }
 if (window.Daily) window.Daily.attach({ games: GAMES, open: openGame });
-window.Arcade = { daily: () => ({ on: dly, run: dlyRun, seed: runSeed }), mountList, open: openGame, topLine, playing: () => !!view, games: GAMES, layout, challenge: () => chal, held: () => Object.keys(keys).filter(k => keys[k]), replay: Replay, lastReplay: () => lastReplay, ghost: () => ghost };
+window.Arcade = { initials: myInitials, setInitials, initialsHTML, daily: () => ({ on: dly, run: dlyRun, seed: runSeed }), mountList, open: openGame, topLine, playing: () => !!view, games: GAMES, layout, challenge: () => chal, held: () => Object.keys(keys).filter(k => keys[k]), replay: Replay, lastReplay: () => lastReplay, ghost: () => ghost };
 if (window.Nutcade) window.Nutcade.render();
 })();
