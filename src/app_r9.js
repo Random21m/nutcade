@@ -93,12 +93,7 @@ async function ksNow(url, opts) {
   let st; try { st = await inTime(w.checkProofsStates(cand), 30000); } catch (e) { ks.due = ksBackoff(ks); save(); return ks; }
   const spent = new Set(cand.filter((p, i) => st[i] && st[i].state === 'SPENT').map(p => p.secret)), held = new Set(cand.filter((p, i) => st[i] && st[i].state !== 'UNSPENT').map(p => p.secret));
   const res = { n: 0, t: 0, k: 0, fee: 0, aside: 0, asideA: 0, spentN: 0, spentA: 0, why: '' };
-  if (spent.size) {
-    const gone = (S.proofs[url] || []).filter(p => spent.has(p.secret));
-    S.proofs[url] = (S.proofs[url] || []).filter(p => !spent.has(p.secret)); spentElsewhere(url, sum(gone)); save();
-    res.spentN = gone.length; res.spentA = sum(gone);
-    plan = ksPlan(w, url, now);
-  }
+  if (spent.size) { await ksPrune(url, cand, res); plan = ksPlan(w, url, now); }
   const old = plan.old.filter(p => !held.has(p.secret)), tidy = plan.tidy.filter(p => !held.has(p.secret));
   const auto = S.prefs.ksAuto !== false, fAll = ksFee(w, url, old.concat(tidy), plan.known), fOld = ksFee(w, url, old, plan.known);
   let move = [];
@@ -125,6 +120,13 @@ async function ksNow(url, opts) {
   save();
   return ks;
 }
+/* Coins the mint says are spent: dropped the one way every spent coin is (pruneSpent): first any step of this wallet
+   whose request reached the mint late is settled as itself (lateCheck), and a step still open keeps its coins; only
+   what is left is "Ecash already spent elsewhere". */
+async function ksPrune(url, cand, res) {
+  const v = await pruneSpent(url).catch(() => 0), held = new Set((S.proofs[url] || []).map(p => p.secret));
+  if (v > 0) { res.spentN += cand.filter(p => !held.has(p.secret)).length; res.spentA += v; }
+}
 async function ksMove(w, url, plan, move, res) {
   const tidyS = new Set(plan.tidy.map(p => p.secret));
   let line = null;
@@ -136,8 +138,8 @@ async function ksMove(w, url, plan, move, res) {
       if (isTooMany(e)) throw e;   // (the mint's limit is read again and the check-up runs again in pieces that fit)
       if (ksDead(e)) { ksAside(url, g, res); continue; }
       if (isRefusal(e) || isSpentErr(e)) {   // (turned down because some of these coins were spent since the check a moment ago, by a device holding this wallet: they get that line, the rest are tried again)
-        const st = await inTime(w.checkProofsStates(g), 30000).catch(() => null), sp = new Set(g.filter((p, i) => st && st[i] && st[i].state === 'SPENT').map(p => p.secret));
-        if (sp.size) { const gone = (S.proofs[url] || []).filter(p => sp.has(p.secret)); S.proofs[url] = (S.proofs[url] || []).filter(p => !sp.has(p.secret)); spentElsewhere(url, sum(gone)); save(); res.spentN += gone.length; res.spentA += sum(gone); res.again = true; continue; }
+        const st = await inTime(w.checkProofsStates(g), 30000).catch(() => null);
+        if (st && st.some(x => x && x.state === 'SPENT')) { await ksPrune(url, g, res); res.again = true; continue; }
       }
       res.why = e.asked && !isRefusal(e) ? 'wait' : isRefusal(e) ? 'refused' : 'down'; break;
     }

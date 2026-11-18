@@ -1190,7 +1190,18 @@ async function settleOpNow(id) {
   let fresh = await unspent(outs.filter(p => !heldNow().has(p.secret)));
   const stOf = new Map(op.inputs.map((s, i) => [s, st[i] && st[i].state]));
   const mine = (S.proofs[op.mint] || []).filter(p => op.inputs.includes(p.secret));
-  const spent = mine.filter(p => stOf.get(p.secret) === 'SPENT');
+  let spent = mine.filter(p => stOf.get(p.secret) === 'SPENT');
+  /* Two steps of this wallet tried with the same coins (the first one's answer was lost, then it was tried again): when
+     the mint signed the OTHER one, these coins are that step's and are settled with it, never "spent elsewhere" here. */
+  if (!outs.length && spent.length) {
+    const sh = new Set(spent.map(p => p.secret)); let theirs = false;
+    for (const o of S.ops.concat(S.oplate || [])) {
+      if (o.id === op.id || o.mint !== op.mint || !(o.outs || []).length || !(o.inputs || []).some(x => sh.has(x))) continue;
+      const g = await restoreRecorded(w, o.outs, o.mint).catch(() => null);
+      if (g && g.all) { for (const x of o.inputs) sh.delete(x); theirs = true; }
+    }
+    if (theirs) { spent = spent.filter(p => sh.has(p.secret)); setTimeout(() => lateCheck(op.mint, true).catch(() => {}), 0); }   // (the other step, if it waits aside, is settled right after)
+  }
   // (the Extra Life a CONTINUE was renewing: are its coins spent? asked now, before the one write below)
   const xr = op.follow && op.follow.k === 'extra-renew' && S.extra && S.extra.mint === op.mint && S.extra.proofs.some(p => op.inputs.includes(p.secret)) ? S.extra : null;
   let xGone = false; if (xr) { const st = await inTime(w.checkProofsStates(xr.proofs), 30000); xGone = st.length > 0 && st.every(s => s && s.state === 'SPENT'); }
@@ -1272,15 +1283,20 @@ const lateSeen = new Map();   // mint -> when its waiting steps were last checke
 // on the regular round only when due. A restore or a clean-up of spent coins asks at once (force).
 async function lateCheck(url, force) {
   url = normUrl(url);
-  const now = Date.now(), all = S.oplate || [], keep = all.filter(r => now - r.lateAt < LATE_MS);
+  // a record a day old is dropped only after one more look at the mint made once it was a day old, so a request the mint
+  // signed in its last minutes (between two of the spaced-out checks) is still found; one whose mint can't be asked for
+  // another whole day is dropped anyway
+  const now = Date.now(), all = S.oplate || [], keep = all.filter(r => now - r.lateAt < LATE_MS || (now - r.lateAt < 2 * LATE_MS && !(r.looked >= r.lateAt + LATE_MS)));
   if (keep.length !== all.length) { S.oplate = keep; save(); }
   const here = keep.filter(r => r.mint === url); if (!here.length) return;
-  if (!force && (isOffline() || document.hidden || now - (lateSeen.get(url) || 0) < lateGap(now - Math.max(...here.map(r => r.lateAt))))) return;
+  const ending = here.some(r => now - r.lateAt >= LATE_MS);   // (that last look is due at once)
+  if (!force && (isOffline() || document.hidden || (!ending && now - (lateSeen.get(url) || 0) < lateGap(now - Math.max(...here.map(r => r.lateAt)))))) return;
   const busy = new Set(S.ops.flatMap(o => o.inputs).concat(S.pending.flatMap(p => (p.proofs || []).map(x => x.secret))));
   const rs = here.filter(r => !r.inputs.some(s => busy.has(s)) && !S.ops.some(o => o.id === r.id)); if (!rs.length) return;
   lateSeen.set(url, now);
   const w = await getWallet(url), ys = [...new Set(rs.flatMap(r => r.inputs))];
   const st = await inTime(w.checkProofsStates(ys.map(s => ({ secret: s }))), 30000), stOf = new Map(ys.map((s, i) => [s, st[i] && st[i].state]));
+  { const ids = new Set(rs.map(r => r.id)); for (const r of S.oplate || []) if (ids.has(r.id)) r.looked = now; save(); }
   for (const r of rs) {
     if (!r.inputs.some(s => stOf.get(s) === 'SPENT' || stOf.get(s) === 'PENDING')) continue;
     if (!(S.oplate || []).some(x => x.id === r.id) || S.ops.some(o => o.id === r.id)) continue;
