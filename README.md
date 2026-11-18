@@ -380,7 +380,7 @@ Posting the link on X and most social sites shows a large preview card automatic
 
 ## For maintainers
 
-The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm` and the offline helper `public/sw.js`. `public/index.html` is built from the files in [`src/`](src/README.md): edit those, run `python3 build.py`, and commit both. On every push to `main`, `.github/workflows/test-and-deploy.yml` checks that the page matches `src/`, runs the test suites, and then publishes `public/` to GitHub Pages with fresh checksums. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
+The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm`, the offline helper `public/sw.js` and the bundled libraries' licence texts `public/THIRD_PARTY_LICENSES.txt`. `public/index.html` is built from the files in [`src/`](src/README.md): edit those, run `python3 build.py`, and commit both. On every push to `main`, `.github/workflows/test-and-deploy.yml` checks that the page matches `src/`, runs the test suites, and then publishes `public/` to GitHub Pages with fresh checksums. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
 
 ## Made by
 
@@ -408,6 +408,7 @@ You can also tip from inside NUTCADE: **Settings → About → Support**. The sa
   - Fold-over cards, four to a page: front and back side by side, so plain one-sided printing lines up on any printer. **Printed tokens** (Notes) shows which were claimed (asked at the mint) and takes back unclaimed ones. Backups carry them like any token you sent.
   - **QR code center** (Settings → Look & sound): the NUTCADE acorn in the middle of every QR code NUTCADE shows and prints, at error correction H, read back and drawn plain where it wouldn't scan; animated codes stay plain. Or None.
   - Fixed: a busy (disabled) button could still be triggered by a click sent from a script; every button now ignores clicks while it is disabled.
+  - The full licence texts of every bundled library are now in `public/THIRD_PARTY_LICENSES.txt` (the bundle itself only carried the noble and scure notices).
 - **v1.14.2:** the **PIN guard**. With a PIN set, **Show recovery phrase**, **Download backup**, **Import backup**, **Restore wallet from 12 words**, **Connect an app** and **Edit** on a connected app (Wallet Connect), and **Reset wallet** now ask for your PIN first. Before, someone holding your unlocked phone could get around the spending limit by reading the 12 words, downloading the backup file (the phrase and every coin), or typing their own 12 words into Restore, which moved every sat under their phrase. The PIN is the open wallet's own (the duress PIN in its wallet), on the same pad, with the same wrong-PIN count and wait; Face ID isn't offered there, as for the limit. A PIN is used only for the step its pad was opened for: a pad closed while the PIN is checked does nothing, whatever was started meanwhile (this also covers a payment over the limit, saving the limit, and the duress PIN, Change PIN and Remove PIN pads). Nothing changes without a PIN, or on the start screen.
 - **v1.14.1:** fixes, and a new support address: **npub18wnvs7ncun8exphx8h7r9c6p9kg6jagpe8ck0g2qll0ushv8rp4slzjlpw@npub.cash** (an npub.cash address received in NUTCADE itself, instead of a Strike account), in the app, its QR code and this README.
   - A rare case, present since 1.12.x, where a Lightning deposit could show **+0**. If the mint turned down NUTCADE's request for the deposit's ecash because a copy of that same request was already being worked on (for example the library sending again a request whose answer was lost), the deposit forgot the counters its coins are made with, and closed at 0 once the mint finished. Nothing was lost: **Find lost ecash** (or a restore from the 12 words) brought the sats back. (When the mint answered that the request was already signed, the sats came back at once, as a separate "Recovered with recovery phrase" line beside the +0.) Now the deposit keeps those counters and waits, and gets exactly its coins once the mint has issued them. The same goes when the mint can't be asked right then, when NUTCADE asks again after answers that never came (however many times), for a deposit with no coins going in (on-chain), for a payment step the mint turned down as "already pending", and for the duress PIN wallet's first claim of its sats.
@@ -450,11 +451,11 @@ NUTCADE is open source under the [MIT License](LICENSE).
 
 ## Open-source components
 
-The page bundles these libraries (their license notices are at the end of the bundled script):
+The page bundles these libraries, unchanged. Their full licence texts, copied from the published packages, are in [`public/THIRD_PARTY_LICENSES.txt`](public/THIRD_PARTY_LICENSES.txt), which is served next to the app:
 
-- [cashu-ts](https://github.com/cashubtc/cashu-ts)
-- [noble-curves, noble-hashes, scure-base, scure-bip32, scure-bip39](https://paulmillr.com/noble/)
-- [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator)
+- [cashu-ts](https://github.com/cashubtc/cashu-ts) (MIT or Apache-2.0)
+- [noble-curves, noble-hashes, scure-base, scure-bip32, scure-bip39](https://paulmillr.com/noble/) (MIT)
+- [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) (MIT)
 - [zxing-wasm](https://github.com/Sec-ant/zxing-wasm) (MIT) with [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp) (Apache-2.0), the QR decoder
 - [jsQR](https://github.com/cozmo/jsQR) (Apache-2.0), the fallback QR decoder
 - [nostr-tools](https://github.com/nbd-wtf/nostr-tools) (Unlicense) and [noble-ciphers](https://github.com/paulmillr/noble-ciphers) (MIT), for signing Nostr events and NIP-44 encryption
