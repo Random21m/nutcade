@@ -632,6 +632,7 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .ink .pt-qr{box-shadow:0 0 0 .4mm #000}
 #tokPrint{display:none}
 @media print{
+  html.print-tokens{color-scheme:light}
   html.print-tokens,html.print-tokens body{background:#fff !important;margin:0;padding:0;height:auto}
   html.print-tokens body > :not(#tokPrint){display:none !important}
   html.print-tokens body::before{display:none}
