@@ -167,6 +167,23 @@ async def main():
             if os.environ.get('QA_OUT'): await w.pg.screenshot(path=os.path.join(os.environ['QA_OUT'], f'poker-{tag}.png'))
         await w.ev("document.querySelector('[data-g=exit]') && document.querySelector('[data-g=exit]').click()"); await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(200)
         for vw, vh, tag in [(320, 640, '320'), (375, 667, '375'), (430, 932, '430'), (1440, 900, '1440'), (667, 375, 'landscape'), (844, 390, 'landscape-wide')]: await layout(vw, vh, tag)
+        # ---- a challenge link for Nut Poker (a crafted one: our client never makes it) says so and just opens the cabinet ----
+        await w.ev("document.querySelector('[data-g=exit]') && document.querySelector('[data-g=exit]').click()"); await w.wait(200)
+        await w.ev("Nutcade.startChallenge({game:'poker', seed:7, score:900, by:'AAA'})"); await w.wait(600)
+        link = await w.ev("(document.querySelector('#layer .code')||{}).innerText||''")
+        await w.ev("Nutcade.closeSheet()")
+        check('(set-up) a signed challenge link for Nut Poker exists', '#challenge=' in link, link[:40])
+        lk = await newwallet(b, 'poker-linker'); await lk.create()
+        n0 = await lk.ev("Nutcade.S.challenges.length")
+        await lk.pg.evaluate(f"location.hash = {json.dumps(link[link.index('#'):])}"); await lk.wait(1500)
+        sheet = await lk.sheet_text()
+        check('a Nut Poker challenge link says plainly that there are no challenges on this cabinet, and offers no Accept', 'No challenges on this cabinet' in sheet and 'Accept' not in sheet, sheet)
+        check('nothing is stored: no challenge is added to the wallet', await lk.ev("Nutcade.S.challenges.length") == n0)
+        await lk.click('[data-act=openCab]'); await lk.wait(500)
+        check('Play opens Nut Poker as a normal game, with no challenge', await lk.ev("Arcade.playing() && !!document.querySelector('[data-g=exit]') && Arcade.challenge() === null && document.querySelector('.game-view .ttl').innerText === 'NUT POKER'"))
+        await lk.pg.context.close()
+        await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(300)
+
         # ---- five languages ----
         keys = ['ROYAL FLUSH','STRAIGHT FLUSH','FOUR OF A KIND','FULL HOUSE','FLUSH','STRAIGHT','THREE OF A KIND','TWO PAIR','JACKS OR BETTER']
         lim = {'name': 15, 'btn': 8, 'line': 27, 'hdr': 12}

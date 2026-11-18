@@ -85,7 +85,7 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 - Take back a sent token if nobody claimed it, and see when one was claimed
 - Coin-drop and 1UP effects when sats arrive, and a launch effect when you send
 
-**Arcade**: eleven original cabinets with high-score tables, chiptune sound and music
+**Arcade**: ten original cabinets with high-score tables, chiptune sound and music
 
 | Cabinet | Style |
 |---|---|
@@ -98,7 +98,6 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 | Nibble | Snake |
 | Nut Flipper | Pinball: light N-U-T for a multiplier, drop the S-A-T targets, hunt the gold sat |
 | Nut Poker | Five-card draw video poker, jacks or better, for **free credits only** (never sats) |
-| Corner Pocket | Top-down 8-ball pool for one player against the machine (three levels) or two players passing the phone |
 | Neon Road | Pseudo-3D night-highway racer: pass traffic, race the clock to each checkpoint |
 
 Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons (tap **Use D-pad** above the controls if you'd rather have arrow buttons).
@@ -192,7 +191,7 @@ Tap **Share my score** to see a short note, for example "NUTCADE Daily Challenge
 
 NUTCADE can't ask a server what day it is, so it watches the clock itself: if the device date moves back before a day it has already seen, or reads as before 2025, that day's runs are for fun (not official, not in the streak) and a notice says so until the clock catches up or you tap **My clock is right**. Moving the clock forward just moves you to that day's challenge.
 
-Ten of the eleven cabinets can be the daily: the eight originals, Corner Pocket (against the machine on medium, straight to the break) and Neon Road. **Nut Poker never is**: its deck is shuffled for real, so two phones could never play the same deal. For cabinet authors: a cabinet joins with `daily: true` in its object (all its gameplay randomness must come from the engine's seeded `rnd()`/`ri()`/`RNG()`), and `init(G, seed)` receives the run's seed; a cabinet marked `noChallenge` can't join even with the flag. The details are at the top of `src/daily.js`.
+Nine of the ten cabinets can be the daily: the eight originals and Neon Road. **Nut Poker never is**: its deck is shuffled for real, so two phones could never play the same deal. For cabinet authors: a cabinet joins with `daily: true` in its object (all its gameplay randomness must come from the engine's seeded `rnd()`/`ri()`/`RNG()`), and `init(G, seed)` receives the run's seed; a cabinet marked `noChallenge` can't join even with the flag. The details are at the top of `src/daily.js`.
 
 ### Extra Life
 
@@ -265,15 +264,6 @@ On the **Mints** tab, tap **Block** on a mint you no longer trust. From then on 
 
 Go to **Settings → Lightning address → Set it up**, pick the mint that should receive payments, and tap **Turn on**. Share the address shown, or find it any time on the **Receive → Lightning** screen. Payments are turned into ecash at your mint by npub.cash, and NUTCADE claims them whenever it's open. If you used a Lightning address in cashu.me with the same 12 words, it's the same address here.
 
-### Corner Pocket (8-ball pool)
-
-Open the Arcade, pick **Corner Pocket**, then **VS MACHINE** (choose EASY, MEDIUM or HARD under LEVEL) or **2 PLAYERS** (pass the phone). **HOW TO PLAY** has the rules on screen.
-
-- **Aim and shoot:** on a phone, drag back from the cue ball: the cue points the opposite way, and the further you drag the harder the shot. Let go to shoot; drag back to where you started to cancel. A dotted line shows where the cue ball goes, with a ring where it meets the next ball and short lines for the way each ball will roll. You can also use the joystick (left and right turn the aim) and hold **A** for power. With a keyboard, the arrows aim (up and down for fine aim), hold **Space** for power and release it to shoot.
-- **Rules (simplified 8-ball):** the first ball potted after the break picks your group, solids (1 to 7) or stripes (9 to 15); pot a ball of yours and you shoot again. Pot all of your group, then the 8. A **scratch** (cue ball potted) gives the other player the cue ball in hand behind the head string (drag to place it, or arrows and A). Potting the 8 too early, or scratching while shooting at the 8, loses. The 8 on the break goes back on its spot.
-- **Points (VS MACHINE only):** 100 for every ball you pot, 1,000 for the win and a bonus for winning in few shots, all multiplied by the machine's level (1, 2 or 3). High scores are saved like the other cabinets. **2 PLAYERS** keeps no score.
-- The machine picks an easy pot (a clear line to a pocket, a gentle cut) and slips a little: more on EASY, hardly at all on HARD.
-
 ### Spending limit
 
 **Settings → Security → Set a spending limit.** "Ask for my PIN above" makes any single payment over that amount (fees included) wait for your PIN, even while the wallet is unlocked; it needs a PIN to be set. "At most … in any 24 hours" caps everything that leaves the wallet in the last 24 hours: what was paid, what is in flight (on this phone, in another tab, or interrupted and not settled yet), and fees. A payment that fails and comes back frees its part again, except a fee the mint kept. Leave a box empty to turn that limit off; without a PIN the per-payment box stays off (shown greyed out with why). With a PIN, the limits are stored inside the encrypted vault, and changing or removing them needs the PIN. Moves between your own mints count in full (a thief could add a mint of their own), and so do the sats you put in a duress PIN's wallet (the PIN you just entered lets them through). Limits belong to this device: restoring from your 12 words or a backup, or resetting, starts without them. A Wallet Connect app that asks for more is refused with QUOTA_EXCEEDED. What comes in (claiming a token, deposits, swapping a token into your mint) is never limited.
@@ -327,9 +317,9 @@ Every push runs the suites in `tests/` automatically on GitHub (GitHub Actions) 
 - 41 checks for multinut payments, payment requests (over Nostr and HTTP, including ecash sent by another wallet) and NFC reading and writing
 - 39 checks for trophies, share cards, instant updates, the Nostr mint-list backup and the Lightning address, against a stand-in Nostr relay and npub.cash server that check every signature
 - 24 scanner checks, run before release: camera scans of real tokens and invoices, photo scans, and recognising every kind of code
-- All eleven games played through to game over, with high scores, pause, exit, touch controls and sound
+- All ten games played through to game over, with high scores, pause, exit, touch controls and sound
 - The arcade clock: every cabinet takes 60 steps a second on a faked 30, 60, 120 and 144 Hz screen, a pause or tab switch never makes a game race to catch up, and recorded runs still verify as replays on every cabinet that has them (Nut Poker has none, by design)
-- Nut Poker (43 rule checks and 84 play checks), Corner Pocket (55), Neon Road (38) and the Daily Challenge (about 120), each in five languages and at phone and desktop sizes
+- Nut Poker (43 rule checks and about 90 play checks), Neon Road (about 70) and the Daily Challenge (about 135), each in five languages and at phone and desktop sizes
 - Every screen at 320, 390, 768 and 1280 pixels wide, checked for overflow and clipped text, and again in each language
 
 ## Privacy
@@ -373,13 +363,12 @@ You can also tip from inside NUTCADE: **Settings → About → Donate**. The sam
 
 ## Changelog
 
-- **v1.13.1:** the **Arcade Update**: three new cabinets and a Daily Challenge, plus a fix for fast games on fast screens.
+- **v1.13.1:** the **Arcade Update**: two new cabinets and a Daily Challenge, plus a fix for fast games on fast screens.
   - **Nut Poker**: five-card draw video poker (jacks or better, 9/6 pay table) for free credits only. It is never linked to sats: no purchases, no cash-out, a free refill at 0 credits, and its score card can't be loaded with sats. Hands are dealt from a fair, cryptographically shuffled deck, so it has no challenges or replays.
-  - **Corner Pocket**: top-down 8-ball pool with real ball physics, against the machine (three levels, scored) or two players on one phone; touch drag-back aiming, keyboard aiming, ball in hand on a scratch; a new trophy, EIGHT BALL ACE.
   - **Neon Road**: a pseudo-3D night-highway racer with curves and hills, traffic, a clock with checkpoints, stages that change colours, a road built from the seed (so challenges and replays race the same course), keyboard and touch controls, and its own chiptune loop.
-  - **Daily Challenge**: one cabinet and one seeded level a day for everyone (from the UTC date), a first-run-counts official score, a streak and history, and a Share my score note you post to Nostr only by tapping Post (or copy); clock changes, time zones, midnight UTC and offline posting are handled and tested in five languages. The eight old cabinets, Corner Pocket and Neon Road can be the daily; Nut Poker never is. The share preview now wraps at spaces instead of in the middle of a word.
+  - **Daily Challenge**: one cabinet and one seeded level a day for everyone (from the UTC date), a first-run-counts official score, a streak and history, and a Share my score note you post to Nostr only by tapping Post (or copy); clock changes, time zones, midnight UTC and offline posting are handled and tested in five languages. The eight old cabinets and Neon Road can be the daily; Nut Poker never is. The share preview now wraps at spaces instead of in the middle of a word.
   - **Fixed: games ran too fast on 120 Hz and 144 Hz screens.** The arcade took one game step per screen refresh, so every cabinet ran about twice as fast on a 120 Hz phone. It now runs a fixed 60 steps a second whatever the screen, catches up at most a few steps after a pause or a tab switch, and draws once per refresh. Replays and challenges count steps, so they verify as before.
-  - The **GRAND TOUR** trophy now means every cabinet in the arcade ("Play all 11 cabinets"), counted from the cabinet list; players who already earned it keep it. Corner Pocket's POWER label is outlined so it reads over the bar. A result screen from one run can no longer land on the next cabinet you open.
+  - The **GRAND TOUR** trophy now means every cabinet in the arcade ("Play all 10 cabinets"), counted from the cabinet list; players who already earned it keep it. A touch the system cancels (a call, a palm) no longer counts as letting go of Nut Flipper's plunger. The Daily's share sheet says "your relay" for one relay and "your 3 relays" for several, in every language. A made-up challenge link for Nut Poker now says plainly that the cabinet has no challenges, instead of offering to accept one. A result screen from one run can no longer land on the next cabinet you open.
   - For developers: every cabinet lives in its own `src/game_*.js` and registers one factory in `window.NutCabinets` (see `src/README.md`).
 - **v1.13.0:** a **spending limit** for the whole wallet (ask for the PIN above an amount per payment, and a cap per 24 hours, over every way sats leave, fees included, held for each payment in one step so two taps or two tabs can't both slip under it; kept in the PIN vault, changed only with the PIN; Wallet Connect apps get QUOTA_EXCEEDED); a **duress PIN** that opens a small separate wallet instead of yours (funded with coins of its own) (the vault always has room for it, both keys are tried on every PIN, and the real wallet is never read while the other is open; see Safety for what it can't hide); mints with a request limit (NUT-06 `max_array_length`): NUTCADE needs at least 128, a mint below that can't be added, coin picks stay within a mint's limit, restores and checks go in pieces, big tokens are claimed in parts, and a mint that drops below 128 takes no deposits but its sats can still move out; a **Report a problem** form (Settings → About); every GitHub Action pinned to a commit. Fixes: a treasure hunt (or any step) that moved sats and then failed redraws the screen at once; "Need X SAT including fees" counts the mint's fee to spend ecash; a token taken back on a mint with fees shows one fee line for what it cost; "already spent" with nothing to remove no longer says "removed 0 SAT"; long mint names and notes wrap instead of being cut off.
   - Known issues in v1.13.0: Wallet Connect can't ask for your PIN, so a payment over a limit from an app is refused (nothing paid, nothing taken from its budget), never let through. A mint that accepts fewer than 128 items per request can't be used for deposits; if a mint you use drops below that, npub.cash may still try to pay your Lightning address there (turn the address off or point it at another mint), and moving out of it may leave part of a payment's unused fee reserve with the mint (shown before you pay). Inside the duress wallet a duress PIN, Remove PIN and Face ID set-up aren't available (the same answer as a used-up PIN-change allowance), and Reset wallet there keeps the PIN; the allowance counter is plain device storage that someone with developer tools can read or clear (they could attack the vault directly anyway): someone who studies NUTCADE can notice these. The v1.12.1 known issues still apply.

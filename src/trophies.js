@@ -61,7 +61,6 @@ const DEFS = [
   { id: 'g-shield', game: 'shield', name: 'CITY SAVER', how: 'Reach wave 3 in Sky Shield.', icon: 'shield', col: '#2de2ff', g: s => s.wave >= 3 },
   { id: 'g-nibble', game: 'nibble', name: 'LONG BOI', how: 'Grow to length 30 in Nibble.', icon: 'snake', col: '#9dff3a', g: s => s.body && s.body.length >= 30 },
   { id: 'g-flipper', game: 'flipper', name: 'SILVER BALL', how: 'Light all three N-U-T lanes in Nut Flipper.', icon: 'ball', col: '#ffcf3a', g: s => s.mult >= 2 },
-  { id: 'g-pocket', game: 'cornerPocket', name: 'EIGHT BALL ACE', how: 'Beat the machine at Corner Pocket.', icon: 'ball', col: '#2de2ff', g: s => !!s.won },
   // Every cabinet in the arcade, counted from the GAMES list (window.Arcade.games), so a new cabinet moves the goalposts without an edit here. Players who earned it earlier keep it (trophies are never taken back).
   { id: 'tour', name: 'GRAND TOUR', get how() { return 'Play all ' + (cabinets().length || 8) + ' cabinets.'; }, icon: 'stick', col: '#ff9a1f', p: p => { const c = cabinets(); return c.length > 0 && c.every(g => (p.by || {})[g.id] > 0); } },
   { id: 'rat', name: 'ARCADE RAT', how: 'Play 50 games.', icon: 'stick', col: '#ff3d8b', p: p => (p.n || 0) >= 50 },

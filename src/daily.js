@@ -14,7 +14,7 @@
      device-level like the arcade tables). Nothing is sent anywhere. The only network use is the Post button in the
      share sheet, which publishes one note you have just previewed.
 
-   THE HOOK FOR NEW CABINETS (Corner Pocket and Neon Road joined this way; Nut Poker is truly random, so it does not)
+   THE HOOK FOR NEW CABINETS (Neon Road joined this way; Nut Poker is truly random, so it does not)
    A cabinet joins the daily with one line in its object:   daily: true,
    It promises that all of its GAMEPLAY randomness comes from the engine's RNG (rnd(), ri(), RNG()), never from
    Math.random() (that is for sparks and stars only), so the same seed gives the same level. The seed also arrives as
@@ -238,7 +238,7 @@ function share(date) {
   const body = n.openSheet('Share my score', `
     <div class="chal-card"><span class="label">DAILY CHALLENGE</span><b data-noi18n>${esc(num(e.o))}</b><span data-noi18n>${esc(nameOf(e.g))} · ${esc(dateLabel(e.d))}</span></div>
     <div class="field"><label>Preview of your note</label><div class="code dy-note" data-noi18n id="dyText">${esc(text)}</div></div>
-    ${can ? `<p class="tiny muted" style="margin:0" data-noi18n>${esc(t('Posts a public note on Nostr, signed with your NUTCADE key ({k}), to your {r}. Nothing is sent until you tap Post.', { k: shortNpub(nn.npub()), r: rel }))}</p>`
+    ${can ? `<p class="tiny muted" style="margin:0" data-noi18n>${esc(relays === 1 ? t('Posts a public note on Nostr, signed with your NUTCADE key ({k}), to your relay. Nothing is sent until you tap Post.', { k: shortNpub(nn.npub()) }) : t('Posts a public note on Nostr, signed with your NUTCADE key ({k}), to your {r}. Nothing is sent until you tap Post.', { k: shortNpub(nn.npub()), r: rel }))}</p>`
       : '<p class="tiny muted" style="margin:0">There is no Nostr key on this device yet, so posting is off. Copy the text and post it anywhere you like. Nothing is sent from here.</p>'}
     <div id="dyMsg"></div>
     ${can ? '<button class="btn solid gold block" id="dyPost">Post</button>' : ''}

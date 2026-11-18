@@ -5,6 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wallet_qa import newwallet, check, results
 from playwright.async_api import async_playwright
 
+import glob
+FILES = len(glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'game_*.js')))   # cabinets in their own file; the eight originals come on top
 HZ = [30, 60, 120, 144]
 FAKE = """(() => {
   const F = window.__F = { t: 1000, id: 0, q: new Map(), steps: 0 };
@@ -25,7 +27,7 @@ async def main():
         await w.click('[data-act=tab][data-tab=arcade]'); await w.wait(500)
         ids = await w.ev("Arcade.games.map(g => g.id)")
         replayable = await w.ev("Arcade.games.filter(g => !g.noChallenge).map(g => g.id)")
-        check('the loop test covers every cabinet in the arcade', len(ids) >= 11 and len(ids) == await w.ev("document.querySelectorAll('[data-game]').length"), ids)
+        check('the loop test covers every cabinet in the arcade', len(ids) > FILES and len(ids) == await w.ev("document.querySelectorAll('[data-game]').length"), ids)
         await w.ev(FAKE)
         for hz in HZ:
             bad = []

@@ -602,6 +602,7 @@ const nutFlipper = {
     if (s.ready) {                                                                   // ball on the plunger
       const pull = G.held('a') || G.held('down') || G.ptr.down;
       if (pull) s.power = Math.min(1, s.power + 1 / 50);
+      else if (s.power > 0 && G.ptr.cancel && !G.held('a') && !G.held('down')) s.power = 0;   // the touch was cancelled: let the plunger go back, don't launch
       else if (s.power > 0) { b.vy = -(6.2 + s.power * 2.6); s.ready = false; s.saveT = s.saved ? 0 : 360; s.power = 0; G.sfx('launch'); }
     }
     const n = PB.steps;
@@ -722,7 +723,7 @@ window.addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) release
 window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; if (mode === 'play') mode = 'pause'; });
 document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'play') mode = 'pause'; });
 
-const ptr = { x: W / 2, y: H / 2, down: false, over: false, sx: 0, sy: 0, st: 0 };
+const ptr = { x: W / 2, y: H / 2, down: false, over: false, cancel: false, sx: 0, sy: 0, st: 0 };   // cancel: the system took the touch away (pointercancel); true for one step, so a cabinet drops a drag instead of treating it as a release
 let tap = null, swipe = null;
 
 /* ---------- replays ----------
@@ -739,12 +740,12 @@ async function zip(bytes, how) {
   return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new S('deflate-raw'))).arrayBuffer());
 }
 function stepper(g, seed, runs) {
-  const P = { x: W / 2, y: H / 2, down: false, over: false }; let HELD = 0, HIT = 0, T = null, SW = null, done = false, frames = 0;
+  const P = { x: W / 2, y: H / 2, down: false, over: false, cancel: false }; let HELD = 0, HIT = 0, T = null, SW = null, done = false, frames = 0;
   const bit = k => 1 << RK.indexOf(k);
   const Gs = { W, H, score: 0, held: k => !!(HELD & bit(k)), hit: k => !!(HIT & bit(k)), ptr: P, get tap() { return T; }, get swipe() { return SW; }, sfx() {}, addScore(n) { this.score += n; }, over() { done = true; }, hud() {} };
   const rng = seeded(seed); const withRNG = fn => { const keep = RNG; RNG = rng; try { return fn(); } finally { RNG = keep; } };
   const s = withRNG(() => g.init(Gs, seed));
-  const load = code => { const v = code.split(','); HELD = +v[0]; HIT = +v[1]; P.down = !!(v[2] & 1); P.over = !!(v[2] & 2); P.x = v[3] / 4; P.y = v[4] / 4; T = v[5] !== '' ? { x: v[5] / 4, y: v[6] / 4 } : null; SW = v[7] ? SWD[v[7]] : null; };
+  const load = code => { const v = code.split(','); HELD = +v[0]; HIT = +v[1]; P.down = !!(v[2] & 1); P.over = !!(v[2] & 2); P.cancel = !!(v[2] & 4); P.x = v[3] / 4; P.y = v[4] / 4; T = v[5] !== '' ? { x: v[5] / 4, y: v[6] / 4 } : null; SW = v[7] ? SWD[v[7]] : null; };
   let ri = 0, left = runs.length ? runs[0][1] : 0; if (runs.length) load(runs[0][0]);
   return {
     g: Gs, state: s, get done() { return done; }, get frames() { return frames; }, get over() { return done || ri >= runs.length; },
@@ -759,7 +760,7 @@ function stepper(g, seed, runs) {
 const Replay = {
   code() {   // this frame's input, exactly as the game sees it
     let h = 0, t = 0; RK.forEach((k, i) => { if (keys[k]) h |= 1 << i; if (pressed.has(k)) t |= 1 << i; });
-    return [h, t, (ptr.down ? 1 : 0) | (ptr.over ? 2 : 0), ptr.x * 4, ptr.y * 4, tap ? tap.x * 4 : '', tap ? tap.y * 4 : '', swipe ? swipe[0] : ''].join(',');
+    return [h, t, (ptr.down ? 1 : 0) | (ptr.over ? 2 : 0) | (ptr.cancel ? 4 : 0), ptr.x * 4, ptr.y * 4, tap ? tap.x * 4 : '', tap ? tap.y * 4 : '', swipe ? swipe[0] : ''].join(',');
   },
   async pack(r) {
     const runs = []; for (const f of r.frames) { const last = runs[runs.length - 1]; if (last && last[0] === f) last[1]++; else runs.push([f, 1]); }
@@ -891,7 +892,7 @@ function openGame(id, opts) {
   view.querySelector('[data-g="exit"]').onclick = () => closeGame();
   view.querySelector('[data-g="mute"]').onclick = e => { const p = window.NutPrefs || {}; p.sound = p.sound === false; store.set('prefs', p); e.currentTarget.textContent = p.sound ? 'SND ON' : 'SND OFF'; if (p.sound) A().music(mode === 'play' ? cur.track : 'title'); else A().stopMusic(); };
   const cv = view.querySelector('#gameCanvas');
-  cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); const p = toLogical(e); Object.assign(ptr, p, { down: true, over: e.pointerType === 'mouse', sx: e.clientX, sy: e.clientY, st: performance.now() }); });
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); const p = toLogical(e); Object.assign(ptr, p, { down: true, cancel: false, over: e.pointerType === 'mouse', sx: e.clientX, sy: e.clientY, st: performance.now() }); });
   cv.addEventListener('pointermove', e => { const p = toLogical(e); ptr.x = p.x; ptr.y = p.y; if (e.pointerType === 'mouse') ptr.over = true; });
   cv.addEventListener('pointerleave', () => { ptr.over = false; });
   const upH = e => {
@@ -899,7 +900,7 @@ function openGame(id, opts) {
     if (d > 22) swipe = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
     else if (performance.now() - ptr.st < 400) tap = toLogical(e);
   };
-  cv.addEventListener('pointerup', upH); cv.addEventListener('pointercancel', () => { ptr.down = false; });
+  cv.addEventListener('pointerup', upH); cv.addEventListener('pointercancel', () => { if (ptr.down) ptr.cancel = true; ptr.down = false; });   // (an interrupted touch is not a release: no shot, no tap, no swipe)
   window.addEventListener('resize', fit); fit(); setTimeout(fit, 50);
   // the screen re-fits whenever the space for it changes: switching to the slightly taller D-pad, or the hint
   // wrapping to two lines once it's translated, so the hint never sits on the game
@@ -1061,7 +1062,7 @@ function tick() {   // one 60 Hz step of the logic (nothing is drawn here); taps
   } else if (mode === 'pause') {
     if (pressed.has('a') || pressed.has('b') || tap) { mode = 'play'; A().sfx('blip'); }
   }
-  pressed.clear(); tap = null; swipe = null;
+  pressed.clear(); tap = null; swipe = null; ptr.cancel = false;
 }
 function render() {   // once per screen refresh
   if (mode === 'title') drawTitle();

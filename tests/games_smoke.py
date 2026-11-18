@@ -47,6 +47,23 @@ async def main():
         await w.ev("document.querySelector('[data-game=swarm]').click()"); await w.wait(300)
         check('touch: the choice is remembered', await w.ev("!!document.querySelector('.game-view .dpad')"))
         await w.ev("document.querySelector('[data-g=pad]').click(); document.querySelector('[data-g=exit]').click()"); await w.wait(200)
+        # a touch the system cancels (a call, a notification, a palm) is not a release: Nut Flipper's plunger goes back instead of launching
+        await w.ev("window.__fs = null; const g = Arcade.games.find(x => x.id === 'flipper'); if (!g.__spy) { g.__spy = 1; const u = g.update; g.update = function (s, G) { window.__fs = s; return u.apply(this, arguments); }; } 0")
+        cdp = await w.pg.context.new_cdp_session(w.pg)
+        async def touch(kind, down=True):
+            box = await w.pg.locator('#gameCanvas').bounding_box()
+            pts = [{'x': box['x'] + box['width'] / 2, 'y': box['y'] + box['height'] * 0.5}] if down else []
+            await cdp.send('Input.dispatchTouchEvent', {'type': kind, 'touchPoints': pts}); await w.wait(100)
+        res = {}
+        for how in ('touchCancel', 'touchEnd'):
+            await w.ev("document.querySelector('[data-game=flipper]').click()"); await w.wait(300)
+            await w.pg.keyboard.press('Space'); await w.wait(500)
+            await touch('touchStart'); await w.wait(700)
+            res[how + ' charged'] = await w.ev("window.__fs && window.__fs.power > 0.2")
+            await touch(how, down=False); await w.wait(300)
+            res[how + ' launched'] = await w.ev("window.__fs && !window.__fs.ready")
+            await w.ev("document.querySelector('[data-g=exit]').click()"); await w.wait(200)
+        check('Nut Flipper: a cancelled touch on the plunger does not launch the ball, a normal release does', res['touchCancel charged'] and not res['touchCancel launched'] and res['touchEnd charged'] and res['touchEnd launched'], res)
         # GRAND TOUR means every cabinet in the arcade, counted from the list; an earned trophy is never taken back
         r = await w.ev("""(() => { const ids = Arcade.games.map(g => g.id), key = 'nutcade:plays', tkey = 'nutcade:trophies'; const t0 = Trophies.DEFS.find(d => d.id === 'tour');
           const reset = (by, got) => { localStorage.setItem(key, JSON.stringify({ n: 0, by })); localStorage.setItem(tkey, JSON.stringify(got || {})); Trophies.reload(); };

@@ -80,8 +80,8 @@ async def main():
             if await w.ev(f"Daily.seedOf('{d}')") != fnv('nutcade-daily-' + d): ok = False
         check('seed = FNV-1a of "nutcade-daily-<UTC date>" (matches an independent implementation)', ok)
         ids8 = ['swarm', 'maze', 'brick', 'rocks', 'hop', 'shield', 'nibble', 'flipper']
-        DAILY = ids8 + ['cornerPocket', 'neonRoad']   # the cabinets that join: the eight originals, Corner Pocket and Neon Road (both seeded); never Nut Poker
-        check('the 8 original cabinets, Corner Pocket and Neon Road join the daily', sorted(await w.ev("Daily.eligible().map(g=>g.id)")) == sorted(DAILY))
+        DAILY = ids8 + ['neonRoad']   # the cabinets that join: the eight originals and Neon Road (seeded); never Nut Poker
+        check('the 8 original cabinets and Neon Road join the daily', sorted(await w.ev("Daily.eligible().map(g=>g.id)")) == sorted(DAILY))
         allids = await w.ev("Arcade.games.map(g => g.id)")
         check('every cabinet in the arcade is either in the daily or Nut Poker', sorted(set(allids) - set(DAILY)) == ['poker'], allids)
         check('Nut Poker is not flagged daily and is not eligible (its shuffle is truly random, so two phones could never play the same deal)',
@@ -98,9 +98,9 @@ async def main():
         check('the pick does not depend on the order of the list', await w.ev(f"Daily.pick('2026-11-18', {json.dumps(DAILY)}) === Daily.pick('2026-11-18', {json.dumps(DAILY[::-1])})"))
         # a new cabinet joining changes only the days it wins
         days = [datetime.date(2026, 1, 1) + datetime.timedelta(i) for i in range(365)]
-        old = [py_pick(str(d), ids8) for d in days]; new = [py_pick(str(d), ids8 + ['cornerPocket']) for d in days]
+        old = [py_pick(str(d), ids8) for d in days]; new = [py_pick(str(d), ids8 + ['neonRoad']) for d in days]
         changed = [i for i in range(365) if old[i] != new[i]]
-        check('a new cabinet only changes the days it wins itself', all(new[i] == 'cornerPocket' for i in changed) and 15 < len(changed) < 80, len(changed))
+        check('a new cabinet only changes the days it wins itself', all(new[i] == 'neonRoad' for i in changed) and 15 < len(changed) < 80, len(changed))
         check('all 8 cabinets get picked over a year', len(set(old)) == 8)
         # the hook: daily:true joins, no flag stays out, init gets the seed
         r = await w.ev("""(() => { const gs = Arcade.games; const a = { id: 'fake1', name: 'FAKE ONE', daily: true, init() {}, update() {}, draw() {}, thumb() {} }, c = { id: 'fake2', name: 'FAKE TWO', init() {}, update() {}, draw() {}, thumb() {} };
@@ -114,11 +114,10 @@ async def main():
           for (const g of Arcade.games.filter(g => g.daily)) { const s = Daily.seedOf('2026-11-18'), o = Daily.seedOf('2026-11-19'); const a = await Arcade.replay.verify(g.id, s, packed, 0), c = await Arcade.replay.verify(g.id, s, packed, 0), d = await Arcade.replay.verify(g.id, o, packed, 0);
             out[g.id] = [a.score === c.score && a.frames === c.frames, a.frames > 0, a.score, d.score]; } return out; })()""")
         check('every cabinet plays the same from the same day seed (same inputs, same score and frames)', all(v[0] and v[1] for v in det.values()), det)
-        same = await w.ev("""(() => { const out = {}; const seed = Daily.seedOf('2026-11-18'), other = Daily.seedOf('2026-11-19'); const real = Arcade.daily;
-          Arcade.daily = () => ({ on: true });   // Corner Pocket skips its menu in a daily run: the start is the rack and the break
-          try { for (const g of Arcade.games.filter(g => g.id === 'cornerPocket' || g.id === 'neonRoad')) { const a = Arcade.layout(g.id, seed), b = Arcade.layout(g.id, seed), c = Arcade.layout(g.id, other); out[g.id] = [a === b, a !== c, a.length]; } } finally { Arcade.daily = real; }
+        same = await w.ev("""(() => { const out = {}; const seed = Daily.seedOf('2026-11-18'), other = Daily.seedOf('2026-11-19');
+          { for (const g of Arcade.games.filter(g => g.id === 'neonRoad')) { const a = Arcade.layout(g.id, seed), b = Arcade.layout(g.id, seed), c = Arcade.layout(g.id, other); out[g.id] = [a === b, a !== c, a.length]; } }
           return out; })()""")
-        check('Corner Pocket and Neon Road start identically from the same seed (rack and break, road and traffic), and differently from another day\'s', all(v[0] and v[1] for v in same.values()) and len(same) == 2, same)
+        check('Neon Road starts identically from the same seed (road and traffic), and differently from another day\'s', all(v[0] and v[1] for v in same.values()) and len(same) == 1, same)
         check('another day\'s seed plays differently in most cabinets', sum(1 for v in det.values() if v[2] != v[3]) >= 3, det)
 
         # ---------- the lobby entry ----------
@@ -177,7 +176,7 @@ async def main():
         check('preview shows the note and the app link', pv == f"NUTCADE Daily Challenge Nov 18: {nm} 12,340 🕹️ #nutcade\nhttps://random21m.github.io/nutcade/", pv)
         check('opening the preview sends nothing', await w.ev("__ws.notes.length") == before)
         sheet = await w.sheet_text()
-        check('the preview says what Post does (public, signed with your key, which relays)', 'public note on Nostr' in sheet and 'Nothing is sent until you tap Post' in sheet and 'npub1' in sheet and '1 relay' in sheet, sheet)
+        check('the preview says what Post does (public, signed with your key, which relays)', 'public note on Nostr' in sheet and 'Nothing is sent until you tap Post' in sheet and 'npub1' in sheet and 'to your relay.' in sheet, sheet)
         await w.ev("window.__ws.mode='fail'")
         await w.click('#dyPost'); await w.wait(900)
         check('relays down: clear error, nothing sent, button ready to retry', 'Couldn\'t reach any relay' in await w.ev("document.querySelector('#dyMsg').innerText") and not await w.ev("document.querySelector('#dyPost').disabled") and await w.ev("__ws.notes.length") == 0)
@@ -338,6 +337,15 @@ async def main():
             check(f'{lang}: the note preview wraps at spaces, never in the middle of a word', await z.ev(WORDS) == [], await z.ev(WORDS))
             check(f'{lang}: the note is in {lang}, with the date and score written the {lang} way', pv.startswith(exp[lang][2]) and exp[lang][1] in pv and pv.endswith('🕹️ #nutcade\nhttps://random21m.github.io/nutcade/'), pv)
             sheet = await z.sheet_text()
+            one = {'en': 'to your relay.', 'es': 'en tu relé.', 'pt': 'no seu relay.', 'de': 'an Dein Relay.', 'fr': 'sur votre relais.'}[lang]
+            check(f'{lang}: one relay reads in the singular ("{one}"), never "your 1 relays"', one in sheet and not any(f'{w_} 1 ' in sheet for w_ in ('tus', 'seus', 'Deine', 'vos', 'your')), sheet)
+            await z.ev("Nutcade.closeSheet()")
+            await z.ev("(() => { const n = window.NutDailyNostr, o = n.relayCount; window.__rc = o; n.relayCount = () => 3; })()")
+            await z.click('[data-daily-share]'); await z.wait(300)
+            many = {'en': 'to your 3 relays.', 'es': 'en tus 3 relés.', 'pt': 'nos seus 3 relays.', 'de': 'an Deine 3 Relays.', 'fr': 'sur vos 3 relais.'}[lang]
+            sheet3 = await z.sheet_text()
+            await z.ev("window.NutDailyNostr.relayCount = window.__rc")
+            check(f'{lang}: three relays read in the plural ("{many}")', many in sheet3, sheet3)
             if lang != 'en': check(f'{lang}: the share sheet is translated (no English left)', 'Preview of your note' not in sheet and 'Nothing is sent' not in sheet and 'Copy text' not in sheet and 'relay' not in sheet.replace('relé', '').replace('relais', '') .lower().replace('relays', 'x') or lang in ('pt', 'de'), sheet[:200])
             await z.ev("Nutcade.closeSheet()"); await z.click('[data-daily-hist]'); await z.wait(250)
             await z.ev("Nutcade.closeSheet()")

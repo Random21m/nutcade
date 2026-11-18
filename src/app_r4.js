@@ -567,6 +567,7 @@ function openChallengeSend(id) {
 function onChallenge(ev, via, bounty, from, replay) {
   let c; try { c = readSigned(ev); } catch (e) { return null; }
   if (!gameById(c.game) || !Number.isFinite(c.score) || !Number.isFinite(c.seed) || !c.id) return null;
+  if (gameById(c.game).noChallenge) return { noChallenge: c.game };   // a cabinet that is random by design (Nut Poker) has no challenges: nothing is stored, and the link only opens the cabinet
   if (c.pubkey === L.nostrPub(nostrKey())) return S.challenges.find(x => x.id === c.id) || null;   // our own link
   let rec = S.challenges.find(x => x.id === c.id && x.dir === 'in');
   if (!rec) {
