@@ -4605,7 +4605,7 @@ const marqueeHTML = full => full
 /* ---------- QR scanner ---------- */
 let scanStream = null, scanRaf = 0;
 function stopScan() { cancelAnimationFrame(scanRaf); scanRaf = 0; if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; } }
-/* Decoder: zxing (WebAssembly, loaded from this site only when scanning) with jsQR as fallback. */
+/* Decoder: zxing (WebAssembly, loaded from this site when scanning, or to read back a QR code NUTCADE draws) with jsQR as fallback. */   // tokens
 let zxReady = null;
 function loadZxing() {
   if (zxReady) return zxReady;
@@ -9460,8 +9460,8 @@ function qrCanvas(text, mode, plain) {
 async function qrRead(src) {
   try {
     const d = frameData(src, 0); if (!d) return null;
-    if (await loadZxing()) { const r = await L.readBarcodes(d, ZX_OPTS); return r[0] && r[0].isValid && r[0].text ? r[0].text : null; }
-    const r = L.jsQR(d.data, d.width, d.height, { inversionAttempts: 'dontInvert' }); return r && r.data ? r.data : null;
+    if (await loadZxing()) { qrRead.by = 'zxing'; const r = await L.readBarcodes(d, ZX_OPTS); return r[0] && r[0].isValid && r[0].text ? r[0].text : null; }
+    qrRead.by = 'jsqr'; const r = L.jsQR(d.data, d.width, d.height, { inversionAttempts: 'dontInvert' }); return r && r.data ? r.data : null;
   } catch (e) { return null; }
 }
 // tokens: called by qrBlock with the code it just showed. A code with the acorn that doesn't read back is drawn plain.
@@ -9481,8 +9481,8 @@ async function qrVerified(text, cell, o = {}) {
     const n = p.qr.getModuleCount(), q = o.quiet == null ? 4 : o.quiet, cl = typeof cell === 'function' ? cell(n + 2 * q) : cell;
     const c = document.createElement('canvas'); c.width = c.height = (n + 2 * q) * cl;
     qrDraw(c.getContext('2d'), p, 0, 0, cl, Object.assign({}, o, { quiet: q }));
-    if ((await qrRead(c)) === text) return { canvas: c, logo: p.logo, n, ok: true };
-    if (plain) return { canvas: c, logo: false, n, ok: false };
+    if ((await qrRead(c)) === text) return { canvas: c, logo: p.logo, n, ok: true, by: qrRead.by };
+    if (plain) return { canvas: c, logo: false, n, ok: false, by: qrRead.by };
   }
   return null;
 }
@@ -9507,8 +9507,8 @@ const PT_APP = 'random21m.github.io/nutcade';
 const ptCode = () => { const h = hex(rnd(4)).toUpperCase(); return h.slice(0, 4) + '-' + h.slice(4); };
 let ptLast = { b: null, check: null };
 
-// the cost of a batch before it is made: each token the way the swap will make it (the library's own numbers), the
-// change of one coming back as the coins the next one can use. null: not enough at this mint
+// the most a batch can cost, worked out before it is made: each token the way the swap will make it (the library's own
+// numbers), the change of one coming back as the coins the next one can use. null: not enough at this mint
 function ptEstimate(w, url, amount, count) {
   let have = [...(S.proofs[url] || [])], spend = 0, ks = null;
   try { ks = w.getOutputKeyset().id; } catch (e) {}
@@ -9516,7 +9516,10 @@ function ptEstimate(w, url, amount, count) {
     const p = swapPlan(w, have, amount, undefined, url);
     if (!p) return null;
     if (p.tooMany) return { tooMany: p.tooMany };
-    spend += p.spend;
+    // (the coins the change comes back as can differ from the ones assumed here, so a token may need a coin or two more:
+    // their fee is counted too, so the fee shown is the most it can be)
+    const id0 = p.sel.send[0].id, n0 = p.sel.send.length;
+    spend += p.spend + Math.max(0, feeOfK(w, n0 + 2, id0) - feeOfK(w, n0, id0));
     const used = new Set(p.sel.send.map(x => x.secret)), back = sum(p.sel.send) - p.spend;
     have = have.filter(x => !used.has(x.secret)).concat(back > 0 ? splitAmt(back).map((a, j) => ({ id: ks || p.sel.send[0].id, amount: a, secret: `est${i}.${j}`, C: '' })) : []);
   }
@@ -9598,7 +9601,7 @@ async function ptImages(txs, style) {
   for (const t of txs) {
     const text = ptText(t);
     const r = await qrVerified(text, 8, { quiet: 4, ink, light: ink ? '#ffffff' : '#fff8e6', dark: ink ? '#000000' : '#0a0717' });
-    check.push({ i: t.print.i, code: t.print.code, ok: !!(r && r.ok), logo: !!(r && r.logo) });
+    check.push({ i: t.print.i, code: t.print.code, ok: !!(r && r.ok), logo: !!(r && r.logo), by: r && r.by });
     if (!r) { ptLast.check = check; const e = new Error(`Token #${t.print.code} is too long for one printed QR code, so nothing was printed. It is kept in Printed tokens: take it back, or send it another way.`); e.keep = true; throw e; }
     if (r.ok && r.n > PT_MAX_MODULES) { ptLast.check = check; const e = new Error(`The QR code of token #${t.print.code} is too dense to scan reliably on paper, so nothing was printed. It is kept in Printed tokens: take it back, or send it another way.`); e.keep = true; throw e; }
     if (!r.ok) { ptLast.check = check; const e = new Error(`The QR code of token #${t.print.code} didn't read back, so nothing was printed. Your tokens are kept in Printed tokens: try printing again, or take them back.`); e.keep = true; throw e; }
@@ -9706,6 +9709,7 @@ async function ptTakeOne(t) {
 /* ---------- for the tests (and nothing else) ---------- */
 window.NutTokens = {
   get lastCheck() { return ptLast.check; },
+  get lastEstimate() { return ptUI.est; },
   preparePrint, endPrint, printed: () => printedTxs(),
   showQR: text => openSheet('QR code', qrBlock(text, 'QR code')),
   // a token of n coins at the active mint, with DLEQ proofs, like a real one (only for measuring QR sizes)

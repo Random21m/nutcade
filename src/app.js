@@ -1410,7 +1410,7 @@ const marqueeHTML = full => full
 /* ---------- QR scanner ---------- */
 let scanStream = null, scanRaf = 0;
 function stopScan() { cancelAnimationFrame(scanRaf); scanRaf = 0; if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; } }
-/* Decoder: zxing (WebAssembly, loaded from this site only when scanning) with jsQR as fallback. */
+/* Decoder: zxing (WebAssembly, loaded from this site when scanning, or to read back a QR code NUTCADE draws) with jsQR as fallback. */   // tokens
 let zxReady = null;
 function loadZxing() {
   if (zxReady) return zxReady;
