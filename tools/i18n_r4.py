@@ -929,6 +929,20 @@ ROWS = [
 ("1-5 hold · D or Enter deal / draw · B bet · M max · E end run", "1-5 fijar · D o Intro repartir / cambiar · B apostar · M máx · E terminar", "1-5 fixar · D ou Enter dar / trocar · B apostar · M máx · E encerrar", "1-5 halten · D oder Enter geben / tauschen · B Einsatz · M max · E Ende", "1-5 garder · D ou Entrée donner / tirer · B miser · M max · E finir"),
 ("P pause", "P pausa", "P pausa", "P Pause", "P pause"),
 ("Free credits only: this card can't hold sats.", "Solo créditos gratis: esta tarjeta no puede llevar sats.", "Só créditos grátis: este cartão não pode guardar sats.", "Nur Gratis-Kredite: Diese Karte kann keine Sats enthalten.", "Crédits gratuits seulement : cette carte ne peut pas contenir de sats."),
+# --- Neon Road ---
+("NEON ROAD", "NEON ROAD", "NEON ROAD", "NEON ROAD", "NEON ROAD"),
+("Race the clock down a neon highway. Pass traffic, hit every checkpoint.", "Gana al reloj en una autopista de neón. Adelanta coches y llega a cada control.", "Corra contra o relógio numa estrada de neon. Passe os carros e chegue a cada checkpoint.", "Renne gegen die Uhr über eine Neon-Autobahn. Überhole Autos, erreiche jeden Kontrollpunkt.", "Battez la montre sur une autoroute au néon. Doublez les voitures, franchissez chaque point de contrôle."),
+("◀ ▶ steer · ▲ boost · ▼ brake", "◀ ▶ girar · ▲ turbo · ▼ frenar", "◀ ▶ virar · ▲ turbo · ▼ frear", "◀ ▶ lenken · ▲ Gas · ▼ Bremse", "◀ ▶ diriger · ▲ turbo · ▼ freiner"),
+("← → steer · ↑ gas · ↓ brake", "← → girar · ↑ gas · ↓ frenar", "← → virar · ↑ acelerar · ↓ frear", "← → lenken · ↑ Gas · ↓ Bremse", "← → diriger · ↑ gaz · ↓ frein"),
+("STAGE {#}", "ETAPA {#}", "ETAPA {#}", "ETAPPE {#}", "ÉTAPE {#}"),
+("GO!", "¡YA!", "VAI!", "LOS!", "PARTEZ !"),
+("CHECKPOINT !", "¡CONTROL!", "CHECKPOINT!", "KONTROLLPUNKT!", "CHECKPOINT !"),
+("+{#} SEC", "+{#} SEG", "+{#} SEG", "+{#} SEK", "+{#} SEC"),
+("TIME UP!", "¡SE ACABÓ!", "TEMPO ESGOTADO!", "ZEIT ABGELAUFEN!", "TEMPS ÉCOULÉ !"),
+("TOUCH A SIDE TO STEER", "TOCA UN LADO PARA GIRAR", "TOQUE UM LADO PARA VIRAR", "ZUM LENKEN SEITE ANTIPPEN", "TOUCHEZ UN CÔTÉ: VIRAGE"),
+("TOUCH THE TOP TO BRAKE", "TOCA ARRIBA PARA FRENAR", "TOQUE EM CIMA PARA FREAR", "OBEN ANTIPPEN ZUM BREMSEN", "TOUCHEZ LE HAUT: FREIN"),
+("ARROWS TO STEER", "FLECHAS PARA GIRAR", "SETAS PARA VIRAR", "PFEILE ZUM LENKEN", "FLÈCHES: DIRECTION"),
+("UP GAS / DOWN BRAKE", "ARRIBA GAS / ABAJO FRENO", "CIMA ACELERA / BAIXO FREIA", "HOCH GAS / RUNTER BREMSE", "HAUT GAZ / BAS FREIN"),
 ]
 
 # Patterns for sentences that carry names or dates. $1, $2… are filled in (and translated again if they're known words).
@@ -1019,7 +1033,7 @@ RE = [
 # ===== 1.11 polish, round 2 =====
 (r"^(Lightning invoice|Bitcoin address|Ecash token|Payment request|Lightning address|Ecash address|Ecash payment request|Heir's copy|P2PK public key|Challenge link|Ecash payment) QR$", "Código QR: $1", "QR code: $1", "QR-Code: $1", "QR code : $1"),
 (r"^(Lightning invoice|Bitcoin address|Ecash token|Payment request|Lightning address|Ecash address|Ecash payment request|Heir's copy|P2PK public key|Challenge link|Ecash payment) QR, animated$", "Código QR animado: $1", "QR code animado: $1", "Animierter QR-Code: $1", "QR code animé : $1"),
-(r"^(STAR SWARM|NUT MAZE|BRICK BLITZ|VOID ROCKS|HOP LANES|SKY SHIELD|NIBBLE|NUT FLIPPER|NUT POKER) game screen$", "Pantalla del juego $1", "Tela do jogo $1", "Spielbildschirm $1", "Écran du jeu $1"),
+(r"^(STAR SWARM|NUT MAZE|BRICK BLITZ|VOID ROCKS|HOP LANES|SKY SHIELD|NIBBLE|NUT FLIPPER|NUT POKER|NEON ROAD) game screen$", "Pantalla del juego $1", "Tela do jogo $1", "Spielbildschirm $1", "Écran du jeu $1"),
 (r"^QR code for the Lightning address (.+)$", "Código QR de la dirección Lightning $1", "QR code do endereço Lightning $1", "QR-Code der Lightning-Adresse $1", "QR code de l'adresse Lightning $1"),
 (r"^Bitcoin price in ([A-Z]{3}) over (\w+): now (.+), high (.+), low (.+)\. Use left and right arrow keys to read values\.$", "Precio de Bitcoin en $1 en $2: ahora $3, máximo $4, mínimo $5. Usa las flechas izquierda y derecha para leer los valores.", "Preço do Bitcoin em $1 em $2: agora $3, máxima $4, mínima $5. Use as setas esquerda e direita para ler os valores.", "Bitcoin-Preis in $1 über $2: jetzt $3, Hoch $4, Tief $5. Mit den Pfeiltasten links und rechts liest du die Werte.", "Prix du Bitcoin en $1 sur $2 : maintenant $3, haut $4, bas $5. Utilisez les flèches gauche et droite pour lire les valeurs."),
 (r"^(.+) already has this Lightning address\. Edit that contact instead\.$", "$1 ya tiene esta dirección Lightning. Edita ese contacto.", "$1 já tem este endereço Lightning. Edite esse contato.", "$1 hat diese Lightning-Adresse schon. Bearbeite diesen Kontakt.", "$1 a déjà cette adresse Lightning. Modifiez ce contact."),

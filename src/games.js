@@ -693,6 +693,7 @@ const nutFlipper = {
 const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper, cornerPocket];
 // Cabinets kept in their own files (poker.js) register a factory in window.NutCabinets; each gets the helpers it draws with.
 for (const make of (window.NutCabinets || [])) GAMES.push(make({ W, H, C, spr, text, T, A, store, clamp, hiOf, qualifies, addScore }));
+window.ArcadeKit = { W, H, C, Math, spr, text, T, rnd, ri, clamp, boom, tickFx, drawFx, add(g) { GAMES.push(g); if (window.Nutcade) window.Nutcade.render(); } };
 // The challenger's ghost: their player drawn faintly over yours while you race their replay
 starSwarm.ghost = (s, ctx) => { if (!s.p.dead) spr(ctx, SHIP, s.p.x, s.p.y, { c: C.white, w: C.white, p: C.white }); };
 brickBlitz.ghost = (s, ctx) => { ctx.fillStyle = C.white; ctx.fillRect(s.pad.x, s.pad.y, s.pad.w, s.pad.h); ctx.fillRect(s.ball.x - 2, s.ball.y - 2, 4, 4); };
