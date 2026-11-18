@@ -517,10 +517,11 @@ function addTx(t) {
   const ru = piggyRoundUp(tx); if (ru) tx.roundup = ru;
   S.txs.unshift(tx);
   save();
+  arrivalSeen(tx);   // (arrival notices: src/app_arrive.js)
   return tx;
 }
 const txById = id => S.txs.find(t => t.id === id);
-function updTx(id, patch) { const t = txById(id); if (t) Object.assign(t, patch); save(); return t; }
+function updTx(id, patch) { const t = txById(id); if (t) Object.assign(t, patch); save(); arrivalSeen(t); return t; }   // (arrivalSeen: src/app_arrive.js)
 function addProofs(url, ps) {
   const cur = S.proofs[url] || [];
   const seen = new Set(cur.map(p => p.secret));
@@ -2069,6 +2070,7 @@ const ICONS = {
 const TABS = [['wallet', 'WALLET'], ['arcade', 'ARCADE'], ['history', 'NOTES'], ['mints', 'MINTS'], ['settings', 'SETTINGS']];
 
 function render() {
+  arrRendered();   // (arrival notices: src/app_arrive.js)
   const app = $('#app');
   app.className = S.prefs.crt ? 'crt' : '';
   document.body.className = 'theme-' + (S.prefs.theme || 'neon');
@@ -2365,7 +2367,7 @@ function viewLock() {
   const rec = raw.get('vault', {}); const f = pinFails(); const wait = Math.max(0, Math.ceil((f.until - Date.now()) / 1000));
   if (pinUI.mode !== 'unlock') { pinUI.mode = 'unlock'; pinUI.value = ''; }
   return `<section class="screen"><div class="panel hot gate" style="justify-items:center">
-    ${padHTML('ENTER PIN', wait ? `Too many wrong tries. Wait ${wait}s.` : 'Your wallet is locked.', { warn: !!wait, extra:
+    ${arrLockHTML()}${padHTML('ENTER PIN', wait ? `Too many wrong tries. Wait ${wait}s.` : 'Your wallet is locked.', { warn: !!wait, extra:
       `${rec.bio ? `<button class="btn block violet" data-act="bioUnlock">Unlock with Face ID / fingerprint</button>` : ''}
        <button class="linkbtn" data-act="forgotPin" style="justify-self:center">Forgot PIN?</button>` })}
   </div></section>`;
@@ -2528,6 +2530,7 @@ function viewSettings() {
       <div class="field"><label>Cabinet theme</label><div class="seg three" role="group" aria-label="Theme">${THEMES.map(([k, l]) => `<button data-act="setTheme" data-t="${k}" aria-pressed="${S.prefs.theme === k}">${l.split(' ')[0].toUpperCase()}</button>`).join('')}</div></div>
       <div class="field"><label for="p_lang">Language</label><select id="p_lang" class="inp" data-act="prefSelect" data-k="lang">${LANGS.map(([k, l]) => `<option value="${k}" ${(S.prefs.lang || 'auto') === k ? 'selected' : ''} data-noi18n>${l}</option>`).join('')}</select></div>
       ${toggle('sound', 'Sound effects', '')}
+      ${arrSettingsHTML()}
       ${toggle('music', 'Arcade music', '')}
       ${toggle('crt', 'CRT scanlines', '')}
       ${toggle('btcSymbol', 'Show amounts as ₿', '₿1,000 instead of 1,000 SAT.')}
@@ -2953,6 +2956,7 @@ async function receivePayload(p, from) {
   try {
     const tx = await receiveToken(token, note, req ? { follow: { k: 'req', reqId: req.id } } : {});
     updTx(tx.id, { reqId: p.id || null });
+    if (!req) arrivalFrom(tx.id, 'nostr');   // (arrival notices: src/app_arrive.js)
     if (req) reqPaid(req.id, tx);
     sfx('coin'); refresh();
     if (!$('#layer .sheet')) celebrate('in', tx.amount);
@@ -3682,6 +3686,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_daily.js@@*/
 /*@@app_r9.js@@*/
 /*@@app_tokens.js@@*/
+/*@@app_arrive.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4226,6 +4231,7 @@ const A = {
 /*@@app_r8_actions.js@@*/
 /*@@app_r9_actions.js@@*/
 /*@@app_tokens_actions.js@@*/
+/*@@app_arrive_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;

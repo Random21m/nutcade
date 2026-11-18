@@ -39,3 +39,8 @@ self.addEventListener('fetch', e => {
     return net;
   })());
 });
+// A notice that money arrived (shown by the open page, never pushed from a server): tapping it brings NUTCADE forward.
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => { const c = cs.find(x => 'focus' in x); return c ? c.focus() : self.clients.openWindow('./'); }));
+});
