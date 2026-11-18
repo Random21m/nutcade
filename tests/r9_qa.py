@@ -722,7 +722,8 @@ DEP_LINE = """(u=>Nutcade.S.txs.filter(t=>t.mint===u&&t.type==='in'&&t.method===
 DEP_REC = """(u=>Nutcade.S.quotes.filter(q=>q.mint===u).map(q=>({ctr:q.ctr||null,was:q.was||null,state:q.state||null})))"""
 TAGS = {'pending': '"already pending" (20005), the mint says PENDING', 'store': '"outputs are pending" (11004), the mint says PENDING',
         'nostate': '"already pending", then the look at the quote fails', 'signed': '"already signed" (11003), the mint says ISSUED',
-        'lost': 'its answer lost, asked again with new counters, the lost request signed late', 'paid': 'refused, the mint says PAID',
+        'lost': 'its answer lost, asked again with new counters, the lost request signed late',
+        'lost6': 'six tries in a row with their answers lost, the first one signed late', 'paid': 'refused, the mint says PAID',
         'unpaid': 'refused, the mint says UNPAID'}
 
 
@@ -746,14 +747,16 @@ def race_routes(u, st, mode):
         if first and mode == 'signed':   # the other copy got there first and was signed: the app's copy is "already signed"
             st['other_now'] = await asyncio.to_thread(post_raw, u, '/v1/mint/bolt11', body)
             await answer(route); st['done1'] = True; return
-        if mode == 'lost':
-            if body == st['bodies'][0]:   # its answer is lost (and the library's resends of it too)
+        if mode in ('lost', 'lost6'):
+            d = st.setdefault('distinct', [])
+            if body not in d: d.append(body)
+            if d.index(body) < (1 if mode == 'lost' else 6):   # its answer is lost (and the library's resends of it too); 'lost6': six tries in a row
                 st['done1'] = True
                 try: await route.abort()
                 except Exception: pass
                 return
-            if 'late' not in st:   # the app asks again, with new counters; the lost request reaches the mint first, late
-                st['late'] = await asyncio.to_thread(post_raw, u, '/v1/mint/bolt11', st['bodies'][0])
+            if 'late' not in st:   # the app asks again, with new counters; the FIRST lost request reaches the mint now, late
+                st['late'] = await asyncio.to_thread(post_raw, u, '/v1/mint/bolt11', d[0])
                 await answer(route); return
         if first and mode in ('paid', 'unpaid'):   # turned down for another reason: nothing signed (the mint says PAID, or UNPAID)
             if mode == 'unpaid': st['arm'] = 'unpaid'
@@ -778,7 +781,7 @@ async def deposit_race(b, broken):
     or has been signed already. The overlap is forced, not timed: the copy is held at the mint (tests/stub) until the
     app has had its answer. In every case the deposit is credited in full, to itself, with no line at 0."""
     u = FREE; os.makedirs(HOLD, exist_ok=True)
-    for mode in [m for m in os.environ.get('R9_RACE', 'pending,store,nostate,signed,lost,paid,unpaid').split(',') if m]:
+    for mode in [m for m in os.environ.get('R9_RACE', 'pending,store,nostate,signed,lost,lost6,paid,unpaid').split(',') if m]:
         w = await fresh(b, u); await fund(w, u, 1000); b0 = await bal(w, u)
         st = {'bodies': [], 'resp': [], 'arm': None, 'qid': None, 'other': None, 'done1': False}
         post, look = race_routes(u, st, mode)
@@ -802,11 +805,13 @@ async def deposit_race(b, broken):
             check(f'deposit race ({tag}): the other copy is then signed (the mint says ISSUED)', o and o[0] == 200 and await asyncio.to_thread(qstate, u, st['qid']) == 'ISSUED', o and o[0])
         elif mode == 'signed':
             check(f'deposit race ({tag}): the other copy was signed and the app is refused with 11003', st.get('other_now', [0])[0] == 200 and st['resp'] and st['resp'][0][1] == 11003, (st.get('other_now', [0])[0], st['resp']))
-        elif mode == 'lost':
-            for _ in range(120):
+        elif mode in ('lost', 'lost6'):
+            for _ in range(480):
                 if 'late' in st and st['resp']: break
                 await w.wait(250)
+                if _ % 40 == 39: await w.ev("window.dispatchEvent(new Event('online'))")
             check(f'deposit race ({tag}): the late copy is signed, the new request refused', st.get('late', [0])[0] == 200 and st['resp'] and st['resp'][0][0] == 400, (st.get('late', [0])[0], st['resp']))
+            if mode == 'lost6': check(f'deposit race ({tag}): six earlier tries, each with new counters, before the one that is refused', len(st.get('distinct', [])) >= 7, len(st.get('distinct', [])))
         ok = await w.until(f"Nutcade.S.txs.some(t=>t.mint==={J(u)}&&t.type==='in'&&t.method==='ln'&&t.status==='done'&&t.amount===640) && !Nutcade.S.quotes.some(q=>q.mint==={J(u)})", 60000)
         await w.wait(500)
         end = dict(line=await w.ev(DEP_LINE + f"({J(u)})"), rec=await w.ev(DEP_REC + f"({J(u)})"), bal=await bal(w, u))

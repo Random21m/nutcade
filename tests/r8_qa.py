@@ -941,6 +941,34 @@ async def main():
             await d.ev(NOALLOW); await d.pg.context.close()
         await section('r2decoy', r2_decoy)
 
+        async def r3_decoy():
+            # 1.14.1: the duress wallet's own claim of its sats is refused "proofs are pending" (another copy of that very
+            # request is at work at the mint), and that copy is signed after: the duress wallet settles it from its journal
+            d = await wallet(b); await d.create(); await d.add_mint(B); await d.use(B); await d.receive_ln(3000); await set_pin(d)
+            got = {'n': 0}
+            async def h(route):
+                if route.request.method == 'POST':
+                    got['n'] += 1
+                    if got['n'] == 2 and 'body' not in got:   # (1: this wallet's token for it; 2: the duress wallet claiming it)
+                        got['body'] = route.request.post_data
+                        await route.fulfill(status=400, headers={'Access-Control-Allow-Origin': '*'}, content_type='application/json', body=json.dumps({'detail': 'proofs are pending', 'code': 11002})); return
+                await route.continue_()
+            await d.pg.route(f'{B}/v1/swap', h)
+            await settings(d); await d.click('[data-act=duressOpen]'); await d.wait(250); await pad(d, PIN); await d.wait(900); await pad(d, DPIN); await d.wait(300); await pad(d, DPIN)
+            await d.until("!!document.querySelector('#duressAmt')", 8000); await d.fill('#duressAmt', '300'); await d.click('[data-act=duressMake]'); await d.until("/READY/.test(document.body.innerText)", 30000); await d.ev("Nutcade.closeSheet()")
+            await d.pg.unroute(f'{B}/v1/swap', h)
+            def post(body):
+                try: return urllib.request.urlopen(urllib.request.Request(f'{B}/v1/swap', data=body.encode(), headers={'Content-Type': 'application/json'}), timeout=20).status
+                except urllib.error.HTTPError as e: return e.code
+            stc = await asyncio.to_thread(post, got['body']) if got.get('body') else None
+            check('duress claim refused "proofs are pending", the other copy then signed at the mint', got.get('body') and stc == 200, (got['n'], stc))
+            await d.pg.reload(); await d.wait(700); await unlock(d, DPIN)
+            ok = await d.until("Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0)===300 && !Nutcade.S.ops.length && !Nutcade.S.txs.some(t=>t.incoming&&(t.status==='pending'||t.status==='failed'))", 60000)
+            L = await d.ev("Nutcade.S.txs.map(t=>[t.type,t.status,t.amount,t.note])")
+            check('duress wallet: those 300 SAT are its coins, settled from its journal (no line left waiting or failed)', ok and await d.bal() == 300, (await d.bal(), L))
+            await d.pg.context.close()
+        await section('r3decoy', r3_decoy)
+
         # ======================= round 3: your own sats at a mint that dropped below 128 always come back =======================
         HEIR_NPUB = 'npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6'
         PUBKEY_JS = "(()=>{const k=crypto.getRandomValues(new Uint8Array(32)); return Array.from(CashuLib.getPubKeyFromPrivKey(k),x=>x.toString(16).padStart(2,'0')).join('')})()"
