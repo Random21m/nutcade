@@ -52,6 +52,9 @@ async def wallet(b, vw=375, vh=667, lang='en', mobile=True, init=None):
     import time as _t
     pg.on('framenavigated', lambda f: print('NAVDBG', round(_t.time() % 1000, 1), lang, f.url[:80], flush=True) if f == pg.main_frame else None)
     pg.on('crash', lambda: print('NAVDBG crash', lang, flush=True))
+    pg.on('console', lambda m: print('NAVDBG console', round(_t.time() % 1000, 1), m.type, m.text[:160].replace('\n', ' '), flush=True) if m.type in ('error', 'warning') or 'NAVDBG' in m.text else None)
+    pg.on('load', lambda p_: print('NAVDBG load', round(_t.time() % 1000, 1), flush=True))
+    pg.on('framedetached', lambda f: print('NAVDBG detached', round(_t.time() % 1000, 1), f.url[:60], flush=True))
     await ctx.add_init_script("try{navigation.addEventListener('navigate',e=>console.log('NAVDBG-PAGE '+e.navigationType+' '+e.destination.url+' '+performance.now()))}catch(e){}")
     await pg.goto(URL); await pg.wait_for_timeout(700)
     return w

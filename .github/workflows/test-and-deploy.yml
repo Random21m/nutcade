@@ -65,7 +65,7 @@ jobs:
         run: MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh --only "$SUITES"
       - name: The end of each suite log (when a suite failed)
         if: failure()
-        run: for f in qa-out/*_qa.log; do echo "=== $f ==="; tail -n 40 "$f" | cut -c1-400; done
+        run: for f in qa-out/*_qa.log; do echo "=== $f ==="; tail -n 90 "$f" | cut -c1-400; done
       - name: Keep logs and screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
