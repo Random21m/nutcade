@@ -637,6 +637,23 @@ async def main():
             check('a game: back from it, the notice is there again', await r.ev("!!document.querySelector('#arrStack .arr-card') && getComputedStyle(document.querySelector('#arrStack')).display!=='none'"))
             await dismiss(r); await r.home(); await r.pg.set_viewport_size({'width': 390, 'height': 844})
 
+        # ---------- a fresh wallet on a phone held sideways: its first deposit covers no screen's buttons (as r8 checks) ----------
+        if want('widths') or want('game'):
+            IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+            SEE = """(sel=>{const e=document.querySelector(sel); if(!e) return 'missing'; e.scrollIntoView({block:'center'}); const q=e.getBoundingClientRect();
+              if(q.width<1||q.top<0||q.bottom>innerHeight||q.left<0||q.right>innerWidth) return 'off screen'; const h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2);
+              if(h&&(h===e||e.contains(h))) return 'ok'; const c=h&&h.closest('.arr-card'); return 'covered by '+(c?'a notice ('+c.dataset.type+', '+Math.round(c.getBoundingClientRect().height)+' px)':(h?(h.id||h.className||h.tagName):'nothing'))+' at y '+Math.round(q.top)})"""
+            for vw, vh in ((844, 390), (568, 320)):
+                ctx = await b.new_context(viewport={'width': vw, 'height': vh}, device_scale_factor=1, is_mobile=True, has_touch=True, user_agent=IPHONE)
+                await ctx.add_init_script(INIT % J(J({'sound': False, 'music': False, 'crt': False, 'lang': 'en', 'relays': [NOSTR], 'npcHost': MOCK})))
+                u = await wallet(b, ctx=ctx); await u.create(); await u.add_mint(FREE); await u.use(FREE); await u.receive_ln(2000)
+                res = {}
+                for tabn, sel in (('wallet', '[data-act=send]'), ('history', '#app .tx'), ('mints', '#app [data-act=pickMint]'), ('settings', '[data-act=limOpen]')):
+                    await u.ev("Nutcade.closeSheet()"); await u.click(f'[data-act=tab][data-tab={tabn}]'); await u.wait(250)
+                    res[tabn] = await u.ev(SEE + f"({J(sel)})"); res[tabn + ' tabs'] = await u.ev(SEE + "('[data-act=tab][data-tab=wallet]')")
+                check(f'sideways {vw}x{vh}, a fresh wallet\'s first deposit: every screen\'s buttons stay usable', all(v == 'ok' for v in res.values()), res)
+                await ctx.close()
+
         errs = [e for e in (r.errs + p.errs) if 'PAGEERROR' in e]
         for e in r.errs + p.errs: print('  page said:', e[:300])
         check('no page errors', not errs, errs[:5])
