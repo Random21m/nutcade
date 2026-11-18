@@ -354,7 +354,7 @@ async def main():
               const lines = [T('DAILY CHALLENGE') + ' ' + lab, T('FIRST RUN COUNTS'), T('PRACTICE RUN'), T('CLOCK WRONG: NOT COUNTED'), T('DAILY')]; return lines.map(s => [s, c.measureText(s).width]); })()""")
             check(f'{lang}: canvas lines fit the 224px screen', all(wd <= 224 for _, wd in fits), fits)
             miss = await z.ev("[...window.__i18nMiss]")
-            mine = [m for m in miss if any(k in m for k in ['daily', 'Daily', 'DAILY', 'relay', 'streak', 'Streak', 'official', 'OFFICIAL', 'PRACTICE', 'clock', 'Nostr', 'Post'])]
+            mine = [m for m in miss if any(k in m for k in ['daily', 'Daily', 'DAILY', 'relay', 'streak', 'Streak', 'official', 'OFFICIAL', 'PRACTICE', 'clock', 'Nostr', 'Post', 'reto diario', 'desafio diário', 'Tages-Challenge', 'défi du jour'])]   # (an already translated label that is run through the translator a second time shows up here)
             check(f'{lang}: no untranslated daily text reported', lang == 'en' or not mine, mine)
             check(f'{lang}: no script errors', not z.errs, z.errs[:2])
             await z.ctx.close()

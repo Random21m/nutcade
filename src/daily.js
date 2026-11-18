@@ -197,7 +197,7 @@ function html() {
   return `<div class="panel daily" data-daily="${esc(i.date)}">
     <div class="row between" style="gap:8px;flex-wrap:wrap"><span class="h2" style="color:var(--gold)">DAILY CHALLENGE</span><span class="tiny muted" data-noi18n>${esc(dateLabel(i.date, true))} · UTC</span></div>
     <div class="dtop">
-      <button class="dthumb" data-daily-play aria-label="${esc(t('Play the daily challenge: {g}', { g: cabs.name }))}"><canvas width="112" height="84" data-thumb="${esc(cabs.id)}"></canvas></button>
+      <button class="dthumb" data-daily-play data-noi18n aria-label="${esc(t('Play the daily challenge: {g}', { g: cabs.name }))}"><canvas width="112" height="84" data-thumb="${esc(cabs.id)}"></canvas></button>
       <div class="dcol">
         <div class="dname" data-noi18n>${esc(cabs.name)}</div>
         <div class="dlab">${e ? "TODAY'S SCORE" : 'NOT PLAYED YET'}</div>
