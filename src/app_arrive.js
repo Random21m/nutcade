@@ -78,9 +78,10 @@ function arrGroups(items) {
 }
 function arrCardHTML(type, items) {
   const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
-  const body = one
-    ? `<div class="arr-big" data-noi18n>+${esc(money(one.a))}</div><div class="arr-what"><span>${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span></div>`
-    : `${type === 'away' ? '<div class="arr-sub">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
+  // (one arrival: a compact card, so it covers little even on a phone held sideways)
+  if (one) return `<div class="arr-head"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-title">MONEY ARRIVED</span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
+    <div class="arr-one"><span class="arr-big" data-noi18n>+${esc(money(one.a))}</span><span class="arr-what">${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span><button type="button" class="linkbtn arr-link" data-act="arrNotes">Open notes</button></div>`;
+  const body = `${type === 'away' ? '<div class="arr-sub">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
       <div class="arr-total"><span>Total</span><span data-noi18n>+${esc(money(total))}</span></div>`;
   return `<div class="arr-head"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-title">${type === 'away' ? 'WHILE YOU WERE AWAY' : 'MONEY ARRIVED'}</span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
     ${body}

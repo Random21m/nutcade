@@ -658,17 +658,19 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 }
 /* Notices when money arrives (src/app_arrive.js) */
 .arr-stack{position:fixed;left:50%;top:calc(8px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:280;width:min(calc(100vw - 32px),440px);display:grid;gap:8px;pointer-events:none}
-.arr-card{pointer-events:auto;display:grid;gap:6px;padding:10px 12px;border:3px solid var(--lime);border-radius:var(--r);background:var(--well);box-shadow:4px 4px 0 #000;font-size:18px;line-height:1.15;max-height:calc(100vh - 120px);overflow:auto}
+.arr-card{pointer-events:auto;display:grid;gap:4px;padding:8px 12px;border:3px solid var(--lime);border-radius:var(--r);background:var(--well);box-shadow:4px 4px 0 #000;font-size:18px;line-height:1.15;max-height:calc(100vh - 120px);overflow:auto}
 .arr-card[data-type=away]{border-color:var(--cyan)}
 .arr-head{display:flex;align-items:center;gap:8px;min-width:0}
 .arr-ico{flex:none;font-family:var(--f-display);font-size:14px;color:var(--lime)}
 .arr-card[data-type=away] .arr-ico{color:var(--cyan)}
 .arr-title{flex:1;min-width:0;font-family:var(--f-display);font-size:10px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
-.arr-x{flex:none;width:32px;height:32px;margin:-6px -6px -6px 0;border:0;background:transparent;color:var(--dim);font-size:24px;line-height:1;cursor:pointer}
+.arr-x{flex:none;width:32px;height:28px;margin:-6px -8px -6px 0;border:0;background:transparent;color:var(--dim);font-size:24px;line-height:1;cursor:pointer}
 .arr-x:hover,.arr-x:focus-visible{color:var(--ink)}
-.arr-big{font-family:var(--f-display);font-size:16px;line-height:1.4;color:var(--lime);overflow-wrap:anywhere}
-.arr-what{display:flex;flex-wrap:wrap;gap:2px 10px;color:var(--ink)}
+.arr-one{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;min-width:0}
+.arr-big{font-family:var(--f-display);font-size:14px;line-height:1.5;color:var(--lime);overflow-wrap:anywhere}
+.arr-what{color:var(--ink);overflow-wrap:anywhere;min-width:0}
 .arr-mint{color:var(--dim);overflow-wrap:anywhere;min-width:0}
+.arr-link{margin:-9px -8px -9px auto;min-height:40px;padding:4px 8px;font-size:16px}
 .arr-sub{color:var(--dim);font-size:16px}
 .arr-lines{display:grid;gap:4px}
 .arr-line{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:baseline;padding:4px 0;border-bottom:1px dashed var(--grid)}
@@ -681,6 +683,7 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .arr-lock{margin-bottom:10px;text-align:center}
 /* a game or the till fills the screen: the notices wait under it */
 body:has(.game-view,.cashier) .arr-stack{display:none}
+@media (max-height:500px){.arr-card{padding:6px 10px;gap:2px}.arr-card[data-type=away]{max-height:calc(100vh - 24px)}}
 </style>
 
 <div id="app" class="crt"></div>
@@ -10423,9 +10426,10 @@ function arrGroups(items) {
 }
 function arrCardHTML(type, items) {
   const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
-  const body = one
-    ? `<div class="arr-big" data-noi18n>+${esc(money(one.a))}</div><div class="arr-what"><span>${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span></div>`
-    : `${type === 'away' ? '<div class="arr-sub">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
+  // (one arrival: a compact card, so it covers little even on a phone held sideways)
+  if (one) return `<div class="arr-head"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-title">MONEY ARRIVED</span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
+    <div class="arr-one"><span class="arr-big" data-noi18n>+${esc(money(one.a))}</span><span class="arr-what">${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span><button type="button" class="linkbtn arr-link" data-act="arrNotes">Open notes</button></div>`;
+  const body = `${type === 'away' ? '<div class="arr-sub">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
       <div class="arr-total"><span>Total</span><span data-noi18n>+${esc(money(total))}</span></div>`;
   return `<div class="arr-head"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-title">${type === 'away' ? 'WHILE YOU WERE AWAY' : 'MONEY ARRIVED'}</span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
     ${body}
