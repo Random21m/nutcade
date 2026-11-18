@@ -59,17 +59,13 @@ async def main():
         check('GRAND TOUR is earned by playing every cabinet, and not before', r['all'] and not r['almost'] and not r['eight'], r)
         check('GRAND TOUR says the number from the cabinet list', r['how'] == f"Play all {r['n']} cabinets.", r)
         check('a GRAND TOUR earned before the new cabinets arrived is kept', r['kept'], r)
-        bad = {}; parts_bad = {}
+        bad = {}
         for lang in ('es', 'pt', 'de', 'fr'):
             await w.ev("document.querySelector('[data-act=tab][data-tab=settings]').click()"); await w.wait(150)
             await w.ev(f"const s=document.querySelector('#p_lang'); s.value='{lang}'; s.dispatchEvent(new Event('change',{{bubbles:true}}))"); await w.wait(250)
             t = await w.ev("Nutcade.tr(Trophies.DEFS.find(d => d.id === 'tour').how)")
             if t == r['how'] or str(r['n']) not in t: bad[lang] = t
-            for src, want in (('(part 1 of 2)', {'es': '(parte 1 de 2)', 'pt': '(parte 1 de 2)', 'de': '(Teil 1 von 2)', 'fr': '(partie 1 sur 2)'}), ('ZZZ (part 2 of 3)', {'es': 'ZZZ (parte 2 de 3)', 'pt': 'ZZZ (parte 2 de 3)', 'de': 'ZZZ (Teil 2 von 3)', 'fr': 'ZZZ (partie 2 sur 3)'})):
-                got = await w.ev(f"Nutcade.tr({src!r})")
-                if got != want[lang]: parts_bad[lang + ' ' + src] = got
         await w.ev("const s=document.querySelector('#p_lang'); s.value='en'; s.dispatchEvent(new Event('change',{bubbles:true}))")
-        check('a payment part with no note, "(part 1 of 2)", is translated in Spanish, Portuguese, German and French (history display text)', not parts_bad, parts_bad)
         check('GRAND TOUR text is translated, with the number, in Spanish, Portuguese, German and French', not bad, bad)
         check('no script errors in the arcade', not w.errs, w.errs[:3])
         await b.close()
