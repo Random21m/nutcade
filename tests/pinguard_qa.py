@@ -25,7 +25,7 @@ GUARD = {   # the step: (how it starts, what shows once it went ahead, the pad's
     'newseed': ('newSeedAsk', "!!document.querySelector('[data-act=doNewSeed]')", 'New recovery phrase', 'Enter your PIN to make a new recovery phrase.'),
 }
 # (downloads are recorded, not saved; the steps with no button on screen today are started the way a button would)
-DL_JS = "window.__dl=[]; if(!window.__dlHook){window.__dlHook=1; const c=HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click=function(){ if(this.download){ window.__dl.push(this.download); return; } return c.call(this); }}"
+DL_JS = "window.__dl=[]; if(!window.__dlHook){window.__dlHook=1; document.addEventListener('click', e=>{ const a=e.target && e.target.closest && e.target.closest('a[download]'); if(a){ window.__dl.push(a.download); e.preventDefault(); } }, true)}"
 PAD = "!!document.querySelector('#layer [data-pinpad=guard]')"
 PINERR = "(document.querySelector('#pinErr')||{}).innerText||''"
 FAILS = "JSON.parse(localStorage.getItem('nutcade:pinfails')||'{\"n\":0}').n"
