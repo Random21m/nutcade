@@ -1,6 +1,7 @@
 /* Notices when money arrives (src/app_arrive.js). A notice sits over the logo bar only: it never covers the balance,
    the lock or the mint (the credits panel starts 100 px down at every size). */
-.arr-stack{position:fixed;left:50%;top:calc(6px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:280;width:min(calc(100vw - 32px),440px);display:grid;gap:6px;pointer-events:none}
+/* (above sheets, 100; under a game or the till, 120, which fill the screen: the notices wait under them) */
+.arr-stack{position:fixed;left:50%;top:calc(6px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:110;width:min(calc(100vw - 32px),440px);display:grid;gap:6px;pointer-events:none}
 .arr-card{pointer-events:auto;display:grid;gap:2px;padding:5px 8px 5px 10px;border:3px solid var(--lime);border-radius:var(--r);background:var(--well);box-shadow:4px 4px 0 #000;font-size:17px;line-height:1.1;min-width:0}
 .arr-card[data-type=away]{border-color:var(--cyan)}
 .arr-row{display:flex;align-items:center;gap:8px;min-width:0}
@@ -28,6 +29,4 @@
 .arr-acts{display:flex;flex-wrap:wrap;gap:8px}
 .arr-acts .btn{flex:1 1 40%}
 .arr-lock{margin-bottom:10px;text-align:center}
-/* a game or the till fills the screen: the notices wait under it */
-body:has(.game-view,.cashier) .arr-stack{display:none}
 @media (max-width:340px){.arr-sub{gap:6px}.arr-mint:empty{display:none}}
