@@ -156,9 +156,12 @@ async def zap_to(w, npub, amount, comment='', pay=True):
     return q, await w.sheet_text()
 
 
-async def make_nwc(w, name, per='none', sats=None):
+async def make_nwc(w, name, per='none', sats=None, pin='135791'):
     await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
     await w.click('[data-act=nwcNew]'); await w.wait(200)
+    if await w.ev("!!document.querySelector('#layer [data-pinpad=guard]')"):   # with a PIN, Connect an app asks for it first (the PIN guard)
+        for k in pin: await w.click(f'#layer [data-pinpad=guard] [data-k="{k}"]')
+        await w.click('#layer [data-pinpad=guard] [data-k=ok]'); await w.until("!!document.querySelector('#nwcName')", 20000)
     await w.fill('#nwcName', name)
     if per != 'none':
         await w.pg.select_option('#nwcPer', per); await w.wait(100); await w.fill('#amtIn', str(sats))
