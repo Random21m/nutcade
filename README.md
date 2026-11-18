@@ -85,7 +85,7 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 - Take back a sent token if nobody claimed it, and see when one was claimed
 - Coin-drop and 1UP effects when sats arrive, and a launch effect when you send
 
-**Arcade**: eight original cabinets with high-score tables, chiptune sound and music
+**Arcade**: ten original cabinets with high-score tables, chiptune sound and music
 
 | Cabinet | Style |
 |---|---|
@@ -97,14 +97,22 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 | Sky Shield | Missile defense |
 | Nibble | Snake |
 | Nut Flipper | Pinball: light N-U-T for a multiplier, drop the S-A-T targets, hunt the gold sat |
+| Nut Poker | Five-card draw video poker, jacks or better, for **free credits only** (never sats) |
+| Neon Road | Pseudo-3D night-highway racer: pass traffic, race the clock to each checkpoint |
 
 Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons (tap **Use D-pad** above the controls if you'd rather have arrow buttons).
 
+**Neon Road** (how to play): you drive down a neon highway toward the sunset, against a clock. The road curves and rolls over hills; slower cars share it, and the grass drags you down. Pass cars for points, hit the checkpoint arch at the end of each stage for extra time and points, and keep going until the time runs out. Every stage has its own colours and tighter curves, and the same seed always builds the same road, so a challenge or a Daily Challenge replays the same course.
+- **Keyboard:** left/right arrows or A/D steer, up or W is gas (the car cruises by itself without it), down or S brakes.
+- **Phone:** touch the left or right half of the screen to steer (the car accelerates while you touch), touch the top of the screen to brake, or use the joystick: left/right steers, up boosts, down brakes.
+- Score is distance, plus 50 for every car you pass (100 for a close pass), plus a bonus at each checkpoint.
+**Daily Challenge**: at the top of the arcade, one cabinet a day (picked from the UTC date) with the same seeded level for everyone. The first run of the day is your official score, you keep a streak of days played in a row, and you can share the score as a Nostr note only when you tap **Post**. See [Daily Challenge](#daily-challenge).
+
 **Challenges and bounties**: after a game, tap **Challenge a friend** to send your score to a contact over Nostr or share it as a link. Your friend's game starts from the same seed, so it's laid out the same way, and their score comes back to you. Challenges are signed with your NUTCADE key, so nobody can send one in your name. Sending to a contact, you can also **put sats on it**: they're locked so only that friend can win them, and only by beating your score within a week.
 
-**Replays**: every game is replayable. The games start from a seed and run one step per frame, and NUTCADE records each frame's input, so playing the inputs back gives exactly the same game and score on any phone. The games use their own sine, cosine and distance maths, so iPhones and Android phones agree to the last bit. A challenge carries your replay: your friend's NUTCADE plays it back to confirm your score is real before they accept, and then they race your ghost. Their result comes back with their replay too, which your NUTCADE checks before believing it.
+**Replays**: every game is replayable. The games start from a seed and run on a fixed clock of 60 steps a second (the same speed on 60, 120 and 144 Hz screens), and NUTCADE records each step's input, so playing the inputs back gives exactly the same game and score on any phone. The games use their own sine, cosine and distance maths, so iPhones and Android phones agree to the last bit. A challenge carries your replay: your friend's NUTCADE plays it back to confirm your score is real before they accept, and then they race your ghost. Their result comes back with their replay too, which your NUTCADE checks before believing it.
 
-**Trophies and score cards**: 27 trophies for wallet milestones and arcade feats (reach wave 3 in Star Swarm, grow Nibble to 30, play every cabinet…). Every high score and trophy can be turned into a share card for X or anywhere else. Cards show the game and score only, never anything about your wallet, and trophies stay on your device.
+**Trophies and score cards**: 28 trophies for wallet milestones and arcade feats (reach wave 3 in Star Swarm, grow Nibble to 30, play every cabinet…). Every high score and trophy can be turned into a share card for X or anywhere else. Cards show the game and score only, never anything about your wallet, and trophies stay on your device.
 
 **Settings**
 - **Security:** set, change or remove your PIN, turn on Face ID / fingerprint, lock now, and choose when the wallet locks itself
@@ -115,7 +123,7 @@ Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons
 - **Privacy:** turn the live price and price chart on or off (prices come from Coinbase, in your currency), choose whether to check if sent tokens were claimed, and whether to receive ecash sent over Nostr
 - **Piggy bank:** turn round-ups on or off, choose what to round to, and empty the piggy bank
 - **Wallet tools:** cashier mode and today's till, move sats between mints, remove spent ecash and check stuck payments
-- **About:** version, links and donations
+- **About:** version, links and support
 
 ## Getting started
 
@@ -169,6 +177,21 @@ Hunters scan the cards with their phone camera or the NUTCADE scanner. Each card
 ### Loaded score cards
 
 When you share a high-score or trophy card, type an amount under **Put sats in it** and tap **Load card**. The card is redrawn with a QR code and "INSERT COIN: SCAN TO WIN". It works like a one-card treasure hunt: the first person to scan it wins the sats, and if nobody does within a week, they come back to you. Anyone who sees the card can scan it, so only load what you're happy to give away.
+
+### Nut Poker (free credits only)
+
+Pick **Nut Poker** in the Arcade. You start with 100 credits. Tap **Bet one** (1 to 5 credits, it wraps round) or **Bet max**, then **Deal**: five cards are dealt face up. Tap a card to **HOLD** it (shown under the card), then **Draw** to swap the others for new cards from the same deck. The hand is scored against the pay table, which stays on screen with the current bet's column lit and the winning row flashing. It is the usual 9/6 jacks-or-better table, multiplied by your bet: royal flush 250 (4000 at max bet), straight flush 50, four of a kind 25, full house 9, flush 6, straight 4, three of a kind 3, two pair 2, jacks or better 1. A pair of 10s or lower pays nothing, and A-2-3-4-5 counts as a straight. The deck is shuffled fresh for every hand with the browser's cryptographic random numbers (`crypto.getRandomValues`), not the games' seeded generator, and the draw comes from the same shuffled deck. Keys: **1 to 5** hold, **D** or **Enter** deal / draw, **B** bet one, **M** bet max, **E** end the run, **P** pause.
+
+**Free credits only, never sats.** The credits are play money. They can't be bought with sats, can't be cashed out, and aren't linked to your wallet, mints or any payment in any way. Run out and you get a **FREE REFILL** to 100. The high score is the most credits you have held in one run; it is saved when you end the run or leave. Because of this, a Nut Poker score card can never be loaded with sats (no **Put sats in it** / **Load card**), and there are no challenges or bounties for it. Nut Poker's code (`src/poker.js`) contains no wallet or payment code.
+### Daily Challenge
+
+The **DAILY CHALLENGE** card at the top of the arcade shows today's cabinet, your score for today and the time until the next challenge (and what time that is on your clock). Tap **Play daily**. The day is the **UTC date**, so everyone in the world gets the same cabinet and the same starting level; the cabinet and the seed are worked out from the date alone, on your phone, with no server. Your first run of the day is your **official score**; replays that day are for fun and only update your best for the day. A run you quit halfway keeps the score it had (quit at 0 points and the day isn't used up), and a run you start before midnight UTC counts for the day it began. History and your **streak** (days played in a row) stay on this phone.
+
+Tap **Share my score** to see a short note, for example "NUTCADE Daily Challenge Nov 18: Star Swarm 12,340 🕹️ #nutcade", with the app link. Nothing is sent until you tap **Post**, which publishes that one public note, signed with your NUTCADE Nostr key, to your Nostr relays. If you're offline it says so and nothing is lost; with no Nostr key there is **Copy text** instead. There are no accounts, no leaderboard server and no tracking.
+
+NUTCADE can't ask a server what day it is, so it watches the clock itself: if the device date moves back before a day it has already seen, or reads as before 2025, that day's runs are for fun (not official, not in the streak) and a notice says so until the clock catches up or you tap **My clock is right**. Moving the clock forward just moves you to that day's challenge.
+
+Nine of the ten cabinets can be the daily: the eight originals and Neon Road. **Nut Poker never is**: its deck is shuffled for real, so two phones could never play the same deal. For cabinet authors: a cabinet joins with `daily: true` in its object (all its gameplay randomness must come from the engine's seeded `rnd()`/`ri()`/`RNG()`), and `init(G, seed)` receives the run's seed; a cabinet marked `noChallenge` can't join even with the flag. The details are at the top of `src/daily.js`.
 
 ### Extra Life
 
@@ -294,7 +317,9 @@ Every push runs the suites in `tests/` automatically on GitHub (GitHub Actions) 
 - 41 checks for multinut payments, payment requests (over Nostr and HTTP, including ecash sent by another wallet) and NFC reading and writing
 - 39 checks for trophies, share cards, instant updates, the Nostr mint-list backup and the Lightning address, against a stand-in Nostr relay and npub.cash server that check every signature
 - 24 scanner checks, run before release: camera scans of real tokens and invoices, photo scans, and recognising every kind of code
-- All eight games played through to game over, with high scores, pause, exit, touch controls and sound
+- All ten games played through to game over, with high scores, pause, exit, touch controls and sound
+- The arcade clock: every cabinet takes 60 steps a second on a faked 30, 60, 120 and 144 Hz screen, a pause or tab switch never makes a game race to catch up, and recorded runs still verify as replays on every cabinet that has them (Nut Poker has none, by design)
+- Nut Poker (43 rule checks and about 90 play checks), Neon Road (about 70) and the Daily Challenge (about 135), each in five languages and at phone and desktop sizes
 - Every screen at 320, 390, 768 and 1280 pixels wide, checked for overflow and clipped text, and again in each language
 
 ## Privacy
@@ -302,10 +327,11 @@ Every push runs the suites in `tests/` automatically on GitHub (GitHub Actions) 
 NUTCADE has no account, no tracking and no analytics. Your recovery phrase and notes stay in your browser, and mints only see the ecash you exchange with them. The app contacts other services only for these things:
 
 - **Mints**: yours for every payment, and the ones listed in the mint picker to show whether they're online
+- **Nostr relays, for the Daily Challenge**: only when you tap **Post** under **Share my score**, to publish the one note you just previewed
 - **Coinbase**, for the price and chart, only while **Show Bitcoin price** is on
 - **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to send and receive game challenges with your contacts, to save your encrypted mint list when it changes and to look for it when you restore (turn this off in Settings → Backup), to receive payments for requests you made in the last 30 days, to deliver payments to requests you pay, to receive ecash friends send to your ecash address (turn this off in Settings → Privacy), and when you tap "Find mints people recommend". Payments you send over Nostr are signed with a one-time key, so they aren't linked to you. Challenges and their scores are signed with your NUTCADE Nostr key so friends know they're from you
 - **npub.cash**, only while your Lightning address is turned on. It sees the amounts and times of payments to your address, not the rest of your wallet
-- **The donation address** (strike.me), only when you tip from inside the app
+- **The support address** (strike.me), only when you tip from inside the app
 
 The **microphone** is used only while a Listen screen is open. The sound is decoded on your phone and nothing is recorded or sent anywhere.
 
@@ -333,10 +359,17 @@ NUTCADE is free and open source, and it stays that way. Supporting it is optiona
 
 **keywest@strike.me**
 
-You can also tip from inside NUTCADE: **Settings → About → Donate**. The same address and code are on that screen. Be wary of any other "NUTCADE donation" address.
+You can also tip from inside NUTCADE: **Settings → About → Support**. The same address and code are on that screen. Be wary of any other "NUTCADE support" address.
 
 ## Changelog
 
+- **v1.13.2:** the **Arcade Update**: two new cabinets and a Daily Challenge, plus a fix for fast games on fast screens.
+  - **Nut Poker**: five-card draw video poker (jacks or better, 9/6 pay table) for free credits only. It is never linked to sats: no purchases, no cash-out, a free refill at 0 credits, and its score card can't be loaded with sats. Hands are dealt from a fair, cryptographically shuffled deck, so it has no challenges or replays.
+  - **Neon Road**: a pseudo-3D night-highway racer with curves and hills, traffic, a clock with checkpoints, stages that change colours, a road built from the seed (so challenges and replays race the same course), keyboard and touch controls, and its own chiptune loop.
+  - **Daily Challenge**: one cabinet and one seeded level a day for everyone (from the UTC date), a first-run-counts official score, a streak and history, and a Share my score note you post to Nostr only by tapping Post (or copy); clock changes, time zones, midnight UTC and offline posting are handled and tested in five languages. The eight old cabinets and Neon Road can be the daily; Nut Poker never is. The share preview now wraps at spaces instead of in the middle of a word.
+  - **Fixed: games ran too fast on 120 Hz and 144 Hz screens.** The arcade took one game step per screen refresh, so every cabinet ran about twice as fast on a 120 Hz phone. It now runs a fixed 60 steps a second whatever the screen, catches up at most a few steps after a pause or a tab switch, and draws once per refresh. Replays and challenges count steps, so they verify as before.
+  - The **GRAND TOUR** trophy now means every cabinet in the arcade ("Play all 10 cabinets"), counted from the cabinet list; players who already earned it keep it. A touch the system cancels (a call, a palm) no longer counts as letting go of Nut Flipper's plunger. The Daily's share sheet says "your relay" for one relay and "your 3 relays" for several, in every language. A made-up challenge link for Nut Poker now says plainly that the cabinet has no challenges, instead of offering to accept one. A result screen from one run can no longer land on the next cabinet you open.
+  - For developers: every cabinet lives in its own `src/game_*.js` and registers one factory in `window.NutCabinets` (see `src/README.md`).
 - **v1.13.1:** a step the mint finished is always booked as itself, never as "Ecash already spent elsewhere", even when the connection drops, the app is closed, the mint answers late, or two phones holding the same wallet send the same step. When the mint turns down a repeat of a step it already did (as when the app resends one whose answer was lost), NUTCADE takes the result from the mint's own signatures for that step, so a token you send is shown right away; a step the mint is still working on waits until it's done; and if a step's request reaches a slow mint after the app had given up on it, the step is settled again as itself. A Lightning deposit the mint already issued is credited, even when the mint turns down a repeat of it. Coins that another device really spent in a different way are still shown as spent elsewhere. (This could happen since 1.12.0; until now Find lost ecash brought the sats back.)
   - Known issues in v1.13.1: if a step's request reaches the mint more than a day after the app gave up on it, its coins stay in your balance until NUTCADE notices they were spent (the next time you pay with them, or at once with **Remove spent ecash**, next to Find lost ecash, which then shows them as "Ecash already spent elsewhere"). Running **Find lost ecash** before that can show those sats twice for a moment; Remove spent ecash puts it right. Nothing is lost. The other v1.13.0 known issues still apply.
 - **v1.13.0:** a **spending limit** for the whole wallet (ask for the PIN above an amount per payment, and a cap per 24 hours, over every way sats leave, fees included, held for each payment in one step so two taps or two tabs can't both slip under it; kept in the PIN vault, changed only with the PIN; Wallet Connect apps get QUOTA_EXCEEDED); a **duress PIN** that opens a small separate wallet instead of yours (funded with coins of its own) (the vault always has room for it, both keys are tried on every PIN, and the real wallet is never read while the other is open; see Safety for what it can't hide); mints with a request limit (NUT-06 `max_array_length`): NUTCADE needs at least 128, a mint below that can't be added, coin picks stay within a mint's limit, restores and checks go in pieces, big tokens are claimed in parts, and a mint that drops below 128 takes no deposits but its sats can still move out, and your own sats there (tokens taken back, gifts, bounties and treasures coming back, an Extra Life, a restore from the 12 words, another phrase, a backup) always come back, in parts where needed; a **Report a problem** form (Settings → About); every GitHub Action pinned to a commit. Fixes: a treasure hunt (or any step) that moved sats and then failed redraws the screen at once; "Need X SAT including fees" counts the mint's fee to spend ecash; a token taken back on a mint with fees shows one fee line for what it cost; "already spent" with nothing to remove no longer says "removed 0 SAT"; long mint names and notes wrap instead of being cut off; "(part 1 of 2)" on its own, "N SAT in flight." on the wallet screen and the older-wallet notice are shown in your language.

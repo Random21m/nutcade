@@ -62,7 +62,7 @@ const SPAL = { c: C.lime, w: C.white, p: C.pink };
 const starfield = n => Array.from({ length: n }, () => ({ x: frnd(0, W), y: frnd(0, H), v: frnd(0.2, 1.2), c: [C.ink, C.cyan, C.pink, C.gold][Math.floor(frnd(0, 4))] }));
 function drawStars(ctx, stars, dy = 1) { for (const s of stars) { s.y += s.v * dy; if (s.y > H) { s.y = 0; s.x = frnd(0, W); } ctx.fillStyle = s.c; ctx.globalAlpha = s.v > 0.8 ? 1 : 0.5; ctx.fillRect(s.x | 0, s.y | 0, 1, 1); } ctx.globalAlpha = 1; }
 const starSwarm = {
-  id: 'swarm', name: 'STAR SWARM', year: '1981', blurb: 'Blast the diving formation before it lands.', track: 'action',
+  id: 'swarm', daily: true, name: 'STAR SWARM', year: '1981', blurb: 'Blast the diving formation before it lands.', track: 'action',
   help: '◀ ▶ move · A fire', keys: '← → move · Space fire',
   init(G) { const s = { stars: starfield(60), p: { x: 106, y: 256, w: 11, h: 8, inv: 120 }, shots: [], bombs: [], fx: [], wave: 0, lives: 3, t: 0 }; this.wave(s); return s; },
   wave(s) {
@@ -155,7 +155,7 @@ const AUDITOR = [['...r....', '.rrrrrr.', 'rrwkrwkr', 'rrrrrrrr', 'rr.rr.rr', 'r
 const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 const OPP = { up: 'down', down: 'up', left: 'right', right: 'left' };
 const nutMaze = {
-  id: 'maze', name: 'NUT MAZE', year: '1980', blurb: 'Gobble every nut. Golden acorns turn the auditors.', track: 'bounce',
+  id: 'maze', daily: true, name: 'NUT MAZE', year: '1980', blurb: 'Gobble every nut. Golden acorns turn the auditors.', track: 'bounce',
   help: '✚ or swipe to steer', keys: 'Arrow keys steer',
   init(G) { const s = { lives: 3, level: 0, t: 0 }; this.level(s); return s; },
   level(s) {
@@ -273,7 +273,7 @@ const LAYOUTS = [
   (r, c) => !(r > 1 && r < 6 && c > 2 && c < 9) || r === 4
 ];
 const brickBlitz = {
-  id: 'brick', name: 'BRICK BLITZ', year: '1986', blurb: 'Smash the wall. Catch the ball. Keep the streak.', track: 'bounce',
+  id: 'brick', daily: true, name: 'BRICK BLITZ', year: '1986', blurb: 'Smash the wall. Catch the ball. Keep the streak.', track: 'bounce',
   help: '◀ ▶ or drag · A launch', keys: '← → move · Space launch',
   init(G) { const s = { lives: 3, level: 0, t: 0, fx: [] }; this.level(s); return s; },
   level(s) {
@@ -336,7 +336,7 @@ function makeRock(x, y, size, lvl) {
 }
 const wrap = o => { if (o.x < 0) o.x += W; if (o.x > W) o.x -= W; if (o.y < 24) o.y += H - 24; if (o.y > H) o.y -= H - 24; };
 const voidRocks = {
-  id: 'rocks', name: 'VOID ROCKS', year: '1979', blurb: 'Drift, spin, and split the space rocks to dust.', track: 'action',
+  id: 'rocks', daily: true, name: 'VOID ROCKS', year: '1979', blurb: 'Drift, spin, and split the space rocks to dust.', track: 'action',
   help: '◀ ▶ turn · ▲ thrust · A fire', keys: '← → turn · ↑ thrust · Space fire',
   init(G) { const s = { lives: 3, wave: 0, t: 0, shots: [], fx: [], stars: starfield(30) }; this.ship(s); this.wave(s); return s; },
   ship(s) { s.p = { x: W / 2, y: 156, a: -Math.PI / 2, vx: 0, vy: 0, inv: 150 }; },
@@ -392,7 +392,7 @@ const HT = 16, HOY = 32, HCOLS = 14;
 const BUNNY = ['.w....w.', '.wp..pw.', '.wp..pw.', '..wwww..', '.wkwwkw.', '.wwppww.', 'wwwwwwww', '.w.ww.w.'];
 const CAR = [['..rrrrrrrr....', '.rrccrrrccr...', 'rrrrrrrrrrrrr.', 'rrrrrrrrrrrrrr', '.kk.......kk..'], ['....yyyyyyyy..', '...yccyyyccyy.', '.yyyyyyyyyyyyy', 'yyyyyyyyyyyyyy', '..kk.......kk.']];
 const hopLanes = {
-  id: 'hop', name: 'HOP LANES', year: '1981', blurb: 'Dodge traffic, ride the logs, fill every burrow.', track: 'bounce',
+  id: 'hop', daily: true, name: 'HOP LANES', year: '1981', blurb: 'Dodge traffic, ride the logs, fill every burrow.', track: 'bounce',
   help: '✚ or swipe to hop', keys: 'Arrow keys hop',
   init(G) { const s = { lives: 3, level: 0, t: 0, fx: [] }; this.level(s); return s; },
   level(s) {
@@ -459,7 +459,7 @@ const hopLanes = {
 ===================================================================== */
 const CITY = ['..c...cc..', '.ccc..cc.c', '.ccc.cccc.', 'cccccccccc', 'cwcwcwcwcc'];
 const skyShield = {
-  id: 'shield', name: 'SKY SHIELD', year: '1980', blurb: 'Tap the sky to stop warheads before they hit your cities.', track: 'action',
+  id: 'shield', daily: true, name: 'SKY SHIELD', year: '1980', blurb: 'Tap the sky to stop warheads before they hit your cities.', track: 'action',
   help: 'Tap to fire · or ✚ aim + A', keys: 'Click to fire · arrows aim + Space',
   init(G) { const s = { t: 0, wave: 0, cross: { x: W / 2, y: 140 }, cities: [16, 46, 76, 138, 168, 198].map(x => ({ x, alive: true })), lastBonus: 0 }; this.wave(s); return s; },
   wave(s) { s.wave++; s.incoming = []; s.outs = []; s.booms = []; s.ammo = 24 + s.wave * 2; s.toSpawn = 8 + s.wave * 3; s.spawnT = 60; s.pause = 90; s.bonusShown = 0; },
@@ -520,7 +520,7 @@ const skyShield = {
 ===================================================================== */
 const NT = 8, NW = 28, NH = 30, NOY = 28;
 const nibble = {
-  id: 'nibble', name: 'NIBBLE', year: '1982', blurb: 'Eat sats, grow longer, never bite your tail.', track: 'bounce',
+  id: 'nibble', daily: true, name: 'NIBBLE', year: '1982', blurb: 'Eat sats, grow longer, never bite your tail.', track: 'bounce',
   help: '✚ or swipe to turn', keys: 'Arrow keys turn',
   init(G) { const s = { t: 0, body: [[10, 15], [9, 15], [8, 15], [7, 15]], dir: 'right', q: [], grow: 0, every: 8, k: 0, eaten: 0 }; this.food(s); return s; },
   food(s) { let x, y; do { x = ri(1, NW - 2); y = ri(1, NH - 2); } while (s.body.some(([a, b]) => a === x && b === y)); s.f = [x, y]; if (RNG() < 0.2) s.bonus = { x: ri(1, NW - 2), y: ri(1, NH - 2), life: 300 }; },
@@ -581,7 +581,7 @@ const PB_LANES = [72, 96, 120], PB_WORD = 'NUT';
 function pbClosest(px, py, x1, y1, x2, y2) { const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy || 1; const t = clamp(((px - x1) * dx + (py - y1) * dy) / L, 0, 1); return [x1 + dx * t, y1 + dy * t]; }
 function pbFlip(side, a) { const p = PIV[side], d = side === 'l' ? 1 : -1; return [p.x, p.y, p.x + Math.cos(a) * FLEN * d, p.y + Math.sin(a) * FLEN]; }
 const nutFlipper = {
-  id: 'flipper', name: 'NUT FLIPPER', year: '1983', blurb: 'Silver-ball pinball. Light N-U-T and hunt the gold sat.', track: 'bounce',
+  id: 'flipper', daily: true, name: 'NUT FLIPPER', year: '1983', blurb: 'Silver-ball pinball. Light N-U-T and hunt the gold sat.', track: 'bounce',
   help: '◀ ▶ flippers · hold A to launch', keys: '← → flippers · hold Space to launch',
   init(G) {
     const s = { t: 0, balls: 3, ball: 1, mult: 1, bonus: 0, lanes: [0, 0, 0], drops: [0, 0, 0], dropT: 0, bh: [0, 0, 0], fl: { l: FREST, r: FREST }, fw: { l: 0, r: 0 }, msg: '', msgT: 0, fx: [], coins: 0, still: 0, lit: ri(0, 2) };
@@ -602,6 +602,7 @@ const nutFlipper = {
     if (s.ready) {                                                                   // ball on the plunger
       const pull = G.held('a') || G.held('down') || G.ptr.down;
       if (pull) s.power = Math.min(1, s.power + 1 / 50);
+      else if (s.power > 0 && G.ptr.cancel && !G.held('a') && !G.held('down')) s.power = 0;   // the touch was cancelled: let the plunger go back, don't launch
       else if (s.power > 0) { b.vy = -(6.2 + s.power * 2.6); s.ready = false; s.saveT = s.saved ? 0 : 360; s.power = 0; G.sfx('launch'); }
     }
     const n = PB.steps;
@@ -690,6 +691,11 @@ const nutFlipper = {
 };
 
 const GAMES = [starSwarm, nutMaze, brickBlitz, voidRocks, hopLanes, skyShield, nibble, nutFlipper];
+// Every cabinet kept in its own file (game_*.js, loaded before this one) registers a factory in window.NutCabinets; each is
+// called once, in script order, with the kit below and returns its cabinet object. See "Adding a cabinet" in src/README.md.
+const KIT = { W, H, C, Math, A, T, store, spr, text, rnd, ri, clamp, boom, tickFx, drawFx, hiOf, qualifies, addScore,
+  RNG: () => RNG(), withSeed(seed, fn) { const keep = RNG; RNG = seeded(seed >>> 0); try { return fn(); } finally { RNG = keep; } } };
+for (const make of (window.NutCabinets || [])) GAMES.push(make(KIT));
 // The challenger's ghost: their player drawn faintly over yours while you race their replay
 starSwarm.ghost = (s, ctx) => { if (!s.p.dead) spr(ctx, SHIP, s.p.x, s.p.y, { c: C.white, w: C.white, p: C.white }); };
 brickBlitz.ghost = (s, ctx) => { ctx.fillStyle = C.white; ctx.fillRect(s.pad.x, s.pad.y, s.pad.w, s.pad.h); ctx.fillRect(s.ball.x - 2, s.ball.y - 2, 4, 4); };
@@ -704,16 +710,20 @@ nutFlipper.ghost = (s, ctx) => { ctx.fillStyle = C.white; ctx.beginPath(); ctx.a
 const keys = {}, pressed = new Set();
 let G = null, cur = null, st = null, mode = 'title', raf = 0, view = null, ctx = null, frame = 0;
 let chal = null, runSeed = 0;   // chal: a challenge being played { id, seed, target, by, name, replay? }
+// dly: a Daily Challenge is being played; dlyRun is the day's run from Daily.begin (see daily.js).
+// A cabinet joins the daily with `daily: true`, and its init(G, seed) also gets the run's seed.
+let dly = false, dlyRun = null;
 let rec = null, lastReplay = null, ghost = null;   // this game's inputs, frame by frame; the last finished game; a challenger's ghost
 const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', Space: 'a', KeyZ: 'a', KeyX: 'a', KeyJ: 'a', Enter: 'b', KeyP: 'b', Escape: 'esc' };
 function press(k) { if (!keys[k]) pressed.add(k); keys[k] = true; }
 function release(k) { keys[k] = false; }
-window.addEventListener('keydown', e => { if (!view || e.target.tagName === 'INPUT') return; const k = KEYMAP[e.code]; if (!k) return; e.preventDefault(); if (k === 'esc') { closeGame(); return; } press(k); });
+window.addEventListener('keydown', e => { if (!view || e.target.tagName === 'INPUT') return; if (cur && cur.onKey && cur.onKey(e.code, st, mode, e)) { e.preventDefault(); return; }   // a cabinet may take a key for itself (poker: D and Enter deal)
+  const k = KEYMAP[e.code]; if (!k) return; e.preventDefault(); if (k === 'esc') { closeGame(); return; } press(k); });
 window.addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) release(k); });
 window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; if (mode === 'play') mode = 'pause'; });
 document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'play') mode = 'pause'; });
 
-const ptr = { x: W / 2, y: H / 2, down: false, over: false, sx: 0, sy: 0, st: 0 };
+const ptr = { x: W / 2, y: H / 2, down: false, over: false, cancel: false, sx: 0, sy: 0, st: 0 };   // cancel: the system took the touch away (pointercancel); true for one step, so a cabinet drops a drag instead of treating it as a release
 let tap = null, swipe = null;
 
 /* ---------- replays ----------
@@ -730,12 +740,12 @@ async function zip(bytes, how) {
   return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new S('deflate-raw'))).arrayBuffer());
 }
 function stepper(g, seed, runs) {
-  const P = { x: W / 2, y: H / 2, down: false, over: false }; let HELD = 0, HIT = 0, T = null, SW = null, done = false, frames = 0;
+  const P = { x: W / 2, y: H / 2, down: false, over: false, cancel: false }; let HELD = 0, HIT = 0, T = null, SW = null, done = false, frames = 0;
   const bit = k => 1 << RK.indexOf(k);
   const Gs = { W, H, score: 0, held: k => !!(HELD & bit(k)), hit: k => !!(HIT & bit(k)), ptr: P, get tap() { return T; }, get swipe() { return SW; }, sfx() {}, addScore(n) { this.score += n; }, over() { done = true; }, hud() {} };
   const rng = seeded(seed); const withRNG = fn => { const keep = RNG; RNG = rng; try { return fn(); } finally { RNG = keep; } };
-  const s = withRNG(() => g.init(Gs));
-  const load = code => { const v = code.split(','); HELD = +v[0]; HIT = +v[1]; P.down = !!(v[2] & 1); P.over = !!(v[2] & 2); P.x = v[3] / 4; P.y = v[4] / 4; T = v[5] !== '' ? { x: v[5] / 4, y: v[6] / 4 } : null; SW = v[7] ? SWD[v[7]] : null; };
+  const s = withRNG(() => g.init(Gs, seed));
+  const load = code => { const v = code.split(','); HELD = +v[0]; HIT = +v[1]; P.down = !!(v[2] & 1); P.over = !!(v[2] & 2); P.cancel = !!(v[2] & 4); P.x = v[3] / 4; P.y = v[4] / 4; T = v[5] !== '' ? { x: v[5] / 4, y: v[6] / 4 } : null; SW = v[7] ? SWD[v[7]] : null; };
   let ri = 0, left = runs.length ? runs[0][1] : 0; if (runs.length) load(runs[0][0]);
   return {
     g: Gs, state: s, get done() { return done; }, get frames() { return frames; }, get over() { return done || ri >= runs.length; },
@@ -750,7 +760,7 @@ function stepper(g, seed, runs) {
 const Replay = {
   code() {   // this frame's input, exactly as the game sees it
     let h = 0, t = 0; RK.forEach((k, i) => { if (keys[k]) h |= 1 << i; if (pressed.has(k)) t |= 1 << i; });
-    return [h, t, (ptr.down ? 1 : 0) | (ptr.over ? 2 : 0), ptr.x * 4, ptr.y * 4, tap ? tap.x * 4 : '', tap ? tap.y * 4 : '', swipe ? swipe[0] : ''].join(',');
+    return [h, t, (ptr.down ? 1 : 0) | (ptr.over ? 2 : 0) | (ptr.cancel ? 4 : 0), ptr.x * 4, ptr.y * 4, tap ? tap.x * 4 : '', tap ? tap.y * 4 : '', swipe ? swipe[0] : ''].join(',');
   },
   async pack(r) {
     const runs = []; for (const f of r.frames) { const last = runs[runs.length - 1]; if (last && last[0] === f) last[1]++; else runs.push([f, 1]); }
@@ -770,13 +780,13 @@ const Replay = {
   },
   // play a replay to the end and report the score it reaches
   async verify(id, seed, packed, score) {
-    const g = GAMES.find(x => x.id === id); if (!g) return { ok: false, why: 'game' };
+    const g = GAMES.find(x => x.id === id); if (!g || g.noChallenge) return { ok: false, why: 'game' };
     let runs; try { runs = await Replay.unpack(packed); } catch (e) { return { ok: false, why: 'replay' }; }
     const sim = stepper(g, seed >>> 0, runs); let n = 0;
     while (sim.step()) { if (++n % 4000 === 0) await new Promise(r => setTimeout(r, 0)); }
     return { ok: sim.done && sim.g.score === Math.floor(score), score: sim.g.score, frames: sim.frames, ended: sim.done };
   },
-  ghost(id, seed, runs) { const g = GAMES.find(x => x.id === id); try { return g && runs ? stepper(g, seed >>> 0, runs) : null; } catch (e) { return null; } }
+  ghost(id, seed, runs) { const g = GAMES.find(x => x.id === id); try { return g && !g.noChallenge && runs ? stepper(g, seed >>> 0, runs) : null; } catch (e) { return null; } }
 };
 
 function makeG() {
@@ -792,6 +802,7 @@ function makeG() {
       text(ctx, '1UP', 8, 3, C.red); text(ctx, pad6(this.score), 8, 12, C.ink);
       if (chal && ghost) { text(ctx, T(ghost.over ? 'GHOST OUT' : 'GHOST'), W / 2, 3, C.violet, 8, 'center'); text(ctx, pad6(ghost.g.score), W / 2, 12, this.score > ghost.g.score ? C.lime : C.pink, 8, 'center'); }
       else if (chal) { text(ctx, T('TARGET'), W / 2, 3, C.pink, 8, 'center'); text(ctx, pad6(chal.target), W / 2, 12, this.score > chal.target ? C.lime : C.ink, 8, 'center'); }
+      else if (dly && window.Daily) { const e = window.Daily.info().entry; text(ctx, T('DAILY'), W / 2, 3, C.cyan, 8, 'center'); text(ctx, pad6(Math.max(e ? e.b : 0, this.score)), W / 2, 12, C.ink, 8, 'center'); }
       else { text(ctx, T('HI-SCORE'), W / 2, 3, C.red, 8, 'center'); text(ctx, pad6(Math.max(hiOf(cur.id), this.score)), W / 2, 12, C.ink, 8, 'center'); }
       if (label) text(ctx, label, W - 8, 12, C.gold, 8, 'right');
       if (lives != null) for (let i = 0; i < lives - 1 && i < 5; i++) spr(ctx, ['.c.', 'ccc', 'c.c'], 8 + i * 6, bottomless ? H - 14 : H - 8, { c: C.lime }, 1);
@@ -850,13 +861,14 @@ function bindStick(root) {
 function openGame(id, opts) {
   cur = GAMES.find(g => g.id === id); if (!cur) return;
   closeGame(true);
-  chal = opts && opts.challenge ? opts.challenge : null;
+  chal = opts && opts.challenge && !cur.noChallenge ? opts.challenge : null;   // (free-credit cabinets have no replays, so no challenges)
+  dly = !chal && !!(opts && opts.daily && window.Daily); dlyRun = null;
   view = document.createElement('div'); view.className = 'game-view'; view.setAttribute('role', 'dialog'); view.setAttribute('aria-label', cur.name);
   view.innerHTML = `<div class="game-top"><button class="btn sm red" data-g="exit">Exit</button><div class="ttl">${cur.name}</div><button class="btn sm" data-g="mute" aria-label="Toggle sound">${(window.NutPrefs || {}).sound === false ? 'SND OFF' : 'SND ON'}</button></div>
     <div class="screen-frame"><canvas id="gameCanvas" width="${W}" height="${H}" aria-label="${T(cur.name + ' game screen')}"></canvas></div>
-    <div class="pad touch-only"><div class="hint"><span>${cur.help}</span><button class="padswap" data-g="pad">${store.get('pad', 'stick') === 'stick' ? 'Use D-pad' : 'Use joystick'}</button></div>
-    <div class="pad-row">${padHTML()}<div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause"><span data-noi18n>II</span></button><button class="abtn a" data-k="a" aria-label="A button"><span data-noi18n>A</span></button></div></div></div>
-    <div class="pad-keys"><span>${cur.keys}</span> · <span>Enter pause</span> · <span>Esc exit</span></div><div id="entry"></div>`;
+    <div class="pad touch-only${cur.noStick ? ' nostick' : ''}"><div class="hint"><span>${cur.help}</span><button class="padswap" data-g="pad"${cur.noStick ? ' hidden' : ''}>${store.get('pad', 'stick') === 'stick' ? 'Use D-pad' : 'Use joystick'}</button></div>
+    <div class="pad-row"${cur.noStick ? ' style="justify-content:center"' : ''}>${cur.noStick ? '' : padHTML()}<div class="abtns"><button class="abtn b" data-k="b" aria-label="Pause"><span data-noi18n>II</span></button><button class="abtn a" data-k="a" aria-label="A button"><span data-noi18n>A</span></button></div></div></div>
+    <div class="pad-keys"><span>${cur.keys}</span> · <span>${cur.onKey ? 'P pause' : 'Enter pause'}</span> · <span>Esc exit</span></div><div id="entry"></div>`;
   document.body.appendChild(view);
   document.body.style.overflow = 'hidden';
   if (window.Nutcade && window.Nutcade.holdToasts) window.Nutcade.holdToasts();   // nothing lands on the controls
@@ -880,7 +892,7 @@ function openGame(id, opts) {
   view.querySelector('[data-g="exit"]').onclick = () => closeGame();
   view.querySelector('[data-g="mute"]').onclick = e => { const p = window.NutPrefs || {}; p.sound = p.sound === false; store.set('prefs', p); e.currentTarget.textContent = p.sound ? 'SND ON' : 'SND OFF'; if (p.sound) A().music(mode === 'play' ? cur.track : 'title'); else A().stopMusic(); };
   const cv = view.querySelector('#gameCanvas');
-  cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); const p = toLogical(e); Object.assign(ptr, p, { down: true, over: e.pointerType === 'mouse', sx: e.clientX, sy: e.clientY, st: performance.now() }); });
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); const p = toLogical(e); Object.assign(ptr, p, { down: true, cancel: false, over: e.pointerType === 'mouse', sx: e.clientX, sy: e.clientY, st: performance.now() }); });
   cv.addEventListener('pointermove', e => { const p = toLogical(e); ptr.x = p.x; ptr.y = p.y; if (e.pointerType === 'mouse') ptr.over = true; });
   cv.addEventListener('pointerleave', () => { ptr.over = false; });
   const upH = e => {
@@ -888,17 +900,20 @@ function openGame(id, opts) {
     if (d > 22) swipe = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
     else if (performance.now() - ptr.st < 400) tap = toLogical(e);
   };
-  cv.addEventListener('pointerup', upH); cv.addEventListener('pointercancel', () => { ptr.down = false; });
+  cv.addEventListener('pointerup', upH); cv.addEventListener('pointercancel', () => { if (ptr.down) ptr.cancel = true; ptr.down = false; });   // (an interrupted touch is not a release: no shot, no tap, no swipe)
   window.addEventListener('resize', fit); fit(); setTimeout(fit, 50);
   // the screen re-fits whenever the space for it changes: switching to the slightly taller D-pad, or the hint
   // wrapping to two lines once it's translated, so the hint never sits on the game
   if (window.ResizeObserver) { fitObs = new ResizeObserver(() => fit()); fitObs.observe(view.querySelector('.screen-frame')); }
-  G = makeG(); mode = 'title'; frame = 0; st = null;
+  G = makeG(); mode = 'title'; frame = 0; st = null; lastT = 0; acc = 0;
   A().music('title');
   if (window.Nutcade) window.Nutcade.closeSheet();
   loop();
 }
 function closeGame(silent) {
+  if (dlyRun && (mode === 'play' || mode === 'pause') && window.Daily) window.Daily.finish(dlyRun, G ? G.score : 0, true);   // leaving a daily run keeps the score it had
+  dlyRun = null; dly = false;
+  if (!silent && view && cur && cur.onExit && st && (mode === 'play' || mode === 'pause')) try { cur.onExit(st, G); } catch (e) {}   // a run left unfinished still saves its best
   cancelAnimationFrame(raf); raf = 0; RNG = Math.random; ghost = null; rec = null;
   if (fitObs) { fitObs.disconnect(); fitObs = null; }
   if (view) { view.remove(); view = null; window.removeEventListener('resize', fit); document.body.style.overflow = ''; }
@@ -906,7 +921,12 @@ function closeGame(silent) {
   if (!silent) { mode = 'title'; A().music('title'); if (window.Nutcade) window.Nutcade.refresh(); }
 }
 function startGame() {
-  runSeed = chal ? chal.seed >>> 0 : (Math.random() * 4294967296) >>> 0; RNG = seeded(runSeed); G = makeG(); st = cur.init(G); mode = 'play'; rec = []; lastReplay = null;
+  if (dly) {   // the day, the seed and whether this run is the official one are decided now, as the run starts
+    const r = window.Daily.begin(cur.id);
+    if (r.moved) { if (N()) N().toast('A new daily challenge just started.', 'gold'); openGame(r.id, { daily: true }); return; }   // midnight UTC passed on the title screen
+    dlyRun = r;
+  }
+  runSeed = dlyRun ? dlyRun.seed : chal ? chal.seed >>> 0 : (Math.random() * 4294967296) >>> 0; RNG = seeded(runSeed); G = makeG(); st = cur.init(G, runSeed); mode = 'play'; rec = []; lastReplay = null;
   ghost = chal && chal.replay ? Replay.ghost(cur.id, runSeed, chal.replay) : null;
   A().sfx('start'); A().music(cur.track); if (window.Trophies) window.Trophies.played(cur.id);
 }
@@ -916,11 +936,18 @@ function endGame() {
   if (rec) { lastReplay = { game: cur.id, seed: runSeed, score, frames: rec }; rec = null; }
   if (window.Trophies) try { window.Trophies.gameOver(cur.id, score, st, qualifies(cur.id, score)); } catch (e) {}
   const seed = runSeed;
+  let dres = null;
+  if (dlyRun && window.Daily) {   // a daily run: one official score a day (the first), the rest for fun
+    dres = window.Daily.finish(dlyRun, score, false); dlyRun = null;
+    if (qualifies(cur.id, score)) addScore(cur.id, store.get('initials', 'AAA'), score);
+  }
+  const v0 = view;
   setTimeout(() => {
-    if (!view) return;
-    if (chal) showChallengeResult(score);
+    if (!view || view !== v0) return;   // (left, or another cabinet opened since: this run's result screen is moot)
+    if (dres) showDailyResult(score, dres);
+    else if (chal) showChallengeResult(score);
     else if (qualifies(cur.id, score)) showEntry(score, seed);
-    else if (score > 0 && canChallenge()) showOver(score, seed);
+    else if (score > 0 && canChallenge() && !cur.noChallenge) showOver(score, seed);
     else { mode = 'title'; A().music('title'); }
   }, 1800);
 }
@@ -941,6 +968,21 @@ function showOver(score, seed) {
     <button class="btn solid gold block" data-g="chal">Challenge a friend</button><button class="btn block" data-g="again">Continue</button>`);
   box.querySelector('[data-g=again]').onclick = () => { box.innerHTML = ''; mode = 'title'; A().music('title'); };
   box.querySelector('[data-g=chal]').onclick = () => challengeFromHere(g, seed, score);
+}
+function showDailyResult(score, r) {
+  mode = 'entry';
+  const box = view.querySelector('#entry'), D = window.Daily, off = r.official;
+  box.innerHTML = box6(`<div style="font-family:var(--f-display);font-size:11px;color:var(--gold)">DAILY CHALLENGE</div>
+    <div style="font-family:var(--f-display);font-size:18px" data-noi18n>${pad6(score)}</div>
+    <div style="font-family:var(--f-display);font-size:10px;color:${off ? 'var(--lime)' : 'var(--pink)'}">${off ? 'OFFICIAL SCORE' : 'PRACTICE RUN'}</div>
+    ${r.why === 'clock' ? '<div class="notice" style="font-size:16px">Your device clock looks wrong, so this run does not count as official.</div>' : ''}
+    ${!off && r.officialScore != null ? `<div class="tiny" data-noi18n>${esc6(D.t('Your official score today: {s}', { s: D.num(r.officialScore) }))}</div>` : ''}
+    <div class="tiny" data-noi18n>${esc6(D.streakText(r.streak))}</div>
+    ${r.officialScore != null ? '<button class="btn solid gold block" data-g="dshare">Share my score</button>' : ''}
+    <button class="btn block ${r.officialScore != null ? '' : 'solid gold'}" data-g="again">Play again for fun</button><button class="btn block" data-g="exit2">Exit</button>`);
+  const sh = box.querySelector('[data-g=dshare]'); if (sh) sh.onclick = () => { closeGame(); D.share(r.date); };
+  box.querySelector('[data-g=again]').onclick = () => { box.innerHTML = ''; mode = 'title'; A().music('title'); };
+  box.querySelector('[data-g=exit2]').onclick = () => closeGame();
 }
 function showChallengeResult(score) {
   mode = 'entry';
@@ -978,7 +1020,7 @@ function showEntry(score, seed) {
     box.innerHTML = `<div class="scrim" style="align-items:center"><div class="sheet initials" style="border-radius:8px;border-bottom:3px solid var(--cyan);max-width:340px">
       <div style="font-family:var(--f-display);font-size:12px;color:var(--lime)">SCORE SAVED</div>
       <div style="font-family:var(--f-display);font-size:18px">${pad6(score)} ${n}</div>
-      <button class="btn solid gold block" data-g="card">Share score card</button>${canChallenge() ? '<button class="btn block violet" data-g="chal">Challenge a friend</button>' : ''}<button class="btn block" data-g="again">Continue</button></div></div>`;
+      <button class="btn solid gold block" data-g="card">Share score card</button>${canChallenge() && !cur.noChallenge ? '<button class="btn block violet" data-g="chal">Challenge a friend</button>' : ''}<button class="btn block" data-g="again">Continue</button></div></div>`;
     const g = cur;
     const cb = box.querySelector('[data-g=chal]'); if (cb) cb.onclick = () => challengeFromHere(g, seed, score, n);
     box.querySelector('[data-g=again]').onclick = () => { box.innerHTML = ''; mode = 'title'; A().music('title'); };
@@ -993,6 +1035,7 @@ function drawTitle() {
   ctx.drawImage(thumb, 56, 34); ctx.strokeStyle = C.violet; ctx.strokeRect(55.5, 33.5, 113, 85);
   text(ctx, cur.name, W / 2, 128, C.gold, 12, 'center');
   if (chal) { text(ctx, T('CHALLENGE FROM') + ' ' + String(chal.name || chal.by).toUpperCase().slice(0, 12), W / 2, 144, C.pink, 8, 'center'); text(ctx, T('BEAT') + ' ' + pad6(chal.target), W / 2, 154, C.ink, 8, 'center'); }
+  else if (dly && window.Daily) { const d = window.Daily.titleLines(); if (d) { text(ctx, T('DAILY CHALLENGE') + ' ' + d.date, W / 2, 144, C.gold, 8, 'center'); text(ctx, T(d.status), W / 2, 156, d.ok && d.status === 'FIRST RUN COUNTS' ? C.lime : C.pink, 8, 'center'); } }
   else text(ctx, '© NUTCADE ' + cur.year, W / 2, 146, C.dim, 8, 'center');
   text(ctx, T('HIGH SCORES'), W / 2, 166, C.cyan, 8, 'center');
   const sc = scoresOf(cur.id);
@@ -1001,43 +1044,69 @@ function drawTitle() {
   text(ctx, T('CREDIT 99'), W / 2, 270, C.dim, 8, 'center');
 }
 function drawGhost() { if (!ghost || ghost.over || !cur.ghost) return; ctx.save(); ctx.globalAlpha = 0.38; try { cur.ghost(ghost.state, ctx); } catch (e) {} ctx.restore(); }
-function loop() {
-  raf = requestAnimationFrame(loop);
-  if (!view) return;
+/* The game clock. Every cabinet is written for 60 steps a second, and a replay is a list of steps, not of seconds. The
+   screen may refresh at 30, 60, 120 or 144 Hz, so the loop keeps an accumulator of real time (the requestAnimationFrame
+   timestamp) and runs a whole number of 1/60 s steps from it, then draws once. At 60 Hz that is one step a frame, at
+   120 Hz one step every other frame, at 30 Hz two a frame, so a game runs at the same speed on every screen.
+   A step is run only when a full 1/60 s has built up, never early, so a phone that returns from another tab, or
+   hitches, runs at most MAXCATCH steps to catch up and then drops the rest instead of spiralling. */
+const STEP = 1000 / 60, MAXCATCH = 5;
+let lastT = 0, acc = 0;
+function tick() {   // one 60 Hz step of the logic (nothing is drawn here); taps, key presses and swipes are consumed by the first step that sees them
   frame++;
   if (mode === 'title') {
-    drawTitle();
     if (pressed.has('a') || pressed.has('b') || tap) startGame();
   } else if (mode === 'play') {
     if (pressed.has('b')) { mode = 'pause'; A().sfx('blip'); }
-    else { if (rec) rec.push(Replay.code()); cur.update(st, G); if (ghost) ghost.step(); if (frame % 30 === 0 && window.Trophies && st) try { window.Trophies.progress(cur.id, st, G.score); } catch (e) {} if (mode !== 'over' || st) { ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx); drawGhost(); } }
+    else { if (rec) rec.push(Replay.code()); cur.update(st, G); if (ghost) ghost.step(); if (dlyRun && frame % 30 === 0) window.Daily.progress(dlyRun, G.score); if (frame % 30 === 0 && window.Trophies && st) try { window.Trophies.progress(cur.id, st, G.score); } catch (e) {} }
   } else if (mode === 'pause') {
+    if (pressed.has('a') || pressed.has('b') || tap) { mode = 'play'; A().sfx('blip'); }
+  }
+  pressed.clear(); tap = null; swipe = null; ptr.cancel = false;
+}
+function render() {   // once per screen refresh
+  if (mode === 'title') drawTitle();
+  else if (mode === 'play') { if (st) { ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx); drawGhost(); } }
+  else if (mode === 'pause') {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx);
     ctx.fillStyle = 'rgba(5,3,12,.7)'; ctx.fillRect(0, 22, W, H - 22);
     text(ctx, T('PAUSED'), W / 2, 130, C.gold, 12, 'center'); text(ctx, T(matchMedia('(pointer:fine)').matches ? 'ENTER TO RESUME' : 'A OR TAP TO RESUME'), W / 2, 152, C.ink, 8, 'center');
-    if (pressed.has('a') || pressed.has('b') || tap) { mode = 'play'; A().sfx('blip'); }
   } else if (mode === 'over' || mode === 'entry') {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H); cur.draw(st, G, ctx);
     ctx.fillStyle = 'rgba(5,3,12,.6)'; ctx.fillRect(0, 22, W, H - 22);
     text(ctx, T('GAME OVER'), W / 2, 130, C.red, 12, 'center');
   }
-  pressed.clear(); tap = null; swipe = null;
+}
+function loop(now) {
+  raf = requestAnimationFrame(loop);
+  if (!view) return;
+  if (typeof now !== 'number') now = lastT + STEP;   // (the first call, made straight from openGame)
+  let dt = lastT ? now - lastT : STEP; lastT = now;
+  if (!(dt > 0) || dt > 250) dt = STEP;               // a clock that jumped, or a tab that just came back: don't count it
+  else if (Math.abs(dt - STEP) < 1.2) dt = STEP;      // 60 Hz screens report 16.4 to 16.9 ms: count it as exactly one step
+  acc += dt;
+  let n = 0;
+  while (acc >= STEP - 0.001 && n < MAXCATCH) { tick(); acc -= STEP; n++; if (!view) return; }
+  if (acc > STEP) acc = 0;                            // too far behind: drop the rest
+  if (acc < 0) acc = 0;
+  render();
 }
 
 /* ---------- arcade lobby ---------- */
 let lobbyRaf = 0;
 function mountList(el) {
   cancelAnimationFrame(lobbyRaf);
-  el.innerHTML = `<div class="row between"><h2 class="h2">Arcade · ${GAMES.length} cabinets</h2><span class="tiny muted">Free play</span></div>
+  el.innerHTML = `${window.Daily ? window.Daily.html() : ''}<div class="row between"><h2 class="h2">Arcade · ${GAMES.length} cabinets</h2><span class="tiny muted">Free play</span></div>
     <div class="cabinets">${GAMES.map(g => `<button class="cab" data-game="${g.id}" aria-label="Play ${g.name}"><canvas width="112" height="84" data-thumb="${g.id}"></canvas>
       <span class="nm" data-noi18n>${g.name}</span><span class="ds">${g.blurb}</span><span class="hs"><span>HI</span> <span data-noi18n>${hiOf(g.id) ? pad6(hiOf(g.id)) + ' ' + scoresOf(g.id)[0].n : '------'}</span></span></button>`).join('')}</div>
     <div class="panel"><span class="h2">Hall of fame</span><div class="scores">${GAMES.map(g => { const s = scoresOf(g.id)[0]; return `<div><span style="color:var(--dim)" data-noi18n>${g.name.split(' ')[0]}</span><span data-noi18n>${s ? s.n : '---'}</span><span>${s ? pad6(s.s) : '------'}</span>${s ? `<button class="sharebtn" data-card="${g.id}" aria-label="Share ${g.name} score card"><svg viewBox="0 0 8 8" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M5 0h3v3H7V2L4 5 3 4l3-3H5zM0 2h4v1H1v4h4V4h1v4H0z"/></svg></button>` : '<span></span>'}</div>`; }).join('')}</div></div>`;
+  if (window.Daily) window.Daily.bind(el);
   el.querySelectorAll('[data-game]').forEach(b => b.onclick = () => { A().sfx('select'); openGame(b.dataset.game); });
   el.querySelectorAll('[data-card]').forEach(b => b.onclick = () => { const g = GAMES.find(x => x.id === b.dataset.card); const s = scoresOf(g.id)[0]; A().sfx('select'); if (window.Trophies && s) window.Trophies.openCard({ kind: 'score', game: g, score: s.s, initials: s.n, at: s.t }); });
   const thumbs = [...el.querySelectorAll('[data-thumb]')].map(c => ({ c, x: c.getContext('2d'), g: GAMES.find(g => g.id === c.dataset.thumb) }));
   thumbs.forEach(t => t.x.imageSmoothingEnabled = false);
   let t = 0; const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const tick = () => { if (!el.isConnected) return; t++; if (!view) thumbs.forEach(o => o.g.thumb(o.x, t)); if (!reduce) lobbyRaf = requestAnimationFrame(tick); };
+  const tick = now => { if (!el.isConnected) return; const n = typeof now === 'number' ? Math.floor(now / STEP) : t + 1; if (n !== t) { t = n; if (!view) thumbs.forEach(o => o.g.thumb(o.x, t)); } if (!reduce) lobbyRaf = requestAnimationFrame(tick); };   // thumbnails animate at 60 a second on any screen
   tick();
 }
 function topLine() {
@@ -1045,7 +1114,8 @@ function topLine() {
   return best ? `Top score: <span style="color:var(--gold)">${pad6(best.s.s)}</span> by ${best.s.n} on ${best.g.name}` : `${GAMES.length} cabinets of free play: shooters, mazes, bricks and more.`;
 }
 // layout(id, seed): the starting state a seed gives, so tests can check that a challenge replays the same layout
-function layout(id, seed) { const g = GAMES.find(x => x.id === id); if (!g || view) return null; const keep = RNG; RNG = seeded(seed); const c0 = ctx; try { return JSON.stringify(g.init(makeG())); } finally { RNG = keep; ctx = c0; } }
-window.Arcade = { mountList, open: openGame, topLine, playing: () => !!view, games: GAMES, layout, challenge: () => chal, held: () => Object.keys(keys).filter(k => keys[k]), replay: Replay, lastReplay: () => lastReplay, ghost: () => ghost };
+function layout(id, seed) { const g = GAMES.find(x => x.id === id); if (!g || view) return null; const keep = RNG; RNG = seeded(seed); const c0 = ctx; try { return JSON.stringify(g.init(makeG(), seed)); } finally { RNG = keep; ctx = c0; } }
+if (window.Daily) window.Daily.attach({ games: GAMES, open: openGame });
+window.Arcade = { daily: () => ({ on: dly, run: dlyRun, seed: runSeed }), mountList, open: openGame, topLine, playing: () => !!view, games: GAMES, layout, challenge: () => chal, held: () => Object.keys(keys).filter(k => keys[k]), replay: Replay, lastReplay: () => lastReplay, ghost: () => ghost };
 if (window.Nutcade) window.Nutcade.render();
 })();

@@ -1657,7 +1657,7 @@ function classify(raw) {
   return { kind: 'unknown' };
 }
 // a NUTCADE link: a challenge, or a treasure-hunt clue card
-function openLink(t) { if (/^hunt=/.test(t)) { onHuntCard(t.slice(5)); return; } if (/^challenge=/.test(t)) { let rec = null; try { const [evPart, rPart] = t.slice(10).split('&r='); rec = onChallenge(JSON.parse(new TextDecoder().decode(unb64url(evPart))), 'link', null, null, rPart || null); } catch (e) {} if (rec && rec.dir === 'in') openChallengeIn(rec.id); else if (rec) openChallengeSend(rec.id); else toast("That challenge link isn't valid.", 'gold'); } else handleScan(t); }
+function openLink(t) { if (/^hunt=/.test(t)) { onHuntCard(t.slice(5)); return; } if (/^challenge=/.test(t)) { let rec = null; try { const [evPart, rPart] = t.slice(10).split('&r='); rec = onChallenge(JSON.parse(new TextDecoder().decode(unb64url(evPart))), 'link', null, null, rPart || null); } catch (e) {} if (rec && rec.noChallenge) { const g = window.Arcade && window.Arcade.games.find(x => x.id === rec.noChallenge); openSheet('Challenge!', `<div class="notice" id="noChal">No challenges on this cabinet. You can still play it for fun.</div><div class="tiny muted" data-noi18n>${esc(g ? g.name : '')}</div><button class="btn solid gold block" data-act="openCab" data-game="${esc(rec.noChallenge)}">Play</button><button class="btn block" data-act="close">Later</button>`); } else if (rec && rec.dir === 'in') openChallengeIn(rec.id); else if (rec) openChallengeSend(rec.id); else toast("That challenge link isn't valid.", 'gold'); } else handleScan(t); }
 // A ur: code that fits in one QR (or was pasted) decodes on its own. Returns the text, false for one frame of a longer code, null if it isn't ur:.
 async function urSingle(text) {
   if (!/^ur:/i.test(String(text).trim()) || !window.NutUR) return null;
@@ -2543,7 +2543,7 @@ function viewSettings() {
       <p class="th" style="margin:0">Reports are public on GitHub. Never paste your 12 words, your PIN or a token into one.</p>
       <div class="sub" style="color:var(--pink)">Support NUTCADE</div>
       <p class="th" style="margin:0">Free and open source. Tips over Lightning are optional and keep the cabinets lit.</p>
-      <button class="btn sm pink" data-act="support">Donate</button>
+      <button class="btn sm pink" data-act="support">Support</button>
     </div>
   </section>`;
 }
@@ -3639,7 +3639,7 @@ function openSupport() {
     <div class="field"><label>Lightning address</label><div class="row"><div class="code" style="flex:1;font-size:16px">${DONATE.address}</div><button class="btn sm" data-act="copy" data-text="${DONATE.address}">Copy</button></div></div>
     ${qrBlock('lightning:' + DONATE.lnurl, 'QR code for the Lightning address ' + DONATE.address)}
     <div class="field"><label>Same thing as a payment code (LNURL)</label><div class="code">${DONATE.lnurl}</div><button class="btn sm" data-act="copy" data-text="${DONATE.lnurl}">Copy LNURL</button></div>
-    <div class="notice">Be wary of any other "NUTCADE donation" address. The same address and code are in the project README on GitHub. Never send your backup or seed words to anyone, for any reason.</div>
+    <div class="notice">Be wary of any other "NUTCADE support" address. The same address and code are in the project README on GitHub. Never send your backup or seed words to anyone, for any reason.</div>
     <div id="sheetErr"></div>`);
 }
 async function lnAddressInvoice(address, sats, comment) {
@@ -3661,6 +3661,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_r6.js@@*/
 /*@@app_r7.js@@*/
 /*@@app_r8.js@@*/
+/*@@app_daily.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every

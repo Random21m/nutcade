@@ -46,6 +46,7 @@ Object.assign(A, {
   tillCsv: () => exportCsv(todaysSales(), `nutcade-sales-${new Date().toISOString().slice(0, 10)}.csv`),
   chalOpen: b => openChallengeIn(b.dataset.id),
   chalSendOpen: b => openChallengeSend(b.dataset.id),
+  openCab: b => { closeSheet(); if (window.Arcade) window.Arcade.open(b.dataset.game); },
   chalPlay: b => {
     const c = S.challenges.find(x => x.id === b.dataset.id && x.dir === 'in'); if (!c || !window.Arcade) return;
     // a verified replay becomes a ghost to race; an unchecked one is never raced

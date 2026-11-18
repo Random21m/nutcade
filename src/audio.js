@@ -77,7 +77,9 @@ const TRACKS = {
   action: { bpm: 150, lead: seq('A4 C5 E5 A5 G5 E5 C5 E5 | F4 A4 C5 F5 E5 C5 A4 C5 | G4 B4 D5 G5 F5 D5 B4 D5 | E5 . E5 D5 C5 B4 A4 . | A4 C5 E5 A5 G5 E5 C5 E5 | F4 A4 C5 F5 A5 F5 C5 A4 | G4 B4 D5 G5 B5 G5 D5 B4 | E5 G#4 B4 E5 . . . .'),
     bass: seq('A2 A2 A3 A2 A2 A2 A3 A2 | F2 F2 F3 F2 F2 F2 F3 F2 | G2 G2 G3 G2 G2 G2 G3 G2 | E2 E2 E3 E2 E2 E2 E3 E2 | A2 A2 A3 A2 A2 A2 A3 A2 | F2 F2 F3 F2 F2 F2 F3 F2 | G2 G2 G3 G2 G2 G2 G3 G2 | E2 E2 E3 E2 E3 E2 E3 E2'), hat: 1 },
   bounce: { bpm: 140, lead: seq('G4 . B4 D5 . B4 G5 . | E5 . C5 . D5 . B4 . | A4 . C5 E5 . C5 A5 . | F#5 . D5 . E5 . C5 . | G4 . B4 D5 . G5 F#5 G5 | A5 . G5 . E5 . D5 . | C5 . E5 . D5 . F#4 . | G4 . . . G5 . . .'),
-    bass: seq('G2 . D3 . G2 . D3 . | C3 . G2 . G2 . D3 . | A2 . E3 . A2 . E3 . | D3 . A2 . D3 . A2 . | G2 . D3 . G2 . D3 . | C3 . G3 . C3 . G3 . | A2 . D3 . D3 . F#2 . | G2 . D3 . G2 . . .'), hat: 2 }
+    bass: seq('G2 . D3 . G2 . D3 . | C3 . G2 . G2 . D3 . | A2 . E3 . A2 . E3 . | D3 . A2 . D3 . A2 . | G2 . D3 . G2 . D3 . | C3 . G3 . C3 . G3 . | A2 . D3 . D3 . F#2 . | G2 . D3 . G2 . . .'), hat: 2 },
+  drive: { bpm: 156, lead: seq('A4 . A4 C5 . E5 . A5 | F4 . F4 A4 . C5 . F5 | C5 . C5 E5 . G5 . C6 | G4 . G4 B4 . D5 . G5 | A4 . A4 C5 . E5 . A5 | F4 . F4 A4 . C5 . F5 | G4 . B4 D5 . G5 B5 . | E5 . D5 . C5 . B4 .'),
+    bass: seq('A2 A2 . A2 A2 . A2 . | F2 F2 . F2 F2 . F2 . | C3 C3 . C3 C3 . C3 . | G2 G2 . G2 G2 . G2 . | A2 A2 . A2 A2 . A2 . | F2 F2 . F2 F2 . F2 . | G2 G2 . G2 G2 . G2 . | E2 E2 . E2 E2 . E3 .'), hat: 2 }
 };
 let cur = null, timer = null, step = 0, nextT = 0, pendingTrack = null;
 function music(name) {

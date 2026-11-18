@@ -36,6 +36,7 @@ const ICON = {
 };
 
 const done = t => t.method !== 'fee' && ['done', 'claimed', 'reclaimed'].includes(t.status);   // a mint's fee line isn't a payment you made
+const cabinets = () => (window.Arcade && window.Arcade.games) || [];
 const DEFS = [
   { id: 'first-in', name: 'FIRST COIN', how: 'Receive your first sats.', icon: 'coin', col: '#ffcf3a', w: s => s.txs.some(t => t.type === 'in' && done(t) && t.amount > 0) },
   { id: 'first-out', name: 'PLAYER 2 JOINS', how: 'Send sats to someone.', icon: 'up', col: '#ff3d8b', w: s => s.txs.some(t => t.type === 'out' && done(t)) },
@@ -60,7 +61,8 @@ const DEFS = [
   { id: 'g-shield', game: 'shield', name: 'CITY SAVER', how: 'Reach wave 3 in Sky Shield.', icon: 'shield', col: '#2de2ff', g: s => s.wave >= 3 },
   { id: 'g-nibble', game: 'nibble', name: 'LONG BOI', how: 'Grow to length 30 in Nibble.', icon: 'snake', col: '#9dff3a', g: s => s.body && s.body.length >= 30 },
   { id: 'g-flipper', game: 'flipper', name: 'SILVER BALL', how: 'Light all three N-U-T lanes in Nut Flipper.', icon: 'ball', col: '#ffcf3a', g: s => s.mult >= 2 },
-  { id: 'tour', name: 'GRAND TOUR', how: 'Play all 8 cabinets.', icon: 'stick', col: '#ff9a1f', p: p => Object.keys(p.by || {}).length >= 8 },
+  // Every cabinet in the arcade, counted from the GAMES list (window.Arcade.games), so a new cabinet moves the goalposts without an edit here. Players who earned it earlier keep it (trophies are never taken back).
+  { id: 'tour', name: 'GRAND TOUR', get how() { return 'Play all ' + (cabinets().length || 8) + ' cabinets.'; }, icon: 'stick', col: '#ff9a1f', p: p => { const c = cabinets(); return c.length > 0 && c.every(g => (p.by || {})[g.id] > 0); } },
   { id: 'rat', name: 'ARCADE RAT', how: 'Play 50 games.', icon: 'stick', col: '#ff3d8b', p: p => (p.n || 0) >= 50 },
   { id: 'top5', name: 'TOP FIVE', how: 'Put your initials on a high-score table.', icon: 'star', col: '#ffcf3a', x: 'hiscore' },
   { id: 'big', name: 'FIVE DIGITS', how: 'Score 10,000 in any game.', icon: 'five', col: '#ff3d8b', x: 'big' }
@@ -112,7 +114,7 @@ function played(id) {
 }
 function progress(id, st, score) {
   for (const d of DEFS) if (d.game === id && !got[d.id] && st && d.g(st)) unlock(d);
-  if (score >= 10000) unlock(DEFS.find(d => d.x === 'big'));
+  if (score >= 10000 && id !== 'poker') unlock(DEFS.find(d => d.x === 'big'));
 }
 function gameOver(id, score, st, high) {
   progress(id, st, score);
@@ -263,6 +265,8 @@ function shareText(o) {
 }
 async function openCard(o) {
   const n = N();
+  const noSats = !!(o.game && o.game.noSats);   // free-credit cabinets (Nut Poker): the card can never be loaded with sats
+  if (noSats) o = Object.assign({}, o, { loaded: null });
   n.openSheet(o.kind === 'score' ? 'Score card' : 'Trophy card', `<div id="cardBox">${'<div class="row" style="justify-content:center;padding:24px 0"><span class="spinner">PRINTING CARD</span></div>'}</div>`);
   const r = await renderCard(o);
   const box = document.getElementById('cardBox'); if (!box) return;
@@ -271,6 +275,7 @@ async function openCard(o) {
   const canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] }));
   box.innerHTML = `<img src="${r.url}" alt="${n.esc(shareText(o))}" class="share-card">
     ${o.loaded ? `<div class="notice cyan">Loaded with ${n.esc(n.fmt(o.loaded.amount))} SAT. Whoever scans it first wins them. If nobody does by ${n.esc(n.fmtDate(o.loaded.until))}, they come back to you.</div>`
+      : noSats ? `<div class="notice cyan" id="noSatsCard">Free credits only: this card can't hold sats.</div>`
       : `<div class="load-card"><label class="label" for="loadAmt">Put sats in it (optional)</label><div class="row" style="gap:8px"><input id="loadAmt" class="inp" inputmode="numeric" placeholder="210" style="flex:1"><button class="btn sm gold" id="cardLoad">Load card</button></div><div class="tiny muted">Adds a QR code to the card. The first person to scan it wins the sats; unclaimed after a week, they come back to you.</div><div id="sheetErr"></div></div>`}
     <div class="tiny muted">The card shows the game and score only, nothing about your wallet.</div>
     ${canShare ? '<button class="btn solid gold block" id="cardShare">Share</button>' : ''}
