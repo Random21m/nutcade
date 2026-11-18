@@ -254,7 +254,7 @@ async def main():
                 check(f'claim {tag}: Check marks both claimed tokens claimed, the others still waiting', [st[t['id']] for t in txs] == ['claimed', 'claimed', 'pending', 'pending'], st)
                 rows = await w.ev("[...document.querySelectorAll('.pt-row')].map(r=>({id:r.dataset.id, text:r.innerText}))")
                 rt = {r_['id']: r_['text'] for r_ in rows}
-                check(f'claim {tag}: the list says CLAIMED / WAITING in words (not color alone)', 'CLAIMED' in rt.get(txs[0]['id'], '') and 'WAITING' in rt.get(txs[2]['id'], ''), list(rt.values())[:4])
+                check(f'claim {tag}: the list says CLAIMED / UNCLAIMED in words (not color alone)', 'CLAIMED' in rt.get(txs[0]['id'], '') and 'UNCLAIMED' in rt.get(txs[2]['id'], ''), list(rt.values())[:4])
                 check(f'claim {tag}: Take back only offered for unclaimed ones', await w.ev(f"!document.querySelector('.pt-row[data-id={json.dumps(txs[0]['id'])}] [data-act=ptTake]') && !!document.querySelector('.pt-row[data-id={json.dumps(txs[2]['id'])}] [data-act=ptTake]')"))
                 # 3: take back an unclaimed one
                 bal0 = await w.bal(mint)

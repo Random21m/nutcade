@@ -122,7 +122,7 @@ function ptEstimate(w, url, amount, count) {
   }
   return { spend, fee: spend - amount * count };
 }
-const ptStyleName = s => s === 'ink' ? 'Ink saver' : 'Arcade';
+const ptStyleName = s => s === 'ink' ? 'Ink saver' : '<span data-noi18n>Arcade</span>';   // (Arcade: the style's name, the same in every language)
 function openPrint() {
   if (needMint()) return;
   const m = activeMint(); ptUI.mint = m.url;
@@ -131,7 +131,7 @@ function openPrint() {
     <div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
     <div class="row" style="gap:10px"><div class="field" style="flex:3"><label for="ptAmt">Amount per token (SAT)</label><input id="ptAmt" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off" value="${ptUI.amount || ''}"></div>
     <div class="field" style="flex:2"><label for="ptCount">How many (1 to 20)</label><input id="ptCount" class="inp" inputmode="numeric" autocomplete="off" value="${ptUI.count || 4}"></div></div>
-    <div class="field"><label>Style</label><div class="seg pt-seg" role="group" aria-label="Style">${[['arcade', 'ARCADE'], ['ink', 'INK SAVER']].map(([k, l]) => `<button type="button" data-act="ptStyle" data-s="${k}" aria-pressed="${ptUI.style === k}">${l}</button>`).join('')}</div>
+    <div class="field"><label>Style</label><div class="seg pt-seg" role="group" aria-label="Style">${[['arcade', 'ARCADE'], ['ink', 'INK SAVER']].map(([k, l]) => `<button type="button" data-act="ptStyle" data-s="${k}" aria-pressed="${ptUI.style === k}"${k === 'arcade' ? ' data-noi18n' : ''}>${l}</button>`).join('')}</div>
       <div class="tiny muted" id="ptStyleHelp">${ptUI.style === 'ink' ? 'Black on white.' : 'Full color. The QR code is always dark on light.'}</div></div>
     <button class="btn solid gold block" data-act="ptNext">Next</button>
     ${n ? `<button class="linkbtn tiny" data-act="ptList" style="justify-self:start">Printed tokens (${n})</button>` : ''}
@@ -260,14 +260,14 @@ async function ptPrintNow(b) {
 }
 
 /* ---------- the Printed tokens list ---------- */
-const PT_ST = { pending: ['○', 'WAITING'], claimed: ['✓', 'CLAIMED'], reclaimed: ['↩', 'TAKEN BACK'] };
+const PT_ST = { pending: ['○', 'UNCLAIMED'], claimed: ['✓', 'CLAIMED'], reclaimed: ['↩', 'TAKEN BACK'] };
 function ptListHTML() {
   const all = printedTxs(), by = new Map();
   for (const t of all) { if (!by.has(t.print.b)) by.set(t.print.b, []); by.get(t.print.b).push(t); }
   const n = s => all.filter(t => t.status === s).length, waiting = n('pending');
   const batches = [...by.values()].sort((a, b) => (b[0].print.at || b[0].ts) - (a[0].print.at || a[0].ts));
   return `<div class="pt-list">
-    <div class="tiny">${all.length} printed · ${waiting} waiting · ${n('claimed')} claimed · ${n('reclaimed')} taken back</div>
+    <div class="tiny">${all.length} printed · ${waiting} unclaimed · ${n('claimed')} claimed · ${n('reclaimed')} taken back</div>
     <div class="row wrap" style="gap:8px"><button class="btn sm violet" data-act="ptCheck" ${waiting ? '' : 'disabled'}>Check claimed</button><button class="btn sm gold" data-act="ptTakeAll" ${waiting ? '' : 'disabled'}>Take back all unclaimed</button></div>
     ${batches.map(ts => { ts.sort((a, b) => a.print.i - b.print.i); const f = ts[0], open = ts.some(t => t.status === 'pending');
       return `<div class="pt-batch"><div class="row between" style="gap:8px"><span class="tiny"><span data-noi18n>${esc(fmtDate(f.print.at || f.ts))}</span> · <span>${ts.length} × ${money(f.amount)}</span> · <span data-noi18n>${esc(host(f.mint))}</span></span>${open ? `<button class="btn sm" data-act="ptReprint" data-b="${esc(f.print.b)}">Print again</button>` : ''}</div>
