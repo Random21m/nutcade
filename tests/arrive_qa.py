@@ -618,6 +618,14 @@ async def main():
             tok = await token_from(p, 1500, FREE); await claim(r, tok)
             await r.until("!document.querySelector('#layer .spinner')", 15000); await r.wait(1500); await r.ev("Nutcade.closeSheet()")
             shown = bool(await cards(r))
+            REACH = """(sel=>{const e=document.querySelector(sel); if(!e) return 'missing'; e.scrollIntoView({block:'center'}); const q=e.getBoundingClientRect();
+              if(q.top<0||q.bottom>innerHeight) return 'off screen'; const h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2); return h&&(h===e||e.contains(h))?'ok':'covered'})"""
+            for vw, vh in ((844, 390), (568, 320)):
+                await r.pg.set_viewport_size({'width': vw, 'height': vh}); await settings(r)
+                g = await r.ev(REACH + "('[data-act=limOpen]')"); h = await r.ev("document.querySelector('#arrStack .arr-card').getBoundingClientRect().height")
+                check(f'sideways {vw}x{vh}: a notice is compact and leaves the screen usable (a button mid-screen not covered)', shown and g == 'ok' and h < vh / 3, (g, h))
+                if vw == 568: await shot(r, 'notice-568x320')
+            await r.home(); await r.pg.set_viewport_size({'width': 844, 'height': 390})
             await r.click('[data-act=tab][data-tab=arcade]'); await r.wait(200); await r.ev("document.querySelector('[data-game=swarm]').click()"); await r.wait(800)
             g = await r.ev("""(sel=>{const e=document.querySelector(sel); if(!e) return 'missing'; const q=e.getBoundingClientRect();
               const h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2); return h&&(h===e||e.contains(h))?'ok':'covered'})('[data-g=exit]')""")
