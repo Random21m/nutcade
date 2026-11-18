@@ -2,7 +2,7 @@
 zaps (NIP-57). Uses the local mints and mock_nostr.py, which also plays the LNURL services (reached as
 https://lnurl.test, forwarded here), Nostr profiles and an NWC app. With SHOTS=dir it saves screenshots of every
 new screen at 375 px in English and German."""
-import asyncio, json, os, re, urllib.request, urllib.error
+import asyncio, json, os, re, time, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 from wallet_qa import W, check, results, A, B, URL, invoice, outside_net
 
@@ -757,16 +757,46 @@ async def main():
         await books(w, 'find lost credits change', broken)
         # an interrupted deposit whose restore fails once: the quote is kept, then the ecash is credited to that deposit (no double line)
         await w.pg.route(f'{B}/v1/restore', failing(1, 500))
+        # (test-only trace, printed as a TRACE line and in the FAIL detail: every request this page makes to mint B about the
+        # deposit with its answer, and every change of the deposit's record (seen not issued: rec; its counters: ctr; the
+        # mint's last state; empty looks), of the app's next counter on B's keyset and of the line, against the counters
+        # the test wallet reserved. A 0 close then shows which branch closed it and whose counters the coins are at.)
+        net, t0 = [], time.time()
+        async def crash_net(r):
+            try:
+                u, m = r.url, r.request.method
+                if not u.startswith(B + '/v1/') or not ('/mint/' in u or '/restore' in u or '/swap' in u or '/melt/' in u): return
+                st = r.status; body = ''
+                try: body = await r.text()
+                except Exception: pass
+                info = ''
+                try: d = json.loads(body); info = d.get('state') or (f"{d.get('code')} {str(d.get('detail'))[:60]}" if st >= 400 else '')
+                except Exception: info = body[:60] if st >= 400 else ''
+                net.append((round(time.time() - t0, 2), m, u[len(B) + 4:][:44], st, info))
+            except Exception: pass
+        crash_cb = lambda r: asyncio.ensure_future(crash_net(r))
+        w.pg.on('response', crash_cb)
         await w.ev(f"""(async()=>{{ const S=Nutcade.S; const ws=new CashuLib.Wallet('{B}',{{unit:'sat',bip39seed:CashuLib.mnemonicToSeedSync(S.seed.mnemonic),counterInit:{{...S.counters}}}}); await ws.loadMint();
+            const kid=ws.keysetId, T0=Date.now(), tr=window.__crashTrace={{kid,ctr0:S.counters[kid]||0,ws:null,wsCtr:null,hist:[]}};
             const q=await ws.createMintQuoteBolt11(640); const id='crash'+Date.now();
             S.txs.unshift({{id,ts:Date.now(),note:'',status:'pending',fee:0,type:'in',method:'ln',amount:640,mint:'{B}',quote:q.quote,request:q.request}});
             S.quotes.push({{kind:'bolt11',quote:q.quote,request:q.request,amount:640,mint:'{B}',txId:id}});
+            let last=''; const look=()=>{{ const r=Nutcade.S.quotes.find(x=>x.quote===q.quote), t=Nutcade.S.txs.find(x=>x.id===id)||{{}};
+              const s=JSON.stringify([r?[r.rec||0,r.ctr?r.ctr.start+'+'+r.ctr.n:'-',r.state||'-',r.empty||0]:'gone',Nutcade.S.counters[kid]||0,t.status,t.amount]);
+              if (s!==last) {{ last=s; tr.hist.push([Date.now()-T0].concat(JSON.parse(s))); }} return t.status==='done'; }};
+            look(); const iv=setInterval(()=>{{ if (look() || Date.now()-T0>45000) setTimeout(()=>{{ look(); clearInterval(iv); }}, 3000); }}, 40);
             window.__crashTx=id; await new Promise(r=>setTimeout(r,1200));
             // the app's own quote watcher may claim the deposit during the wait (it then owns those counters): that is the case under test too
-            try {{ await ws.mintProofsBolt11(640,q.quote); }} catch (e) {{ if (!/already (signed|issued)|issued|11003|20002|20003/i.test(String(e&&e.message||e))) throw e; }} }})()""")
+            try {{ await ws.mintProofsBolt11(640,q.quote,{{onCountersReserved:u=>{{tr.wsCtr=u.start+'+'+u.count;}}}}); tr.ws=[Date.now()-T0,'ok']; }}
+            catch (e) {{ tr.ws=[Date.now()-T0,String(e&&e.message||e).slice(0,80)]; if (!/already (signed|issued|pending)|issued|pending|11003|11004|20002|20003|20005/i.test(String(e&&e.message||e))) throw e; }} }})()""")   # (pending, 20005/11004: the app's identical request is at the mint that moment)
         ok = await w.until("(Nutcade.S.txs.find(t=>t.id===window.__crashTx)||{}).status==='done'", 40000); await w.pg.unroute(f'{B}/v1/restore')
         ct = await w.ev("Nutcade.S.txs.find(t=>t.id===window.__crashTx)")
-        check('(round 2, 1) an interrupted deposit whose recovery fails once is retried, then credited to the deposit itself', ok and ct['amount'] == 640 and not await w.ev("Nutcade.S.txs.some(t=>t.note==='Recovered with recovery phrase'&&t.mint===" + json.dumps(B) + "&&t.ts>Date.now()-60000)"), ct)
+        rec_line = await w.ev("Nutcade.S.txs.some(t=>t.note==='Recovered with recovery phrase'&&t.mint===" + json.dumps(B) + "&&t.ts>Date.now()-60000)")
+        await w.wait(300); w.pg.remove_listener('response', crash_cb)
+        trace = await w.ev("window.__crashTrace"); trace['net'] = net; trace['key'] = 'hist: [ms, [rec, ctr, state, empty] | gone, app next counter, line status, line amount]'
+        print('TRACE (round 2, 1) crash deposit', json.dumps(trace), flush=True)
+        good = ok and ct['amount'] == 640 and not rec_line
+        check('(round 2, 1) an interrupted deposit whose recovery fails once is retried, then credited to the deposit itself', good, ct if good else {'line': ct, 'recovered_line': rec_line, 'trace': trace})
         await books(w, 'interrupted deposit retried', broken)
         # (round 2, item 4) a slow mint (800 ms on every call) and a reload mid-payment: the startup check and the live
         # watch both reconcile the payment at once; its change is credited once, the fee is the real one (not 0)
