@@ -12,9 +12,7 @@ ROWS = [
 ("Amount per token (SAT)", "Cantidad por token (SAT)", "Valor por token (SAT)", "Betrag pro Token (SAT)", "Montant par jeton (SAT)"),
 ("How many (1 to 20)", "Cuántos (1 a 20)", "Quantos (1 a 20)", "Wie viele (1 bis 20)", "Combien (1 à 20)"),
 ("Style", "Estilo", "Estilo", "Stil", "Style"),
-("ARCADE", "ARCADE", "FLIPERAMA", "ARCADE", "ARCADE"),
 ("INK SAVER", "AHORRA TINTA", "ECONOMIZA TINTA", "TINTE SPAREN", "ÉCO ENCRE"),
-("Arcade", "Arcade", "Fliperama", "Arcade", "Arcade"),
 ("Ink saver", "Ahorra tinta", "Economiza tinta", "Tinte sparen", "Éco encre"),
 ("Black on white.", "Negro sobre blanco.", "Preto no branco.", "Schwarz auf Weiß.", "Noir sur blanc."),
 ("Full color. The QR code is always dark on light.", "A todo color. El código QR siempre es oscuro sobre claro.", "Colorido. O QR code é sempre escuro sobre claro.", "In Farbe. Der QR-Code ist immer dunkel auf hell.", "En couleurs. Le QR code est toujours foncé sur clair."),
@@ -86,10 +84,10 @@ ROWS = [
 ("NO ACCOUNT. NO TRACKING.", "SIN CUENTA. SIN RASTREO.", "SEM CONTA. SEM RASTREAMENTO.", "KEIN KONTO. KEIN TRACKING.", "SANS COMPTE. SANS PISTAGE."),
 # --- the Printed tokens list ---
 ("Printed tokens", "Tokens impresos", "Tokens impressos", "Gedruckte Tokens", "Jetons imprimés"),
-("{#} printed · {#} waiting · {#} claimed · {#} taken back", "{#} impresos · {#} en espera · {#} reclamados · {#} recuperados", "{#} impressos · {#} aguardando · {#} resgatados · {#} pegos de volta", "{#} gedruckt · {#} warten · {#} eingelöst · {#} zurückgeholt", "{#} imprimés · {#} en attente · {#} réclamés · {#} repris"),
+("{#} printed · {#} unclaimed · {#} claimed · {#} taken back", "{#} impresos · {#} sin reclamar · {#} reclamados · {#} recuperados", "{#} impressos · {#} não resgatados · {#} resgatados · {#} pegos de volta", "{#} gedruckt · {#} nicht eingelöst · {#} eingelöst · {#} zurückgeholt", "{#} imprimés · {#} non réclamés · {#} réclamés · {#} repris"),
 ("Take back all unclaimed", "Recuperar todos los no reclamados", "Pegar de volta todos não resgatados", "Alle nicht eingelösten zurückholen", "Reprendre tous les non réclamés"),
 ("Print again", "Imprimir de nuevo", "Imprimir de novo", "Erneut drucken", "Imprimer à nouveau"),
-("WAITING", "EN ESPERA", "AGUARDANDO", "WARTET", "EN ATTENTE"),
+("UNCLAIMED", "SIN RECLAMAR", "NÃO RESGATADO", "NICHT EINGELÖST", "NON RÉCLAMÉ"),
 ("TAKEN BACK", "RECUPERADO", "DE VOLTA", "ZURÜCKGEHOLT", "REPRIS"),
 ("Take back", "Recuperar", "Pegar de volta", "Zurückholen", "Reprendre"),
 ("No printed tokens yet.", "Aún no hay tokens impresos.", "Ainda não há tokens impressos.", "Noch keine gedruckten Tokens.", "Pas encore de jetons imprimés."),
@@ -156,6 +154,11 @@ if __name__ == '__main__':
         assert len(row) == 5, row
         assert row[0] not in seen, row[0]; seen.add(row[0])
         for x in row[1:]: assert row[0].count('{#}') == x.count('{#}'), row
+    import re as _re
+    here = os.path.dirname(os.path.abspath(__file__))
+    old = open(os.path.join(here, '..', 'src', 'i18n.js')).read() + open(os.path.join(here, '..', 'src', 'i18n_r4.js')).read()
+    for row in ROWS:   # (a text other screens already show is translated there: one meaning per text)
+        assert json.dumps(row[0], ensure_ascii=False) + ':' not in old, 'already translated elsewhere: ' + row[0]
     for row in RE:
         assert len(row) == 5, row
         for x in row[1:]: assert x.count('$1') == 1, row
