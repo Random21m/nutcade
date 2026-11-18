@@ -766,10 +766,10 @@ async function sendEcashNow(amount, note, lockTo, url, opts) {
   const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}) }, keep: w.defaultOutputType() } : undefined;
   // the spending limit, with the most this can take: the swap's own numbers, fees included
   if (belowMin(url) && !opts.noBatch) return sendBatched(w, amount, note, lockTo, url, opts, outCfg);   // (a mint that dropped below the minimum: its sats can still leave, in steps)
-  const plan = swapPlan(w, S.proofs[url] || [], amount, outCfg && outCfg.send, url);
+  const plan = opts.pick ? opts.pick(w, S.proofs[url] || []) : swapPlan(w, S.proofs[url] || [], amount, outCfg && outCfg.send, url);   // tokens: opts.pick, coins fixed by the caller (printed tokens)
   if (plan && plan.tooMany) throw manyErr(url, plan.tooMany);
   const hold = limitGate(plan ? plan.spend : feeMax(w, S.proofs[url] || [], amount), { free: opts.noLimit, grant: opts.grant, approved: opts.approved });
-  try { return await withPick(w, plan && plan.sel, () => sendEcashSwap(w, amount, note, lockTo, url, opts, outCfg, hold)); }
+  try { return await withPick(w, plan && plan.sel, () => sendEcashSwap(w, amount, note, lockTo, url, opts, outCfg, hold), !!opts.pick); }
   finally { hold.release(); }
 }
 async function sendEcashSwap(w, amount, note, lockTo, url, opts, outCfg, hold) {
@@ -779,7 +779,7 @@ async function sendEcashSwap(w, amount, note, lockTo, url, opts, outCfg, hold) {
   let have;
   const attempt = async () => {
     have = [...(S.proofs[url] || [])];
-    const all = have.length && amount === maxSendable(w, have) && w._selectProofs;
+    const all = !opts.pick && have.length && amount === maxSendable(w, have) && w._selectProofs;   // (tokens: not when the coins are fixed)
     const pick = all ? w._selectProofs : null;
     if (all) w._selectProofs = ps => ({ keep: [], send: ps });
     try { return await journaled(url, 'send', { inputs: have, amount, note, locked: !!lockTo, tx: Object.assign({ locked: lockTo || null }, opts.txx || {}), follow: opts.follow || null, lim: limRec(hold) }, (cb, o) => rSend(o, w, amount, have, { includeFees: true, onCountersReserved: cb }, outCfg)); }
@@ -4117,6 +4117,7 @@ function setTrust(meta) {
 document.addEventListener('click', e => {
   if (e.target.matches('[data-scrim]')) { closeSheet(); return; }
   const b = e.target.closest('[data-act]'); if (!b) return;
+  if (b.disabled) return;   // tokens: a disabled button (one that is busy, like Make or Create token) does nothing, however it is clicked
   if (b.type === 'checkbox') return;
   const f = A[b.dataset.act]; if (f) { e.preventDefault(); f(b, e); }
 });

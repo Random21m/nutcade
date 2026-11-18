@@ -507,6 +507,15 @@ async def main():
                 check(f'money2 fee {count}x{amount}: paid {paid} <= shown "up to {ests[-1]}", and the same coins give the same number every time {sorted(set(ests))}', bid and len(txs) == count and paid == lines and ests[-1] is not None and paid <= ests[-1] and len(set(ests)) == 1, (await w.err(), len(txs), paid, lines, ests))
                 await w.ev("Nutcade.closeSheet()")
             check('money2 fee: history = balance', not await books(w, (FEE,)), await books(w, (FEE,)))
+            # the coins give another cost at Make than the one shown (here the shown number is made 1 SAT lower, as when
+            # coins changed since; at 100 ppk real coin changes rarely move the cost): nothing is made, the cost is shown again
+            await open_print(w, FEE); await w.fill('#ptAmt', '63'); await w.fill('#ptCount', '5'); await w.click('[data-act=ptNext]'); await w.until("!!document.querySelector('[data-act=ptMake]')", 20000)
+            n0 = await w.ev(f"{PRINTED}.length"); real = (await w.ev("NutTokens.lastEstimate"))['spend']
+            await w.ev("NutTokens.lastEstimate.spend -= 1; 0")
+            await w.click('[data-act=ptMake]'); await w.until("/\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'') || !!document.querySelector('.pt-ready')", 60000); await w.wait(300)
+            e = await w.err()
+            check('money2: the coins give another cost at Make than shown: nothing is made, the cost is worked out again and shown', 'changed since' in e and await w.ev(f"{PRINTED}.length") == n0 and await w.ev("!!document.querySelector('[data-act=ptMake]')") and (await w.ev("NutTokens.lastEstimate"))['spend'] == real, (e, real))
+            await w.ev("Nutcade.closeSheet()")
             # F1: the spending limit uses the number shown: a day limit of exactly what is shown lets the batch through
             for trial in range(3):
                 await open_print(w, FEE); await w.fill('#ptAmt', '63'); await w.fill('#ptCount', '20'); await w.click('[data-act=ptNext]'); await w.until("!!document.querySelector('[data-act=ptMake]')", 20000)

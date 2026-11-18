@@ -104,24 +104,46 @@ const PT_APP = 'random21m.github.io/nutcade';
 const ptCode = () => { const h = hex(rnd(4)).toUpperCase(); return h.slice(0, 4) + '-' + h.slice(4); };
 let ptLast = { b: null, check: null };
 
-// the most a batch can cost, worked out before it is made: each token the way the swap will make it (the library's own
-// numbers), the change of one coming back as the coins the next one can use. null: not enough at this mint
-function ptEstimate(w, url, amount, count) {
-  let have = [...(S.proofs[url] || [])], spend = 0, ks = null;
+/* What a batch costs, worked out once and then made exactly that way. Each token's coins are picked by ptPick, which
+   gives the same pick for the same coins (the library's own pick is randomised, so two estimates could differ). The
+   change of a swap comes back as plain binary coins (the library's split when it isn't told what the wallet holds),
+   so the coins each next token can use are known in advance too. Making a token then uses exactly the pick ptPick
+   makes at that moment (sendEcash's opts.pick, under the mint's lock), and the batch stops before any token that
+   would take the total over what was shown (only possible if another payment changed the coins meanwhile). */
+// one token's coins: the smallest single coin that covers it with its fee, else the largest coins until they do
+function ptPick(w, have, h) {
+  const cs = [...have].sort((a, b) => num(b.amount) - num(a.amount) || String(a.id).localeCompare(String(b.id)) || String(a.secret).localeCompare(String(b.secret)));
+  for (let i = cs.length - 1; i >= 0; i--) if (num(cs[i].amount) >= h + feeOfPs(w, [cs[i]])) return [cs[i]];
+  const sel = []; let t = 0;
+  for (const c of cs) { sel.push(c); t += num(c.amount); if (t >= h + feeOfPs(w, sel)) return sel; }
+  return null;
+}
+// what one token of `amount` takes before input fees (the amount and the fee coins it carries for its receiver), and its coins
+function ptOuts(w, amount) {
+  const ot = w.configureOutputs(w.parseAmount(amount, 'limit'), w.getOutputKeyset(), w.defaultOutputType(), true);
+  const denoms = (ot.denominations || []).map(num);
+  return { h: num(w.preparedTotal(ot)), denoms };
+}
+// the whole batch: { spend, fee, per: [each token's spend], denoms } (null: not enough at this mint; { tooMany })
+function ptPlan(w, url, amount, count) {
+  const { h, denoms } = ptOuts(w, amount), m = mintMax(url);
+  let have = [...(S.proofs[url] || [])], spend = 0, ks = null; const per = [];
   try { ks = w.getOutputKeyset().id; } catch (e) {}
   for (let i = 0; i < count; i++) {
-    const p = swapPlan(w, have, amount, undefined, url);
-    if (!p) return null;
-    if (p.tooMany) return { tooMany: p.tooMany };
-    // (the coins the change comes back as can differ from the ones assumed here, so a token may need a coin or two more:
-    // their fee is counted too, so the fee shown is the most it can be)
-    const id0 = p.sel.send[0].id, n0 = p.sel.send.length;
-    spend += p.spend + Math.max(0, feeOfK(w, n0 + 2, id0) - feeOfK(w, n0, id0));
-    const used = new Set(p.sel.send.map(x => x.secret)), back = sum(p.sel.send) - p.spend;
-    have = have.filter(x => !used.has(x.secret)).concat(back > 0 ? splitAmt(back).map((a, j) => ({ id: ks || p.sel.send[0].id, amount: a, secret: `est${i}.${j}`, C: '' })) : []);
+    const sel = ptPick(w, have, h);
+    if (!sel) return null;
+    if (m && sel.length > m) return { tooMany: m };
+    const s_ = h + feeOfPs(w, sel); spend += s_; per.push(s_);
+    const used = new Set(sel.map(x => x.secret)), back = sum(sel) - s_;
+    have = have.filter(x => !used.has(x.secret)).concat(back > 0 ? splitAmt(back).map((a, j) => ({ id: ks || sel[0].id, amount: a, secret: `plan${i}.${j}`, C: '' })) : []);
   }
-  return { spend, fee: spend - amount * count };
+  return { spend, fee: spend - amount * count, per, denoms };
 }
+const ptBadPlan = (url, amount, count, plan) => {
+  if (!plan) return new Error(`${count} × ${money(amount)} plus the mint's fees is more than this mint holds (${money(balanceOf(url))}).`);
+  if (plan.tooMany) return manyErr(url, plan.tooMany);
+  return null;
+};
 const ptStyleName = s => s === 'ink' ? 'Ink saver' : '<span data-noi18n>Arcade</span>';   // (Arcade: the style's name, the same in every language)
 function openPrint() {
   if (needMint()) return;
@@ -144,18 +166,21 @@ function ptRead() {
   return { amount, count };
 }
 // a token of `coins` coins at this mint, as printed (no DLEQ), for its size only: is its code small enough for paper?
-function ptFits(url, coins) {
-  const r = k => hex(rnd(k)), id = Object.keys(S.counters)[0] || '00' + r(7);
-  const text = L.getEncodedToken({ mint: url, unit: 'sat', proofs: Array.from({ length: coins }, (_, i) => ({ id, amount: 2 ** (i % 16), secret: r(32), C: '02' + r(32) })) });
+// a token of exactly these coins (the receiver's fee coins too), as printed (no DLEQ): is its code small enough for paper?
+function ptFits(url, w, denoms) {
+  const r = k => hex(rnd(k)); let id; try { id = w.getOutputKeyset().id; } catch (e) { id = '00' + r(7); }
+  const text = L.getEncodedToken({ mint: url, unit: 'sat', proofs: denoms.map(a => ({ id, amount: a, secret: r(32), C: '02' + r(32) })) });
   try { return qrPlan(text, undefined, true).qr.getModuleCount() <= PT_MAX_MODULES; } catch (e) { return false; }
 }
-async function ptSummary() {
-  const { amount, count } = ptRead(), url = ptUI.mint;
-  if (!ptFits(url, bitsOf(amount))) throw new Error(`A ${money(amount)} token needs ${bitsOf(amount)} coins, and its QR code would be too dense to scan reliably on paper. Pick an amount made of fewer coins: ${fmt(1024)} or ${fmt(2048)} are one coin each, ${fmt(1000)} is six.`);
+async function ptSummary() { const { amount, count } = ptRead(); return ptShowCost(amount, count); }
+async function ptShowCost(amount, count) {
+  const url = ptUI.mint;
   if (isOffline()) throw new Error("Making tokens needs the mint, and you're offline. Try again online.");
-  const w = await getWallet(url), est = ptEstimate(w, url, amount, count);
-  if (!est) throw new Error(`${count} × ${money(amount)} plus the mint's fees is more than this mint holds (${money(balanceOf(url))}).`);
-  if (est.tooMany) throw manyErr(url, est.tooMany);
+  const w = await getWallet(url);
+  if (belowMin(url)) { const e = new Error(`${host(url)} takes too few coins per request to print tokens from it.`); e.keep = true; throw e; }
+  const { denoms } = ptOuts(w, amount);
+  if (!ptFits(url, w, denoms)) throw new Error(`A ${money(amount)} token needs ${denoms.length} coins, and its QR code would be too dense to scan reliably on paper. Pick an amount made of fewer coins: ${fmt(1024)} or ${fmt(2048)} are one coin each, ${fmt(1000)} is six.`);
+  const est = ptPlan(w, url, amount, count), bad = ptBadPlan(url, amount, count, est); if (bad) throw bad;
   Object.assign(ptUI, { amount, count, est });
   setBody(`<div class="pt-sum"><dl class="kv"><dt>Tokens</dt><dd>${count} × ${money(amount)}</dd><dt>Total</dt><dd>${money(amount * count)}</dd>
       <dt>Fees</dt><dd>${est.fee > 0 ? `up to ${money(est.fee)}` : 'None at this mint'}</dd><dt>Style</dt><dd>${ptStyleName(ptUI.style)}</dd><dt>Mint</dt><dd data-noi18n>${esc(host(url))}</dd></dl>
@@ -164,27 +189,42 @@ async function ptSummary() {
     <button class="btn solid pink block" data-act="ptMake">Make ${count === 1 ? '1 token' : `${count} tokens`}</button><button class="btn block" data-act="ptOpen">Back</button><div id="sheetErr"></div></div>`);
 }
 async function ptMakeBatch(btn) {
-  const { amount, count, style } = ptUI, url = ptUI.mint;
+  const { amount, count, style } = ptUI, url = ptUI.mint, shown = ptUI.est;
   if (isOffline()) throw new Error("Making tokens needs the mint, and you're offline. Try again online.");
   const say = t => { const sp = btn && btn.querySelector('.spinner'); if (sp) sp.textContent = t; };
-  const w = await getWallet(url), est = ptEstimate(w, url, amount, count);
-  if (!est) throw new Error(`${count} × ${money(amount)} plus the mint's fees is more than this mint holds (${money(balanceOf(url))}).`);
-  if (est.tooMany) throw manyErr(url, est.tooMany);
-  piggyGuard(est.spend);
-  // the spending limit: the batch as a whole, once (a PIN entered for it lets every token of it through); each token is
-  // then made, held and counted the normal way
+  const w = await getWallet(url), plan = ptPlan(w, url, amount, count), bad = ptBadPlan(url, amount, count, plan); if (bad) throw bad;
+  // the coins changed since the cost was shown (a payment came in or went out): the new cost is shown, nothing is made
+  if (!shown || plan.spend !== shown.spend) { await ptShowCost(amount, count); const e = new Error('Your balance changed since, so the cost was worked out again. Check it and tap Make again.'); e.keep = true; throw e; }
+  piggyGuard(shown.spend);
+  // the spending limit: the batch as a whole, once, with the cost shown (a PIN entered for it lets every token of it
+  // through); each token is then made, held and counted the normal way
   const approved = !!(limitOK && limitOK.until > Date.now());
-  limitGate(est.spend).release();
-  const b = uid(), at = Date.now(), made = [];
+  limitGate(shown.spend).release();
+  const b = uid(), at = Date.now(), made = []; let paid = 0;
   try {
     for (let i = 1; i <= count; i++) {
       say(`MAKING TOKEN ${i} OF ${count}`);
-      const tx = await sendEcash(amount, `Printed token ${i} of ${count}`, null, url, { approved, txx: { print: { b, i, n: count, code: ptCode(), style, at } } });
-      made.push(tx.id);
+      const pick = (w2, have) => {   // (under the mint's lock, from the coins held right then)
+        const sel = ptPick(w2, have, ptOuts(w2, amount).h); if (!sel) return null;
+        const spend = ptOuts(w2, amount).h + feeOfPs(w2, sel);
+        if (paid + spend > shown.spend) { const e = new Error('Another payment changed the coins at this mint during the batch, so the next token would cost more than shown.'); e.keep = true; throw e; }
+        return { sel: { send: sel }, spend };
+      };
+      const tx = await sendEcash(amount, `Printed token ${i} of ${count}`, null, url, { approved, pick, txx: { print: { b, i, n: count, code: ptCode(), style, at } } });
+      made.push(tx.id); paid += num(tx.amount) + num(tx.fee);
     }
   } catch (e) {
-    if (made.length) { e.also = `${made.length} of ${count} tokens were made before this. They are in Printed tokens: print them or take them back.`; refresh(); }
-    throw e;
+    if (!made.length) throw e;   // (nothing made: the usual error, and a retry after a PIN starts the batch from the start)
+    // stopped part way: never made again (no retry), and the screen says exactly what was made
+    refresh(); sfx('err');
+    const why = friendly(e, url);
+    setBody(`<div class="pt-stopped" data-b="${esc(b)}"><div class="pb-h" style="text-align:center">STOPPED AFTER ${made.length} OF ${count}</div>
+      ${errHTML(why)}
+      <p style="margin:0">${made.length} of ${count} tokens were made before this. They are in Printed tokens: print them or take them back.</p>
+      <p class="tiny muted" style="margin:0">Nothing more was made.</p>
+      <button class="btn solid gold block" data-act="ptReprint" data-b="${esc(b)}">Print what was made</button>
+      <button class="btn block" data-act="ptList">Printed tokens</button><div id="sheetErr"></div></div>`);
+    return;
   }
   sfx('coin'); refresh();
   say('CHECKING CODES');
@@ -307,6 +347,7 @@ async function ptTakeOne(t) {
 window.NutTokens = {
   get lastCheck() { return ptLast.check; },
   get lastEstimate() { return ptUI.est; },
+  planNow: async (amount, count, url) => { url = url || S.active; const p = ptPlan(await getWallet(url), url, amount, count); return p && { spend: p.spend, fee: p.fee }; },
   preparePrint, endPrint, printed: () => printedTxs(),
   showQR: text => openSheet('QR code', qrBlock(text, 'QR code')),
   // a token of n coins at the active mint, with DLEQ proofs, like a real one (only for measuring QR sizes)

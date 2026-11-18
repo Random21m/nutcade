@@ -90,10 +90,12 @@ function swapPlan(w, have, amount, sendOT, url) {
   } catch (e) { return null; }
 }
 // until the swap: the library's own pick, so the swap spends exactly the coins the check counted
-async function withPick(w, sel, fn) {
+// (strict, tokens: a pick fixed in advance is used exactly, or the step stops: never another pick that could cost more)
+async function withPick(w, sel, fn, strict) {
+  if (strict && (!sel || !w._selectProofs)) throw new Error('These coins are no longer here. Nothing was sent.');
   if (!sel || !w._selectProofs) return fn();
   const pick = w._selectProofs, want = new Set(sel.send.map(p => p.secret));
-  w._selectProofs = (ps, ...a) => { const send = ps.filter(p => want.has(p.secret)); return send.length === want.size ? { keep: ps.filter(p => !want.has(p.secret)), send } : pick.call(w, ps, ...a); };
+  w._selectProofs = (ps, ...a) => { const send = ps.filter(p => want.has(p.secret)); if (send.length === want.size) return { keep: ps.filter(p => !want.has(p.secret)), send }; if (strict) throw new Error('These coins are no longer here. Nothing was sent.'); return pick.call(w, ps, ...a); };
   try { return await fn(); } finally { w._selectProofs = pick; }
 }
 function feeMax(w, have, amount) {   // when the library can't say: as if every coin is spent, plus the receiver's fee
