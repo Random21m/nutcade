@@ -176,9 +176,8 @@ const HELP = [
     'Nostr relays (relay.damus.io, nos.lol and relay.primal.net): for game challenges and payments between contacts, apps you connect with Wallet Connect, your encrypted mint list, requests you made and ecash sent to your ecash address. A contact or a payment request can name relays of its own, which are used when you send to them.',
     'Two more relays (relay.nostr.band and relay.cashumints.space) are asked only when you tap Find mints people recommend.',
     'Coinbase, for the price and the price chart, only while Show Bitcoin price is on.',
-    'npub.cash, only while your Lightning address is on.',
+    'npub.cash, while your Lightning address is on, and when you tip from inside the app (the tip address is an npub.cash address).',
     'The web address of any Lightning address, LNURL, voucher or payment request you pay or scan, and of a Nostr profile when you zap it. It sees that one request.',
-    'strike.me, only when you tip from inside the app.',
     'This website, to load NUTCADE, its QR scanner and the update check. GitHub, which hosts it, sees these requests like any website visit.',
     'GitHub pages (the source, release notes and the problem report form), only when you tap a link to them.'], after: [
     'The camera is used only while a scanner is open and the microphone only while a Listen screen is open. Nothing is recorded or sent.'] },

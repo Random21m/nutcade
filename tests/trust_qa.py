@@ -146,11 +146,10 @@ async def main():
                        'api.coinbase.com', 'api.exchange.coinbase.com', 'ws-feed.exchange.coinbase.com', 'npub.cash'}
             check('privacy: every host the code names is in the Privacy section (nothing is contacted that it does not list)', contacted <= claimed, sorted(contacted - claimed))
             check('privacy: every host the Privacy section lists is really in the code', claimed <= contacted, sorted(claimed - contacted))
-            check('privacy: strike.me (the tip address) is in the code', 'strike.me' in SRC['app.js'])
             readme = open(os.path.join(ROOT, 'README.md'), encoding='utf-8').read()
             priv = readme[readme.index('## Privacy'):readme.index('## Sharing')]
             curated = {'mint.minibits.cash': 'Minibits', 'mint.cubabitcoin.org': 'Cuba Bitcoin', 'testnut.cashu.space': 'test mints', 'nofees.testnut.cashu.space': 'test mints', '8333.space': '8333.space'}
-            names = [(curated[h] if h in curated else h) for h in claimed | {'strike.me'}]
+            names = [(curated[h] if h in curated else h) for h in claimed]
             check('privacy: the README Privacy section names every one of those hosts (the five listed mints by name)', all(n in priv for n in names), [n for n in names if n not in priv])
             helptext = SRC['app_trust.js']
             hs = helptext[helptext.index("What does NUTCADE contact"):helptext.index("Reporting a problem")]
