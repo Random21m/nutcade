@@ -43,8 +43,10 @@ Object.assign(A, {
     const { c, uri } = nwcCreate(val('nwcName'), budget, !!($('#nwcAll') || {}).checked);
     sfx('coin'); refresh(); showNwcUri(c, uri);
   }),
-  nwcEdit: b => openNwcEdit(b.dataset.id),
-  nwcSave: b => run(b, 'SAVING', async () => {
+  // editing a connection can raise its budget or let it see everything: with a PIN it asks, as Connect an app does
+  // (the form opens after the PIN, and Save goes ahead only while that same form is open)
+  nwcEdit: b => { const id = b.dataset.id; if (!S.nwc.some(x => x.id === id)) return; sfx('select'); pinGuard('nwcEdit', () => openNwcEdit(id)); },
+  nwcSave: b => !guardHeld('nwcEdit') ? closeSheet() : run(b, 'SAVING', async () => {
     const c = S.nwc.find(x => x.id === b.dataset.id); if (!c) { closeSheet(); return; }
     const name = val('nwcName').trim().slice(0, 40); if (!name) throw new Error('Give the connection a name, like the app it is for.');
     const budget = readBudget();

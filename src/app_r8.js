@@ -157,21 +157,24 @@ function limitClose() { document.getElementById('limitLayer')?.remove(); limitRe
 /* ---------- PIN guard ----------
    The spending limit protects an unlocked phone only if nothing hands over the whole wallet around it. So with a PIN,
    every step that could do that asks for it first: showing the recovery phrase, the backup file (downloading it or
-   showing its text), importing a backup, restoring a wallet from 12 words, connecting an app (Wallet Connect),
+   showing its text), importing a backup, restoring a wallet from 12 words, connecting or editing an app (Wallet Connect),
    resetting the wallet, exporting a mint's ecash and making a new phrase. (Changing the spending limit and every PIN
    change already need it.) Restoring asks whatever the balance: the phrase decides where every later deposit, refund,
    change and Lightning-address payment lands, not just today's sats.
    The PIN asked is the open wallet's own (in the duress PIN's wallet, its PIN), through the same pad, check, wrong-PIN
    count and wait as a payment over the limit, so every wallet asks the same way. Face ID / fingerprint isn't offered
-   here, as for the limit. A step that opens a form (restore, import, Wallet Connect, reset) asks before the form
-   opens, and the form's button goes ahead only while that same form is open. Without a PIN, and on the start screen
-   before a wallet exists, nothing is asked. */
+   here, as for the limit. A step that opens a form (restore, import, Wallet Connect: connecting an app or editing one,
+   reset) asks before the form opens, and the form's button goes ahead only while that same form is open. A PIN is
+   for the pad it was typed on: if that pad was closed while the PIN was checked (another step started, the same one
+   again included), nothing goes ahead and a guard pad opened meanwhile is closed too, so the step is started again
+   and asks again. Without a PIN, and on the start screen before a wallet exists, nothing is asked. */
 const GUARD = {
   seed: ['Recovery phrase', 'Enter your PIN to see your 12 words.'],
   backup: ['Backup file', 'Enter your PIN to get your backup file.'],
   import: ['Import backup', 'Enter your PIN to import a backup.'],
   restore: ['Restore wallet', 'Enter your PIN to restore a wallet from 12 words.'],
   nwc: ['Connect an app', 'Enter your PIN to connect an app to this wallet.'],
+  nwcEdit: ['Wallet Connect', 'Enter your PIN to change this connection.'],
   reset: ['Reset wallet', 'Enter your PIN to reset this wallet.'],
   export: ['Export ecash', 'Enter your PIN to export your ecash.'],
   newseed: ['New recovery phrase', 'Enter your PIN to make a new recovery phrase.']
@@ -184,10 +187,16 @@ function pinGuard(k, fn) {
   openPinSheet('guard', GUARD[k][0], { title: 'ENTER PIN', text: GUARD[k][1] });
   guard.run = { k, fn, sheet: $('#layer .sheet') };
 }
-// the right PIN was entered on the guard's pad: the step goes ahead (a form it opens keeps the pass while it is open)
-function guardGo() {
-  const g = guard.run; guard.run = null; pinUI.mode = null;
-  if (!g || !g.sheet || !g.sheet.isConnected) return;
+// the right PIN was entered on the guard's pad for step g (taken when OK was pressed): that step goes ahead, only
+// while its own pad is still the one open (a form it opens keeps the pass while it is open). Otherwise nothing goes
+// ahead, and a guard pad for another step (or the same step started again) opened meanwhile is closed: it asks again.
+function guardGo(g) {
+  const cur = guard.run;
+  if (!g || cur !== g || !g.sheet || !g.sheet.isConnected || g.sheet !== $('#layer .sheet')) {
+    if (cur && cur !== g) { guard.run = null; if (pinUI.mode === 'guard') pinUI.mode = null; if (cur.sheet && cur.sheet.isConnected) closeSheet(); }
+    return;
+  }
+  guard.run = null; pinUI.mode = null;
   closeSheet(); g.fn();
   const sheet = $('#layer .sheet'); guard.pass = sheet ? { k: g.k, sheet } : null;
 }
@@ -378,22 +387,25 @@ async function duressOff() {
 // Reset wallet, inside the duress PIN's wallet: that wallet starts over empty (still opened by its PIN); the rest of
 // the vault, the real wallet included, is left exactly as it was
 async function resetPart() { npcSocketStop(); dmStop(); vault.data = {}; queueVaultWrite(); await vault.chain; }
-// the PIN of the wallet that is open, for the steps that need it (a limit, the duress PIN)
-async function pinMore(m, v, busy) {
+// the PIN of the wallet that is open, for the steps that need it (a limit, the duress PIN). live(): the pad it was
+// typed on is still open for the same step (see pinSubmit); what the step acts on is taken when OK is pressed, and
+// once the PIN is checked the step goes ahead only if nothing changed meanwhile (the PIN is never used for another step)
+async function pinMore(m, v, busy, live) {
   const f = pinFails(); if (f.until > Date.now()) return pinError(`Wait ${Math.ceil((f.until - Date.now()) / 1000)}s before trying again.`);
-  const check = async () => { busy('CHECKING…'); if (await pinToDek(v)) { raw.del('pinfails'); return true; } notePinFail(); pinError('That PIN is wrong.'); return false; };
-  if (m === 'limitOK') { if (!(await check())) return; limitOK = { until: Date.now() + 120e3 }; const r = limitRetry; limitClose(); sfx('coin'); if (r) r(); return; }
-  if (m === 'limitSave') { if (!(await check())) return; applyLimits(limWant.v); return; }
-  if (m === 'guard') { if (!(await check())) return; guardGo(); return; }
+  const check = async () => { busy('CHECKING…'); if (await pinToDek(v)) { raw.del('pinfails'); return true; } notePinFail(); if (live()) pinError('That PIN is wrong.'); return false; };   // (a wrong try is counted even on a pad closed meanwhile)
+  if (m === 'limitOK') { const r = limitRetry; if (!(await check())) return; if (!live() || !r || limitRetry !== r) return; limitOK = { until: Date.now() + 120e3 }; limitClose(); sfx('coin'); r(); return; }
+  if (m === 'limitSave') { const want = limWant.v; if (!(await check())) return; if (!live() || !want || limWant.v !== want) return; applyLimits(want); return; }
+  if (m === 'guard') { const g = guard.run; if (!(await check())) return; guardGo(live() ? g : null); return; }
   if (m === 'duressOld') {
-    if (!(await check())) return; duressUI.old = v;
+    if (!(await check())) return; if (!live()) return; duressUI.old = v;
     try { pinChangeCheck(); if (vault.decoy) throw pinChangeRefuse(); } catch (e) { return pinError(e.message); }   // (the duress PIN's wallet has no room for a duress PIN of its own)
     if (duressOn()) duressMenu(); else duressNewPad(); return;
   }
   if (m === 'duressNew') { if (v === duressUI.old) return pinError('Your duress PIN has to differ from your PIN.'); duressUI.pin = v; nextPad('duressConfirm'); setBody(padHTML('CONFIRM DURESS PIN', 'Type the same duress PIN again.') + '<div id="sheetErr"></div>'); return; }
   if (m === 'duressConfirm') {
     if (v !== duressUI.pin) { duressNewPad(); return pinError("Those didn't match. Start again."); }
-    if (await realOpens(v)) { duressNewPad(); return pinError('Your duress PIN has to differ from your PIN.'); }
+    if (await realOpens(v)) { if (!live()) return; duressNewPad(); return pinError('Your duress PIN has to differ from your PIN.'); }
+    if (!live()) return;
     if (duressUI.change) { busy('ENCRYPTING…'); pinChangeCheck(); await changeDuress(v); pinChangeUse(); duressUI.pin = duressUI.old = ''; closeSheet(); refresh(); sfx('coin'); toast('Duress PIN changed', 'lime'); return; }
     pinUI.mode = null; duressFund(); return;
   }

@@ -2429,10 +2429,14 @@ function refreshPad() {
 }
 function pinError(msg) { sfx('err'); const e = $('#pinErr'); if (e) { e.textContent = msg; } const d = document.querySelector('.pin-dots'); if (d) { d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake'); } pinUI.value = ''; refreshPad(); }
 const nextPad = mode => { pinUI.mode = mode; pinUI.value = ''; };
-async function pinSubmit() {
+async function pinSubmit(pad) {
   const v = pinUI.value, m = pinUI.mode;
   if (v.length < PIN_MIN) return pinError(`Use at least ${PIN_MIN} digits.`);
-  const busy = msg => { const e = $('#pinErr'); if (e) { e.textContent = msg; e.classList.add('busy'); } };
+  // the pad this PIN was typed on: once it is checked, a step goes ahead only while that same pad is still open for
+  // the same step (closed meanwhile, or another step started: nothing happens, and the PIN is never used for it)
+  pad = pad && pad.isConnected ? pad : document.querySelector('[data-pinpad]');
+  const live = () => !!pad && pad.isConnected && pinUI.mode === m;
+  const busy = msg => { const e = live() && pad.querySelector('#pinErr'); if (e) { e.textContent = msg; e.classList.add('busy'); } };
   try {
     if (m === 'unlock') {
       const f = pinFails(); if (f.until > Date.now()) return pinError(`Wait ${Math.ceil((f.until - Date.now()) / 1000)}s before trying again.`);
@@ -2443,7 +2447,7 @@ async function pinSubmit() {
       setTimeout(() => backgroundTick(true).then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 300);
       return;
     }
-    if (m === 'limitOK' || m === 'limitSave' || m === 'guard' || /^duress/.test(m)) return pinMore(m, v, busy);
+    if (m === 'limitOK' || m === 'limitSave' || m === 'guard' || /^duress/.test(m)) return pinMore(m, v, busy, live);
     if (m === 'set') { pinUI.first = v; nextPad('setConfirm'); setBody(padHTML('CONFIRM PIN', 'Type the same PIN again.') + '<div id="sheetErr"></div>'); return; }
     if (m === 'setConfirm') {
       if (v !== pinUI.first) { nextPad('set'); setBody(padHTML('CHOOSE A PIN', "Those didn't match. Start again.") + '<div id="sheetErr"></div>'); return; }
@@ -2455,15 +2459,15 @@ async function pinSubmit() {
         <button class="btn solid gold block" data-act="close">Done</button></div>`);
       refresh(); return;
     }
-    if (m === 'changeOld') { busy('CHECKING…'); if (!(await pinToDek(v))) { notePinFail(); return pinError('That PIN is wrong.'); } pinUI.old = v; nextPad('changeNew');   // (the allowance is checked once the new PIN is typed twice: the same step as every refusal of a new PIN)
+    if (m === 'changeOld') { busy('CHECKING…'); if (!(await pinToDek(v))) { notePinFail(); return live() && pinError('That PIN is wrong.'); } if (!live()) return; pinUI.old = v; nextPad('changeNew');   // (the allowance is checked once the new PIN is typed twice: the same step as every refusal of a new PIN)
       setBody(padHTML('NEW PIN', `Choose a new PIN (${PIN_MIN} to ${PIN_MAX} digits).`) + '<div id="sheetErr"></div>'); return; }
     if (m === 'changeNew') { pinUI.first = v; nextPad('changeConfirm'); setBody(padHTML('CONFIRM NEW PIN', 'Enter it again.') + '<div id="sheetErr"></div>'); return; }
     if (m === 'changeConfirm') {
       if (v !== pinUI.first) { nextPad('changeNew'); setBody(padHTML('NEW PIN', "Those didn't match. Start again.") + '<div id="sheetErr"></div>'); return; }
       busy('ENCRYPTING…'); pinChangeCheck(); await changePin(pinUI.old, v); pinChangeUse(); pinUI.old = pinUI.first = ''; sfx('coin'); closeSheet(); toast('PIN changed', 'lime'); return;
     }
-    if (m === 'remove') { busy('CHECKING…'); if (!(await pinToDek(v))) { notePinFail(); return pinError('That PIN is wrong.'); } pinChangeCheck(); if (vault.decoy) throw pinChangeRefuse(); await removeVault(v); pinChangeUse(); sfx('blip'); closeSheet(); refresh(); toast('PIN removed. Your wallet is no longer encrypted.', 'gold'); return; }
-    if (m === 'bioVerify') { busy('CHECKING…'); const dek = await pinToDek(v); if (!dek) { notePinFail(); return pinError('That PIN is wrong.'); } pinChangeCheck(); if (vault.decoy) throw pinChangeRefuse(); pinChangeUse(); await enableBio(); closeSheet(); refresh(); toast('Face ID / fingerprint unlock is on', 'lime'); return; }
+    if (m === 'remove') { busy('CHECKING…'); if (!(await pinToDek(v))) { notePinFail(); return live() && pinError('That PIN is wrong.'); } if (!live()) return; pinChangeCheck(); if (vault.decoy) throw pinChangeRefuse(); await removeVault(v); pinChangeUse(); sfx('blip'); closeSheet(); refresh(); toast('PIN removed. Your wallet is no longer encrypted.', 'gold'); return; }
+    if (m === 'bioVerify') { busy('CHECKING…'); const dek = await pinToDek(v); if (!dek) { notePinFail(); return live() && pinError('That PIN is wrong.'); } if (!live()) return; pinChangeCheck(); if (vault.decoy) throw pinChangeRefuse(); pinChangeUse(); await enableBio(); closeSheet(); refresh(); toast('Face ID / fingerprint unlock is on', 'lime'); return; }
   } catch (e) { pinError(e.message || 'Something went wrong.'); }
 }
 
@@ -4058,7 +4062,7 @@ const A = {
   pinKey: b => {
     const k = b.dataset.k; lastActive = Date.now();
     if (k === 'del') pinUI.value = pinUI.value.slice(0, -1);
-    else if (k === 'ok') return pinSubmit();
+    else if (k === 'ok') return pinSubmit(b.closest('[data-pinpad]'));
     else if (pinUI.value.length < PIN_MAX) { pinUI.value += k; sfx('tick'); }
     const e = $('#pinErr'); if (e && !e.classList.contains('busy')) e.textContent = '';
     refreshPad();
