@@ -688,6 +688,127 @@ async def main():
             await w.pg.context.close()
         await section('pages', pages)
 
+        # ---------- 1.14.2 interplay (rebase onto the PIN guard): PIN on x per-payment limit x wrong / cancel / right PIN;
+        # the PIN lets this one batch through and nothing after it; the PIN guard on the backup keeps the print records;
+        # PIN removed keeps the list; the duress wallet's printed tokens stay its own; a mint that starts taking fewer
+        # coins per request before or during a batch: never made another (dearer) way, never over the cost shown ----------
+        async def pinlim():
+            async def pad(x, pin, root='[data-pinpad]'):
+                for k in pin: await x.click(f'{root} [data-k="{k}"]')
+                await x.click(f'{root} [data-k=ok]')
+            async def set_pin(x):
+                await x.ev("Nutcade.closeSheet()"); await x.click('[data-act=tab][data-tab=settings]'); await x.wait(150); await x.click('[data-act=pinSet]'); await x.wait(200)
+                await pad(x, PIN); await x.wait(300); await pad(x, PIN); await x.until("Nutcade.vault.on && Nutcade.vault.open", 20000); await x.wait(500); await x.ev("Nutcade.closeSheet()")
+            async def set_limits(x, per, day):
+                await x.ev("Nutcade.closeSheet()"); await x.click('[data-act=tab][data-tab=settings]'); await x.wait(150); await x.click('[data-act=limOpen]'); await x.until("!!document.querySelector('#limDay')", 5000)
+                await x.ev(f"(()=>{{for(const [id,v] of [['limPer',{json.dumps(per)}],['limDay',{json.dumps(day)}]]){{const e=document.querySelector('#'+id);e.value=v;e.dispatchEvent(new Event('input',{{bubbles:true}}))}}}})()")
+                await x.click('[data-act=limSave]'); await x.wait(400)
+                if await x.ev("!!document.querySelector('#layer [data-pinpad]')"): await pad(x, PIN, '#layer [data-pinpad]'); await x.until("!document.querySelector('#layer [data-pinpad]')", 20000)
+                await x.ev("Nutcade.closeSheet()")
+            async def to_make(x, mint, amount, count):
+                await open_print(x, mint); await x.fill('#ptAmt', str(amount)); await x.fill('#ptCount', str(count)); await x.click('[data-act=ptNext]')
+                await x.until("!!document.querySelector('[data-act=ptMake]') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 20000)
+                return await x.ev("NutTokens.lastEstimate")
+            LAY = "(document.querySelector('#limitLayer')||{}).innerText||''"
+            # A: PIN on, per-payment limit 1,000, a batch of 3 x 500 (1,500): asks the PIN for the whole batch
+            w = await funded(b, [NOFEE], 6000); await set_pin(w); await set_limits(w, '1000', '')
+            n0 = await w.ev(f"{PRINTED}.length"); b0 = await w.bal(NOFEE); d0 = await w.ev("Nutcade.r8.spentDay()")
+            await to_make(w, NOFEE, 500, 3); await w.click('[data-act=ptMake]'); await w.until("!!document.querySelector('#limitLayer [data-pinpad]')", 20000)
+            check('pinlim: PIN on, 3 x 500 over a 1,000 per-payment limit: the PIN pad asks for the whole batch (1,500), nothing made yet', '1,500' in await w.ev(LAY) and await w.ev(f"{PRINTED}.length") == n0 and await w.bal(NOFEE) == b0, await w.ev(LAY))
+            await pad(w, '000000', '#limitLayer [data-pinpad]'); await w.until("/wrong/i.test((document.querySelector('#limitLayer')||{}).innerText||'')", 20000); await w.wait(500)
+            check('pinlim: a wrong PIN makes nothing and keeps asking', await w.ev(f"{PRINTED}.length") == n0 and await w.bal(NOFEE) == b0 and await w.ev("!!document.querySelector('#limitLayer [data-pinpad]')"))
+            await w.click('#limitLayer [data-act=limitNo]'); await w.wait(800)
+            check('pinlim: Cancel makes nothing', await w.ev(f"{PRINTED}.length") == n0 and await w.bal(NOFEE) == b0 and not await w.ev("!!document.querySelector('#limitLayer')"))
+            await w.ev("Nutcade.closeSheet()"); await to_make(w, NOFEE, 500, 3); await w.click('[data-act=ptMake]'); await w.until("!!document.querySelector('#limitLayer [data-pinpad]')", 20000)
+            await pad(w, PIN, '#limitLayer [data-pinpad]'); await w.until("!!document.querySelector('.pt-ready') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 90000); await w.wait(500)
+            made = await w.ev(f"{PRINTED}.length") - n0
+            check('pinlim: the right PIN: the whole batch of 3 is made, once, and the day counts all 1,500', made == 3 and await w.ev("Nutcade.r8.spentDay()") - d0 == 1500 and await w.bal(NOFEE) == b0 - 1500, (made, await w.err(), await w.ev("Nutcade.r8.spentDay()") - d0))
+            await w.ev("Nutcade.closeSheet()")
+            # the PIN was for that batch only: the next batch over the limit, and a plain token over it, ask again
+            await to_make(w, NOFEE, 600, 2); await w.click('[data-act=ptMake]'); await w.until("!!document.querySelector('#limitLayer') || !!document.querySelector('.pt-ready')", 20000)
+            check('pinlim: the PIN does not carry over: the next batch over the limit asks again, nothing made', await w.ev("!!document.querySelector('#limitLayer [data-pinpad]')") and await w.ev(f"{PRINTED}.length") - n0 == 3)
+            await w.click('#limitLayer [data-act=limitNo]'); await w.wait(300); await w.ev("Nutcade.closeSheet()")
+            await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.fill('#amtIn', '1200'); await w.click('[data-act=doSendEcash]'); await w.until("!!document.querySelector('#limitLayer') || !!document.querySelector('.tokbox, [data-act=copyTok]')", 20000)
+            check('pinlim: nor to a plain token over the limit', await w.ev("!!document.querySelector('#limitLayer [data-pinpad]')"))
+            await w.click('#limitLayer [data-act=limitNo]'); await w.wait(300); await w.ev("Nutcade.closeSheet()")
+            # the PIN guard: Download backup asks for the PIN first; the file then has every printed token with its record
+            mine = await w.ev(f"{PRINTED}.map(t=>t.print.code)")
+            await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150)
+            await w.ev("window.__dlx=0; document.addEventListener('click', e=>{ if(e.target.closest && e.target.closest('a[download]')) window.__dlx++ }, true)")
+            await w.click('#app [data-act=backupDownload]'); await w.wait(400)
+            asked = await w.ev("!!document.querySelector('#layer [data-pinpad=guard]')")
+            async with w.pg.expect_download() as d:
+                await pad(w, PIN, '#layer [data-pinpad=guard]')
+            data = open(await (await d.value).path()).read()
+            check('pinlim: PIN guard: Download backup asks for the PIN, then the file holds every printed token with its record', asked and all(c in data for c in mine) and data.count('"print"') >= len(mine), (asked, len(mine)))
+            await w.ev("Nutcade.closeSheet()")
+            # PIN removed: the list and the first-scan rule seen stay
+            await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=pinRemove]'); await w.wait(200); await pad(w, PIN); await w.until("!Nutcade.vault.on", 20000); await w.wait(1500)
+            await w.ev("Nutcade.closeSheet()"); await w.pg.reload(); await w.wait(1500)
+            after = await w.ev(f"{PRINTED}.map(t=>t.print.code)")
+            await w.home(); await w.click('[data-act=send]'); await w.wait(150); await w.click('[data-act=ptOpen]'); await w.until("!!document.querySelector('#ptAmt') || !!document.querySelector('.pt-intro')", 5000)
+            check('pinlim: PIN removed (and a reload): the printed tokens are all still there, the first-scan rule not shown again', sorted(after) == sorted(mine) and not await w.ev("!!document.querySelector('.pt-intro')"), (len(after), len(mine)))
+            check('pinlim: history = balance', not await books(w, (NOFEE,)), await books(w, (NOFEE,)))
+            check('pinlim A: no page errors', not w.errs, w.errs[:3])
+            await w.pg.context.close()
+            # D: the duress wallet: its printed tokens are its own; nothing about them in plain storage; the real wallet doesn't see them
+            DPIN = '246802'
+            w = await funded(b, [NOFEE], 4000); await set_pin(w)
+            await w.click('[data-act=tab][data-tab=settings]'); await w.wait(150); await w.click('[data-act=duressOpen]'); await w.wait(250)
+            await pad(w, PIN); await w.wait(800); await pad(w, DPIN); await w.wait(300); await pad(w, DPIN); await w.until("!!document.querySelector('#duressAmt')", 8000)
+            await w.fill('#duressAmt', '800'); await w.click('[data-act=duressMake]'); await w.until("/READY/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 30000)
+            await w.ev("Nutcade.closeSheet()"); real_n = await w.ev(f"{PRINTED}.length")
+            await w.pg.reload(); await w.wait(700); await w.until("!!document.querySelector('[data-pinpad]')", 8000); await pad(w, DPIN); await w.until("Nutcade.vault.open", 20000); await w.wait(800)
+            await w.until("Object.values(Nutcade.S.proofs).flat().length>0", 30000); await w.wait(800)
+            dm = await w.ev("Nutcade.S.active")
+            s_, e, bid = await make(w, dm, 100, 2)
+            dn = await w.ev(f"{PRINTED}.length")
+            check('pinlim duress: the duress wallet prints its own tokens (2 x 100)', bool(bid) and dn == 2, (e, dn))
+            plain = await w.ev("JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter(k=>k!=='nutcade:vault').map(k=>[k,localStorage.getItem(k)])))")
+            codes = await w.ev(f"{PRINTED}.map(t=>t.print.code)")
+            check('pinlim duress: nothing about them in plain storage (no ptintro, no code, no print record)', 'ptintro' not in plain and '"print"' not in plain and not any(c in plain for c in codes), plain[:200])
+            await w.ev("Nutcade.closeSheet()"); await w.pg.reload(); await w.wait(700); await w.until("!!document.querySelector('[data-pinpad]')", 8000); await pad(w, PIN); await w.until("Nutcade.vault.open", 20000); await w.wait(1500)
+            check("pinlim duress: the real wallet doesn't see them (its own printed tokens unchanged)", await w.ev(f"{PRINTED}.length") == real_n and not await w.ev(f"{PRINTED}.some(t=>{json.dumps(codes)}.includes(t.print.code))"))
+            check('pinlim duress: real wallet history = balance', not await books(w, (NOFEE,)), await books(w, (NOFEE,)))
+            await w.pg.context.close()
+            # E: the fee mint starts taking only 3 coins per request (and enforcing it), before Make and during a batch
+            # (1,024: one coin, so in steps the library could still make it, at a higher fee than shown)
+            def dropper(after_swaps):
+                st = {'swaps': 0, 'on': False, 'big': 0}
+                async def h(route):
+                    rq = route.request; ep = rq.url.split('/v1/')[-1]
+                    try:
+                        if ep == 'swap' and rq.method == 'POST' and not st['on']:
+                            st['swaps'] += 1
+                            if st['swaps'] > after_swaps: st['on'] = True
+                        if not st['on']: return await route.fallback()
+                        if ep == 'info' and rq.method == 'GET':
+                            r = await route.fetch(); j = await r.json(); j['max_array_length'] = 3; return await route.fulfill(response=r, body=json.dumps(j))
+                        if rq.method == 'POST':
+                            j = json.loads(rq.post_data or '{}'); n = max([len(j[k]) for k in ('inputs', 'outputs', 'Ys') if isinstance(j.get(k), list)] or [0])
+                            if n > 3:
+                                st['big'] += 1
+                                return await route.fulfill(status=422, body=json.dumps({'detail': [{'type': 'too_long', 'msg': f'List should have at most 3 items after validation, not {n}'}]}), headers={'content-type': 'application/json'})
+                        await route.fallback()
+                    except Exception:
+                        try: await route.fallback()
+                        except Exception: pass
+                return st, h
+            for after_swaps, tag in ((0, 'before Make'), (1, 'after the first token')):
+                w = await funded(b, [FEE], 9000)
+                est = await to_make(w, FEE, 1024, 4); b0 = await w.bal(FEE); n0 = await w.ev(f"{PRINTED}.length")
+                st, h = dropper(after_swaps); await w.pg.route(FEE + '/v1/**', h)
+                await w.click('[data-act=ptMake]'); await w.until("!!document.querySelector('.pt-ready') || !!document.querySelector('.pt-stopped') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 180000); await w.wait(1500)
+                txt = await w.sheet_text(); made = await w.ev(f"{PRINTED}.filter(t=>t.status!=='failed').length") - n0; spent = b0 - await w.bal(FEE)
+                odd = await w.ev("Nutcade.S.txs.filter(t=>/part \\d+ of|smaller requests/.test(t.note||'')).length")
+                want = 0 if after_swaps == 0 else 1
+                check(f'pinlim request limit {tag}: never made another way: {want} token(s) of 4, the rest refused, never over the cost shown ({est["spend"]})', made == want and spent <= est['spend'] and spent == made * 1024 + sum(t.get('fee', 0) for t in await w.ev(f"{PRINTED}")) and not odd and not await w.ev("!!document.querySelector('.pt-ready')"), (made, spent, odd, txt[:240]))
+                check(f'pinlim request limit {tag}: the screen says why (coins per request){", and exactly how many were made" if want else ""}', re.search(r'coins per request', txt) and (not want or '1 of 4' in txt), txt[:300])
+                await w.pg.unroute(FEE + '/v1/**', h); await w.until("Nutcade.S.ops.length===0", 30000)
+                check(f'pinlim request limit {tag}: history = balance, nothing left open', not await books(w, (FEE,)) and await w.ev("Nutcade.S.ops.length") == 0, await books(w, (FEE,)))
+                await w.pg.context.close()
+        await section('pinlim', pinlim)
+
         bad = [r for r in results if not r[1]]
         print('SUMMARY', sum(1 for r in results if r[1]), 'passed,', len(bad), 'failed')
         await b.close()

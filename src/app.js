@@ -811,7 +811,10 @@ async function sendEcashNow(amount, note, lockTo, url, opts) {
   if (sum(S.proofs[url] || []) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
   const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}) }, keep: w.defaultOutputType() } : undefined;
   // the spending limit, with the most this can take: the swap's own numbers, fees included
-  if (belowMin(url) && !opts.noBatch) return sendBatched(w, amount, note, lockTo, url, opts, outCfg);   // (a mint that dropped below the minimum: its sats can still leave, in steps)
+  if (belowMin(url) && !opts.noBatch) {   // (a mint that dropped below the minimum: its sats can still leave, in steps)
+    if (opts.pick) throw minErr(url);   // (tokens: coins fixed by the caller at a cost already shown are never made another, dearer way: a printed token stops here)
+    return sendBatched(w, amount, note, lockTo, url, opts, outCfg);
+  }
   const plan = opts.pick ? opts.pick(w, S.proofs[url] || []) : swapPlan(w, S.proofs[url] || [], amount, outCfg && outCfg.send, url);   // tokens: opts.pick, coins fixed by the caller (printed tokens)
   if (plan && plan.tooMany) throw manyErr(url, plan.tooMany);
   const hold = limitGate(plan ? plan.spend : feeMax(w, S.proofs[url] || [], amount), { free: opts.noLimit, grant: opts.grant, approved: opts.approved });
