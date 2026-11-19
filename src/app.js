@@ -3685,7 +3685,7 @@ function openLnAddr() {
 }
 
 /* ---------- support / donations ---------- */
-const DONATE = { address: 'keywest@strike.me', lnurl: 'LNURL1DP68GURN8GHJ7UM5WF5KKEFWD4JJ7TNHV4KXCTTTDEHHWM30D3H82UNVWQHKKETEWAJHXAQ6MZ0AF' };
+const DONATE = { address: 'npub18wnvs7ncun8exphx8h7r9c6p9kg6jagpe8ck0g2qll0ushv8rp4slzjlpw@npub.cash', lnurl: 'LNURL1DP68GURN8GHJ7MNSW43ZUCMPWD5Z7TNHV4KXCTTTDEHHWM30D3H82UNVWQHKUUR4VGCNSAMWWEENWMNRW4HRSETCWP58SWRGXAERJCEKWQUKKEEKDFSKWUR98P3KKVR8XFCKCMPSW4EKSA3CWFCRGUMV0F4XCURH3RKF5Z' };
 function openSupport() {
   const m = activeMint();
   const canTip = m && supports(m, 'melt', 'bolt11');
