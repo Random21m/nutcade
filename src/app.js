@@ -599,7 +599,7 @@ async function checkQuoteNow(id, txId) {
         if (proofs === WAIT) return 'waiting';
         if (proofs === ISSUED) {
           const got = await creditDepositRange(w, q).catch(() => null);
-          if (got != null && !S.quotes.some(x => x.quote === q.quote)) { refresh(); document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote })); if (got) toast(`+${money(got)} received`, 'lime'); return 'paid'; }
+          if (got != null && !S.quotes.some(x => x.quote === q.quote)) { refresh(); document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote })); if (got) arrToast(q.txId, `+${money(got)} received`, 'lime'); return 'paid'; }
           return 'waiting';
         }
         const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
@@ -608,7 +608,7 @@ async function checkQuoteNow(id, txId) {
         dropQuote(q); sfx('coin'); refresh();
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         if (!$('#layer .sheet')) celebrate('in', q.amount);
-        toast(`+${money(q.amount)} received`, 'lime');
+        arrToast(q.txId, `+${money(q.amount)} received`, 'lime');   // (src/app_arrive.js: not beside its notice)
         return 'paid';
       }
       if (r.state === 'ISSUED') {
@@ -627,7 +627,7 @@ async function checkQuoteNow(id, txId) {
         } catch (e) { return 'waiting'; }
         if (S.quotes.some(x => x.quote === q.quote)) return 'waiting';
         refresh();
-        if (got) { sfx('coin'); toast(`Recovered ${money(got)} from an interrupted deposit`, 'lime'); }
+        if (got) { sfx('coin'); arrToast(q.txId, `Recovered ${money(got)} from an interrupted deposit`, 'lime'); }
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         return 'paid';
       }
@@ -643,10 +643,10 @@ async function checkQuoteNow(id, txId) {
         const got = sum(proofs);
         addProofs(q.mint, proofs);
         const t = txById(q.txId);
-        if (t && t.status === 'pending') updTx(q.txId, { status: 'done', amount: got, ts: Date.now() });
-        else addTx({ type: 'in', method: 'onchain', amount: got, mint: q.mint, note: t ? t.note : '', request: q.request, quote: q.quote });
+        const line = t && t.status === 'pending' ? updTx(q.txId, { status: 'done', amount: got, ts: Date.now() })
+          : addTx({ type: 'in', method: 'onchain', amount: got, mint: q.mint, note: t ? t.note : '', request: q.request, quote: q.quote });
         closeOp(op); save();
-        sfx('coin'); refresh(); toast(`+${money(got)} deposited on-chain`, 'lime');
+        sfx('coin'); refresh(); arrToast(line && line.id, `+${money(got)} deposited on-chain`, 'lime');
         return 'paid';
       }
       if (q.expiry && Date.now() / 1000 > q.expiry) { dropQuote(q); const t = txById(q.txId); if (t && t.status === 'pending') updTx(q.txId, { status: 'expired' }); refresh(); return 'expired'; }
@@ -719,6 +719,9 @@ async function receiveTokenNow(token, note, opts = {}) {
   // parts where needed. Anyone else's token there is new money in: refused.
   const ownTx = S.txs.find(t => t.token === token && (t.status === 'pending' || t.status === 'claimed'));
   const f0 = opts.follow || {}, mine = !!(opts.own || ownTx || f0.k === 'heir' || (f0.k === 'incoming' && (txById(f0.txId) || {}).mine));
+  // a token of ours coming back is marked on its line: 'hand' when you brought it back yourself (Take back, or pasted or
+  // scanned into Receive), 'auto' when it came back by itself (a gift nobody opened); a part saved to claim later keeps it
+  const back = opts.own || ownTx ? (opts.hand || !opts.own ? 'hand' : 'auto') : (f0.k === 'incoming' && (txById(f0.txId) || {}).back) || null;
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: mine });
   const w = await getWallet(meta.mint);
   if (belowMin(meta.mint) && !mine) throw minErr(meta.mint);   // (no new deposits at a mint below the minimum)
@@ -728,21 +731,21 @@ async function receiveTokenNow(token, note, opts = {}) {
     if (ps.length > sm || bitsOf(Math.max(0, sum(ps) - feeOfPs(w, ps))) > sm) {
       const parts = tokenParts(w, ps, sm);
       if (!parts) throw new Error(`${host(meta.mint)} takes at most ${sm} coins per request and charges a fee to claim, so each part of this token gives back its coins less that fee, and for some of its coins that needs more than ${sm} coins back. It can't be claimed there in any parts. Nothing was spent: the token still holds its sats, for when the mint takes more coins per request.`);
-      if (parts.length > 1) return receiveInParts(w, meta, token, note, parts, ownTx || null, mine);
+      if (parts.length > 1) return receiveInParts(w, meta, token, note, parts, ownTx || null, mine, back);
     }
   }
   let res;
   // what this claim finishes is on its record too (a token of ours coming back, a gift, a bounty, an Extra Life...),
   // so if its answer is lost, settling it later closes those records the same way
   const own0 = S.txs.find(t => t.token === token && (t.status === 'pending' || t.status === 'claimed'));
-  try { const privs = allPrivs(); res = await journaled(meta.mint, 'receive', { amount: meta.amount, note: note || meta.memo, own: own0 && own0.id, follow: opts.follow || null }, (cb, o) => rRecv(o, w, token, Object.assign(privs.length ? { privkey: privs } : {}, { onCountersReserved: cb }))); }
+  try { const privs = allPrivs(); res = await journaled(meta.mint, 'receive', Object.assign({ amount: meta.amount, note: note || meta.memo, own: own0 && own0.id, follow: opts.follow || null }, back ? { back } : {}), (cb, o) => rRecv(o, w, token, Object.assign(privs.length ? { privkey: privs } : {}, { onCountersReserved: cb }))); }
   catch (e) { if (/witness|signature|p2pk|locked|locktime/i.test(e.message || '')) throw new Error("This ecash is locked to someone else's key, so this wallet can't claim it."); throw e; }
   const proofs = res.r, got = sum(proofs);
   addProofs(meta.mint, proofs);
   // mark own sent token as reclaimed if it matches
   const own = S.txs.find(t => t.token === token && (t.status === 'pending' || t.status === 'claimed'));   // our own unclaimed token came back
   if (own) updTx(own.id, { status: 'reclaimed' });
-  const tx = addTx({ type: 'in', method: 'ecash', amount: got, fee: inFee(meta.amount, got, own || own0), mint: meta.mint, note: note || meta.memo });
+  const tx = addTx(Object.assign({ type: 'in', method: 'ecash', amount: got, fee: inFee(meta.amount, got, own || own0), mint: meta.mint, note: note || meta.memo }, back ? { back } : {}));
   closeOp(res.op); save();
   return tx;
 }
@@ -1081,6 +1084,7 @@ const closeOp = op => { S.ops = S.ops.filter(o => o.id !== op.id); S.opsdone = [
 async function journaled(url, kind, info, run) {
   const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, follow: info.follow || null, own: info.own || null, created: Date.now(), ctr: [], outs: [] };
   if (info.lim && info.lim.id) op.lim = { id: info.lim.id, a: info.lim.a, at: Date.now() };
+  if (info.back) op.back = info.back;   // (a token of ours coming back: its line says so when it is settled from this record)
   if (info.dep) op.dep = 1;   // (a deposit's mint request: no coins go in)   // (counts toward the spending limit until it settles)
   S.ops.push(op); save();
   const onCountersReserved = u => { if (u && u.count > 0) { op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); save(); } };
@@ -1269,7 +1273,7 @@ async function settleOpNow(id) {
   const waitingTx = op.txId && (txById(op.txId) || {}).status === 'pending' ? op.txId : null;   // a deposit waiting for exactly this: it gets it
   // a claim or deposit: the line is what was received (the token less the mint's fee), and what of it was spent since has its own line
   if (op.kind === 'receive' && added + spentOut && waitingTx) { updTx(waitingTx, { status: 'done', amount: added + spentOut, ts: Date.now() }); spentElsewhere(op.mint, spentOut, op.impLine); }
-  else if (op.kind === 'receive') { if (added + spentOut) { const t = addTx({ type: 'in', method: 'ecash', amount: added + spentOut, fee: inFee(op.amount, signed, op.own && txById(op.own)), mint: op.mint, note: op.note || '', settled: true }); spentElsewhere(op.mint, spentOut, op.impLine); if (op.extra && S.extra) { S.extra = null; saveExtra(); } receiveDone(op, t); } }
+  else if (op.kind === 'receive') { if (added + spentOut) { const t = addTx(Object.assign({ type: 'in', method: 'ecash', amount: added + spentOut, fee: inFee(op.amount, signed, op.own && txById(op.own)), mint: op.mint, note: op.note || '', settled: true }, op.back ? { back: op.back } : {})); spentElsewhere(op.mint, spentOut, op.impLine); if (op.extra && S.extra) { S.extra = null; saveExtra(); } receiveDone(op, t); } }
   else if (lockedOut.length) {
     // (a token that carries the receiver's fee on top of its amount: that part is the sender's fee, as when nothing is interrupted)
     const ps = plain(lockedOut), amount = Math.min(op.amount || sum(ps), sum(ps)), fee = fee0 + sum(ps) - amount;
@@ -3004,7 +3008,7 @@ async function receivePayload(p, from) {
     if (req) reqPaid(req.id, tx);
     sfx('coin'); refresh();
     if (!$('#layer .sheet')) celebrate('in', tx.amount);
-    toast(`+${money(tx.amount)} received${req ? ' for your request' : ''}`, 'lime');
+    arrToast(tx.id, `+${money(tx.amount)} received${req ? ' for your request' : ''}`, 'lime');
     document.dispatchEvent(new CustomEvent('nutcade:request', { detail: { id: p.id, amount: tx.amount } }));
   } catch (e) { /* already claimed or not valid: nothing to add */ }
 }

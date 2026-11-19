@@ -13,7 +13,7 @@ announced twice (across reloads, tabs and restores).
 
 Uses two local test mints (ARR_FEE, default 3338, with input fees; ARR_FREE, default 3339, without) and mock_nostr.py
 (ARR_NOSTR, default ws://127.0.0.1:3350/relay; it also stands in for npub.cash). ARR_ONLY=a,b runs some sections
-(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, own, langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
+(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, own, own2, toast, langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
 (default QA_OUT)."""
 import asyncio, json, os, re, time, urllib.request
 from playwright.async_api import async_playwright
@@ -688,6 +688,108 @@ async def main():
                 check('printed token claimed by someone else: (marked claimed here)', await r.ev(f"Nutcade.S.txs.find(t=>t.id==={J(toks[1]['id'])}).status") == 'claimed')
                 check('printed token claimed by someone else: nothing announced here (no new line coming in, no notice)', await n_in() == n0 and len(await r.ev(LOG_JS)) == log1)
             await r.ev("Nutcade.closeSheet()"); await dismiss(r); await r.home()
+
+        # ---------- your own token coming back, every way (1.16.0 recheck): by your own hand it is never an arrival
+        # (a printed or plain token pasted back into Receive, the same with the mint's answer lost and settled after a
+        # reload, a gift taken back by hand); a gift nobody opened, coming back by itself, is ("Came back to you") ----------
+        if want('own2'):
+            async def relock(w):   # (a PIN set by an earlier section: unlock after a reload)
+                if await w.ev("!!document.querySelector('[data-pinpad]')"): await unlock(w)
+            await r.ev("Nutcade.closeSheet()"); await r.use(FREE); await dismiss(r)
+            n_in = lambda: r.ev("Nutcade.S.txs.filter(t=>t.type==='in'&&t.status==='done').length")
+            def newest_in(t0): return r.ev(f"Nutcade.S.txs.find(t=>t.type==='in'&&t.status==='done'&&t.ts>={t0})||null")
+            async def not_announced(label, line, log0):
+                check(f'{label}: (its line, the sats back)', bool(line) and line.get('status') == 'done', line)
+                ev = [e for e in (await r.ev(LOG_JS))[log0:] if line and line['id'] in e['ids']]
+                seen = await r.ev("window.NutArrivals?NutArrivals.ledger().seen.map(x=>x[0]):null")
+                check(f'{label}: not announced as money arriving (no notice, not waiting for a summary, not on the arrivals record)', bool(line) and not ev and line['id'] not in await pend(r, line['id']) and seen is not None and line['id'] not in seen and not await cards(r), (ev, await cards(r)))
+            # printed token, scanned back into your own Receive
+            await r.home(); await r.click('[data-act=send]'); await r.wait(150)
+            await r.click('[data-act=ptOpen]'); await r.until("!!document.querySelector('#ptAmt') || !!document.querySelector('.pt-intro')", 5000)
+            if await r.ev("!!document.querySelector('.pt-intro')"): await r.click('[data-act=ptIntroOk]'); await r.until("!!document.querySelector('#ptAmt')", 5000)
+            await r.fill('#ptAmt', '120'); await r.fill('#ptCount', '1'); await r.click('[data-act=ptNext]')
+            await r.until("!!document.querySelector('[data-act=ptMake]') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 20000)
+            await r.click('[data-act=ptMake]'); await r.until("!!document.querySelector('.pt-ready') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 120000); await r.wait(300)
+            bid = await r.ev("(document.querySelector('.pt-ready')||{dataset:{}}).dataset.b||null")
+            pt = await r.ev(f"Nutcade.S.txs.find(t=>t.print&&t.print.b==={J(bid)})||null") if bid else None
+            check('own2 printed token: (made)', bool(pt), bid)
+            if pt:
+                await r.ev("Nutcade.closeSheet()"); await dismiss(r); log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+                await claim(r, pt['token']); await r.until(f"(Nutcade.S.txs.find(t=>t.id==={J(pt['id'])})||{{}}).status==='reclaimed'", 20000); await r.wait(1500)
+                await not_announced('own2 printed token scanned back into your own Receive', await newest_in(t0), log0)
+                await r.ev("Nutcade.closeSheet()")
+            # a plain token you made, pasted back
+            await dismiss(r); tok = await token_from(r, 130, FREE); await r.wait(300); log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+            await claim(r, tok); await wait_line(r, f"t.ts>={t0}"); await r.wait(1500)
+            await not_announced('own2 a token you made, pasted back into Receive', await newest_in(t0), log0)
+            await r.ev("Nutcade.closeSheet()"); await dismiss(r)
+            # the same with the mint's answer lost (the mint swapped it, the page never heard): settled after a reload
+            tok = await token_from(r, 140, FREE); await r.wait(300); t0 = await r.ev("Date.now()")
+            async def lose(route):
+                try: await route.fetch()
+                except Exception: pass
+                await route.abort()
+            await r.pg.route(re.compile(re.escape(FREE) + r'/v1/swap$'), lose)
+            await claim(r, tok); await r.wait(2500); await r.pg.unroute(re.compile(re.escape(FREE) + r'/v1/swap$')); await r.ev("Nutcade.closeSheet()")
+            await r.pg.reload(); await r.wait(700); await relock(r); await settled(r); await r.wait(1500)
+            await wait_line(r, f"t.ts>={t0}", 30000); await r.wait(1000)
+            await not_announced('own2 a token you made, pasted back, the mint\'s answer lost and settled after a reload', await newest_in(t0), 0)
+            await dismiss(r)
+            # the same at a mint that takes only 3 coins per request (its info says so here): claimed in parts, none announced
+            tok = await token_from(r, 255, FREE); await r.wait(300); t0 = await r.ev("Date.now()")
+            ncoins = None
+            INFO = re.compile(re.escape(FREE) + r'/v1/info$')
+            async def small(route):
+                resp = await route.fetch(); d = await resp.json(); d['max_array_length'] = 3; await route.fulfill(response=resp, json=d)
+            await r.pg.route(INFO, small); await r.pg.reload(); await r.wait(700); await relock(r); await settled(r); await r.wait(500); await dismiss(r)
+            await r.ev(f"Nutcade.r8.mintMax({J(FREE)})")
+            await claim(r, tok); await r.until(f"Nutcade.S.txs.some(t=>t.token==={J(tok)}&&t.status==='reclaimed')", 40000); await r.wait(2000)
+            lines = await r.ev(f"Nutcade.S.txs.filter(t=>t.type==='in'&&t.ts>={t0}).map(t=>({{id:t.id, status:t.status, amount:t.amount, back:t.back||null, note:t.note}}))")
+            seen = await r.ev("NutArrivals.ledger().seen.map(x=>x[0])"); mx = await r.ev(f"Nutcade.r8.mintMax({J(FREE)})")
+            check('own2 a token you made, pasted back at a mint taking 3 coins per request: claimed in parts', mx == 3 and len([l for l in lines if l['status'] == 'done']) >= 2 and sum(l['amount'] for l in lines if l['status'] == 'done') == 255, (mx, ncoins, lines))
+            check('own2 ... in parts: no part announced as money arriving (no notice, nothing on the arrivals record)', bool(lines) and not [l for l in lines if l['id'] in seen] and not await cards(r), (lines, await cards(r)))
+            await r.pg.unroute(INFO); await r.pg.reload(); await r.wait(700); await relock(r); await settled(r); await dismiss(r)
+            # gifts: one taken back by hand, one coming back by itself
+            gifts = {}
+            for k in ('hand', 'auto'):
+                pub = await r.ev("(()=>{const k=crypto.getRandomValues(new Uint8Array(32)); return Array.from(CashuLib.getPubKeyFromPrivKey(k),x=>x.toString(16).padStart(2,'0')).join('')})()")
+                o = {'locktime': int(time.time()) + 2, 'txx': {'lockUntil': int(time.time() * 1000) + 3600e3, 'giftTo': 'Friend ' + k}}
+                gifts[k] = await r.ev(f"Nutcade.r8.sendEcash(150, 'gift', {J(pub)}, {J(FREE)}, {J(o)}).then(t=>t.id, e=>'ERR '+e.message)")
+            check('own2 gifts: (two made)', all(not str(v).startswith('ERR') for v in gifts.values()), gifts)
+            await r.wait(3500); await r.ev("Nutcade.S.txs.filter(t=>t.lockUntil&&t.status==='pending'&&t.giftTo==='Friend hand').forEach(t=>t.lockUntil=Date.now()-60000)")
+            log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+            await r.ev("Nutcade.closeSheet()"); await r.click('[data-act=tab][data-tab=history]'); await r.wait(200)
+            await r.ev(f"document.querySelector('#txList [data-id=\"{gifts['hand']}\"]').click()"); await r.wait(300); await r.click('#layer [data-act=giftTake]')
+            await r.until(f"(Nutcade.S.txs.find(t=>t.id==={J(gifts['hand'])})||{{}}).status==='reclaimed'", 20000); await r.wait(1500)
+            await not_announced('own2 a gift taken back by hand', await newest_in(t0), log0)
+            await r.ev("Nutcade.closeSheet()"); await dismiss(r); await r.home()
+            await r.ev("Nutcade.S.txs.filter(t=>t.lockUntil&&t.status==='pending').forEach(t=>t.lockUntil=Date.now()-60000)")
+            log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+            await r.ev("Nutcade.r8.refundExpired()"); await r.until(f"(Nutcade.S.txs.find(t=>t.id==={J(gifts['auto'])})||{{}}).status==='reclaimed'", 20000); await r.wait(1500)
+            line = await newest_in(t0); cs = await cards(r)
+            check('own2 a gift nobody opened, coming back by itself: announced once, "Came back to you"', bool(line) and len([e for e in (await r.ev(LOG_JS))[log0:] if line['id'] in e['ids']]) == 1 and any('Came back to you' in c['text'] for c in cs), (line, cs))
+            await dismiss(r)
+
+        # ---------- one message per arrival (1.16.0 recheck): no "+X received" toast beside the notice ----------
+        if want('toast'):
+            await r.ev("Nutcade.closeSheet()"); await r.use(FREE); await dismiss(r)
+            await r.ev("""(()=>{window.__toasts=[]; if(window.__toastObs) return; const seen=()=>{const e=document.getElementById('toast'); if(e&&!e.hidden&&e.textContent) window.__toasts.push(e.textContent)};
+              window.__toastObs=new MutationObserver(seen); window.__toastObs.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['hidden']})})()""")
+            for kind, sheet in (('ln', True), ('ln', False), ('nostr', False), ('request', False)):
+                await r.ev("window.__toasts=[]"); await dismiss(r); t0 = await r.ev("Date.now()"); a = next(amt)
+                if kind == 'ln':
+                    await ln_invoice(r, a, FREE)
+                    if not sheet: await r.ev("Nutcade.closeSheet()")
+                elif kind == 'nostr': await dm(p, rpk, a, FREE)
+                else:
+                    enc = await r.ev(f"Nutcade.r8.newRequest({a}, 'Pizza').encoded"); await r.wait(600); await pay_request(p, enc, FREE)
+                await wait_line(r, f"t.ts>={t0}&&t.amount==={a}", 25000)
+                await r.until("!!document.querySelector('#arrStack .arr-card')", 8000); await r.wait(1500)
+                ts = await r.ev("window.__toasts"); cs = await cards(r)
+                label = f'{kind}{" (Receive sheet open)" if sheet else ""}'
+                check(f'toast: {label}: the notice says it once (no "+{a} received" toast beside it)', bool(cs) and not [t for t in ts if re.search(r'received|deposited', t)], (ts, [c['text'] for c in cs]))
+                await r.ev("Nutcade.closeSheet()")
+            await dismiss(r); await r.home()
 
         # ---------- big amounts (up to 9,999,999 SAT) and long labels: the amount is never cut, in every language ----------
         if want('amounts'):

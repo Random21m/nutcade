@@ -4,7 +4,7 @@ Object.assign(A, {
   ctListen: () => { sfx('select'); if (needSeed()) return; openListen(); },
   giftDays: b => { b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); sfx('blip'); },
   giftTake: b => run(b, 'CHECKING', async () => {
-    const t = txById(b.dataset.id); const r = await takeBackGift(t);
+    const t = txById(b.dataset.id); const r = await takeBackGift(t, true);   // (by hand: not an arrival)
     if (r === 'claimed') { toast(`${t.giftTo || 'They'} already claimed it`, 'lime'); closeSheet(); refresh(); return; }
     sfx('coin'); toast(`${money(t.amount)} came back to you`, 'lime'); closeSheet(); refresh();
   }),

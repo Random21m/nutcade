@@ -27,13 +27,22 @@ const ARR_LABEL = { ln: 'Lightning deposit', onchain: 'On-chain deposit', npc: '
 function arrOpen() { return !!(S.seed && S.seed.backedUp) && !tabLocked && !writeGuard.paused && !(vault.on && !vault.open); }
 function arrLedger() {
   const l = raw.get('arrivals', null);
-  return l && l.v === 1 && Array.isArray(l.seen) && Array.isArray(l.pend) ? l : { v: 1, since: arrS().base, seen: [], pend: [] };
+  if (!(l && l.v === 1 && Array.isArray(l.seen) && Array.isArray(l.pend))) return { v: 1, since: arrS().base, seen: [], pend: [] };
+  // (a damaged entry is dropped, never a reason for every later notice to stop)
+  l.seen = l.seen.filter(x => Array.isArray(x) && typeof x[0] === 'string'); l.pend = l.pend.filter(p => p && typeof p.id === 'string');
+  if (!(typeof l.since === 'number')) l.since = arrS().base;
+  return l;
 }
+// one message per arrival: a receive's own toast ("+X received") is left out when its notice (now, after a game or
+// in a summary) says it
+function arrAnnounced(id) { try { return !!id && arrOpen() && arrLedger().seen.some(x => x[0] === id); } catch (e) { return false; } }
+function arrToast(id, msg, c) { if (!arrAnnounced(id)) toast(msg, c); }
 // Not money arriving: your own coins coming back by your own hand or the wallet's upkeep: a token (printed or not) you
-// took back, an Extra Life you cashed out, coins the keyset check-up set aside that the mint accepts again (upkeep).
+// took back or pasted or scanned into Receive, a gift you took back (back: 'hand', also after its mint's answer was lost
+// or in parts), an Extra Life you cashed out, coins the keyset check-up set aside that the mint accepts again (upkeep).
 // (A gift or a payment request's sats that came back by themselves are still announced: "Came back to you".)
 function arrQual(t) {
-  return !!t && t.type === 'in' && t.status === 'done' && num(t.amount) > 0 && !t.move && !t.upkeep
+  return !!t && t.type === 'in' && t.status === 'done' && num(t.amount) > 0 && !t.move && !t.upkeep && t.back !== 'hand'
     && !/^(Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Back from the duress PIN's wallet$|Reclaimed: |Extra Life cashed out)/.test(t.note || '');
 }
 // the kind, from the line (and, for npub.cash, its deposit record, which is gone once it is credited)
@@ -51,7 +60,7 @@ function arrivalSeen(t) {
     if (Date.now() - t.ts > 10 * 60e3) return;   // (an old line coming back changed, or one from another device's backup)
     const l = arrLedger(); if (!(t.ts >= l.since) || l.seen.some(x => x[0] === t.id)) return;
     l.seen.push([t.id, t.ts]); l.pend.push({ id: t.id, k: arrKind(t) });
-    const old = Date.now() - 30 * 86400e3; l.seen = l.seen.filter(x => x[1] > old).slice(-600); l.pend = l.pend.slice(-200);
+    const old = Date.now() - 30 * 86400e3; l.seen = l.seen.filter(x => x[1] > old).slice(-6000); l.pend = l.pend.slice(-5000);   // (room for a busy shop away for days: a summary is exactly its lines)
     raw.set('arrivals', l); arrSchedule();
   } catch (e) {}
 }

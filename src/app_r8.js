@@ -710,8 +710,8 @@ function tokenParts(w, proofs, m) {
   };
   return go(0) ? parts.map(g => g.slice()) : null;
 }
-async function receiveInParts(w, meta, token, note, parts, own, mine) {
-  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true }, mine ? { mine: true } : {})));
+async function receiveInParts(w, meta, token, note, parts, own, mine, back) {
+  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true }, mine ? { mine: true } : {}, back ? { back } : {})));
   save();   // (every part is saved before the first is claimed: if NUTCADE closes in between, the rest are claimed later)
   let got = 0, last = null, err = null;
   for (const t of lines) {
