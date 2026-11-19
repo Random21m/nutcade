@@ -402,7 +402,7 @@ You can also tip from inside NUTCADE: **Settings → About → Support**. The sa
 
 ## Changelog
 
-- **Unreleased: printable tokens.** **NUTCADE tokens**: print sats on paper. Send → **Print tokens**: pick an amount per token (presets of 1,000, 2,100, 5,000 and 21,000 SAT, each with about its value in your currency, or any amount) and how many (1 to 20), in two styles (Arcade, Ink saver). The first time, NUTCADE explains the rule that matters: a printed token is cash, whoever scans it first gets the sats.
+- **v1.15.0:** the **printable tokens** release. **NUTCADE tokens**: print sats on paper. Send → **Print tokens**: pick an amount per token (presets of 1,000, 2,100, 5,000 and 21,000 SAT, each with about its value in your currency, or any amount) and how many (1 to 20), in two styles (Arcade, Ink saver). The first time, NUTCADE explains the rule that matters: a printed token is cash, whoever scans it first gets the sats.
   - Each token is its own Cashu token, made the normal way (written down before the mint is asked, counted by the spending limit as one batch, fees as the mint keeps them). The cost is worked out once, before anything is made, and is never exceeded; a batch stopped part way says exactly how many were made and never makes one twice.
   - Every QR code is read back before printing; a token whose code would be too dense to scan on paper (every coin counted, the receiver's fee coins too) is refused before anything is made.
   - Fold-over cards, four to a page: front and back side by side, so plain one-sided printing lines up on any printer. **Printed tokens** (Notes) shows which were claimed (asked at the mint) and takes back unclaimed ones. Backups carry them like any token you sent.
