@@ -386,7 +386,7 @@ async function restoreFromMintNow(url, onStep, opts) {
     updTx(q.txId, { status: 'done', amount: credit, ts: Date.now() }); S.quotes = S.quotes.filter(x => x.quote !== q.quote);
     if (restoreDeposits[url]) restoreDeposits[url].delete(q.quote);
   }
-  if (fresh.length) { addProofs(url, fresh); if (left) addTx({ type: 'in', method: 'ecash', amount: left, mint: url, note: 'Recovered with recovery phrase' }); }
+  if (fresh.length) { addProofs(url, fresh); if (left) addTx({ type: 'in', method: 'ecash', amount: left, mint: url, note: 'Recovered with recovery phrase', self: true }); }
   // a mint below the minimum that this scan added and where nothing of yours is: not kept (the restore says so)
   if (isNew && belowMin(url) && !balanceOf(url) && !S.txs.some(t => t.mint === url) && !S.pending.some(p => p.mint === url) && !S.ops.some(o => o.mint === url) && !S.quotes.some(q => q.mint === url)) {
     S.mints = S.mints.filter(m => m.url !== url); delete S.proofs[url]; if (S.active === url) S.active = S.mints[0] ? S.mints[0].url : null;
@@ -704,6 +704,19 @@ function peekToken(t) {
   const meta = L.getTokenMetadata(cleanToken(t));
   return { mint: normUrl(meta.mint), amount: num(meta.amount), unit: meta.unit || 'sat', memo: meta.memo || '' };
 }
+/* Our own token, still out (pending, or seen claimed): found by its coins' secrets, not its text. The same coins come
+   back in another encoding too (by sound, which leaves out the DLEQ proofs; cashuA; a card), and that is still ours. */
+const tokSecs = new Map();
+function tokSecrets(t) {
+  if (!t) return null;
+  if (!tokSecs.has(t)) { let k = null; try { const ps = L.getDecodedToken(cleanToken(t), Object.keys(S.counters)).proofs || []; if (ps.length) k = ps.map(p => String(p.secret)).sort().join(' '); } catch (e) {} if (!k) return null; if (tokSecs.size > 500) tokSecs.clear(); tokSecs.set(t, k); }   // (one that can't be read now isn't kept as unreadable)
+  return tokSecs.get(t);
+}
+function ownSent(token) {
+  const out = t => t.token && (t.status === 'pending' || t.status === 'claimed');
+  const same = S.txs.find(t => out(t) && t.token === token); if (same) return same;
+  const k = tokSecrets(token); return k ? S.txs.find(t => out(t) && tokSecrets(t.token) === k) || null : null;
+}
 function receiveToken(token, note, opts = {}) {
   let mint = null; try { mint = normUrl(peekToken(cleanToken(token)).mint); } catch (e) {}
   return mint ? tooManyRetry(mint, () => mintLock(mint, () => receiveTokenNow(token, note, opts))) : receiveTokenNow(token, note, opts);
@@ -717,11 +730,13 @@ async function receiveTokenNow(token, note, opts = {}) {
   // cashed out, a part of one of those saved to claim later, the duress wallet's sats) and an Extra Life left to you
   // (locked to this wallet's key: nobody else can ever move it) are claimed even at a mint below the minimum, in
   // parts where needed. Anyone else's token there is new money in: refused.
-  const ownTx = S.txs.find(t => t.token === token && (t.status === 'pending' || t.status === 'claimed'));
+  const ownTx = ownSent(token);
   const f0 = opts.follow || {}, mine = !!(opts.own || ownTx || f0.k === 'heir' || (f0.k === 'incoming' && (txById(f0.txId) || {}).mine));
   // a token of ours coming back is marked on its line: 'hand' when you brought it back yourself (Take back, or pasted or
-  // scanned into Receive), 'auto' when it came back by itself (a gift nobody opened); a part saved to claim later keeps it
-  const back = opts.own || ownTx ? (opts.hand || !opts.own ? 'hand' : 'auto') : (f0.k === 'incoming' && (txById(f0.txId) || {}).back) || null;
+  // scanned into Receive), 'auto' when it came back by itself (a gift nobody opened); a part saved to claim later keeps it,
+  // and so do the duress PIN's wallet's sats coming back (saved here as "mine" when the duress PIN is turned off)
+  const held = f0.k === 'incoming' ? txById(f0.txId) || {} : {};
+  const back = opts.own || ownTx ? (opts.hand || !opts.own ? 'hand' : 'auto') : held.back || (held.mine ? 'hand' : null);
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: mine });
   const w = await getWallet(meta.mint);
   if (belowMin(meta.mint) && !mine) throw minErr(meta.mint);   // (no new deposits at a mint below the minimum)
@@ -737,13 +752,13 @@ async function receiveTokenNow(token, note, opts = {}) {
   let res;
   // what this claim finishes is on its record too (a token of ours coming back, a gift, a bounty, an Extra Life...),
   // so if its answer is lost, settling it later closes those records the same way
-  const own0 = S.txs.find(t => t.token === token && (t.status === 'pending' || t.status === 'claimed'));
+  const own0 = ownSent(token);
   try { const privs = allPrivs(); res = await journaled(meta.mint, 'receive', Object.assign({ amount: meta.amount, note: note || meta.memo, own: own0 && own0.id, follow: opts.follow || null }, back ? { back } : {}), (cb, o) => rRecv(o, w, token, Object.assign(privs.length ? { privkey: privs } : {}, { onCountersReserved: cb }))); }
   catch (e) { if (/witness|signature|p2pk|locked|locktime/i.test(e.message || '')) throw new Error("This ecash is locked to someone else's key, so this wallet can't claim it."); throw e; }
   const proofs = res.r, got = sum(proofs);
   addProofs(meta.mint, proofs);
   // mark own sent token as reclaimed if it matches
-  const own = S.txs.find(t => t.token === token && (t.status === 'pending' || t.status === 'claimed'));   // our own unclaimed token came back
+  const own = ownSent(token);   // our own unclaimed token came back
   if (own) updTx(own.id, { status: 'reclaimed' });
   const tx = addTx(Object.assign({ type: 'in', method: 'ecash', amount: got, fee: inFee(meta.amount, got, own || own0), mint: meta.mint, note: note || meta.memo }, back ? { back } : {}));
   closeOp(res.op); save();
@@ -1085,6 +1100,7 @@ async function journaled(url, kind, info, run) {
   const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, follow: info.follow || null, own: info.own || null, created: Date.now(), ctr: [], outs: [] };
   if (info.lim && info.lim.id) op.lim = { id: info.lim.id, a: info.lim.a, at: Date.now() };
   if (info.back) op.back = info.back;   // (a token of ours coming back: its line says so when it is settled from this record)
+  if (info.self) op.self = 1;   // (your own coins found again, a sweep of another phrase: the same)
   if (info.dep) op.dep = 1;   // (a deposit's mint request: no coins go in)   // (counts toward the spending limit until it settles)
   S.ops.push(op); save();
   const onCountersReserved = u => { if (u && u.count > 0) { op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); save(); } };
@@ -1268,12 +1284,12 @@ async function settleOpNow(id) {
   const fee0 = signed ? Math.max(0, removed - signed) : 0, shown = sum(outs.filter(p => have.has(p.secret)));
   const spentOut = sum(outs.filter(p => !held.has(p.secret) && !inSet.has(p.secret) && !have.has(p.secret)));
   // (what the coins removed here paid for beyond the fee and this step's own line: outputs already shown here first, the rest left elsewhere)
-  const rest = r => { if (r > 0) spentElsewhere(op.mint, Math.max(0, r - shown), op.impLine); else if (r < 0) addTx({ type: 'in', method: 'ecash', amount: -r, mint: op.mint, note: 'Recovered with recovery phrase', settled: true }); };
+  const rest = r => { if (r > 0) spentElsewhere(op.mint, Math.max(0, r - shown), op.impLine); else if (r < 0) addTx({ type: 'in', method: 'ecash', amount: -r, mint: op.mint, note: 'Recovered with recovery phrase', settled: true, self: true }); };
   S.proofs[op.mint] = cur.filter(p => !gone.has(p.secret)).concat(plain(fresh));
   const waitingTx = op.txId && (txById(op.txId) || {}).status === 'pending' ? op.txId : null;   // a deposit waiting for exactly this: it gets it
   // a claim or deposit: the line is what was received (the token less the mint's fee), and what of it was spent since has its own line
   if (op.kind === 'receive' && added + spentOut && waitingTx) { updTx(waitingTx, { status: 'done', amount: added + spentOut, ts: Date.now() }); spentElsewhere(op.mint, spentOut, op.impLine); }
-  else if (op.kind === 'receive') { if (added + spentOut) { const t = addTx(Object.assign({ type: 'in', method: 'ecash', amount: added + spentOut, fee: inFee(op.amount, signed, op.own && txById(op.own)), mint: op.mint, note: op.note || '', settled: true }, op.back ? { back: op.back } : {})); spentElsewhere(op.mint, spentOut, op.impLine); if (op.extra && S.extra) { S.extra = null; saveExtra(); } receiveDone(op, t); } }
+  else if (op.kind === 'receive') { if (added + spentOut) { const t = addTx(Object.assign({ type: 'in', method: 'ecash', amount: added + spentOut, fee: inFee(op.amount, signed, op.own && txById(op.own)), mint: op.mint, note: op.note || '', settled: true }, op.back ? { back: op.back } : {}, op.self ? { self: true } : {})); spentElsewhere(op.mint, spentOut, op.impLine); if (op.extra && S.extra) { S.extra = null; saveExtra(); } receiveDone(op, t); } }
   else if (lockedOut.length) {
     // (a token that carries the receiver's fee on top of its amount: that part is the sender's fee, as when nothing is interrupted)
     const ps = plain(lockedOut), amount = Math.min(op.amount || sum(ps), sum(ps)), fee = fee0 + sum(ps) - amount;
@@ -1281,7 +1297,7 @@ async function settleOpNow(id) {
     if (f.k === 'extra-renew' && S.extra && S.extra.mint === op.mint && S.extra.proofs.some(p => op.inputs.includes(p.secret))) {   // Extra Life continued: its new coins and date
       Object.assign(S.extra, { proofs: ps, until: f.until, renewed: Date.now(), amount: Math.min(S.extra.amount, sum(ps)) }); delete S.extra.unlocked; saveExtra();
       if (removed > added) addTx({ type: 'out', method: 'fee', amount: 0, fee: removed - added, mint: op.mint, note: 'Mint fee for keeping Extra Life going', status: 'done', settled: true });
-      else if (added > removed) addTx({ type: 'in', method: 'ecash', amount: added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true });
+      else if (added > removed) addTx({ type: 'in', method: 'ecash', amount: added - removed, mint: op.mint, note: 'Recovered with recovery phrase', settled: true, self: true });
       setTimeout(() => sendHeirCopy().catch(() => {}), 0);
       closeOp(op); save(); return 'settled';
     }
@@ -3287,9 +3303,9 @@ async function sweepPhrase(phrase, urls, onStep) {
         if (!parts) throw new Error(`${host(url)} takes at most ${mm} coins per request, and these coins can't be moved there in parts that size.`);
         let got = 0;
         for (const g of parts) {
-          const { r: mine, op } = await journaled(url, 'receive', { amount: sum(g), note: 'Restored from another phrase' }, (cb, o) => rRecv(o, w, g, { onCountersReserved: cb }));
+          const { r: mine, op } = await journaled(url, 'receive', { amount: sum(g), note: 'Restored from another phrase', self: true }, (cb, o) => rRecv(o, w, g, { onCountersReserved: cb }));
           addProofs(url, mine);
-          addTx({ type: 'in', method: 'ecash', amount: sum(mine), fee: Math.max(0, sum(g) - sum(mine)), mint: url, note: 'Restored from another phrase' });
+          addTx({ type: 'in', method: 'ecash', amount: sum(mine), fee: Math.max(0, sum(g) - sum(mine)), mint: url, note: 'Restored from another phrase', self: true });
           closeOp(op); save(); got += sum(mine);
         }
         return got;
@@ -3781,7 +3797,7 @@ function applyImport(u, coins, txs, pending, ops, quotes) {
   if (inc.length) addProofs(u, inc);
   const diff = sum(inc) - ledgerOf(newTxs, u);
   let line = null;
-  if (diff > 0) addTx({ type: 'in', method: 'ecash', amount: diff, mint: u, note: 'Restored from backup' });
+  if (diff > 0) addTx({ type: 'in', method: 'ecash', amount: diff, mint: u, note: 'Restored from backup', self: true });
   else if (diff < 0) line = addTx({ type: 'out', method: 'ecash', amount: -diff, mint: u, note: 'Ecash already spent elsewhere', status: 'done' });
   const fresh = uniqBy(ops, 'id').filter(o => !S.ops.find(x => x.id === o.id) && !opSettledHere(o));
   for (const o of fresh) S.ops.push(o);
@@ -3973,7 +3989,7 @@ const A = {
   }),
   saveNote: b => { updTx(b.dataset.id, { note: val('noteEdit').trim() }); sfx('coin'); toast('Note saved', 'gold'); closeSheet(); refresh(); },
   checkClaim: b => run(b, '…', async () => { const t = txById(b.dataset.id); const c = await checkClaim(t); toast(c ? 'Claimed by the receiver' : 'Not claimed yet', c ? 'lime' : 'gold'); if (c) { closeSheet(); refresh(); } }),
-  reclaim: b => run(b, 'RECLAIMING', async () => { const t = txById(b.dataset.id); reclaiming.add(t.id); try { await receiveToken(t.token, 'Reclaimed: ' + (t.note || 'ecash token'), { own: true }); } finally { setTimeout(() => reclaiming.delete(t.id), 5000); } updTx(t.id, { status: 'reclaimed' }); sfx('coin'); toast('Token reclaimed', 'lime'); closeSheet(); refresh(); }),
+  reclaim: b => run(b, 'RECLAIMING', async () => { const t = txById(b.dataset.id); reclaiming.add(t.id); try { await receiveToken(t.token, 'Reclaimed: ' + (t.note || 'ecash token'), { own: true, hand: true }); } finally { setTimeout(() => reclaiming.delete(t.id), 5000); } updTx(t.id, { status: 'reclaimed' }); sfx('coin'); toast('Token reclaimed', 'lime'); closeSheet(); refresh(); }),
   resumeInvoice: b => { const t = txById(b.dataset.id); showInvoice(t); },
   resumeAddr: b => { const t = txById(b.dataset.id); showAddress(t); },
   stopWatch: b => { const t = txById(b.dataset.id); S.quotes = S.quotes.filter(q => q.quote !== t.quote); updTx(t.id, { status: 'expired' }); closeSheet(); refresh(); },

@@ -375,7 +375,7 @@ async function ptCheckAll() {
 // the token is marked claimed (the mint says its coins are spent); nothing else changes.
 async function ptTakeOne(t) {
   reclaiming.add(t.id);
-  try { await receiveToken(t.token, 'Reclaimed: ' + (t.note || 'ecash token'), { own: true }); }
+  try { await receiveToken(t.token, 'Reclaimed: ' + (t.note || 'ecash token'), { own: true, hand: true }); }
   catch (e) {
     if (isSpentErr(e) || /already spent/i.test(String(e && (e.raw || e.message)))) {
       let claimed = false; try { claimed = await checkClaim(t); } catch (x) {}

@@ -16,9 +16,10 @@
    each arrival gets its own notice. In a background tab the notice waits on the page and, if turned on in Settings,
    a system notification says what came (shown by the page or its service worker, with the permission asked when the
    setting is turned on). When the app locks, those notifications are replaced by one that says only "Money arrived,
-   unlock to see" (or simply closed when a duress PIN is set up, so the duress wallet never has to explain it). */
+   unlock to see". With a duress PIN set, both wallets behave exactly as with a PIN alone (the same words, in the same
+   cases), so neither a notification nor its absence ever tells anyone that a duress PIN exists. */
 function arrS() {
-  return arrS.s || (arrS.s = { base: Date.now(), log: [], card: [], items: {}, onPage: new Set(), away: 0, awayDone: false, tickDone: 0, awayIv: 0, flushT: 0, coinAt: 0, wasOpen: false, lockLine: false, unseen: new Set() });
+  return arrS.s || (arrS.s = { base: Date.now(), log: [], card: [], items: {}, onPage: new Set(), away: 0, awayDone: false, tickDone: 0, awayIv: 0, flushT: 0, coinAt: 0, wasOpen: false, lockLine: false, unseen: new Set(), just: new Map() });
 }
 arrS();
 const ARR_TAG = 'nutcade-arrival';
@@ -34,16 +35,21 @@ function arrLedger() {
   return l;
 }
 // one message per arrival: a receive's own toast ("+X received") is left out when its notice (now, after a game or
-// in a summary) says it
-function arrAnnounced(id) { try { return !!id && arrOpen() && arrLedger().seen.some(x => x[0] === id); } catch (e) { return false; } }
+// in a summary) says it, and only then: never both lost. The notice says it when the line is the arrival
+// in question: the arrival this very receive just put on the record (the line as it is now). A later receive that adds
+// to a line announced before (a deposit recovered onto a line already done) gets its toast: it has no notice of its own.
+function arrAnnounced(id) {
+  try { const t = id && txById(id), j = arrS().just.get(id); return !!t && arrOpen() && j === num(t.amount) && arrLedger().seen.some(x => x[0] === id); } catch (e) { return false; }
+}
 function arrToast(id, msg, c) { if (!arrAnnounced(id)) toast(msg, c); }
-// Not money arriving: your own coins coming back by your own hand or the wallet's upkeep: a token (printed or not) you
-// took back or pasted or scanned into Receive, a gift you took back (back: 'hand', also after its mint's answer was lost
-// or in parts), an Extra Life you cashed out, coins the keyset check-up set aside that the mint accepts again (upkeep).
+// Not money arriving: your own coins coming back by your own hand or the wallet's upkeep, each marked on its line by the
+// code that writes it (never read from its note: a received token's note is its sender's memo): a token (printed or not)
+// you took back or pasted or scanned into Receive, a gift you took back, an Extra Life you cashed out, the duress PIN's
+// wallet's sats coming back (back: 'hand', also after the mint's answer was lost or in parts), coins found by a restore,
+// a sweep of another phrase or a backup (self), coins the keyset check-up set aside that the mint accepts again (upkeep).
 // (A gift or a payment request's sats that came back by themselves are still announced: "Came back to you".)
 function arrQual(t) {
-  return !!t && t.type === 'in' && t.status === 'done' && num(t.amount) > 0 && !t.move && !t.upkeep && t.back !== 'hand'
-    && !/^(Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Back from the duress PIN's wallet$|Reclaimed: |Extra Life cashed out)/.test(t.note || '');
+  return !!t && t.type === 'in' && t.status === 'done' && num(t.amount) > 0 && !t.move && !t.upkeep && !t.self && t.back !== 'hand';
 }
 // the kind, from the line (and, for npub.cash, its deposit record, which is gone once it is credited)
 function arrKind(t) {
@@ -51,7 +57,7 @@ function arrKind(t) {
   if (t.method === 'onchain') return 'onchain';
   if (t.method === 'ln') { const q = S.quotes.find(q => q.quote === t.quote); return (q && q.npc) || t.note === 'Lightning address' ? 'npc' : /^Swapped from /.test(t.note || '') ? 'token' : 'ln'; }
   if (t.reqId) return 'request';
-  return /^(Gift came back|Payment request couldn't be delivered)/.test(t.note || '') ? 'back' : 'token';
+  return t.back === 'auto' ? 'back' : 'token';   // (your own token that came back by itself: from its mark, never from a memo)
 }
 // called right after a history line is written (addTx) or changed (updTx)
 function arrivalSeen(t) {
@@ -59,7 +65,7 @@ function arrivalSeen(t) {
     if (!t || !arrQual(t) || tabLocked || writeGuard.paused || (vault.on && !vault.open)) return;
     if (Date.now() - t.ts > 10 * 60e3) return;   // (an old line coming back changed, or one from another device's backup)
     const l = arrLedger(); if (!(t.ts >= l.since) || l.seen.some(x => x[0] === t.id)) return;
-    l.seen.push([t.id, t.ts]); l.pend.push({ id: t.id, k: arrKind(t) });
+    l.seen.push([t.id, t.ts]); l.pend.push({ id: t.id, k: arrKind(t) }); const j = arrS().just; j.set(t.id, num(t.amount)); if (j.size > 2000) j.delete(j.keys().next().value);
     const old = Date.now() - 30 * 86400e3; l.seen = l.seen.filter(x => x[1] > old).slice(-6000); l.pend = l.pend.slice(-5000);   // (room for a busy shop away for days: a summary is exactly its lines)
     raw.set('arrivals', l); arrSchedule();
   } catch (e) {}
@@ -180,7 +186,7 @@ function arrRendered() {
     const A = arrS(), open = arrOpen(), unlocked = vault.on && vault.open;
     if (open && !A.wasOpen && (!A.rendered || (unlocked && !A.wasUnlocked))) arrAwayStart();
     A.rendered = true; A.wasUnlocked = unlocked;
-    const mode = arrSysMode(); if (A.sysMode && mode !== A.sysMode && mode !== 'full') arrCloseSys(); A.sysMode = mode;   // (a PIN or duress PIN just set: none with an amount stays)
+    const mode = arrSysMode(); if (A.sysMode && mode !== A.sysMode && mode !== 'full') arrCloseSys(); A.sysMode = mode;   // (a PIN just set: none with an amount stays)
     if (!open && A.wasOpen) arrClear();
     A.wasOpen = open;
     // going to another tab: notices you have had in front of you for a moment are done
@@ -196,8 +202,9 @@ async function arrReg() {
 }
 const arrSysOk = () => !!S.prefs.arrNotify && typeof Notification !== 'undefined' && Notification.permission === 'granted';
 // what a system notification may say: no PIN, what came; a PIN, only that money came (a closed or discarded tab, or a
-// phone's lock screen, would otherwise show it while the wallet is locked); a duress PIN, nothing at all
-function arrSysMode() { return vault.decoy || (vault.on && vault.data && vault.data.duress) ? 'none' : vault.on ? 'generic' : 'full'; }
+// phone's lock screen, would otherwise show it while the wallet is locked). A duress PIN changes nothing, in either
+// wallet: the duress PIN's wallet is a wallet with a PIN, and the real one is too (silence would give the duress PIN away)
+function arrSysMode() { return vault.on ? 'generic' : 'full'; }
 function arrSysBody(items) {
   if (items.length === 1) { const x = items[0]; return `${tr(ARR_LABEL[x.k])}: +${money(x.a)} · ${mintName(x.m)}`; }
   return arrGroups(items).map(g => `${tr(ARR_LABEL[g.k])}: ${arrCount(g.n)} · +${money(g.a)}`).join('\n');
@@ -233,7 +240,7 @@ function arrHelp(p, asked) {
   if (p === 'unsupported') return "This browser can't show notifications.";
   if (asked && p === 'default') return "Notifications weren't allowed. Turn this on to be asked again, or allow them in your browser's settings.";
   if (p === 'denied') return "Notifications are blocked for NUTCADE in this browser's settings. Allow them there, then turn this on.";
-  return 'When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. With a PIN they show no amount, only “Money arrived. Open NUTCADE to see.” With a duress PIN there are none.';
+  return 'When money arrives while NUTCADE is open in another tab or window. Shown by this device only: no push service, nothing is sent anywhere. With a PIN they show no amount, only “Money arrived. Open NUTCADE to see.”';
 }
 function arrSettingsHTML() {
   const p = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;

@@ -5,7 +5,9 @@ summary on opening or unlocking.
 The grid: each kind of arrival (Lightning deposit, a token claimed, ecash over Nostr, a payment request paid, the
 npub.cash Lightning address, a Wallet Connect make_invoice paid) x NUTCADE open / in a background tab / closed and
 reopened / locked; plus two tabs (one notice), a reload mid-arrival, a restore from the 12 words (no flood for old
-history), the duress PIN's wallet (only the open wallet's own arrivals, the other never shown), sound on and off,
+history), the duress PIN's wallet (only the open wallet's own arrivals, the other never shown; system notifications exactly as with
+a PIN alone in both wallets), a sender's memo that reads like the app's own note, your own token in another encoding, a
+deposit recovered after its answer was lost, sound on and off,
 system notifications off / on / permission denied, five languages and 320 / 1440 px wide screens.
 
 Exact: a summary's count and total per kind equal the history lines that arrived in that window, and no arrival is
@@ -13,7 +15,8 @@ announced twice (across reloads, tabs and restores).
 
 Uses two local test mints (ARR_FEE, default 3338, with input fees; ARR_FREE, default 3339, without) and mock_nostr.py
 (ARR_NOSTR, default ws://127.0.0.1:3350/relay; it also stands in for npub.cash). ARR_ONLY=a,b runs some sections
-(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, own, own2, toast, langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
+(open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, own, own2, toast, memo, own3, reenc, recover, sysduress,
+langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
 (default QA_OUT)."""
 import asyncio, json, os, re, time, urllib.request
 from playwright.async_api import async_playwright
@@ -65,6 +68,22 @@ LOG_JS = "(window.NutArrivals&&NutArrivals.log||[]).map(e=>({type:e.type, ids:e.
 SYSN_JS = "(async()=>{try{const r=await navigator.serviceWorker.ready; return (await r.getNotifications()).map(n=>({title:n.title, body:n.body}))}catch(e){return []}})()"
 PEND_JS = "(window.NutArrivals?NutArrivals.ledger().pend.map(p=>p.id):null)"
 ARRIVED_JS = "(t0=>Nutcade.S.txs.filter(t=>t.type==='in'&&t.status==='done'&&t.amount>0&&!t.move&&t.ts>=t0).map(t=>({id:t.id, amount:t.amount, mint:t.mint, note:t.note, reqId:t.reqId||null, nwc:t.nwc||null})))"
+
+
+# the app's own notes (and the start of some): a stranger's memo may say the same, and is still only their memo
+OWN_NOTES = ['Reclaimed: lol', 'Restored from backup', 'Extra Life cashed out (was for Bob)', "Back from the duress PIN's wallet",
+             'Recovered with recovery phrase', 'Restored from another phrase', 'Gift came back from Bob', "Payment request couldn't be delivered: the sats came back"]
+WITH_MEMO_JS = "((t,m)=>{const d=CashuLib.getDecodedToken(t, Object.keys(Nutcade.S.counters||{})); return CashuLib.getEncodedToken({mint:d.mint, unit:'sat', memo:m, proofs:d.proofs})})(%s,%s)"
+# your own token read back the way each path reads it: by sound (no DLEQ proofs), from an NFC card (binary), from a QR code (slim)
+REENC_JS = """((tok,way)=>{const L=CashuLib, ids=Object.keys(Nutcade.S.counters||{}); try{
+  if(way==='sound') return Nutcade.soundText(Nutcade.soundBytes(tok));
+  if(way==='nfc') return L.getEncodedToken(L.getDecodedTokenBinary(L.getEncodedTokenBinary(L.getDecodedToken(tok, ids)), ids));
+  const d=L.getDecodedToken(tok, ids); return L.getEncodedToken({mint:d.mint, unit:d.unit||'sat', proofs:d.proofs.map(p=>{const o=Object.assign({},p); delete o.dleq; return o})});
+  }catch(e){return 'ERR '+e.message}})(%s,%s)"""
+SEEN_JS = "(window.NutArrivals?NutArrivals.ledger().seen.map(x=>x[0]):null)"
+TOASTS_JS = """(()=>{window.__toasts=[]; if(window.__toastObs) return; const seen=()=>{const e=document.getElementById('toast'); if(e&&!e.hidden&&e.textContent) window.__toasts.push(e.textContent)};
+  window.__toastObs=new MutationObserver(seen); window.__toastObs.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['hidden']})})()"""
+num_ok = lambda line: line.get('status') == 'done' and (line.get('amount') or 0) > 0
 
 
 def mock(path, data=None):
@@ -588,11 +607,12 @@ async def main():
             await d.ev("__hide(true)"); await d.ev("__sys.length=0"); await dm(p, dpk, 777, FREE)
             ok = await d.until("Nutcade.S.txs.some(t=>t.amount===777&&t.status==='done')", 20000); await d.wait(1500)
             check('duress: (the real wallet got 777 SAT in a background tab)', ok)
-            check('duress PIN set up: the real wallet shows no system notification at all', ok and await d.ev("__sys.length") == 0 and not await d.ev(SYSN_JS), (await d.ev("__sys"), await d.ev(SYSN_JS)))
+            sysn = await d.ev("__sys")
+            check('duress PIN set up: the real wallet\'s system notification is the one a PIN alone gives (no amount, only "Money arrived. Open NUTCADE to see.")', ok and len(sysn) == 1 and sysn[0]['title'] == 'NUTCADE' and sysn[0]['body'] == 'Money arrived. Open NUTCADE to see.', sysn)
             real_ids = await d.ev("Nutcade.S.txs.map(t=>t.id)")
             await d.pg.reload(); await d.wait(1500)
             ns = await d.ev(SYSN_JS); body = await d.ev("document.body.innerText")
-            check('duress set: locked, the real wallet\'s notifications are gone (no amount, and no "money arrived" that the duress wallet couldn\'t explain)', not ns and not re.search(r'Money arrived', body), (ns, body[:200]))
+            check('duress set: locked, as with a PIN alone: only "Money arrived, unlock to see", no amount (the duress wallet has the same, so it gives nothing away)', [(n['title'], n['body']) for n in ns] == [('NUTCADE', 'Money arrived, unlock to see.')] and bool(re.search(r'Money arrived, unlock to see', body)) and '777' not in body, (ns, body[:200]))
             await d.ev("__hide(false)")
             await unlock(d, DPIN); await settled(d)
             check('duress wallet: no summary of the real wallet\'s arrival', not await cards(d), await cards(d))
@@ -602,7 +622,8 @@ async def main():
             await d.pg.route(re.compile(re.escape(FREE) + r'/v1/swap$'), slow); await d.ev("__sys.length=0")
             await claim(d, tok); await d.wait(200); await d.ev("__hide(true)")
             await d.until(f"Nutcade.S.txs.some(t=>t.amount===888&&t.status==='done')", 15000); await d.wait(1500); await d.pg.unroute_all()
-            check('duress wallet: its arrival in a background tab shows no system notification either', await d.ev("__sys.length") == 0 and not await d.ev(SYSN_JS), await d.ev("__sys"))
+            sysn = await d.ev("__sys")
+            check('duress wallet: its arrival in a background tab gives the same notification a PIN alone gives', len(sysn) == 1 and sysn[0]['title'] == 'NUTCADE' and sysn[0]['body'] == 'Money arrived. Open NUTCADE to see.', sysn)
             await d.ev("__hide(false)"); await d.wait(300)
             cs = await cards(d)
             check('duress wallet: its own arrival gets a notice', len(cs) == 1 and '+888 SAT' in cs[0]['text'], cs)
@@ -649,7 +670,7 @@ async def main():
                 check(f'{lang}: the summary doesn\'t rely on color alone (a sign and words)', bool(sm) and '+' in sm['text'])
                 await r.ev("Nutcade.closeSheet()"); await dismiss(r)
                 await settings(r); helptxt = await r.ev("(document.querySelector('#arrNotifyHelp')||{}).textContent||''"); await r.home()
-                check(f'{lang}: the notifications setting says what a PIN and a duress PIN change, in the language', bool(helptxt) and (('With a PIN' in helptxt and 'duress' in helptxt) if lang == 'en' else ('With a PIN' not in helptxt and 'PIN' in helptxt)), helptxt)
+                check(f'{lang}: the notifications setting says what a PIN changes, in the language, and nothing of a duress PIN', bool(helptxt) and (('With a PIN' in helptxt) if lang == 'en' else ('With a PIN' not in helptxt and 'PIN' in helptxt)) and not re.search(r'duress|coacci|coação|Notfall|contrainte', helptxt, re.I), helptxt)
             await set_lang(r, 'en')
 
         # ---------- your own coins coming back are not money arriving (1.14 keyset check-up, 1.15 printed tokens) ----------
@@ -790,6 +811,215 @@ async def main():
                 check(f'toast: {label}: the notice says it once (no "+{a} received" toast beside it)', bool(cs) and not [t for t in ts if re.search(r'received|deposited', t)], (ts, [c['text'] for c in cs]))
                 await r.ev("Nutcade.closeSheet()")
             await dismiss(r); await r.home()
+
+        # ---------- a sender's memo is only the sender's words (1.16.0 fix round, finding 1): a stranger's ecash whose
+        # memo reads like one of the app's own notes is still money arriving, over Nostr, pasted or scanned ----------
+        if want('memo'):
+            await r.ev("Nutcade.closeSheet()"); await r.use(FREE); await dismiss(r)
+            for memo in OWN_NOTES:
+                for way in ('nostr', 'paste', 'scan'):
+                    await r.ev("Nutcade.closeSheet()"); await dismiss(r); a = next(amt); log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+                    if way == 'nostr': await dm(p, rpk, a, FREE, memo)
+                    else:
+                        tok = await p.ev(WITH_MEMO_JS % (J(await token_from(p, a, FREE)), J(memo)))
+                        if way == 'paste': await claim(r, tok)
+                        else:   # (what the scanner does with a token it read: Receive, filled in)
+                            await r.home(); await r.ev(f"Nutcade.handleScan({J(tok)})")
+                            await r.until(f"(document.querySelector('#tokIn')||{{}}).value==={J(tok)}", 5000); await r.click('[data-act=doReceiveToken]')
+                    ok = await wait_line(r, f"t.ts>={t0}&&t.amount==={a}", 25000); await r.wait(1500)
+                    line = await r.ev(f"Nutcade.S.txs.find(t=>t.type==='in'&&t.status==='done'&&t.ts>={t0}&&t.amount==={a})||null")
+                    ann = [i for e in (await r.ev(LOG_JS))[log0:] for i in e['ids']]
+                    cs = [c for c in await cards(r) if c['type'] == 'live']
+                    lab = LABEL['nostr'] if way == 'nostr' else LABEL['token']
+                    check(f'memo {memo!r}, {way}: a stranger\'s ecash is announced once, as "{lab}" (the memo is the sender\'s, never read as the app\'s own note)',
+                          ok and bool(line) and (line.get('note') or '').startswith(memo) and ann == [line['id']] and len(cs) == 1 and lab in cs[0]['text'] and 'Came back to you' not in cs[0]['text'] and not line.get('back') and not line.get('self'),
+                          (line and line.get('note'), ann, [c['text'] for c in cs]))
+            await r.ev("Nutcade.closeSheet()"); await dismiss(r)
+
+        # ---------- the app's own lines are marked by the code that writes them (finding 1, the other side): never
+        # announced, whatever their note says ----------
+        if want('own3'):
+            await r.ev("Nutcade.closeSheet()"); await r.use(FREE); await dismiss(r)
+            async def own_line(label, t0, pred, log0):
+                line = await r.ev(f"Nutcade.S.txs.find(t=>t.type==='in'&&t.status==='done'&&t.ts>={t0}&&({pred}))||null")
+                ev = [e for e in (await r.ev(LOG_JS))[log0:] if line and line['id'] in e['ids']]
+                seen = await r.ev(SEEN_JS)
+                check(f'{label}: (its line, the sats back)', bool(line) and num_ok(line), line)
+                check(f'{label}: not announced as money arriving (no notice, not waiting for a summary, not on the arrivals record)',
+                      bool(line) and not ev and seen is not None and line['id'] not in seen and not [c for c in await cards(r) if line['id'] in c['ids']],
+                      (line and {k: line.get(k) for k in ('note', 'back', 'self')}, ev))
+            # a token you sent, taken back from its line in your notes (Take back)
+            tx = await r.ev("Nutcade.r8.sendEcash(160, 'lunch').then(t=>t.id)"); await r.wait(300)
+            log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+            await r.ev("Nutcade.closeSheet()"); await r.click('[data-act=tab][data-tab=history]'); await r.wait(200)
+            await r.ev(f"document.querySelector('#txList [data-id=\"{tx}\"]').click()"); await r.wait(300); await r.click('#layer [data-act=reclaim]')
+            await r.until(f"(Nutcade.S.txs.find(t=>t.id==={J(tx)})||{{}}).status==='reclaimed'", 20000); await r.wait(1500)
+            await own_line('own3 a token you sent, taken back from your notes', t0, "/^Reclaimed: /.test(t.note||'')", log0)
+            await r.ev("Nutcade.closeSheet()"); await dismiss(r); await r.home()
+            # an Extra Life set up, then cashed out
+            heir = await p.ev(f"CashuLib.nprofileEncode({{pubkey: CashuLib.nostrPub(CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32)), relays:[{J(NOSTR)}]}})")
+            await r.click('[data-act=extraOpen]'); await r.until("!!document.querySelector('#xlTo')", 5000); await r.wait(150)
+            await r.ev("(()=>{const s=document.querySelector('#xlTo'); s.value=''; s.dispatchEvent(new Event('change',{bubbles:true}))})()")
+            await r.fill('#xlKey', heir); await r.fill('#amtIn', '300'); await r.click('[data-act=extraStart]')
+            xl = await r.until("!!Nutcade.S.extra", 30000); await r.wait(1000); await r.ev("Nutcade.closeSheet()"); await dismiss(r)
+            log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+            await r.home(); await r.click('[data-act=extraOpen]'); await r.wait(300); await r.click('[data-act=extraCash]'); await r.wait(200); await r.click('[data-act=extraCashGo]')
+            xo = await r.until("!Nutcade.S.extra", 30000); await r.wait(1500)
+            check('own3 Extra Life: (set up, then cashed out)', xl and xo, (xl, xo, await r.err()))
+            await own_line('own3 an Extra Life you cashed out', t0, "/^Extra Life cashed out/.test(t.note||'')", log0)
+            await r.ev("Nutcade.closeSheet()"); await dismiss(r)
+            # coins found again: Find lost ecash (a coin this wallet lost track of), a backup that has a coin this wallet doesn't
+            for how in ('find', 'backup'):
+                bk = await r.ev("Promise.resolve(Nutcade.r8.backupData()).then(d=>typeof d==='string'?d:JSON.stringify(d))") if how == 'backup' else None
+                lost = await r.ev(f"(()=>{{const u={J(FREE)}, ps=Nutcade.S.proofs[u]||[], x=ps.find(p=>p.amount>=8&&p.amount<=512); if(!x) return 0; Nutcade.S.proofs[u]=ps.filter(p=>p!==x); return x.amount}})()")
+                log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+                if how == 'find':
+                    await settings(r); await r.click('[data-act=findLost]')
+                    await r.until(f"Nutcade.S.txs.some(t=>t.type==='in'&&t.ts>={t0}&&/^Recovered with recovery phrase/.test(t.note||''))", 180000); await r.wait(1500)
+                    await own_line(f'own3 Find lost ecash ({lost} SAT found again)', t0, "/^Recovered with recovery phrase/.test(t.note||'')", log0)
+                else:
+                    res = await r.ev(f"Nutcade.r8.importBackup(JSON.parse({J(bk)})).then(()=>'ok', e=>'ERR '+e.message)"); await r.wait(2000)
+                    await own_line(f'own3 a backup imported, with a coin this wallet lost track of ({lost} SAT, {res})', t0, "/^Restored from backup/.test(t.note||'')", log0)
+                await r.ev("Nutcade.closeSheet()"); await dismiss(r); await r.home()
+            # ecash under another phrase, swept into this wallet
+            q = await wallet(b); qwords = await q.create(); await q.add_mint(FREE); await q.use(FREE); await q.receive_ln(400); await q.wait(1000); await q.pg.context.close()
+            log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+            await settings(r); await r.click('[data-act=sweepOpen]'); await r.until("!!document.querySelector('#phraseIn')", 5000)
+            await r.ev(f"(()=>{{const t=document.querySelector('#phraseIn'); t.value={J(qwords)}; t.dispatchEvent(new Event('input',{{bubbles:true}})); document.querySelectorAll('[data-rmint]').forEach(i=>i.checked=false); document.querySelector('#rmExtra').value={J(FREE)}}})()")
+            await r.click('[data-act=doSweep]'); await r.until("/SCAN COMPLETE|BONUS ROUND/.test((document.querySelector('.sheet-body')||{}).innerText||'') || !!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 120000); await r.wait(1500)
+            await own_line('own3 ecash under another phrase, swept into this wallet', t0, "/^Restored from another phrase/.test(t.note||'')", log0)
+            await r.ev("Nutcade.closeSheet()"); await dismiss(r); await r.home()
+
+        # ---------- your own token, brought back in another encoding (finding 2): found by its coins, not its text ----------
+        if want('reenc'):
+            await r.ev("Nutcade.closeSheet()"); await r.use(FREE); await dismiss(r)
+            for way in ('sound', 'nfc', 'qr'):
+                own = await r.ev("Nutcade.r8.sendEcash(180, '').then(t=>({id:t.id, token:t.token}))"); await r.wait(300)
+                text = await r.ev(REENC_JS % (J(own['token']), J(way)))
+                log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+                await r.ev("Nutcade.closeSheet()"); await r.home(); await r.ev(f"Nutcade.handleScan({J(text)})")
+                await r.until(f"(document.querySelector('#tokIn')||{{}}).value==={J(text)}", 5000); await r.click('[data-act=doReceiveToken]')
+                await wait_line(r, f"t.ts>={t0}"); await r.wait(1500)
+                line = await r.ev(f"Nutcade.S.txs.find(t=>t.type==='in'&&t.status==='done'&&t.ts>={t0})||null")
+                st = await r.ev(f"Nutcade.S.txs.find(t=>t.id==={J(own['id'])}).status")
+                ev = [e for e in (await r.ev(LOG_JS))[log0:] if line and line['id'] in e['ids']]
+                check(f'reenc {way}: (your own token, read back {"as other text" if text != own["token"] else "as the same text"}, claimed back)', bool(line) and line['amount'] == 180 and not text.startswith('ERR'), (text[:30], line))
+                check(f'reenc {way}: not announced as money arriving (brought back by your hand)', bool(line) and line.get('back') == 'hand' and not ev and line['id'] not in await r.ev(SEEN_JS) and not await cards(r), (line and line.get('back'), ev, await cards(r)))
+                check(f'reenc {way}: its sent line says reclaimed (not "claimed" by someone)', st == 'reclaimed', st)
+                await r.ev("Nutcade.closeSheet()"); await dismiss(r)
+            # someone else's token for the same amount while one of yours is out: theirs is money arriving, yours stays out
+            mine = await r.ev("Nutcade.r8.sendEcash(170, '').then(t=>t.id)")
+            log0 = len(await r.ev(LOG_JS)); t0 = await r.ev("Date.now()")
+            await claim(r, await token_from(p, 170, FREE)); await wait_line(r, f"t.ts>={t0}"); await r.wait(1500); await r.ev("Nutcade.closeSheet()")
+            line = await r.ev(f"Nutcade.S.txs.find(t=>t.type==='in'&&t.status==='done'&&t.ts>={t0})||null")
+            st = await r.ev(f"Nutcade.S.txs.find(t=>t.id==={J(mine)}).status")
+            ann = [i for e in (await r.ev(LOG_JS))[log0:] for i in e['ids']]
+            check('reenc someone else\'s token, the same amount as one of yours still out: announced once; yours stays out', bool(line) and ann == [line['id']] and not line.get('back') and st == 'pending', (line, ann, st))
+            await dismiss(r)
+
+        # ---------- a deposit recovered after the mint's answer was lost (finding 4): announced exactly once, the
+        # notice or the toast, never neither ----------
+        if want('recover'):
+            await r.ev("Nutcade.closeSheet()"); await r.use(FREE); await dismiss(r); await r.ev(TOASTS_JS)
+            MINTRQ = re.compile(re.escape(FREE) + r'/v1/mint/bolt11$')
+            blk = Block(); await blk.attach(r.pg, FREE)
+            async def lose(route):   # (the mint signs; its answer never reaches the page, and the page hears nothing more of it for now)
+                try: await route.fetch()
+                except Exception: pass
+                blk.on = True; await route.abort()
+            async def lost_deposit(a):
+                """a deposit the mint issued while this page never heard its answer: the line waits, the record keeps its counters"""
+                await r.pg.route(MINTRQ, lose)
+                txid = await ln_invoice(r, a, FREE)
+                ok = await r.until(f"Nutcade.S.quotes.some(q=>q.txId==={J(txid)}&&q.ctr)", 15000); await r.wait(2500); await r.ev("Nutcade.closeSheet()")
+                return txid, ok and await r.ev(f"(Nutcade.S.txs.find(t=>t.id==={J(txid)})||{{}}).status==='pending'")
+            async def answer_again():   # (the mint can be heard again: the next round of checks finds the deposit issued)
+                blk.on = False; await r.pg.unroute(MINTRQ); await r.ev("window.dispatchEvent(new Event('online'))")
+            # the line still waiting: the recovery is its arrival (one notice, no toast beside it)
+            a = next(amt); await r.ev("window.__toasts=[]"); log0 = len(await r.ev(LOG_JS))
+            txid, ok = await lost_deposit(a)
+            await answer_again()
+            done = await r.until(f"(Nutcade.S.txs.find(t=>t.id==={J(txid)})||{{}}).status==='done'", 40000); await r.wait(2500)
+            ann = [i for e in (await r.ev(LOG_JS))[log0:] for i in e['ids']]; ts = await r.ev("window.__toasts")
+            check('recover, its line still waiting: (the answer was lost, then the deposit was recovered from its record)', ok and done and await r.ev(f"Nutcade.S.txs.find(t=>t.id==={J(txid)}).amount") == a, (ok, done))
+            check('recover, its line still waiting: announced exactly once (its notice, no toast beside it)', ann.count(txid) == 1 and not [t for t in ts if re.search(r'Recovered|received', t)], (ann, ts))
+            await dismiss(r)
+            # the recovered coins credited to a line that is done already and was announced (a later "Recovered X from an
+            # interrupted deposit"): no notice again for the old line, so the toast says it
+            a1 = next(amt); line1 = await ln_invoice(r, a1, FREE); await wait_line(r, f"t.id==={J(line1)}"); await r.wait(1500); await r.ev("Nutcade.closeSheet()"); await dismiss(r)
+            a2 = next(amt); txid, ok = await lost_deposit(a2)
+            await r.ev(f"(()=>{{const S=Nutcade.S, q=S.quotes.find(q=>q.txId==={J(txid)}); q.txId={J(line1)}; S.txs=S.txs.filter(t=>t.id!=={J(txid)})}})()")
+            await r.ev("window.__toasts=[]"); log0 = len(await r.ev(LOG_JS))
+            await answer_again()
+            done = await r.until(f"(Nutcade.S.txs.find(t=>t.id==={J(line1)})||{{}}).amount==={a1 + a2}", 40000); await r.wait(2500)
+            ann = [i for e in (await r.ev(LOG_JS))[log0:] for i in e['ids']]; ts = await r.ev("window.__toasts")
+            said = sorted(set(t for t in ts if 'Recovered' in t and fmtn(a2) in t))
+            check('recover onto a line already done: (the new coins credited to it)', ok and done, (ok, done))
+            check('recover onto a line already done: the new sats are said exactly once (the toast "Recovered X"), never lost', done and len(said) == 1 and line1 not in ann, (ts, ann))
+            await dismiss(r); await r.home()
+
+        # ---------- system notifications with a duress PIN (finding 3): exactly as with a PIN alone, in both wallets,
+        # so neither a notification nor its absence tells anyone a duress PIN exists ----------
+        if want('sysduress'):
+            async def bg_claim(w, a):
+                tok = await token_from(p, a, FREE)
+                async def slow(route): await asyncio.sleep(1.5); await route.continue_()
+                await w.pg.route(re.compile(re.escape(FREE) + r'/v1/swap$'), slow); await w.ev("__sys.length=0")
+                await claim(w, tok); await w.wait(200); await w.ev("__hide(true)")
+                ok = await w.until(f"Nutcade.S.txs.some(t=>t.amount==={a}&&t.status==='done')", 20000); await w.wait(1500); await w.pg.unroute_all()
+                return ok
+            async def notify(w, on):
+                if await w.ev("!!Nutcade.S.prefs.arrNotify") != on: await settings(w); await w.ev("document.querySelector('#p_arrNotify')?.click()"); await w.wait(700)
+                await w.ev("Nutcade.closeSheet()"); await w.home()
+            async def observe(w, label, pin, a):
+                """what someone holding this wallet sees: an arrival in a background tab with notifications off, then on, then locked"""
+                o = {}
+                await dismiss(w); await notify(w, False)
+                ok1 = await bg_claim(w, a); o['off'] = [(n['title'], n['body']) for n in await w.ev("__sys")] + [(n['title'], n['body']) for n in await w.ev(SYSN_JS)]
+                await w.ev("__hide(false)"); await w.wait(500); await w.ev("Nutcade.closeSheet()"); await dismiss(w)
+                await notify(w, True)
+                ok2 = await bg_claim(w, a + 1); o['on'] = [(n['title'], n['body']) for n in await w.ev("__sys")]
+                o['shown'] = sorted((n['title'], n['body']) for n in await w.ev(SYSN_JS))
+                await w.pg.reload(); await w.wait(2000)   # (locked, as after the auto-lock)
+                o['locked'] = sorted((n['title'], n['body']) for n in await w.ev(SYSN_JS))
+                o['lock screen'] = bool(re.search(r'Money arrived, unlock to see', await w.ev("document.body.innerText")))
+                await unlock(w, pin); await settled(w); await w.wait(600)
+                o['after unlock'] = await w.ev(SYSN_JS)
+                o['summary'] = [c['type'] for c in await cards(w)]
+                await w.ev("Nutcade.closeSheet()"); await dismiss(w)
+                await settings(w); o['help'] = await w.ev("(document.querySelector('#arrNotifyHelp')||{}).textContent||''"); await w.ev("Nutcade.closeSheet()"); await w.home()
+                check(f'sysduress {label}: (both arrivals came in)', ok1 and ok2, (ok1, ok2))
+                return o
+            GEN, LOCKED = ('NUTCADE', 'Money arrived. Open NUTCADE to see.'), ('NUTCADE', 'Money arrived, unlock to see.')
+            seen = {}
+            w1 = await wallet(b, notif=True); await w1.create(); await w1.add_mint(FREE); await w1.use(FREE); await w1.receive_ln(3000); await w1.wait(1500); await set_pin(w1)
+            seen['a PIN only'] = await observe(w1, 'a PIN only', PIN, 531); await w1.pg.context.close()
+            w2 = await wallet(b, notif=True); await w2.create(); await w2.add_mint(FREE); await w2.use(FREE); await w2.receive_ln(3000); await w2.wait(1500); await set_pin(w2)
+            await settings(w2); await w2.click('[data-act=duressOpen]'); await w2.wait(250)
+            await pad(w2, PIN); await w2.wait(800); await pad(w2, DPIN); await w2.wait(300); await pad(w2, DPIN)
+            await w2.until("!!document.querySelector('#duressAmt')", 8000); await w2.fill('#duressAmt', '300'); await w2.click('[data-act=duressMake]')
+            await w2.until("/READY/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 30000); await w2.ev("Nutcade.closeSheet()"); await w2.home()
+            seen['a PIN and a duress PIN, the real wallet'] = await observe(w2, 'a PIN and a duress PIN, the real wallet', PIN, 541)
+            await w2.pg.reload(); await w2.wait(900); await unlock(w2, DPIN); await settled(w2); await w2.wait(400); await dismiss(w2)
+            check('sysduress (the duress PIN\'s wallet is open)', await w2.ev("!!Nutcade.vault.decoy"))
+            seen['a PIN and a duress PIN, the duress PIN\'s wallet'] = await observe(w2, 'a PIN and a duress PIN, the duress PIN\'s wallet', DPIN, 551)
+            ref = seen['a PIN only']
+            check('sysduress a PIN only: notifications off, none; on, one that says only "Money arrived. Open NUTCADE to see."; locked, only "unlock to see", also on the lock screen; cleared on unlocking; the arrival in the summary',
+                  ref['off'] == [] and ref['on'] == [GEN] and ref['shown'] == [GEN] and ref['locked'] == [LOCKED] and ref['lock screen'] and ref['after unlock'] == [] and ref['summary'] == ['away'], ref)
+            for k, o in seen.items():
+                if k == 'a PIN only': continue
+                check(f'sysduress {k}: exactly what a PIN-only wallet shows (the same words in the same cases: nothing gives the duress PIN away, by text or by silence)', o == ref, {x: (o[x], ref[x]) for x in o if o[x] != ref[x]})
+            check('sysduress the notifications help says nothing of a duress PIN', all('duress' not in o['help'].lower() and 'With a PIN' in o['help'] for o in seen.values()), [o['help'] for o in seen.values()])
+            # the duress PIN turned off: its wallet's sats come back to the real one, and that is not money arriving
+            await w2.pg.reload(); await w2.wait(900); await unlock(w2, PIN); await settled(w2); await dismiss(w2)
+            log0 = len(await w2.ev(LOG_JS)); t0 = await w2.ev("Date.now()")
+            await settings(w2); await w2.click('[data-act=duressOpen]'); await w2.wait(250); await pad(w2, PIN); await w2.until("!!document.querySelector('[data-act=duressOff]')", 8000)
+            await w2.click('[data-act=duressOff]'); await w2.wait(300); await w2.click('[data-act=duressOffGo]'); await w2.until("!document.querySelector('[data-act=duressOffGo]')", 30000); await w2.wait(2000)
+            back = await w2.ev(f"Nutcade.S.txs.filter(t=>t.type==='in'&&t.status==='done'&&t.ts>={t0}).map(t=>({{id:t.id, amount:t.amount, note:t.note, back:t.back||null}}))")
+            sn = await w2.ev(SEEN_JS); ev = [e for e in (await w2.ev(LOG_JS))[log0:] if any(x['id'] in e['ids'] for x in back)]
+            check('sysduress duress PIN turned off: (its wallet\'s sats came back: 300 + 551 + 552 SAT)', bool(back) and sum(x['amount'] for x in back) == 300 + 551 + 552 and all(x['note'] == "Back from the duress PIN's wallet" for x in back), back)
+            check('sysduress duress PIN turned off: the sats coming back are not announced as money arriving', bool(back) and not ev and not [x for x in back if x['id'] in sn] and not await cards(w2), (back, ev))
+            await w2.pg.context.close()
 
         # ---------- big amounts (up to 9,999,999 SAT) and long labels: the amount is never cut, in every language ----------
         if want('amounts'):

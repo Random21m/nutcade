@@ -194,7 +194,7 @@ async function continueExtra(quiet) {
     try { res = await journaled(url, 'send', { inputs: ins, amount: target, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow }, (cb, o) => rSend(o, w, target, ins, { includeFees: false, privkey: x.unlocked ? undefined : [myLockPriv()], onCountersReserved: cb }, cfg)); }
     finally { w._selectProofs = pick; }
     const { r: { keep, send }, op } = res;
-    if (keep.length) { addProofs(url, keep); addTx({ type: 'in', method: 'ecash', amount: sum(plain(keep)), mint: url, note: `Extra Life cashed out (was for ${x.heir.name})` }); }   // (none: the amount is exact)
+    if (keep.length) { addProofs(url, keep); addTx({ type: 'in', method: 'ecash', amount: sum(plain(keep)), mint: url, note: `Extra Life cashed out (was for ${x.heir.name})`, self: true }); }   // (none: the amount is exact)
     Object.assign(x, { proofs: plain(send), until, renewed: Date.now(), amount: Math.min(x.amount, sum(plain(send))) }); delete x.unlocked; saveExtra(); closeOp(op); save();
     return until;
   });
@@ -205,7 +205,7 @@ async function continueExtra(quiet) {
 async function cashOutExtra() {
   const x = S.extra; if (!x) return;
   const f = { k: 'extra-end', heir: x.heir, secrets: x.proofs.map(p => p.secret) };
-  const tx = await receiveToken(extraToken(), `Extra Life cashed out (was for ${x.heir.name})`, { own: true, follow: f });
+  const tx = await receiveToken(extraToken(), `Extra Life cashed out (was for ${x.heir.name})`, { own: true, hand: true, follow: f });
   extraEnded(f);
   return tx;
 }
