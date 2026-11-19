@@ -334,7 +334,7 @@ async function fundDecoyNow(dek, data, url, token) {
   const w = new L.Wallet(url, { unit: 'sat', bip39seed: L.mnemonicToSeedSync(data.seed.mnemonic), counterSource: cs }); await w.loadMint();
   const ps = (w.decodeToken(cleanToken(token)).proofs || []), m = mintMax(url);
   const wait = (data.txs || []).find(t => t.incoming === cleanToken(token) && t.status === 'pending');   // (the token's line in that wallet: settled with the step, if it comes to that)
-  const op = { id: uid(), kind: 'receive', mint: url, inputs: ps.map(p => p.secret), amount: 0, note: '', locked: false, extra: false, txId: null, tx: null, follow: wait ? { k: 'incoming', txId: wait.id, reqId: null } : null, own: null, created: Date.now(), ctr: [], outs: [] };
+  const op = { id: uid(), kind: 'receive', mint: url, inputs: ps.map(p => p.secret), amount: 0, note: '', locked: false, extra: false, txId: null, tx: null, follow: wait ? { k: 'incoming', txId: wait.id, reqId: null } : null, own: null, created: Date.now(), ctr: [], outs: [], mk: 1 };
   const prepared = await w.prepareSwapToReceive(cleanToken(token), { onCountersReserved: u => { if (u && u.count > 0) op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); } });
   const outs = (prepared.keepOutputs || []).length + (prepared.sendOutputs || []).length;
   if (m && (ps.length > m || outs > m)) return;   // (more than the mint takes in one request: claimed in parts when that wallet opens)
@@ -378,7 +378,7 @@ async function duressOff() {
     for (const p of d.pending || []) if (p.proofs && p.proofs.length && !p.paid) toks.push(L.getEncodedToken({ mint: p.mint, proofs: p.proofs, unit: 'sat' }));
   }
   const ids = [];
-  for (const t of toks) { try { const meta = peekToken(t); if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: true }).catch(() => {}); const h = holdIncoming(t, "Back from the duress PIN's wallet"); updTx(h.id, { mine: true }); ids.push(h.id); } catch (e) {} }
+  for (const t of toks) { try { const meta = peekToken(t); if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: true }).catch(() => {}); const h = holdIncoming(t, "Back from the duress PIN's wallet"); updTx(h.id, { mine: true, back: 'hand' }); ids.push(h.id); } catch (e) {} }
   save(); await vault.chain;
   rec.slot = fillerSlot(); raw.set('vault', rec);
   delete vault.data.duress; queueVaultWrite(); await vault.chain;
@@ -711,7 +711,7 @@ function tokenParts(w, proofs, m) {
   return go(0) ? parts.map(g => g.slice()) : null;
 }
 async function receiveInParts(w, meta, token, note, parts, own, mine, back) {
-  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true }, mine ? { mine: true } : {}, back ? { back } : {})));
+  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true, mk: 1 }, mine ? { mine: true } : {}, back ? { back } : {})));   // (mk: its mark, or none for an Extra Life left to you, is what it says)
   save();   // (every part is saved before the first is claimed: if NUTCADE closes in between, the rest are claimed later)
   let got = 0, last = null, err = null;
   for (const t of lines) {

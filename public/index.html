@@ -3973,6 +3973,26 @@ function ownSent(token) {
   const same = S.txs.find(t => out(t) && t.token === token); if (same) return same;
   const k = tokSecrets(token); return k ? S.txs.find(t => out(t) && tokSecrets(t.token) === k) || null : null;
 }
+/* Our own coins coming back are marked on their line ('hand' / 'auto' / self) by the code that claims them, and the
+   mark is kept on the claim's record (op.back / op.self) and on a part saved to claim later. Records and saved lines
+   written before 1.16.0 have no marks (op.mk / t.mk tell a newer one): for those it is derived once, when they are
+   settled or claimed, from what such a record holds (never from a received token's memo alone): a token of ours
+   (op.own) taken back by hand, or "came back to you" for a gift, bounty or treasure nobody opened or a payment request
+   that couldn't be delivered (the app's own note); an Extra Life cashed out; the duress PIN's wallet's sats or a part
+   of our own token saved as "mine" (but an Extra Life left to you, also "mine", is money arriving); a sweep of another
+   phrase. */
+const backByNote = n => /^(Gift came back|Payment request couldn't be delivered)/.test(n || '') ? 'auto' : 'hand';
+const heldBack = h => !h ? null : h.back || (h.mine && !h.mk && !/^Extra Life from /.test(h.note || '') ? backByNote(h.note) : null);
+function opMarks(op) {
+  if (op.back) return { back: op.back };
+  if (op.self) return { self: true };
+  if (op.mk || op.kind !== 'receive' || op.dep) return {};
+  const f = op.follow || {};
+  if (op.own) return { back: backByNote(op.note) };
+  if (f.k === 'extra-end') return { back: 'hand' };
+  if (f.k === 'incoming') { const b = heldBack(txById(f.txId)); return b ? { back: b } : {}; }
+  return !f.k && op.note === 'Restored from another phrase' ? { self: true } : {};
+}
 function receiveToken(token, note, opts = {}) {
   let mint = null; try { mint = normUrl(peekToken(cleanToken(token)).mint); } catch (e) {}
   return mint ? tooManyRetry(mint, () => mintLock(mint, () => receiveTokenNow(token, note, opts))) : receiveTokenNow(token, note, opts);
@@ -3992,7 +4012,10 @@ async function receiveTokenNow(token, note, opts = {}) {
   // scanned into Receive), 'auto' when it came back by itself (a gift nobody opened); a part saved to claim later keeps it,
   // and so do the duress PIN's wallet's sats coming back (saved here as "mine" when the duress PIN is turned off)
   const held = f0.k === 'incoming' ? txById(f0.txId) || {} : {};
-  const back = opts.own || ownTx ? (opts.hand || !opts.own ? 'hand' : 'auto') : held.back || (held.mine ? 'hand' : null);
+  // (your own token handed back over Nostr by the one you sent it to, re-encoded, or saved to claim later: it came back
+  // by itself, as a gift nobody opened does: 'auto', "Came back to you")
+  const came = opts.came || (f0.k === 'incoming' && !held.mine && !held.back);
+  const back = opts.own || ownTx ? (opts.own ? (opts.hand ? 'hand' : 'auto') : came ? 'auto' : 'hand') : heldBack(held);
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: mine });
   const w = await getWallet(meta.mint);
   if (belowMin(meta.mint) && !mine) throw minErr(meta.mint);   // (no new deposits at a mint below the minimum)
@@ -4355,6 +4378,7 @@ const closeOp = op => { S.ops = S.ops.filter(o => o.id !== op.id); S.opsdone = [
 async function journaled(url, kind, info, run) {
   const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, follow: info.follow || null, own: info.own || null, created: Date.now(), ctr: [], outs: [] };
   if (info.lim && info.lim.id) op.lim = { id: info.lim.id, a: info.lim.a, at: Date.now() };
+  op.mk = 1;   // (written by 1.16.0 or later: a claim of our own coins is marked below; see opMarks for older records)
   if (info.back) op.back = info.back;   // (a token of ours coming back: its line says so when it is settled from this record)
   if (info.self) op.self = 1;   // (your own coins found again, a sweep of another phrase: the same)
   if (info.dep) op.dep = 1;   // (a deposit's mint request: no coins go in)   // (counts toward the spending limit until it settles)
@@ -4545,7 +4569,7 @@ async function settleOpNow(id) {
   const waitingTx = op.txId && (txById(op.txId) || {}).status === 'pending' ? op.txId : null;   // a deposit waiting for exactly this: it gets it
   // a claim or deposit: the line is what was received (the token less the mint's fee), and what of it was spent since has its own line
   if (op.kind === 'receive' && added + spentOut && waitingTx) { updTx(waitingTx, { status: 'done', amount: added + spentOut, ts: Date.now() }); spentElsewhere(op.mint, spentOut, op.impLine); }
-  else if (op.kind === 'receive') { if (added + spentOut) { const t = addTx(Object.assign({ type: 'in', method: 'ecash', amount: added + spentOut, fee: inFee(op.amount, signed, op.own && txById(op.own)), mint: op.mint, note: op.note || '', settled: true }, op.back ? { back: op.back } : {}, op.self ? { self: true } : {})); spentElsewhere(op.mint, spentOut, op.impLine); if (op.extra && S.extra) { S.extra = null; saveExtra(); } receiveDone(op, t); } }
+  else if (op.kind === 'receive') { if (added + spentOut) { const t = addTx(Object.assign({ type: 'in', method: 'ecash', amount: added + spentOut, fee: inFee(op.amount, signed, op.own && txById(op.own)), mint: op.mint, note: op.note || '', settled: true }, opMarks(op))); spentElsewhere(op.mint, spentOut, op.impLine); if (op.extra && S.extra) { S.extra = null; saveExtra(); } receiveDone(op, t); } }
   else if (lockedOut.length) {
     // (a token that carries the receiver's fee on top of its amount: that part is the sender's fee, as when nothing is interrupted)
     const ps = plain(lockedOut), amount = Math.min(op.amount || sum(ps), sum(ps)), fee = fee0 + sum(ps) - amount;
@@ -6274,7 +6298,7 @@ async function receivePayload(p, from) {
     return;
   }
   try {
-    const tx = await receiveToken(token, note, req ? { follow: { k: 'req', reqId: req.id } } : {});
+    const tx = await receiveToken(token, note, req ? { follow: { k: 'req', reqId: req.id }, came: true } : { came: true });   // (came: one of our own tokens handed back this way came back by itself)
     updTx(tx.id, { reqId: p.id || null });
     if (!req) arrivalFrom(tx.id, 'nostr');   // (arrival notices: src/app_arrive.js)
     if (req) reqPaid(req.id, tx);
@@ -9313,7 +9337,7 @@ async function fundDecoyNow(dek, data, url, token) {
   const w = new L.Wallet(url, { unit: 'sat', bip39seed: L.mnemonicToSeedSync(data.seed.mnemonic), counterSource: cs }); await w.loadMint();
   const ps = (w.decodeToken(cleanToken(token)).proofs || []), m = mintMax(url);
   const wait = (data.txs || []).find(t => t.incoming === cleanToken(token) && t.status === 'pending');   // (the token's line in that wallet: settled with the step, if it comes to that)
-  const op = { id: uid(), kind: 'receive', mint: url, inputs: ps.map(p => p.secret), amount: 0, note: '', locked: false, extra: false, txId: null, tx: null, follow: wait ? { k: 'incoming', txId: wait.id, reqId: null } : null, own: null, created: Date.now(), ctr: [], outs: [] };
+  const op = { id: uid(), kind: 'receive', mint: url, inputs: ps.map(p => p.secret), amount: 0, note: '', locked: false, extra: false, txId: null, tx: null, follow: wait ? { k: 'incoming', txId: wait.id, reqId: null } : null, own: null, created: Date.now(), ctr: [], outs: [], mk: 1 };
   const prepared = await w.prepareSwapToReceive(cleanToken(token), { onCountersReserved: u => { if (u && u.count > 0) op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); } });
   const outs = (prepared.keepOutputs || []).length + (prepared.sendOutputs || []).length;
   if (m && (ps.length > m || outs > m)) return;   // (more than the mint takes in one request: claimed in parts when that wallet opens)
@@ -9357,7 +9381,7 @@ async function duressOff() {
     for (const p of d.pending || []) if (p.proofs && p.proofs.length && !p.paid) toks.push(L.getEncodedToken({ mint: p.mint, proofs: p.proofs, unit: 'sat' }));
   }
   const ids = [];
-  for (const t of toks) { try { const meta = peekToken(t); if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: true }).catch(() => {}); const h = holdIncoming(t, "Back from the duress PIN's wallet"); updTx(h.id, { mine: true }); ids.push(h.id); } catch (e) {} }
+  for (const t of toks) { try { const meta = peekToken(t); if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: true }).catch(() => {}); const h = holdIncoming(t, "Back from the duress PIN's wallet"); updTx(h.id, { mine: true, back: 'hand' }); ids.push(h.id); } catch (e) {} }
   save(); await vault.chain;
   rec.slot = fillerSlot(); raw.set('vault', rec);
   delete vault.data.duress; queueVaultWrite(); await vault.chain;
@@ -9690,7 +9714,7 @@ function tokenParts(w, proofs, m) {
   return go(0) ? parts.map(g => g.slice()) : null;
 }
 async function receiveInParts(w, meta, token, note, parts, own, mine, back) {
-  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true }, mine ? { mine: true } : {}, back ? { back } : {})));
+  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true, mk: 1 }, mine ? { mine: true } : {}, back ? { back } : {})));   // (mk: its mark, or none for an Extra Life left to you, is what it says)
   save();   // (every part is saved before the first is claimed: if NUTCADE closes in between, the rest are claimed later)
   let got = 0, last = null, err = null;
   for (const t of lines) {
@@ -10444,7 +10468,7 @@ function arrivalSeen(t) {
 }
 // where a receive knows more than its line says (ecash that came over Nostr)
 function arrivalFrom(id, k) {
-  try { const l = arrLedger(), p = l.pend.find(x => x.id === id); if (p && p.k !== 'request') { p.k = k; raw.set('arrivals', l); } } catch (e) {}
+  try { const l = arrLedger(), p = l.pend.find(x => x.id === id); if (p && p.k !== 'request' && p.k !== 'back') { p.k = k; raw.set('arrivals', l); } } catch (e) {}
 }
 const arrItem = p => { const t = txById(p.id); if (!t || !arrQual(t)) return null; return { id: t.id, k: t.reqId ? 'request' : ARR_KINDS.includes(p.k) ? p.k : 'token', a: num(t.amount), m: t.mint }; };
 function arrSeen(ids) {
@@ -11574,7 +11598,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a) }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON } };
+window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON } };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}

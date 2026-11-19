@@ -7,7 +7,8 @@ npub.cash Lightning address, a Wallet Connect make_invoice paid) x NUTCADE open 
 reopened / locked; plus two tabs (one notice), a reload mid-arrival, a restore from the 12 words (no flood for old
 history), the duress PIN's wallet (only the open wallet's own arrivals, the other never shown; system notifications exactly as with
 a PIN alone in both wallets), a sender's memo that reads like the app's own note, your own token in another encoding, a
-deposit recovered after its answer was lost, sound on and off,
+deposit recovered after its answer was lost, claims cut off by 1.15.0 settled by this version (after a reload or from
+a 1.15 backup), your own token handed back over Nostr, sound on and off,
 system notifications off / on / permission denied, five languages and 320 / 1440 px wide screens.
 
 Exact: a summary's count and total per kind equal the history lines that arrived in that window, and no arrival is
@@ -16,7 +17,7 @@ announced twice (across reloads, tabs and restores).
 Uses two local test mints (ARR_FEE, default 3338, with input fees; ARR_FREE, default 3339, without) and mock_nostr.py
 (ARR_NOSTR, default ws://127.0.0.1:3350/relay; it also stands in for npub.cash). ARR_ONLY=a,b runs some sections
 (open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, own, own2, toast, memo, own3, reenc, recover, sysduress,
-langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
+legacy, langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
 (default QA_OUT)."""
 import asyncio, json, os, re, time, urllib.request
 from playwright.async_api import async_playwright
@@ -1020,6 +1021,155 @@ async def main():
             check('sysduress duress PIN turned off: (its wallet\'s sats came back: 300 + 551 + 552 SAT)', bool(back) and sum(x['amount'] for x in back) == 300 + 551 + 552 and all(x['note'] == "Back from the duress PIN's wallet" for x in back), back)
             check('sysduress duress PIN turned off: the sats coming back are not announced as money arriving', bool(back) and not ev and not [x for x in back if x['id'] in sn] and not await cards(w2), (back, ev))
             await w2.pg.context.close()
+
+        # ---------- claims cut off by 1.15.0 (the upgrade side of finding 1) and your own token handed back over Nostr
+        # (finding 2). The grid: every kind of claim record x saved by 1.16 (control) / saved by 1.15.0 (no marks) and
+        # settled after a reload / saved by 1.15.0 inside a backup imported into another device. Each claim's mint answer
+        # is lost (the mint signs, the page never hears it), so the claim is finished from its record. Our own coins are
+        # never announced; what came back by itself is "Came back to you"; a stranger's ecash is announced whatever its
+        # memo; the books are exact (balance up by the line, our sent token reclaimed). ----------
+        if want('legacy'):
+            # (a receiver of its own: the main one may have a PIN by now, and these cells reload it)
+            rl = await wallet(b, notif=True); await rl.create(); await rl.add_mint(FREE); await rl.use(FREE)
+            await rl.receive_ln(1000); await rl.wait(1500); await dismiss(rl); rlpk = await npub_hex(rl)
+            ppk = await npub_hex(p)
+            SWAP = re.compile(re.escape(FREE) + r'/v1/swap$'); HOLD = re.compile(re.escape(FREE) + r'/v1/(restore|checkstate)$')
+            async def lose(route):
+                try: await route.fetch()
+                except Exception: pass
+                await route.abort()
+            async def drop(route): await route.abort()
+            async def cut(): await rl.pg.route(SWAP, lose); await rl.pg.route(HOLD, drop)   # (from here the mint's answers are lost)
+            # what 1.15.0 wrote: no back / self on a claim's record and no mk on it or on a part saved to claim later
+            STRIP = "(o=>{delete o.back; delete o.self; delete o.mk})"
+            STRIP_JS = f"""(()=>{{const s={STRIP}, ops=JSON.parse(localStorage.getItem('nutcade:ops')||'[]'), txs=JSON.parse(localStorage.getItem('nutcade:txs')||'[]');
+              ops.forEach(s); txs.filter(t=>t.incoming).forEach(s); localStorage.setItem('nutcade:ops', JSON.stringify(ops)); localStorage.setItem('nutcade:txs', JSON.stringify(txs));
+              Nutcade.S.ops.forEach(s); Nutcade.S.txs.filter(t=>t.incoming).forEach(s); return ops.length}})()"""
+            SELF_JS = """(()=>{const ops=JSON.parse(localStorage.getItem('nutcade:ops')||'[]'); ops.forEach(o=>o.self=1); localStorage.setItem('nutcade:ops', JSON.stringify(ops)); Nutcade.S.ops.forEach(o=>o.self=1)})()"""
+            BAL_JS = "(Nutcade.S.proofs[%s]||[]).reduce((t,p)=>t+p.amount,0)" % J(FREE)
+            HEIR = {'name': 'Bob', 'pubkey': ppk}
+            lx = iter(range(21, 999, 3))
+            async def own_tok(a): return await rl.ev(f"Nutcade.r8.sendEcash({a}, 'for lunch').then(t=>({{id:t.id, token:t.token, sent:t.sent}}))")
+            async def go(w, js): await w.ev(f"(()=>{{{js}.catch(()=>{{}}); return 1}})()")
+            async def nostr_back(proofs, memo=None):   # (our own coins handed back by their receiver over Nostr, re-encoded)
+                return await p.ev(f"""(async()=>{{const ev=CashuLib.nip17.wrapEvent(crypto.getRandomValues(new Uint8Array(32)), {{publicKey:{J(rlpk)}}}, JSON.stringify({{mint:{J(FREE)}, unit:'sat', proofs:{J(proofs)}, memo:{J(memo) if memo else 'undefined'}}}));
+                  return await new Promise(res=>{{const ws=new WebSocket({J(NOSTR)}); ws.onopen=()=>ws.send(JSON.stringify(['EVENT',ev])); ws.onmessage=m=>{{const d=JSON.parse(m.data); if(d[0]==='OK'){{ws.close(); res(d[2])}}}}; setTimeout(()=>res('timeout'),8000)}})}})()""")
+            # each kind: (name, starts the claim on rl and returns (note pattern, our sent line id or None), what its line is marked, announced as)
+            async def k_takeback(a):
+                o = await own_tok(a); await cut()
+                await rl.ev(f"(()=>{{const b=document.createElement('button'); b.dataset.act='reclaim'; b.dataset.id={J(o['id'])}; document.body.appendChild(b); b.click(); b.remove()}})()")
+                return '^Reclaimed: ', o['id']
+            async def k_paste(a):
+                o = await own_tok(a); await cut(); await rl.home(); await rl.click('[data-act=receive]'); await rl.wait(150); await rl.click('[data-act=recvMethod][data-m=ecash]'); await rl.wait(100)
+                await rl.fill('#tokIn', o['token']); await rl.fill('#noteIn', 'pasted back'); await rl.click('[data-act=doReceiveToken]'); return '^pasted back$', o['id']
+            async def k_gift(a):
+                o = await own_tok(a); await cut(); await go(rl, f"Nutcade.r8.recv({J(o['token'])}, 'Gift came back from Bob', {{own:true}})"); return '^Gift came back from Bob$', o['id']
+            async def k_request(a):
+                o = await own_tok(a); await cut(); await go(rl, f"Nutcade.r8.recv({J(o['token'])}, \"Payment request couldn't be delivered: the sats came back\", {{own:true}})"); return "^Payment request couldn't", o['id']
+            async def k_extra(a):
+                tok = await token_from(p, a, FREE); await cut()
+                await go(rl, f"Nutcade.r8.recv({J(tok)}, 'Extra Life cashed out (was for Bob)', {{own:true, hand:true, follow:{{k:'extra-end', heir:{J(HEIR)}, secrets:[]}}}})"); return '^Extra Life cashed out', None
+            async def k_duress(a):   # (the duress PIN turned off: its wallet's sats saved as "mine", then claimed)
+                tok = await token_from(p, a, FREE)
+                h = await rl.ev(f"Nutcade.r8.hold({J(tok)}, \"Back from the duress PIN's wallet\", {{mine:true, back:'hand'}}).id"); await cut()
+                await go(rl, f"Nutcade.r8.recv({J(tok)}, \"Back from the duress PIN's wallet\", {{follow:{{k:'incoming', txId:{J(h)}, reqId:null}}}})"); return "^Back from the duress", None
+            async def k_sweep(a):   # (a sweep of another phrase: its record is marked self when 1.16 writes it)
+                tok = await token_from(p, a, FREE); await cut()
+                await go(rl, f"Nutcade.r8.recv({J(tok)}, 'Restored from another phrase', {{}})"); return '^Restored from another phrase$', None
+            async def k_heir(a):   # (an Extra Life left to you, claimed in parts: its parts are saved "mine", and it is money arriving)
+                tok = await token_from(p, a, FREE)
+                h = await rl.ev(f"Nutcade.r8.hold({J(tok)}, 'Extra Life from Bob (part 1 of 2)', {{mine:true, mk:1}}).id"); await cut()
+                await go(rl, f"Nutcade.r8.recv({J(tok)}, 'Extra Life from Bob (part 1 of 2)', {{follow:{{k:'incoming', txId:{J(h)}, reqId:null}}}})"); return '^Extra Life from Bob', None
+            async def k_memo(memo):
+                async def f(a):
+                    tok = await p.ev(WITH_MEMO_JS % (J(await token_from(p, a, FREE)), J(memo))); await cut(); await claim(rl, tok); return '^' + re.escape(memo) + '$', None
+                return f
+            async def k_memo_nostr(a):
+                await cut(); await dm(p, rlpk, a, FREE, 'Gift came back from Bob'); return '^Gift came back from Bob$', None
+            async def k_nostr_own(a):
+                o = await own_tok(a); await cut(); await nostr_back([{k: v for k, v in x.items() if k != 'dleq'} for x in o['sent']], 'here you go'); return '^here you go$', o['id']
+            KINDS_L = [   # name, start, mark, announced as (None: not announced), modes
+                ('a token taken back (Take back)', k_takeback, ('back', 'hand'), None, 'all'),
+                ('your own token pasted back', k_paste, ('back', 'hand'), None, 'all'),
+                ('a gift nobody opened, back by itself', k_gift, ('back', 'auto'), 'Came back to you', 'all'),
+                ("a payment request that couldn't be delivered", k_request, ('back', 'auto'), 'Came back to you', 'all'),
+                ('an Extra Life cashed out', k_extra, ('back', 'hand'), None, 'all'),
+                ("the duress PIN's wallet's sats coming back", k_duress, ('back', 'hand'), None, 'all'),
+                ('a sweep of another phrase', k_sweep, ('self', True), None, 'all'),
+                ('an Extra Life left to you, a part saved to claim', k_heir, ('back', None), 'Ecash claimed', 'all'),
+                ("a stranger's token, memo 'Reclaimed: lol'", await k_memo('Reclaimed: lol'), ('back', None), 'Ecash claimed', 'all'),
+                ("a stranger's token, memo 'Gift came back from Bob'", await k_memo('Gift came back from Bob'), ('back', None), 'Ecash claimed', 'all'),
+                ("a stranger's token, memo 'Extra Life cashed out (was for Bob)'", await k_memo('Extra Life cashed out (was for Bob)'), ('back', None), 'Ecash claimed', 'all'),
+                # (a 1.15 record of this one reads exactly like a 1.15 sweep: only the 1.16 record tells them apart)
+                ("a stranger's token, memo 'Restored from another phrase'", await k_memo('Restored from another phrase'), ('back', None), 'Ecash claimed', '1.16'),
+                # (ecash over Nostr whose claim is finished from its record is "Ecash claimed", as before)
+                ("a stranger's ecash over Nostr, memo 'Gift came back from Bob'", k_memo_nostr, ('back', None), 'Ecash claimed', 'all'),
+                # (a 1.15 record of your own token handed back over Nostr has op.own like a pasted one: taken back by hand)
+                ('your own token handed back over Nostr (re-encoded)', k_nostr_own, ('back', 'auto'), 'Came back to you', '1.16'),
+            ]
+            imp = None
+            async def importer():
+                nonlocal imp
+                if imp is None: imp = await wallet(b, notif=True); await imp.create(); await imp.wait(500)
+                return imp
+            for name, start, (mk, mv), label, modes in KINDS_L:
+                for mode in ('1.16, reload', '1.15, reload', '1.15, backup imported'):
+                    if modes == '1.16' and not mode.startswith('1.16'): continue
+                    tag = f'legacy {name} [{mode}]'
+                    await rl.ev("Nutcade.closeSheet()"); await rl.home(); await dismiss(rl); a = next(lx)
+                    t0 = await rl.ev("Date.now()"); pat, own = await start(a)
+                    has_op = await rl.until("JSON.parse(localStorage.getItem('nutcade:ops')||'[]').some(o=>o.kind==='receive')", 15000); await rl.wait(2500); await rl.ev("Nutcade.closeSheet()")
+                    if name.startswith('a sweep') and mode.startswith('1.16'): await rl.ev(SELF_JS)
+                    if mode.startswith('1.15'): await rl.ev(STRIP_JS)
+                    rec = await rl.ev("JSON.parse(localStorage.getItem('nutcade:ops')||'[]').filter(o=>o.kind==='receive').map(o=>({back:o.back||null, self:o.self||null, mk:o.mk||null, own:!!o.own, k:(o.follow||{}).k||null, note:o.note}))")
+                    check(f'{tag}: (the claim\'s answer was lost: its record waits, as {"1.15.0" if mode.startswith("1.15") else "1.16"} saved it)', has_op and len(rec) == 1 and (not mode.startswith('1.15') or not any(x['back'] or x['self'] or x['mk'] for x in rec)), rec)
+                    w = rl
+                    if mode.endswith('imported'):
+                        bk = await rl.ev("Promise.resolve(Nutcade.r8.backupData()).then(d=>typeof d==='string'?d:JSON.stringify(d))")
+                        bk = J({**json.loads(bk), 'ops': [{k: v for k, v in o.items() if k not in ('back', 'self', 'mk')} for o in json.loads(bk).get('ops', [])],
+                                'txs': [{k: v for k, v in t.items() if not (t.get('incoming') and k in ('back', 'mk'))} for t in json.loads(bk).get('txs', [])]})
+                        w = await importer(); await w.ev("Nutcade.closeSheet()"); await dismiss(w)
+                        b0 = await w.ev(BAL_JS); t0 = await w.ev("Date.now()")
+                        res = await w.ev(f"Nutcade.r8.importBackup(JSON.parse({J(bk)})).then(()=>'ok', e=>'ERR '+e.message)")
+                        await rl.pg.unroute(SWAP); await rl.pg.unroute(HOLD); await rl.pg.reload(); await rl.wait(800); await settled(rl)   # (the record settled on its own device too)
+                    else:
+                        b0 = await rl.ev(BAL_JS)
+                        await rl.pg.unroute(SWAP); await rl.pg.unroute(HOLD); await rl.pg.reload(); await rl.wait(800); await settled(rl)
+                    ok = await wait_line(w, f"t.ts>={t0}&&t.amount==={a}&&new RegExp({J(pat)}).test(t.note||'')", 40000); await w.wait(2500); await settled(w)
+                    line = await w.ev(f"Nutcade.S.txs.find(t=>t.type==='in'&&t.status==='done'&&t.ts>={t0}&&t.amount==={a}&&new RegExp({J(pat)}).test(t.note||''))||null")
+                    seen = await w.ev(SEEN_JS) or []; cs = [c for c in await cards(w) if line and line['id'] in c['ids']]
+                    got = line and (line.get(mk) if mk == 'back' else bool(line.get(mk)))
+                    check(f'{tag}: settled from its record, its line marked {mk}={mv}', ok and bool(line) and got == mv, (line and {k: line.get(k) for k in ('note', 'amount', 'back', 'self')}))
+                    if label is None:
+                        check(f'{tag}: not announced as money arriving', bool(line) and line['id'] not in seen and not cs, (line and line.get('note'), [c['text'] for c in cs]))
+                    else:
+                        # (a live notice names its kind; in a "while you were away" summary it is the kind waiting on the arrivals record)
+                        pk = None
+                        if cs and cs[0]['type'] == 'away': sr = await summary_rows(w); pk = sr and sorted(sr['rows']); said = (sr or {}).get('text', '')
+                        else: said = cs[0]['text'] if cs else ''
+                        check(f'{tag}: announced once, as "{label}"', bool(line) and seen.count(line['id']) == 1 and len(cs) == 1 and label in said and (label == 'Came back to you' or 'Came back to you' not in said), (line and line.get('note'), [c['text'] for c in cs], pk))
+                    if not mode.endswith('imported'):
+                        b1 = await rl.ev(BAL_JS); st = own and await rl.ev(f"(Nutcade.S.txs.find(t=>t.id==={J(own)})||{{}}).status")
+                        check(f'{tag}: books exact (balance up by its line{", our sent token reclaimed" if own else ""})', bool(line) and b1 - b0 == line['amount'] and (not own or st == 'reclaimed'), (b0, b1, line and line['amount'], st))
+                    await dismiss(w); await dismiss(rl)
+            if imp: await imp.pg.context.close()
+            # your own token handed back over Nostr by the one you sent it to, the answer heard (finding 2): "Came back to you"
+            for strip in (False, True):
+                await rl.ev("Nutcade.closeSheet()"); await rl.home(); await dismiss(rl); a = 45 + strip   # (several coins)
+                o = await own_tok(a); b0 = await rl.ev(BAL_JS); log0 = len(await rl.ev(LOG_JS)); t0 = await rl.ev("Date.now()"); await rl.ev(TOASTS_JS)
+                await nostr_back([{k: v for k, v in x.items() if k != 'dleq'} for x in o['sent']] if strip else o['sent'][::-1])   # (without the DLEQ proofs, or in another order: never the very text we sent)
+                ok = await wait_line(rl, f"t.ts>={t0}&&t.amount>0", 25000); await rl.wait(2000)
+                line = await rl.ev(f"Nutcade.S.txs.find(t=>t.type==='in'&&t.status==='done'&&t.ts>={t0}&&t.amount>0)||null")
+                ann = [i for e in (await rl.ev(LOG_JS))[log0:] for i in e['ids']]; cs = [c for c in await cards(rl) if line and line['id'] in c['ids']]
+                st = await rl.ev(f"(Nutcade.S.txs.find(t=>t.id==={J(o['id'])})||{{}}).status"); b1 = await rl.ev(BAL_JS); ts = await rl.ev("window.__toasts")
+                tag = f'legacy your own token handed back over Nostr ({"without its DLEQ proofs" if strip else "its coins in another order"})'
+                check(f'{tag}: claimed, marked came back by itself (back auto)', ok and bool(line) and line.get('back') == 'auto', line)
+                check(f'{tag}: announced once, as "Came back to you" (no toast beside it)', bool(line) and ann == [line['id']] and len(cs) == 1 and 'Came back to you' in cs[0]['text'] and not [t for t in ts if 'received' in t], (ann, [c['text'] for c in cs], ts))
+                check(f'{tag}: books exact (our sent line reclaimed, balance up by its line)', st == 'reclaimed' and bool(line) and b1 - b0 == line['amount'] and line['amount'] == a, (st, b0, b1, line and line['amount']))
+                await dismiss(rl)
+            check('legacy: no page errors', not [e for e in rl.errs + (imp.errs if imp else []) if 'PAGEERROR' in e], [e for e in rl.errs if 'PAGEERROR' in e][:5])
+            await rl.pg.context.close()
+            if await r.ev("Nutcade.vault.on && !Nutcade.vault.open"): await unlock(r); await settled(r); await dismiss(r)   # (the main receiver locked itself meanwhile)
 
         # ---------- big amounts (up to 9,999,999 SAT) and long labels: the amount is never cut, in every language ----------
         if want('amounts'):

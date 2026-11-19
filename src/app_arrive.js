@@ -72,7 +72,7 @@ function arrivalSeen(t) {
 }
 // where a receive knows more than its line says (ecash that came over Nostr)
 function arrivalFrom(id, k) {
-  try { const l = arrLedger(), p = l.pend.find(x => x.id === id); if (p && p.k !== 'request') { p.k = k; raw.set('arrivals', l); } } catch (e) {}
+  try { const l = arrLedger(), p = l.pend.find(x => x.id === id); if (p && p.k !== 'request' && p.k !== 'back') { p.k = k; raw.set('arrivals', l); } } catch (e) {}
 }
 const arrItem = p => { const t = txById(p.id); if (!t || !arrQual(t)) return null; return { id: t.id, k: t.reqId ? 'request' : ARR_KINDS.includes(p.k) ? p.k : 'token', a: num(t.amount), m: t.mint }; };
 function arrSeen(ids) {
