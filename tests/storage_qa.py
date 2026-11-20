@@ -19,7 +19,7 @@ J = json.dumps
 IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
 QUOTA = """window.__quota = false;
 (() => { const o = Storage.prototype.setItem;
-  Storage.prototype.setItem = function (k, v) { if (window.__quota && String(k).startsWith('nutcade:')) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); return o.call(this, k, v); }; })();
+  Storage.prototype.setItem = function (k, v) { if ((window.__quota && String(k).startsWith('nutcade:')) || (window.__qmax && String(k) === 'nutcade:vault' && String(v).length > window.__qmax) || (window.__qkeys && window.__qkeys.includes(String(k)))) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); return o.call(this, k, v); }; })();
 document.addEventListener('DOMContentLoaded', () => { window.__toasts = []; new MutationObserver(() => { const t = document.querySelector('#toast');
   if (t && !t.hidden && t.textContent && window.__toasts[window.__toasts.length - 1] !== t.textContent) window.__toasts.push(t.textContent); })
   .observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden'] }); });"""
@@ -167,6 +167,54 @@ async def main():
             check('PIN: no script errors', not w.errs, w.errs[:4])
             await w.pg.context.close()
 
+        # ======================= with a PIN: a direct write of the vault record while its seal is failing =======================
+        # Storage nearly full: the vault record as it is on disk still fits (window.__qmax), the newer, bigger sealed vault doesn't.
+        # Turning off Face ID and changing the PIN write the record on disk again (the old sealed data in it): that write works,
+        # but it must not count as the wallet being saved.
+        async def direct():
+            w = await funded(b, 1000); await set_pin(w); await w.home(); await chain(w)
+            await w.ev("const r=JSON.parse(localStorage.getItem('nutcade:vault')); r.bio={credId:'AA==',prfSalt:'AA==',wrap:{iv:'AA==',ct:'AA=='}}; localStorage.setItem('nutcade:vault', JSON.stringify(r))")
+            async def h(route):
+                try: await w.pg.evaluate("window.__qmax = localStorage.getItem('nutcade:vault').length + 40")
+                except Exception: pass
+                await route.continue_()
+            await w.pg.route('**/v1/mint/bolt11', h)
+            ok = await w.receive_ln(300, 'direct full'); await w.home(); await chain(w); await w.wait(300)
+            await w.pg.unroute('**/v1/mint/bolt11', h)
+            check('direct: the receive works in memory and its seal failed (notice shown)', ok and await w.bal() == 1300 and 'vault' in (await w.ev(HEALTH))['keys'] and await w.ev(FULL), (await w.bal(), await w.ev(HEALTH)))
+            await settings(w); await w.click('[data-act=bioDisable]'); await w.wait(300); await chain(w); await w.home(); await w.wait(300)
+            check('direct: Turn off Face ID is written (the record on disk has no bio any more)', not await w.ev("!!JSON.parse(localStorage.getItem('nutcade:vault')).bio"))
+            check('direct: ... but the failed seal stays noted and the notice stays', 'vault' in (await w.ev(HEALTH))['keys'] and await w.ev(FULL), await w.ev(HEALTH))
+            await settings(w); await w.click('[data-act=pinChange]'); await w.wait(200); await pad(w, PIN); await w.wait(800); await pad(w, '111333'); await w.wait(300); await pad(w, '111333'); await w.wait(2500); await chain(w)
+            await w.ev("Nutcade.closeSheet()"); await w.home(); await w.wait(300)
+            check('direct: Change PIN is written, and the notice still stays', 'vault' in (await w.ev(HEALTH))['keys'] and await w.ev(FULL), await w.ev(HEALTH))
+            await w.ev("window.__toasts=[]"); await w.click('[data-act=lockNow]'); await w.wait(1500)
+            check("direct: Lock still waits (no reload)", await w.ev("Nutcade.vault.open && !document.querySelector('[data-pinpad=unlock]')") and "Can't lock now" in ' '.join(await w.ev("window.__toasts")), await w.ev("window.__toasts"))
+            await w.ev("window.__qmax=0"); await w.click('[data-storage=full] [data-act=saveRetry]'); await w.wait(800); await chain(w)
+            check('direct: with space again, the vault is sealed and the notice is gone', not (await w.ev(HEALTH))['bad'] and not await w.ev(FULL), await w.ev(HEALTH))
+            await w.pg.reload(); await w.wait(800); await unlock(w, '111333'); await w.home(); await w.wait(500)
+            check('direct: after a reload and unlock with the new PIN, the coins received while full are there (1,300)', await until_bal(w, 1300, 8000) == 1300 and await w.ev("Nutcade.S.txs.some(t=>t.note==='direct full')"), await w.bal())
+            check('direct: no script errors', not w.errs, w.errs[:4])
+            await w.pg.context.close()
+
+        # ======================= re-reading what another tab saved, while one record can't be saved =======================
+        async def sync():
+            w = await funded(b, 1000)
+            await w.ev("window.__qkeys=['nutcade:txs']")
+            ok = await w.receive_ln(200, 'txs unsaved'); await w.home(); await w.wait(300)
+            check('sync: only the history failed to save (noted)', ok and (await w.ev(HEALTH))['keys'] == ['txs'], await w.ev(HEALTH))
+            # another tab saved meanwhile: a higher counter and a new stamp
+            ks = await w.ev("Object.keys(Nutcade.S.counters)[0]")
+            await w.ev(f"const c=JSON.parse(localStorage.getItem('nutcade:counters')); c[{J(ks)}]=900; localStorage.setItem('nutcade:counters', JSON.stringify(c)); localStorage.setItem('nutcade:gen', String(JSON.parse(localStorage.getItem('nutcade:gen'))+5))")
+            tok, e = await w.send_ecash(7, 'after sync'); await w.home(); await w.wait(300)
+            check("sync: the other tab's counters are taken (higher wins) although a record is failing", tok and not e and await w.ev(f"Nutcade.S.counters[{J(ks)}]") > 900, (e, await w.ev(f"Nutcade.S.counters[{J(ks)}]")))
+            check('sync: the failing record (history) is not read back over: the receive made while it failed is still there', await w.ev("Nutcade.S.txs.some(t=>t.note==='txs unsaved')") and await w.bal() == 1193, await w.bal())
+            await w.ev("window.__qkeys=null"); await w.click('[data-storage=full] [data-act=saveRetry]'); await w.wait(600)
+            await w.pg.reload(); await w.wait(1000); await w.home()
+            check('sync: after Try again and a reload, all of it is saved', await w.ev("Nutcade.S.txs.some(t=>t.note==='txs unsaved') && Nutcade.S.txs.some(t=>t.note==='after sync')") and await w.bal() == 1193, await w.bal())
+            check('sync: no script errors', not w.errs, w.errs[:4])
+            await w.pg.context.close()
+
         # ======================= the duress PIN's wallet =======================
         async def duress():
             w = await funded(b, 2000); await set_pin(w)
@@ -222,13 +270,13 @@ async def main():
             check('iPhone: with sats, the banner "Add NUTCADE to your Home Screen, or Safari may delete this wallet"', 'Add NUTCADE to your Home Screen, or Safari may delete this wallet' in txt, txt)
             await w.click('.screen [data-home-hint] [data-act=homeSteps]'); await w.wait(300)
             st = await w.sheet_text()
-            check('iPhone: Show me how opens the steps (Share, Add to Home Screen, the new icon starts empty, restore with the 12 words)', 'Add to Home Screen' in st and 'Share' in st and '12 words' in st and await w.ev("!!document.querySelector('#layer a[href*=\"get-nutcade-add-it-to-your-home-screen\"]')"), st[:200])
+            check('iPhone: Show me how opens the steps (Download backup in Safari, Share, Add to Home Screen, the new icon starts empty, Import backup there; the 12 words as the fallback, with what they may miss)', 'Add to Home Screen' in st and 'Share' in st and 'Download backup' in st and 'Import backup' in st and st.index('Download backup') < st.index('Share') and 'No backup file? Tap Restore from recovery phrase' in st and 'tokens still waiting to be claimed' in st and 'locked ecash' in st and 'payments still in progress' in st and 'your sats come with them' not in st and await w.ev("!!document.querySelector('#layer a[href*=\"get-nutcade-add-it-to-your-home-screen\"]')"), st[:200])
             await w.ev("Nutcade.closeSheet()")
             await settings(w)
             check('iPhone: Settings, Backup has the same steps button', await w.ev("!!document.querySelector('#set-backup [data-act=homeSteps]')"))
             # five languages: banner, steps, the storage notice and the Settings line, with nothing left in English
             await w.home(); await w.ev("window.__quota=true"); await w.ev("document.querySelector('[data-act=hideToggle]').click()"); await w.wait(300)
-            english = ['Home Screen', "can't save your wallet", 'only on this screen', 'Find lost ecash in Settings', 'Storage used by NUTCADE', 'Show me how', 'Not today', 'Steps for every device', 'Open NUTCADE in Safari']
+            english = ['Home Screen', "can't save your wallet", 'only on this screen', 'Find lost ecash in Settings', 'Storage used by NUTCADE', 'Show me how', 'Not today', 'Steps for every device', 'Open NUTCADE in Safari', 'Download backup', 'Import backup', 'No backup file', 'payments still in progress']
             for lang in ['es', 'pt', 'de', 'fr']:
                 await set_lang(w, lang); await w.home(); await w.wait(300)
                 shown = await w.ev("document.querySelector('.screen').innerText")
@@ -258,6 +306,8 @@ async def main():
         await section('plain', plain)
         await section('swap', swap)
         await section('vault', vault)
+        await section('direct', direct)
+        await section('sync', sync)
         await section('duress', duress)
         await section('usage', usage)
         await section('iphone', iphone)

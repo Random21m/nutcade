@@ -59,6 +59,10 @@ const saveBad = () => saveHealth.failed.size > 0;
 const vaultBad = () => saveHealth.failed.has('vault');
 function noteSave(k, ok, v) {
   if (devKey(k) && k !== 'vault') return;
+  // Only sealData writing all of the current vault.data clears a failed vault. Other writes of the vault record (Face ID
+  // on/off, a PIN change, the duress PIN's part...) put back the sealed data that is on disk, older than what is in memory:
+  // such a write working says nothing about the wallet being saved. The failure stays, and a whole seal is tried again.
+  if (k === 'vault' && ok && !vault.sealing) { if (vaultBad() && vault.on && vault.open && !writeGuard.paused) queueVaultWrite(); return; }
   const was = saveBad();
   if (ok) saveHealth.failed.delete(k); else saveHealth.failed.set(k, v);
   if (saveBad() === was) return;
@@ -93,7 +97,7 @@ const raw = {
 };
 // everything that holds ecash, keys or anything that can spend: with a PIN, only inside the encrypted vault
 const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc', 'ops', 'oplate', 'extra', 'hunts', 'found', 'imports', 'limits'];
-const vault = { on: false, open: false, data: {}, dek: null, chain: Promise.resolve(), queued: false, decoy: false };
+const vault = { on: false, open: false, data: {}, dek: null, chain: Promise.resolve(), queued: false, decoy: false, sealing: false };
 vault.on = raw.get('vault', null) != null;
 // A tab paused because NUTCADE opened in another tab never writes the wallet again: work it still had in flight can't
 // overwrite what the active tab saved. (Counters still advance, so no secret is ever issued twice.)
@@ -145,7 +149,8 @@ async function sealData() {
   const rec = raw.get('vault', null), box = { iv: b64e(iv), ct: b64e(ct) };
   if (!rec) return;   // (the vault was removed, by Remove PIN or a reset: a write still queued never brings it back)
   if (vault.decoy) { if (!rec.slot) throw new Error("This browser won't save data."); rec.slot.data = box; } else rec.data = box;
-  if (!raw.set('vault', rec)) throw new Error("This browser won't save data.");
+  vault.sealing = true; let ok; try { ok = raw.set('vault', rec); } finally { vault.sealing = false; }   // (see noteSave)
+  if (!ok) throw new Error("This browser won't save data.");
 }
 function queueVaultWrite() {
   if (vault.queued) return; vault.queued = true;
@@ -154,11 +159,13 @@ function queueVaultWrite() {
 }
 // the vault written now: false while it can't be saved
 async function flushVault() { if (vault.on && vault.open && !writeGuard.paused) { queueVaultWrite(); await vault.chain; } return !vaultBad(); }
-async function openVault(dek) {
+// the open wallet's part of the vault as it is on disk, decrypted
+async function readVault(dek) {
   const rec = raw.get('vault'), box = vault.decoy ? rec.slot.data : rec.data;
   const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(box.iv) }, dek, b64d(box.ct));
-  vault.data = JSON.parse(new TextDecoder().decode(pt)); vault.dek = dek; vault.open = true;
+  return JSON.parse(new TextDecoder().decode(pt));
 }
+async function openVault(dek) { vault.data = await readVault(dek); vault.dek = dek; vault.open = true; }
 async function createVault(pin) {
   const dek = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
   const salt = rnd(16), kek = await kekFromPin(pin, salt, PBKDF2_ITER);
@@ -300,11 +307,19 @@ function retrySaves() {
 }
 async function syncIfStale() {
   if ((raw.get('gen', 0) || 0) === myGen) return;
-  if (saveBad()) return;   // (while saving fails, this tab holds what storage doesn't: reading storage back would lose it)
-  if (vault.on) { if (!vault.open || !vault.dek) return; await vault.chain; await openVault(vault.dek); const d = vault.data; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.txs = d.txs || []; S.quotes = d.quotes || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null; }
-  else { S.proofs = raw.get('proofs', {}); S.pending = raw.get('pending', []); S.txs = raw.get('txs', []); S.quotes = raw.get('quotes', []); S.ops = raw.get('ops', []); S.oplate = raw.get('oplate', []); S.extra = raw.get('extra', null); }
-  S.opsdone = raw.get('opsdone', []);
-  const c = raw.get('counters', {}); for (const k in c) S.counters[k] = Math.max(S.counters[k] || 0, c[k] || 0);
+  // A record that failed to save is newer in this tab than in storage: it is never read back over (that would lose what
+  // only this tab holds). Everything else is re-read, and the counters are always merged (the higher one wins).
+  let c;
+  if (vault.on) {
+    if (!vault.open || !vault.dek) return;
+    await vault.chain;
+    if (vaultBad()) { try { c = (await readVault(vault.dek)).counters; } catch (e) {} }   // (the vault in memory is the newer one: only the counters of the one on disk are taken)
+    else { await openVault(vault.dek); const d = vault.data; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.txs = d.txs || []; S.quotes = d.quotes || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null; S.opsdone = raw.get('opsdone', []); c = raw.get('counters', {}); }
+  } else {
+    for (const [k, d] of [['proofs', {}], ['pending', []], ['txs', []], ['quotes', []], ['ops', []], ['oplate', []], ['extra', null], ['opsdone', []]]) if (!saveHealth.failed.has(k)) S[k] = raw.get(k, d);
+    c = raw.get('counters', {});
+  }
+  for (const k in c || {}) S.counters[k] = Math.max(S.counters[k] || 0, c[k] || 0);
   myGen = raw.get('gen', 0) || 0;
 }
 

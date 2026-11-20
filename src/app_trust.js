@@ -175,8 +175,9 @@ function homeBanner() {
 }
 function openHomeSteps() {
   openSheet('Add to Home Screen', `
-    <ol class="gate-list"><li>Open NUTCADE in Safari.</li><li>Tap Share (the square with an arrow; on newer iOS, tap ••• first).</li><li>Tap Add to Home Screen, then Add.</li><li>From now on, open NUTCADE from the new icon.</li></ol>
-    ${S.seed ? '<div class="notice">The new icon keeps a wallet of its own and starts empty. Open it, tap Restore from recovery phrase and enter your 12 words: your sats come with them. Then use only the icon.</div>' : '<div class="notice">Then set up your wallet from the new icon.</div>'}
+    <ol class="gate-list"><li>Open NUTCADE in Safari.</li>${S.seed ? '<li>In Settings, Backup, tap Download backup and keep the file.</li>' : ''}<li>Tap Share (the square with an arrow; on newer iOS, tap ••• first).</li><li>Tap Add to Home Screen, then Add.</li><li>From now on, open NUTCADE from the new icon.</li></ol>
+    ${S.seed ? `<div class="notice">The new icon keeps a wallet of its own and starts empty. Open it, tap Create a new wallet (its 12 words are replaced by yours in the next step), then tap Import backup in Settings, Backup and choose the file. Your wallet comes back as it was in the file. Then use only the icon.</div>
+    <div class="tiny muted">No backup file? Tap Restore from recovery phrase instead and enter your 12 words. That brings back the ecash made from your words at your mints, but not tokens still waiting to be claimed, locked ecash, ecash that didn't come from your words, or payments still in progress: settle those in Safari first.</div>` : '<div class="notice">Then set up your wallet from the new icon.</div>'}
     <div class="tiny muted">Safari can clear the storage of websites you have not opened in a while, but a Home Screen app keeps it.</div>
     <div class="row wrap"><a class="btn sm" href="https://github.com/Random21m/nutcade#get-nutcade-add-it-to-your-home-screen" target="_blank" rel="noopener noreferrer">Steps for every device</a></div>
     <button class="btn block" data-act="close">Done</button>`);
