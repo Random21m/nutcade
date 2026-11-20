@@ -67,6 +67,8 @@ jobs:
             suites: tokens
           - name: arrive
             suites: arrive
+          - name: storage
+            suites: storage
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out

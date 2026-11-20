@@ -256,7 +256,7 @@ async function openPart(dek, decoy) {
       else if (k === 'prefs') d.prefs = Object.assign({}, v, d.prefs || {});
       else if (d[k] === undefined || d[k] === null) d[k] = v;
     }
-    if (moved) { queueVaultWrite(); await vault.chain; clearPlainWallet(); }
+    if (moved) { queueVaultWrite(); await vault.chain; if (!vaultBad()) clearPlainWallet(); }   // (the plain copies stay until the vault holding them is saved)
   }
   if (lsGet('pinchg', null) == null) lsSet('pinchg', []);
 }
@@ -316,6 +316,7 @@ async function makeDuress(pin, amount) {
   const slot = { kdf: { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(salt) }, pin: await wrapDek(dek, kek), data: await sealBox(dek, data) };
   vault.data.duress = { dek: b64e(await crypto.subtle.exportKey('raw', dek)), at: created };
   queueVaultWrite(); await vault.chain;
+  if (vaultBad()) { delete vault.data.duress; throw new Error("This browser won't save data. Free up space and try again."); }   // (its sats stay a token in this wallet's history, to take back)
   const rec = raw.get('vault'); rec.slot = slot; if (!raw.set('vault', rec)) throw new Error("This browser won't save data.");
   pinChangeUse();
   if (token) await fundDecoyNow(dek, data, url, token).catch(() => {});   // (if this can't finish, the token waits in that wallet and is claimed the first time it opens)
@@ -380,7 +381,8 @@ async function duressOff() {
   const ids = [];
   for (const t of toks) { try { const meta = peekToken(t); if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: true }).catch(() => {}); const h = holdIncoming(t, "Back from the duress PIN's wallet"); updTx(h.id, { mine: true, back: 'hand' }); ids.push(h.id); } catch (e) {} }
   save(); await vault.chain;
-  rec.slot = fillerSlot(); raw.set('vault', rec);
+  if (vaultBad()) throw new Error("This browser won't save data. Free up space and try again.");   // (its part is never wiped before its sats are saved here)
+  const now = raw.get('vault') || rec; now.slot = fillerSlot(); raw.set('vault', now);   // (with the wallet as just saved, its sats from there included)
   delete vault.data.duress; queueVaultWrite(); await vault.chain;
   let back = 0;   // (claimed now where the mint answers; the rest stays saved and is claimed later, like ecash saved offline)
   for (const id of ids) { const t = txById(id); if (!t) continue; try { const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: id, reqId: null } }); incomingClaimed({ txId: id, reqId: null }, nt); back += num(nt.amount); } catch (e) {} }

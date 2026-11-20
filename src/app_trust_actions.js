@@ -16,6 +16,7 @@ Object.assign(A, {
   whatsNewDone: () => { seenNow(); refresh(); },
   reloadNow: () => {
     if (moneyBusy()) { toast("Finish what you're doing first, then reload.", 'gold'); sfx('err'); return; }   // (never in the middle of a payment or an open step)
+    if (saveBad()) { toast("Can't reload now: your wallet isn't saved yet. Free up space first.", 'red'); sfx('err'); return; }   // (a reload would lose what exists only on this screen)
     location.reload();
   },
   verCheck: async b => {
@@ -25,5 +26,14 @@ Object.assign(A, {
     if (v) { refresh(); toast(`New version v${v} is ready.`, 'cyan'); } else toast(v === false ? 'You have the newest version.' : "Couldn't check right now.", v === false ? 'lime' : 'gold');
   },
   helpOpen: () => openHelp(),
+  saveRetry: async () => {
+    save(); if (vault.on) await flushVault();
+    await new Promise(r => setTimeout(r, 0));
+    if (saveBad()) { sfx('err'); toast("Still can't save. Free up more space on this phone, then try again.", 'red'); }
+    else { sfx('blip'); toast('Saved. Your wallet is stored on this device again.', 'lime'); }
+    refresh();
+  },
+  homeSteps: () => openHomeSteps(),
+  homeLater: () => { S.prefs.homeLater = new Date().toDateString(); save(); refresh(); },
   mintInfo: b => openMintInfo(b.dataset.url)
 });

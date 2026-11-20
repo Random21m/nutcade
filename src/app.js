@@ -43,8 +43,36 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const DEVICE_KEYS = new Set(['vault', 'pinfails', 'pinchg', 'gen', 'probe', 'pad', 'initials', 'priceRange']);
 const devKey = k => DEVICE_KEYS.has(k) || /^scores:/.test(k);
 const lsGet = (k, d) => { try { const v = localStorage.getItem('nutcade:' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
-const lsSet = (k, v) => { try { localStorage.setItem('nutcade:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } };
-const lsDel = k => { try { localStorage.removeItem('nutcade:' + k); } catch (e) {} };
+const lsSet = (k, v) => { let ok = true, n = 0; try { const j = JSON.stringify(v); localStorage.setItem('nutcade:' + k, j); n = String(j).length; } catch (e) { ok = false; } noteSave(k, ok, v); if (ok) { useSizes.set(k, 8 + k.length + n); useSoon(); } return ok; };
+const lsDel = k => { try { localStorage.removeItem('nutcade:' + k); useSizes.delete(k); } catch (e) {} saveHealth.failed.delete(k); };
+/* ---------- when the wallet can't be saved ----------
+   Every write of wallet data that fails (a plain record, or the PIN vault as a whole: real wallet and duress PIN's wallet
+   alike, both are the one 'vault' record) is noted here with what it tried to write, until a later write of it succeeds.
+   While anything is noted, the wallet screen says so in red (once per episode also as a toast), lock and reload wait, and
+   every save() tries the failed records again. What is written, and in what order, is unchanged: this only listens.
+   The vault is always sealed whole (sealData encrypts all of vault.data), so the next vault write after a failed one
+   carries everything the failed one had. Device records (scores, PIN tries, ...) are not wallet data and are left out. */
+const saveHealth = { failed: new Map(), since: 0, told: false };
+let useT = 0;   // (the storage-use check runs a few seconds after writes, never on every one: see useCheck in app_trust.js)
+function useSoon() { if (!useT) useT = setTimeout(() => { useT = 0; useCheck(); }, 3000); }
+const saveBad = () => saveHealth.failed.size > 0;
+const vaultBad = () => saveHealth.failed.has('vault');
+function noteSave(k, ok, v) {
+  if (devKey(k) && k !== 'vault') return;
+  const was = saveBad();
+  if (ok) saveHealth.failed.delete(k); else saveHealth.failed.set(k, v);
+  if (saveBad() === was) return;
+  if (saveBad()) saveHealth.since = Date.now(); else { saveHealth.since = 0; saveHealth.told = false; }
+  setTimeout(saveHealthChanged, 0);
+}
+// what NUTCADE itself keeps in localStorage, in characters per record (key + value), kept up to date by every write: the
+// sealed vault's size comes from the string just written, so nothing is read back or encrypted again to measure it
+const useSizes = new Map();
+function useScan() {
+  useSizes.clear();
+  try { for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (key && key.startsWith('nutcade:')) useSizes.set(key.slice(8), key.length + String(localStorage.getItem(key) || '').length); } } catch (e) {}
+}
+useScan();
 // the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
 const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck'];
 const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
@@ -121,8 +149,11 @@ async function sealData() {
 }
 function queueVaultWrite() {
   if (vault.queued) return; vault.queued = true;
-  vault.chain = vault.chain.then(() => { vault.queued = false; return sealData(); }).catch(() => { vault.queued = false; });
+  // (a write that fails is noted, never silent; the next one seals the whole current vault.data again)
+  vault.chain = vault.chain.then(() => { vault.queued = false; return sealData(); }).catch(() => { vault.queued = false; noteSave('vault', false); });
 }
+// the vault written now: false while it can't be saved
+async function flushVault() { if (vault.on && vault.open && !writeGuard.paused) { queueVaultWrite(); await vault.chain; } return !vaultBad(); }
 async function openVault(dek) {
   const rec = raw.get('vault'), box = vault.decoy ? rec.slot.data : rec.data;
   const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(box.iv) }, dek, b64d(box.ct));
@@ -173,13 +204,21 @@ async function changePin(oldPin, newPin) {
 async function removeVault(pin) {
   const dek = await pinToDek(pin); if (!dek) throw new Error('PIN is wrong.');
   if (vault.decoy) throw pinChangeRefuse();   // (that would mean writing over the device's storage)
-  if (vault.data.duress) await duressOff().catch(() => 0);   // the duress PIN's wallet lives inside the vault: its sats come back here first
+  if (vault.data.duress) await duressOff().catch(e => { if (vaultBad()) throw e; return 0; });   // (storage full: nothing is removed)   // the duress PIN's wallet lives inside the vault: its sats come back here first
   await vault.chain;
   delete vault.data.duress;
   const d = vault.data;
   vault.on = false; vault.open = false; vault.dek = null; vault.data = {};
-  for (const k of Object.keys(d)) { if (k === 'prefs' || d[k] == null) continue; lsSet(k, d[k]); }
-  lsSet('prefs', Object.assign(devPrefs(lsGet('prefs', {})), walletPrefs(d.prefs || {})));
+  const prefs0 = lsGet('prefs', {}), wrote = []; let ok = true;
+  for (const k of Object.keys(d)) { if (k === 'prefs' || d[k] == null) continue; if (lsSet(k, d[k])) wrote.push(k); else { ok = false; break; } }
+  if (ok) ok = lsSet('prefs', Object.assign(devPrefs(prefs0), walletPrefs(d.prefs || {})));
+  if (!ok) {   // storage is full: the vault stays as it was (the copies already written are taken back) and the PIN stays on
+    for (const k of wrote) lsDel(k); lsSet('prefs', prefs0);
+    vault.on = true; vault.open = true; vault.dek = dek; vault.data = d;
+    for (const k of Object.keys(d).concat('prefs')) saveHealth.failed.delete(k);   // (nothing was lost: the vault on disk is untouched)
+    setTimeout(saveHealthChanged, 0);
+    throw new Error("This browser won't save data, so the PIN was not removed. Free up space and try again.");
+  }
   lsDel('vault');
 }
 const pinFails = () => raw.get('pinfails', { n: 0, until: 0 });
@@ -243,11 +282,25 @@ let storageOk = store.set('probe', 1);
 let myGen = raw.get('gen', 0);
 function save() {
   if (writeGuard.paused) return;
-  for (const k of ['mints', 'active', 'proofs', 'pending', 'txs', 'quotes', 'prefs', 'ops', 'oplate', 'opsdone']) storageOk = store.set(k, S[k]) && storageOk;
-  myGen = (raw.get('gen', 0) || 0) + 1; raw.set('gen', myGen);
+  for (const k of ['mints', 'active', 'proofs', 'pending', 'txs', 'quotes', 'prefs', 'ops', 'oplate', 'opsdone']) store.set(k, S[k]);   // (a failure is noted in saveHealth)
+  // (only a stamp that reached storage counts as ours: a failed one must not make this tab think someone else wrote)
+  { const g = (raw.get('gen', 0) || 0) + 1; if (raw.set('gen', g)) myGen = g; }
+  retrySaves();
+}
+// the records that failed to save, written again (with what they hold now): by every save(), and by Try again
+function retrySaves() {
+  if (writeGuard.paused || !saveBad()) return;
+  for (const [k, v] of [...saveHealth.failed]) {
+    if (k === 'vault') { if (vault.on && vault.open) queueVaultWrite(); else saveHealth.failed.delete(k); }   // (no vault any more, or a locked one: nothing of it is waiting)
+    else if (k === 'prefs') lsSet('prefs', vault.on ? devPrefs(v) : v);
+    else if (vault.on && !devKey(k)) saveHealth.failed.delete(k);   // (now inside the vault: never written plain)
+    else lsSet(k, v);
+  }
+  if (!saveBad()) setTimeout(saveHealthChanged, 0);
 }
 async function syncIfStale() {
   if ((raw.get('gen', 0) || 0) === myGen) return;
+  if (saveBad()) return;   // (while saving fails, this tab holds what storage doesn't: reading storage back would lose it)
   if (vault.on) { if (!vault.open || !vault.dek) return; await vault.chain; await openVault(vault.dek); const d = vault.data; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.txs = d.txs || []; S.quotes = d.quotes || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null; }
   else { S.proofs = raw.get('proofs', {}); S.pending = raw.get('pending', []); S.txs = raw.get('txs', []); S.quotes = raw.get('quotes', []); S.ops = raw.get('ops', []); S.oplate = raw.get('oplate', []); S.extra = raw.get('extra', null); }
   S.opsdone = raw.get('opsdone', []);
@@ -267,7 +320,8 @@ function persistCounters() {
   if (!store.set('counters', S.counters)) throw new Error("This browser won't save data, so NUTCADE stopped before using your recovery phrase. Open it in a normal browser tab.");
 }
 // (the duress PIN's wallet keeps its counters inside its encrypted part: written before anything goes to a mint)
-const persistCountersNow = async () => { persistCounters(); if (vault.on) await vault.chain; };
+// (with a PIN the counters are on disk only once the vault write that holds them has succeeded)
+const persistCountersNow = async () => { persistCounters(); if (vault.on) { await vault.chain; if (vaultBad()) throw new Error("This browser won't save data, so NUTCADE stopped before using your recovery phrase. Free up space, then try again."); } };
 const counterSource = {
   async reserve(id, n) { const start = S.counters[id] || 0; if (n > 0) { S.counters[id] = start + n; await persistCountersNow(); } return { start, count: n }; },
   async reserveAt(id, start, count) { const cur = S.counters[id] || 0; if (start < cur) throw new Error('Counter range already used.'); S.counters[id] = start + count; await persistCountersNow(); return { start, count }; },
@@ -2283,6 +2337,7 @@ function viewGate() {
         <li><b>Your keys, your sats.</b> A 12-word recovery phrase is the only way to get your sats back if this device is lost.</li>
         <li><b>An arcade.</b> Twelve cabinets of free play once you're in.</li>
       </ul>
+      ${homeHintDue() ? homeHintHTML() : ''}
       ${legacy ? `<div class="notice">You already hold ${money(totalBalance())} here from before recovery phrases. Creating your phrase moves that ecash under it so it's protected too.</div>` : ''}
       <label class="ack" for="ack"><input id="ack" type="checkbox" data-gatecheck="ack"><span>I understand NUTCADE is new, experimental software, that mints hold the Bitcoin behind my ecash, and that my 12 words are the only way to recover my sats.</span></label>
       <button class="btn solid gold block" data-act="gateCreate" data-needs="ack" disabled>Create a new wallet</button>
@@ -2356,7 +2411,7 @@ function viewWallet() {
   const m = activeMint();
   const nag = S.seed && !S.seed.backedUp ? `<div class="notice red row between" style="flex-wrap:wrap"><span>Your recovery phrase isn't backed up yet.</span><button class="btn sm red" data-act="seedShow">Back up now</button></div>` : '';
   const legacy = S.seed && !S.seed.secured && totalBalance() > 0 && S.seed.backedUp ? `<div class="notice row between" style="flex-wrap:wrap"><span>${money(totalBalance())} here isn't covered by your phrase yet.</span><button class="btn sm gold" data-act="secureAll">Protect it</button></div>` : '';
-  if (!m) return `<section class="screen">${nag}${legacy}${trustNotices()}
+  if (!m) return `<section class="screen">${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}
     <div class="credits" style="text-align:center;justify-items:center"><div class="label">Credits</div><div class="credit-num">0<small>${unitTag()}</small></div>
     <div class="spinner" style="font-size:11px">INSERT MINT TO START</div></div>
     <div class="panel"><p style="margin:0">NUTCADE holds Bitcoin as Cashu ecash. A mint issues the ecash, so pick one first. Try a test mint if you want to play with fake sats.</p>
@@ -2368,7 +2423,7 @@ function viewWallet() {
   </section>`;
   const bal = balanceOf(m.url), tot = totalBalance(), po = pendingOut();
   const recent = S.txs.slice(0, recentCount());
-  return `<section class="screen">${nag}${legacy}${trustNotices()}
+  return `<section class="screen">${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}
     <div class="credits">
       <div class="row between"><span class="label">Credits</span><span class="row" style="gap:10px">${tot !== bal ? `<span class="tiny muted">All mints ${money(tot)}</span>` : ''}${hideBtn()}${vault.on ? '<button class="lockbtn" data-act="lockNow" aria-label="Lock wallet" title="Lock wallet"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2h1v8H4V7zm1 0h4V5a2 2 0 0 0-4 0zm1 3v3h2v-3z"/></svg></button>' : ''}</span></div>
       <div class="credit-num tap" data-act="hideToggle" title="${S.prefs.hideAmounts ? 'Tap to show amounts' : 'Tap to hide amounts'}" aria-live="polite">${S.prefs.btcSymbol ? '₿' : ''}${fmt(bal)}<small>${unitTag()}</small></div>
@@ -2556,7 +2611,12 @@ async function bioToDek() {
 /* Auto-lock: reload (which clears every secret from memory) after inactivity or time in the background. */
 let lastActive = Date.now(), hiddenAt = 0, autoLockTimer = 0;
 const lockAfterMs = () => (S.prefs.lockAfter ?? 5) * 60e3;
-async function lockNow() { try { await vault.chain; } catch (e) {} location.reload(); }
+// (never while the wallet can't be saved: a reload would lose what exists only on this screen)
+async function lockNow(byHand) {
+  try { await vault.chain; } catch (e) {}
+  if (vaultBad() && !await flushVault()) { if (byHand) { toast("Can't lock now: your wallet isn't saved yet. Free up space first.", 'red'); sfx('err'); } return; }
+  location.reload();
+}
 function armAutoLock() {
   clearInterval(autoLockTimer);
   if (!vault.on || !vault.open || !lockAfterMs()) return;
@@ -2569,7 +2629,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.20.2';
+const APP_VERSION = '1.21.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -2597,7 +2657,8 @@ function viewSettings() {
     <div class="panel" id="set-backup"><span class="h2">Backup</span>
       <div class="row between tiny"><span>Recovery phrase backed up</span><span style="color:${S.seed && S.seed.backedUp ? 'var(--lime)' : 'var(--red)'}">${S.seed && S.seed.backedUp ? 'YES' : 'NOT YET'}</span></div>
       <div class="row between tiny"><span>Protected from browser clean-up</span><span style="color:${persisted ? 'var(--lime)' : 'var(--gold)'}">${persisted ? 'YES' : persisted === false ? 'NOT GRANTED' : 'CHECKING'}</span></div>
-      ${persisted ? '' : '<div class="th">On iPhone, add NUTCADE to your home screen so Safari keeps its data.</div>'}
+      ${persisted ? '' : '<div class="th">On iPhone, add NUTCADE to your home screen so Safari keeps its data.</div><button class="btn sm" data-act="homeSteps">Show me how</button>'}
+      ${storageRow()}
       ${backupHealth()}
       <div class="row wrap"><button class="btn sm gold" data-act="seedShow">Show recovery phrase</button><button class="btn sm violet" data-act="findLost">Find lost ecash</button><button class="btn sm" data-act="sweepOpen">Restore ecash from another phrase</button></div>
       <div class="sub">Mint list on Nostr</div>
@@ -4161,7 +4222,7 @@ const A = {
     try { b.disabled = true; const dek = await bioToDek(); await openPart(dek, false); hydrateFromVault(); pinUI.mode = null; sfx('start'); render(); armAutoLock(); setTimeout(() => backgroundTick(true).then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }), 300); }
     catch (e) { b.disabled = false; pinError(/NotAllowed|abort/i.test(e.name + e.message) ? 'Face ID / fingerprint was cancelled. Use your PIN.' : (e.message || "Couldn't unlock. Use your PIN.")); }
   },
-  lockNow: () => { sfx('blip'); lockNow(); },
+  lockNow: () => { sfx('blip'); lockNow(true); },
   forgotPin: () => openSheet('Forgot PIN', `<p style="margin:0">Your PIN can't be recovered: it's the key to the encrypted wallet on this device. You can reset the wallet here and restore it with your 12 words and mint list.</p>
     <div class="notice red">Without your 12 words, resetting loses your sats for good.</div>
     <div class="field"><label for="confirmWord">Type RESET to delete the locked wallet</label><input id="confirmWord" class="inp" autocomplete="off" autocapitalize="characters"></div>
@@ -4499,7 +4560,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON } };
+window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON }, storage: { health: () => ({ bad: saveBad(), keys: [...saveHealth.failed.keys()], told: saveHealth.told }), pct: () => usePct(), bytes: () => useBytes(), check: () => useCheck(), level: () => useLevel } };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}

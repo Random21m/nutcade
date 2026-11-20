@@ -61,9 +61,10 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.20.2; rewrite this list at every release)
-  'A deposit that was finished again after an interrupted answer now says "+X received" like any other arrival.',
-  'Saved ecash claimed after you come back online no longer shows a toast next to its own arrival notice.'
+const WHATS_NEW = [   // (v1.21.0; rewrite this list at every release)
+  "If this browser can't save your wallet (storage full), NUTCADE now says so in red on the wallet screen, with what to do, instead of failing silently.",
+  'Settings, Backup shows how much storage NUTCADE uses, and the wallet screen warns when it is 70% and 90% full.',
+  'On iPhone, the wallet screen reminds you to add NUTCADE to your Home Screen, so Safari does not delete your wallet.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);
@@ -111,6 +112,74 @@ function openWhatsNew() {
 function updatePanel() {
   return `${newVer ? `<div class="notice cyan row between" style="flex-wrap:wrap"><span>New version v${esc(newVer)} is ready. Reload when you're done.</span><button class="btn sm" data-act="reloadNow">Reload now</button></div>` : ''}
       <div class="row wrap"><button class="btn sm" data-act="whatsNew">What's new</button><button class="btn sm" data-act="verCheck">Check for a new version</button></div>`;
+}
+
+/* ---------- storage safety: a wallet that can't be saved, storage filling up, and iPhone's Home Screen ----------
+   saveHealth (app.js) notes every write of wallet data that failed. While anything is noted, the wallet screen says so in red
+   with a way out (Try again, Download backup, and Find lost ecash as the recovery path), once per episode also as a toast; it
+   goes away by itself when the writes work again. It looks the same with or without a PIN, in either wallet of the vault.
+   Storage use is NUTCADE's own share of localStorage (every record's key and value, 2 bytes a character, kept up to date by
+   each write: nothing is read back to measure it) against an assumed 5 MB, or the browser's own estimate when that is fuller.
+   It is checked at start and a few seconds after writes, never on each one. 70% gives a soft warning, 90% a red one.
+   On an iPhone or iPad where NUTCADE runs as a website (not from the Home Screen) and the wallet holds sats, a banner says
+   Safari may delete it, with the steps; "Not today" hides it until tomorrow (a setting of this device). */
+const STORE_CAP = 5 * 1024 * 1024;
+let useLevel = 0, useEst = null, useEstAt = 0;
+const useBytes = () => { let n = 0; for (const v of useSizes.values()) n += v; return n * 2; };
+function usePct() {
+  let r = useBytes() / STORE_CAP;
+  if (useEst && useEst.quota > 0) r = Math.max(r, useEst.usage / useEst.quota);
+  return Math.max(0, Math.min(100, Math.round(r * 100)));
+}
+async function useEstimate() {
+  useEstAt = Date.now();
+  try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); useEst = e && +e.quota > 0 ? { usage: +e.usage || 0, quota: +e.quota } : null; } } catch (e) { useEst = null; }
+}
+function useCheck() {
+  const p = usePct(), lvl = p >= 90 ? 2 : p >= 70 ? 1 : 0;
+  if (Date.now() - useEstAt > 10 * 60e3) useEstimate().then(() => { if ((usePct() >= 90 ? 2 : usePct() >= 70 ? 1 : 0) !== useLevel) useCheck(); }, () => {});
+  if (lvl === useLevel) return lvl;
+  useLevel = lvl;
+  if (tab === 'wallet' && !(window.Arcade && window.Arcade.playing())) refresh();
+  return lvl;
+}
+setTimeout(useCheck, 1500);
+function saveHealthChanged() {
+  if (saveBad() && !saveHealth.told) { saveHealth.told = true; toast("NUTCADE couldn't save your wallet: storage is full. Keep it open and read the notice on the wallet screen.", 'red'); sfx('err'); }
+  if (!(window.Arcade && window.Arcade.playing())) refresh();
+}
+const useLine = () => `${(useBytes() / 1048576).toFixed(1)} MB / ${STORE_CAP / 1048576} MB (${usePct()}%)`;
+function storageRow() {
+  const p = usePct();
+  return `<div class="row between tiny"><span>Storage used by NUTCADE</span><span style="color:${saveBad() || p >= 90 ? 'var(--red)' : p >= 70 ? 'var(--gold)' : 'var(--lime)'}">${useLine()}</span></div>`;
+}
+function storageNotice() {
+  if (saveBad()) return `<div class="notice red" role="alert" data-storage="full" style="display:grid;gap:8px">
+      <b>NUTCADE can't save your wallet.</b>
+      <span>This browser's storage is full, so your newest coins and changes exist only on this screen. Don't close or reload NUTCADE.</span>
+      <span class="tiny">Download a backup file now to keep a copy. Then free up space on this phone and tap Try again.</span>
+      <span class="tiny">If NUTCADE closes before it can save, use Find lost ecash in Settings, Backup: your 12 words bring those coins back.</span>
+      <div class="row wrap"><button class="btn sm red" data-act="saveRetry">Try again</button><button class="btn sm gold" data-act="backupDownload">Download backup</button></div></div>`;
+  const p = usePct();
+  if (p >= 90) return `<div class="notice red" role="status" data-storage="90" style="display:grid;gap:8px"><span>Storage for NUTCADE is ${p}% full.</span><span>Soon it may not be able to save your wallet. Download a backup file now, and free up space on this phone.</span><div class="row wrap"><button class="btn sm gold" data-act="backupDownload">Download backup</button></div></div>`;
+  if (p >= 70) return `<div class="notice" role="status" data-storage="70" style="display:grid;gap:8px"><span>Storage for NUTCADE is ${p}% full.</span><span>Download a backup file now and then to keep a copy.</span><div class="row wrap"><button class="btn sm gold" data-act="backupDownload">Download backup</button></div></div>`;
+  return '';
+}
+const isIOS = () => { try { return /iPhone|iPad|iPod/.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); } catch (e) { return false; } };
+const isInstalled = () => { try { return navigator.standalone === true || matchMedia('(display-mode: standalone)').matches; } catch (e) { return false; } };
+const homeHintDue = () => isIOS() && !isInstalled();
+const homeHintHTML = () => `<div class="notice row between" role="status" data-home-hint style="flex-wrap:wrap"><span>Add NUTCADE to your Home Screen, or Safari may delete this wallet.</span><span class="row" style="gap:8px"><button class="btn sm gold" data-act="homeSteps">Show me how</button>${S.seed ? '<button class="btn sm" data-act="homeLater">Not today</button>' : ''}</span></div>`;
+function homeBanner() {
+  if (!homeHintDue() || !(totalBalance() > 0) || S.prefs.homeLater === new Date().toDateString()) return '';
+  return homeHintHTML();
+}
+function openHomeSteps() {
+  openSheet('Add to Home Screen', `
+    <ol class="gate-list"><li>Open NUTCADE in Safari.</li><li>Tap Share (the square with an arrow; on newer iOS, tap ••• first).</li><li>Tap Add to Home Screen, then Add.</li><li>From now on, open NUTCADE from the new icon.</li></ol>
+    ${S.seed ? '<div class="notice">The new icon keeps a wallet of its own and starts empty. Open it, tap Restore from recovery phrase and enter your 12 words: your sats come with them. Then use only the icon.</div>' : '<div class="notice">Then set up your wallet from the new icon.</div>'}
+    <div class="tiny muted">Safari can clear the storage of websites you have not opened in a while, but a Home Screen app keeps it.</div>
+    <div class="row wrap"><a class="btn sm" href="https://github.com/Random21m/nutcade#get-nutcade-add-it-to-your-home-screen" target="_blank" rel="noopener noreferrer">Steps for every device</a></div>
+    <button class="btn block" data-act="close">Done</button>`);
 }
 
 /* ---------- Help & FAQ ----------
