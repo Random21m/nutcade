@@ -86,7 +86,7 @@ async def main():
         check('GRAND TOUR text is translated, with the number, in Spanish, Portuguese, German and French', not bad, bad)
         # Settings -> About: the button says Support (not Donate) in every language and fits a 320 px phone; its sheet says "support" too
         await w.pg.set_viewport_size({'width': 320, 'height': 640})
-        want = {'en': ('Support', 'NUTCADE support'), 'es': ('Apoyar', 'apoyo a NUTCADE'), 'pt': ('Apoiar', 'apoio ao NUTCADE'), 'de': ('Unterstützen', 'NUTCADE-Unterstützung'), 'fr': ('Soutenir', 'soutien NUTCADE')}
+        want = {'en': ('Support', 'NUTCADE support'), 'es': ('Apoyar', 'apoyo a NUTCADE'), 'pt': ('Apoiar', 'apoio ao NUTCADE'), 'de': ('Unterstützen', 'NUTCADE-Unterstützung'), 'fr': ('Soutenir', 'soutenir NUTCADE')}
         bad = {}
         for lang, (word, phrase) in want.items():
             await w.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click()"); await w.wait(150)
