@@ -2281,7 +2281,7 @@ function viewGate() {
       <ul class="gate-list">
         <li><b>A Bitcoin wallet.</b> NUTCADE holds sats as Cashu ecash: fast, private, and sent like a text.</li>
         <li><b>Your keys, your sats.</b> A 12-word recovery phrase is the only way to get your sats back if this device is lost.</li>
-        <li><b>An arcade.</b> Eleven cabinets of free play once you're in.</li>
+        <li><b>An arcade.</b> Twelve cabinets of free play once you're in.</li>
       </ul>
       ${legacy ? `<div class="notice">You already hold ${money(totalBalance())} here from before recovery phrases. Creating your phrase moves that ecash under it so it's protected too.</div>` : ''}
       <label class="ack" for="ack"><input id="ack" type="checkbox" data-gatecheck="ack"><span>I understand NUTCADE is new, experimental software, that mints hold the Bitcoin behind my ecash, and that my 12 words are the only way to recover my sats.</span></label>
@@ -2569,7 +2569,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.19.0';
+const APP_VERSION = '1.20.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];

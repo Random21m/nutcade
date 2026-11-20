@@ -110,6 +110,7 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 | Nut Poker | Five-card draw video poker, jacks or better, for **free credits only** (never sats) |
 | Neon Road | Pseudo-3D night-highway racer: pass traffic, race the clock to each checkpoint |
 | Acorn Links | Overhead arcade golf, nine holes: pull back and let go to swing, mind the wind, water and sand |
+| Nut Bowl | Top-down arcade football: pick a play, run it or throw it, beat the clock |
 
 Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons (tap **Use D-pad** above the controls if you'd rather have arrow buttons).
 
@@ -118,6 +119,11 @@ Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons
 - **Keyboard:** left/right turn the aim, up/down change the club, **hold Space** to run the power meter (it goes up and down) and let go to swing.
 - The game picks a sensible club for you (driver off the tee, a putter on the green). Sand, rough and trees slow or stop the ball; water and out of bounds cost a stroke and put you back where you hit from. You pick up after par plus four.
 - Points per hole: hole in one 1000, eagle 700, birdie 400, par 250, bogey 100, double bogey 50. After the ninth hole you get 250 for every stroke you are under par overall. The nine holes come from the seed, so challenges, replays and the Daily Challenge play the same course.
+
+**Nut Bowl** (how to play): top-down football, you against the computer, four quarters of 2:30. You always have the ball; the computer plays defence on the field, and between your drives its offence is worked out for it (a touchdown, a field goal or a punt, from a list the game seed fixes, so a challenge or the Daily Challenge plays the same game for everyone). The panel shows the quarter and clock, the score, the down and yards to go, and where the ball is.
+- **Pick a play** with left and right and A, or tap a button under the screen: **DIVE** (a run up the middle), **SWEEP** (a run to the outside), **SLANT** (a short pass) or **BOMB** (a long pass). On 4th down the buttons become **PUNT**, **KICK** (a field goal), DIVE and SLANT.
+- **Run:** the stick (or arrow keys) moves the runner; hold **A** for a burst of speed (the meter shows how much is left) that can also break a tackle. **Pass:** left and right choose the receiver, A throws, or tap a receiver to throw to him; the quarterback gets sacked if he holds the ball too long, and a pass can be dropped or picked off. Once a receiver has the ball you run with him.
+- **Points:** 10 for every yard gained, 100 for a first down, 800 for a touchdown, 300 for a field goal, and 1000 for winning the game. After your play the clock runs, and after a score or a turnover the computer gets a drive.
 
 **Neon Road** (how to play): you drive down a neon highway toward the sunset, against a clock. The road curves and rolls over hills; slower cars share it, and the grass drags you down. Pass cars for points, hit the checkpoint arch at the end of each stage for extra time and points, and keep going until the time runs out. Every stage has its own colours and tighter curves, and the same seed always builds the same road, so a challenge or a Daily Challenge replays the same course.
 - **Keyboard:** left/right arrows or A/D steer, up or W is gas (the car cruises by itself without it), down or S brakes.
@@ -223,7 +229,7 @@ Tap **Share my score** to see a short note, for example "NUTCADE Daily Challenge
 
 NUTCADE can't ask a server what day it is, so it watches the clock itself: if the device date moves back before a day it has already seen, or reads as before 2025, that day's runs are for fun (not official, not in the streak) and a notice says so until the clock catches up or you tap **My clock is right**. Moving the clock forward just moves you to that day's challenge.
 
-Ten of the eleven cabinets can be the daily: the eight originals, Neon Road and Acorn Links. **Nut Poker never is**: its deck is shuffled for real, so two phones could never play the same deal. For cabinet authors: a cabinet joins with `daily: true` in its object (all its gameplay randomness must come from the engine's seeded `rnd()`/`ri()`/`RNG()`), and `init(G, seed)` receives the run's seed; a cabinet marked `noChallenge` can't join even with the flag. The details are at the top of `src/daily.js`.
+Eleven of the twelve cabinets can be the daily: the eight originals, Neon Road, Acorn Links and Nut Bowl. **Nut Poker never is**: its deck is shuffled for real, so two phones could never play the same deal. For cabinet authors: a cabinet joins with `daily: true` in its object (all its gameplay randomness must come from the engine's seeded `rnd()`/`ri()`/`RNG()`), and `init(G, seed)` receives the run's seed; a cabinet marked `noChallenge` can't join even with the flag. The details are at the top of `src/daily.js`.
 
 ### Extra Life
 
@@ -391,7 +397,7 @@ Every push runs the suites in `tests/` automatically on GitHub (GitHub Actions) 
 - 41 checks for multinut payments, payment requests (over Nostr and HTTP, including ecash sent by another wallet) and NFC reading and writing
 - 39 checks for trophies, share cards, instant updates, the Nostr mint-list backup and the Lightning address, against a stand-in Nostr relay and npub.cash server that check every signature
 - 24 scanner checks, run before release: camera scans of real tokens and invoices, photo scans, and recognising every kind of code
-- All eleven games played through to game over, with high scores, pause, exit, touch controls and sound
+- All twelve games played through to game over, with high scores, pause, exit, touch controls and sound
 - The arcade clock: every cabinet takes 60 steps a second on a faked 30, 60, 120 and 144 Hz screen, a pause or tab switch never makes a game race to catch up, and recorded runs still verify as replays on every cabinet that has them (Nut Poker has none, by design)
 - Nut Poker (43 rule checks and 88 play checks), Neon Road (69) and the Daily Challenge (138), each in five languages and at phone and desktop sizes; the arcade clock (15 checks); 37 arcade smoke checks, which include the GRAND TOUR trophy and the Support button in five languages
 - Every screen at 320, 390, 768 and 1280 pixels wide, checked for overflow and clipped text, and again in each language
@@ -439,6 +445,9 @@ NUTCADE is free and open source, and it stays that way. Supporting it is optiona
 You can also tip from inside NUTCADE: **Settings → About → Support**. The same address and code are on that screen. Be wary of any other "NUTCADE support" address.
 
 ## Changelog
+
+- **v1.20.0:** a new game, and nothing in it touches money.
+  - **Nut Bowl:** top-down arcade football (see how to play above). Pick a play, run it with the stick or throw to a receiver, punt or kick on 4th down, and beat the clock over four quarters; high scores with initials, challenges, replays and the Daily Challenge work like the other cabinets. The welcome screen and the share text now say twelve cabinets, and Nut Bowl can be the Daily Challenge.
 
 - **v1.19.0:** a new game, and nothing in it touches money.
   - **Acorn Links:** nine holes of overhead arcade golf (see how to play above). Drag back and let go to swing; wind, sand, water and trees; high scores with initials, challenges, replays and the Daily Challenge work like the other cabinets. The welcome screen and the share text now say eleven cabinets, and Acorn Links can be the Daily Challenge.

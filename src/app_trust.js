@@ -61,9 +61,9 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.19.0; rewrite this list at every release)
-  'New game: Acorn Links, nine holes of overhead arcade golf. Pull back and let go to swing, and mind the wind.',
-  'The arcade now has eleven cabinets, and Acorn Links can be the Daily Challenge.'
+const WHATS_NEW = [   // (v1.20.0; rewrite this list at every release)
+  'New game: Nut Bowl, top-down arcade football. Pick a play, run it or throw it, and beat the clock.',
+  'The arcade now has twelve cabinets, and Nut Bowl can be the Daily Challenge.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);

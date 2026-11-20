@@ -103,8 +103,8 @@ async def main():
         async def files():
             html = open(os.path.join(ROOT, 'public', 'index.html'), encoding='utf-8').read()
             descs = re.findall(r'<meta (?:name|property)="(?:description|og:description|twitter:description)" content="([^"]*)"', html)
-            check('listing: three descriptions, all say 10 retro arcade cabinets and none says 8', len(descs) == 3 and all('11 retro arcade cabinets' in d for d in descs) and '8 retro' not in html and '7 retro' not in html, descs)
-            check('listing: the welcome screen says eleven cabinets, not ten', "Eleven cabinets of free play" in SRC['app.js'] and 'Eight cabinets' not in SRC['app.js'])
+            check('listing: three descriptions, all say 10 retro arcade cabinets and none says 8', len(descs) == 3 and all('12 retro arcade cabinets' in d for d in descs) and '8 retro' not in html and '7 retro' not in html, descs)
+            check('listing: the welcome screen says twelve cabinets, not eleven', "Twelve cabinets of free play" in SRC['app.js'] and 'Eight cabinets' not in SRC['app.js'])
             readme = open(os.path.join(ROOT, 'README.md'), encoding='utf-8').read()
             check('listing: the README no longer says 8 original or 8 retro games anywhere', 'one of the 8 original' not in readme and '8 retro' not in readme and 'one of the 10 arcade cabinets' in readme)
             man = json.load(open(os.path.join(ROOT, 'public', 'manifest.webmanifest'), encoding='utf-8'))
