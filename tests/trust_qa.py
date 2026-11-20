@@ -128,7 +128,7 @@ async def main():
             check('SECURITY.md: GitHub private vulnerability reporting, with the direct link and the steps', 'github.com/Random21m/nutcade/security/advisories/new' in sec and 'private vulnerability reporting' in sec.lower() and 'Report a vulnerability' in sec)
             check('SECURITY.md: no invented email address, Nostr key or account', not re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', sec) and 'npub1' not in sec and 'nostr:' not in sec.lower(), re.findall(r'[\w.+-]+@[\w-]+\.[\w.]+', sec))
             check('SECURITY.md: still says never to put details in a public issue, and still promises a reply', "don't open a public issue" in sec and 'reply within a few days' in sec)
-            check("README: the changelog entry is 'Unreleased: Trust & help' and the version number is untouched", '**Unreleased: Trust & help.**' in readme and f"const APP_VERSION = '{APP_VERSION}'" in SRC['app.js'] and re.search(r"APP_VERSION = '1\.14\.0'", SRC['app.js']))
+            check("README: the changelog entry is 'v1.17.0' (Trust & help) and APP_VERSION matches", '- **v1.17.0:**' in readme and re.search(r"APP_VERSION = '1\.17\.0'", SRC['app.js']))
             for h in ('Help & FAQ', 'Checking your 12 words', 'Mint details', 'Hiding amounts'):
                 check(f'README: a section for "{h}"', f'### {h}' in readme)
             check('README: the Features list mentions each item', all(x in readme for x in ('**Help & FAQ**', '**Check your 12 words**', '**Updated to vX**', '**Mint details**', '**Hide amounts**')))
@@ -564,7 +564,7 @@ async def main():
             links = await w.ev("[...document.querySelectorAll('#layer a')].map(a=>({h:a.href,t:a.target,r:a.rel}))")
             check('help: the two report links go to GitHub (the public form and the private security report) and open safely', {l['h'] for l in links} == {'https://github.com/Random21m/nutcade/issues/new?template=bug.yml', 'https://github.com/Random21m/nutcade/security/advisories/new'} and all(l['t'] == '_blank' and 'noopener' in l['r'] for l in links), links)
             check('help: in plain words: no sentence is longer than 60 words, and no jargon like NUT-xx, DLEQ, keyset, BOLT or P2PK', all(len(s.split()) <= 60 for s in re.split(r'(?<=[.!?]) ', txt.replace('\n', ' '))) and not re.search(r'NUT-\d|DLEQ|keyset|BOLT|P2PK|PBKDF', txt), [s for s in re.split(r'(?<=[.!?]) ', txt.replace('\n', ' ')) if len(s.split()) > 60][:1])
-            check('help: the first-scan rule for printed tokens is not claimed (that feature is not in this build)', not re.search(r'\bprint(ed|s)?\b', txt, re.I) and not any(x in SRC['app.js'] for x in ('app_tokens', 'printTokens')))
+            check('help: printed tokens are only mentioned if that feature is in this build', not re.search(r'\bprint(ed|s)?\b', txt, re.I) or 'printTokens' in SRC['app.js'] or 'app_tokens' in SRC['app.js'])
             await w.pg.context.set_offline(False)
             # the hook: another feature can add a topic
             await w.ev("Nutcade.closeSheet(); (window.NutHelpTopics=window.NutHelpTopics||[]).push({q:'A later topic',a:['Added by a later feature.']})"); await tab(w, 'settings'); await w.click('#set-help [data-act=helpOpen]'); await w.wait(300)
