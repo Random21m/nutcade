@@ -20,6 +20,7 @@ const FRIC = { tee: 0.965, fairway: 0.965, rough: 0.9, sand: 0.6, green: 0.975 }
 const LIE_CARRY = { tee: 1, fairway: 1, rough: 0.75, sand: 0.6, green: 1 };
 const LIE_ROLL = { tee: 1, fairway: 1, rough: 0.35, sand: 0.12, green: 0.7 };
 const CUP = 3.4, CUP_SPEED = 1.25, GIMME = 5;                                    // the ball drops if it is this close to the pin and slow enough
+const DIRS8 = [[0, 1], [0, -1], [1, 0], [-1, 0], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
 const ROT_C = 0.9998, ROT_S = 0.0199987;                                        // a keyboard aim step of 0.02 rad as constants (no sin or cos)
 
 const PAL = { rough: '#0b2f1c', rough2: '#0e3a22', fair: '#16662f', fair2: '#1a7436', green: '#35cc60', green2: '#2eb956', sand: '#e0c878', sand2: '#c8ae5c', water: '#1c5fe0', water2: '#4a8bff', tree: '#0a5a2a', tree2: '#1c9a45', trunk: '#6a3a14' };
@@ -67,6 +68,8 @@ function buildHole(i) {
   return h;
 }
 
+const camOf = (s, h) => clamp(Math.round(s.ball.y - 150), 0, h.H - VIEW_H);   // the camera is a pure function of the ball, so update() and replays see what the screen shows
+const playable = l => l !== 'water' && l !== 'oob' && l !== 'tree';
 const yards = px => Math.round(px * PX_YD);
 const norm = (x, y) => { const d = Math.sqrt(x * x + y * y) || 1; return [x / d, y / d]; };
 function holePoints(strokes, par) {
@@ -99,7 +102,7 @@ const links = {
   carryOf(s, p) { const c = CLUBS[s.club], lie = s.lie === 'tree' ? 'rough' : s.lie; return c.max * p * (s.club === 2 && lie === 'sand' ? 0.8 : LIE_CARRY[lie]); },
   windShift(s, c, air) { const h = s.holes[s.hole], k = c.wk * air / 60; return [h.wind.x * k, h.wind.y * k]; },
   swing(s, G, p) {
-    const h = s.holes[s.hole], c = CLUBS[s.club], b = s.ball, lie = lieAt(h, b.x, b.y); s.lie = lie === 'tree' ? 'rough' : lie;
+    const h = s.holes[s.hole], c = CLUBS[s.club], b = s.ball, lie = lieAt(h, b.x, b.y); s.lie = playable(lie) ? lie : 'rough';
     p = clamp(p, 0.04, 1);
     const spread = rnd(-1, 1) * c.err * (0.45 + p * 0.55) * (s.lie === 'rough' ? 1.8 : s.lie === 'sand' ? 1.5 : 1);
     let ax = s.ax - s.ay * spread, ay = s.ay + s.ax * spread; [ax, ay] = norm(ax, ay);
@@ -117,7 +120,10 @@ const links = {
     if (lie === 'water') return this.penalty(s, G, 'water');
     if (lie === 'oob') return this.penalty(s, G, 'oob');
     if (lie === 'tree') {                                                        // the ball drops dead at the foot of the tree
-      for (const t of h.trees) { const dx = x - t.x, dy = y - t.y; if (dx * dx + dy * dy <= t.r * t.r) { const [ux, uy] = norm(dx || 1, dy || 0.01); s.ball = { x: t.x + ux * (t.r + 2), y: t.y + uy * (t.r + 2) }; break; } }
+      for (const t of h.trees) { const dx = x - t.x, dy = y - t.y; if (dx * dx + dy * dy <= t.r * t.r) { const [ux, uy] = norm(dx || 1, dy || 0.01); s.ball = { x: t.x + ux * (t.r + 2), y: t.y + uy * (t.r + 2) };
+          if (!playable(lieAt(h, s.ball.x, s.ball.y))) { for (const [vx, vy] of DIRS8) { const px = t.x + vx * (t.r + 3), py = t.y + vy * (t.r + 3); if (playable(lieAt(h, px, py))) { s.ball = { x: px, y: py }; break; } } }
+          if (!playable(lieAt(h, s.ball.x, s.ball.y))) return this.penalty(s, G, 'oob');   // nowhere to drop it: counts as out of bounds
+          break; } }
       G.sfx('wall'); return this.settle(s, G);
     }
     boom(s.fx, x, y, lie === 'sand' ? C.gold : lie === 'green' ? C.lime : C.dim, 6); G.sfx('tick');
@@ -132,7 +138,7 @@ const links = {
     const h = s.holes[s.hole], d = Math.hypot(h.pin.x - s.ball.x, h.pin.y - s.ball.y);
     if (d <= GIMME && lieAt(h, s.ball.x, s.ball.y) === 'green') return this.holeOut(s, G);
     if (s.strokes >= h.par + 4) { s.strokes = h.par + 4; return this.holeOut(s, G, true); }
-    s.mode = 'aim'; s.pw = 0; s.charge = false; s.drag = null; s.dragDown = false; s.lie = lieAt(h, s.ball.x, s.ball.y); if (s.lie === 'tree') s.lie = 'rough';
+    s.mode = 'aim'; s.pw = 0; s.charge = false; s.drag = null; s.dragDown = false; s.lie = lieAt(h, s.ball.x, s.ball.y); if (!playable(s.lie)) s.lie = 'rough';
     const nd = norm(h.pin.x - s.ball.x, h.pin.y - s.ball.y); s.ax = nd[0]; s.ay = nd[1]; this.pickClub(s);
   },
   holeOut(s, G, pick) {
@@ -154,7 +160,7 @@ const links = {
       if (G.hit('up')) { s.club = (s.club + 1) % 4; G.sfx('blip'); } else if (G.hit('down')) { s.club = (s.club + 3) % 4; G.sfx('blip'); }
       if (G.tap) {
         if (G.tap.y >= PANEL) { s.club = (s.club + 1) % 4; G.sfx('blip'); }
-        else { const sy = s.ball.y - s.camY + VIEW_TOP; const n = norm(G.tap.x - s.ball.x, G.tap.y - sy); if (Math.hypot(G.tap.x - s.ball.x, G.tap.y - sy) > 6) { s.ax = n[0]; s.ay = n[1]; G.sfx('tick'); } }
+        else { const sy = s.ball.y - camOf(s, h) + VIEW_TOP; const n = norm(G.tap.x - s.ball.x, G.tap.y - sy); if (Math.hypot(G.tap.x - s.ball.x, G.tap.y - sy) > 6) { s.ax = n[0]; s.ay = n[1]; G.sfx('tick'); } }
       }
       if (hold) { if (!s.charge) { s.charge = true; s.pw = 0; s.pdir = 1; } s.pw += s.pdir / 55; if (s.pw >= 1) { s.pw = 1; s.pdir = -1; } if (s.pw <= 0 && s.pdir < 0) { s.pw = 0; s.pdir = 1; } }
       else if (s.charge) { s.charge = false; const p = s.pw; s.pw = 0; if (p > 0.03) this.swing(s, G, p); }
@@ -195,7 +201,7 @@ const links = {
   },
   draw(s, G, ctx) {
     const h = s.holes[Math.min(s.hole, HOLES - 1)], b = s.ball;
-    const cam = clamp(Math.round(b.y - 150), 0, h.H - VIEW_H); s.camY = cam;
+    const cam = camOf(s, h); s.camY = cam;
     ctx.save(); ctx.beginPath(); ctx.rect(0, VIEW_TOP, W, VIEW_H); ctx.clip(); ctx.translate(0, VIEW_TOP - cam);
     ctx.fillStyle = PAL.rough; ctx.fillRect(0, cam, W, VIEW_H);
     ctx.fillStyle = PAL.rough2; for (let y = (cam >> 4) << 4; y < cam + VIEW_H + 16; y += 16) for (let x = ((y >> 4) & 1) * 8; x < W; x += 16) ctx.fillRect(x, y, 2, 2);
@@ -235,7 +241,7 @@ const links = {
     const wx = h.wind.x, wy = h.wind.y, wsp = Math.round(Math.hypot(wx, wy) * 2) / 2;
     text(ctx, T('WIND') + ' ' + (wsp === 0 ? '0' : (wx < -0.2 ? '< ' : wx > 0.2 ? '> ' : '') + (wy < -0.2 ? '^' : wy > 0.2 ? 'v' : '') + wsp), W - 6, PANEL + 14, C.lime, 8, 'right');
     text(ctx, T('PIN') + ' ' + dpin + 'Y', 6, PANEL + 24, C.ink); text(ctx, T((s.lie || 'tee').toUpperCase()), W - 6, PANEL + 24, C.dim, 8, 'right');
-    if (s.mode === 'aim') { const mp = s.charge ? s.pw : 0; if (s.charge) { ctx.fillStyle = '#2a1a4a'; ctx.fillRect(60, PANEL + 15, 60, 5); ctx.fillStyle = mp > 0.85 ? C.red : C.lime; ctx.fillRect(60, PANEL + 15, Math.round(60 * mp), 5); } }
+    if (s.mode === 'aim') { const mp = s.charge ? s.pw : 0; if (s.charge) { ctx.fillStyle = '#2a1a4a'; ctx.fillRect(60, PANEL + 15, 40, 5); ctx.fillStyle = mp > 0.85 ? C.red : C.lime; ctx.fillRect(60, PANEL + 15, Math.round(40 * mp), 5); } }
     G.hud(null, T('HOLE') + ' ' + (Math.min(s.hole, HOLES - 1) + 1));
     if (s.msgT) text(ctx, T(s.msg), W / 2, 60, C.gold, 8, 'center');
     else if (s.intro && s.mode === 'aim') { text(ctx, T('DRAG BACK AND LET GO'), W / 2, 40, C.ink, 8, 'center'); text(ctx, T('TAP TO AIM'), W / 2, 52, C.dim, 8, 'center'); }

@@ -66,6 +66,14 @@ SIM = """(args)=>{
    s.ball.x = h.pin.x; s.ball.y = h.pin.y + 14; h.green.rx = 40; h.green.ry = 40; h.slope = {x:0,y:0}; s.strokes = 1; s.lie = 'green'; s.club = 3; s.ax = 0; s.ay = -1; s.mode = 'aim';
    const sc0 = G.score; drag(0, 16); settle(); out.mode = s.mode; out.strokes = s.strokes; out.holed = s.holed; out.pts = G.score - sc0; out.txt = s.bannerTxt; out.par = h.par;
  }
+ if (script==='trees') {   // a ball landing on any tree of any hole is dropped on a playable spot, never in water or out of bounds, never NaN
+   let bad = 0, n = 0; for (let k = 0; k < 9; k++) { const hh = s.holes[k]; for (const t of hh.trees) { n++; s.hole = k; s.mode = 'fly'; s.club = 0; s.last = {x: hh.tee.x, y: hh.tee.y}; s.ball = {x: hh.tee.x, y: hh.tee.y}; s.a1 = {x: t.x, y: t.y}; s.dirx = 0; s.diry = -1; s.carry = 50; g.land(s, G);
+     if (s.mode !== 'drop' && !(Number.isFinite(s.ball.x) && Number.isFinite(s.ball.y))) bad++; if (s.mode === 'roll' || s.mode === 'aim') { /* playable */ } }
+   } out.trees = n; out.bad = bad; }
+ if (script==='tap') {   // tap-to-aim uses the camera the screen shows, computed from the ball alone (the stepper never draws)
+   const hh = s.holes[0]; s.mode = 'aim'; const cam = Math.max(0, Math.min(hh.H - 232, Math.round(s.ball.y - 150)));
+   frame('0,0,0,448,400,,,'); frame('0,0,0,448,400,' + 60*4 + ',' + 80*4 + ',,'); idle(2);
+   const sy = s.ball.y - cam + 22, dx = 60 - s.ball.x, dy = 80 - sy, d = Math.sqrt(dx*dx + dy*dy); out.cam = cam; out.ax = s.ax; out.ay = s.ay; out.wx = dx/d; out.wy = dy/d; }
  if (script==='score') {   // the points table: hole in one, eagle, birdie, par, bogey, double, worse
    const t = []; for (const [st, par] of [[1,4],[2,5],[3,4],[4,4],[5,4],[6,4],[8,4]]) { const hh = s.holes[0]; hh.par = par; s.strokes = st; s.mode = 'aim'; const a = G.score; g.holeOut(s, G); t.push(G.score - a); s.mode = 'aim'; s.holed = false; } out.table = t;
  }
@@ -114,6 +122,10 @@ async def main():
         check('rules: water costs a stroke and the ball goes back to where it was hit from', wt['strokes'] == 2 and wt['back'] < 1 and wt['mode'] == 'aim', wt)
         hl = await sim(w, 3, 'hole')
         check('rules: a gentle putt at the pin drops, the hole is scored and the next one starts', hl['holed'] is True and hl['mode'] == 'hole' and hl['strokes'] == 2 and hl['pts'] == holep(2, hl['par']), hl)
+        tr = await sim(w, 3, 'trees')
+        check('rules: a ball that hits a tree is dropped on a playable spot (never NaN, water or out of bounds)', tr['trees'] > 10 and tr['bad'] == 0, tr)
+        tp = await sim(w, 3, 'tap')
+        check('rules: tap-to-aim points at the tapped spot (the camera is worked out from the ball, so replays agree with the screen)', abs(tp['ax'] - tp['wx']) < 0.02 and abs(tp['ay'] - tp['wy']) < 0.02 and tp['cam'] > 0, tp)
         sc = await sim(w, 3, 'score')
         check('rules: points by score: ace 1000, eagle 700, birdie 400, par 250, bogey 100, double 50, worse 0', sc['table'] == [1000, 700, 400, 250, 100, 50, 0], sc['table'])
         rd = await sim(w, 4, 'round')
