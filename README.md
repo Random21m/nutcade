@@ -446,6 +446,12 @@ You can also tip from inside NUTCADE: **Settings → About → Support**. The sa
 
 ## Changelog
 
+- **v1.20.1:** small fixes.
+  - A very large balance (80 million SAT and up) no longer cuts off the SAT label at 320 px.
+  - Claim now on a saved ecash note shows its amount once (the automatic "Back online" notice is skipped for it).
+  - A second open tab that waited for the same claim now starts from what is saved, so it cannot write a second record for the same ecash (the mint would have refused it anyway; no sats were ever at risk).
+  - A French sentence on the Support screen reads naturally.
+
 - **v1.20.0:** a new game, and nothing in it touches money.
   - **Nut Bowl:** top-down arcade football (see how to play above). Pick a play, run it with the stick or throw to a receiver, punt or kick on 4th down, and beat the clock over four quarters; high scores with initials, challenges, replays and the Daily Challenge work like the other cabinets. The welcome screen and the share text now say twelve cabinets, and Nut Bowl can be the Daily Challenge.
 

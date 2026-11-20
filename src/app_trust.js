@@ -61,9 +61,9 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.20.0; rewrite this list at every release)
-  'New game: Nut Bowl, top-down arcade football. Pick a play, run it or throw it, and beat the clock.',
-  'The arcade now has twelve cabinets, and Nut Bowl can be the Daily Challenge.'
+const WHATS_NEW = [   // (v1.20.1; rewrite this list at every release)
+  'A very large balance no longer cuts off the SAT label on small screens.',
+  'Claiming a saved ecash note now shows its amount once, and a second open tab can no longer start a second claim.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);

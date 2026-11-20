@@ -2122,9 +2122,9 @@ function openSheet(title, html, onOpen) {
 function fitNums(root) {
   (root || document).querySelectorAll('.credit-num,.cash-amt,.cash-charge').forEach(el => {
     if (el.dataset.fs === undefined) el.dataset.fs = el.style.fontSize || '';
-    const min = el.classList.contains('cash-charge') ? 9 : 14;   // the CHARGE label stays one readable line
+    const min = el.classList.contains('cash-charge') ? 9 : el.classList.contains('credit-num') ? 10 : 14;   // the CHARGE label stays one readable line; a huge balance (80M SAT) may go smaller so its unit is not cut off
     let fs = parseFloat(getComputedStyle(el).fontSize), i = 0;
-    while (el.scrollWidth > el.clientWidth + 1 && fs > min && i++ < 30) { fs = Math.max(min, fs - (min < 14 ? 0.5 : 1.5)); el.style.fontSize = fs + 'px'; }
+    while (el.scrollWidth > el.clientWidth + 1 && fs > min && i++ < 40) { fs = Math.max(min, fs - (min < 14 ? 0.5 : 1.5)); el.style.fontSize = fs + 'px'; }
   });
 }
 function closeSheet() {
@@ -2569,7 +2569,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.20.0';
+const APP_VERSION = '1.20.1';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -3300,6 +3300,7 @@ function holdIncoming(token, note) {
    after a lost answer the open record is settled first, and the token is only asked for again if that left nothing of it. */
 function claimHeld(t) {
   return single('incoming:' + t.id, async () => {
+    try { await syncIfStale(); } catch (e) { e.blocked = true; throw e; }   // (a failed re-read leaves the token waiting, never marked failed; another tab may have claimed this token while this one waited for its turn: start from what is saved now)
     for (const op of S.ops.filter(o => o.kind === 'receive' && o.follow && o.follow.k === 'incoming' && o.follow.txId === t.id)) await settleOp(op.id).catch(() => {});
     if (S.ops.some(o => o.kind === 'receive' && o.follow && o.follow.k === 'incoming' && o.follow.txId === t.id)) throw new Error("Can't reach the mint right now. Try again in a moment.");
     if (!txById(t.id)) return S.txs.find(x => x.fromIncoming === t.id) || null;   // (settled from its record: its line is here, the saved one is gone)
@@ -3308,13 +3309,14 @@ function claimHeld(t) {
     return nt;
   });
 }
+const claimingByHand = new Set();   // saved tokens the person is claiming with "Claim now": that screen shows the amount, so the automatic claim does not toast it again
 let claimingSaved = null;
 function claimSaved() { if (!claimingSaved) claimingSaved = claimSavedNow().finally(() => { claimingSaved = null; }); return claimingSaved; }   // one at a time
 async function claimSavedNow() {
   if (isOffline()) return 0;
   let n = 0;
   for (const t of S.txs.filter(t => t.status === 'pending' && t.incoming && t.offline && S.mints.find(m => m.url === t.mint))) {
-    try { const nt = await claimHeld(t); if (nt) n += nt.amount; }
+    try { const nt = await claimHeld(t); if (nt && !claimingByHand.has(t.id)) n += nt.amount; }
     catch (e) {
       if (netErr(e) || e.blocked || e.asked) continue;   // (asked: the request went out and its answer is being settled from its record; the token is not failed)
       if (S.txs.some(x => x.fromIncoming === t.id)) { S.txs = S.txs.filter(x => x.id !== t.id); save(); continue; }   // claimed by this wallet (another device): its line is here already
@@ -4324,7 +4326,8 @@ const A = {
   }),
   claimIncoming: b => run(b, 'CLAIMING', async () => {
     const t = txById(b.dataset.id); if (!t || !t.incoming) return;
-    const nt = await claimHeld(t);
+    claimingByHand.add(t.id);
+    let nt; try { nt = await claimHeld(t); } finally { setTimeout(() => claimingByHand.delete(t.id), 3000); }   // (kept a moment: the automatic claim sharing this one finishes just after)
     if (nt) { sfx('coin'); showDone('in', nt.amount, 'Ecash'); } else { closeSheet(); refresh(); }
   }),
   nfcScan: async b => {
