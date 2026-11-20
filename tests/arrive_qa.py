@@ -375,6 +375,23 @@ async def main():
             await dismiss(r)
 
         # ---------- system notifications: off, on, permission denied ----------
+        # ---------- Hide amounts: a notice, its Details and the toasts show ••• and no amount ----------
+        if want('open'):
+            await dismiss(r); await r.ev("Nutcade.S.prefs.hideAmounts=true; Nutcade.render()")
+            a = next(amt); line = await arrive('token', FEE, a); await r.wait(800)
+            cs = [c for c in await cards(r) if c['type'] == 'live']; got = cs[0]['text'] if cs else ''
+            digits = lambda t: re.search(r'(^|[^\d,.])' + re.escape(fmtn(a)) + r'([^\d]|$)', t) or str(a) in t
+            check('hide amounts: the notice says ••• and not the amount (kind and mint still show)', bool(line) and len(cs) == 1 and '+••• SAT' in got and not digits(got) and NAME[FEE] in got, got)
+            await r.ev("document.querySelector('#arrStack .arr-card [data-act=arrMore]')?.click()"); await r.wait(350)
+            det = await r.ev("(document.querySelector('#layer')||{}).innerText||''")
+            check('hide amounts: Details says ••• too', '•••' in det and not digits(det), det[:160])
+            await r.ev("Nutcade.closeSheet()"); await dismiss(r)
+            await r.ev("Nutcade.S.prefs.hideAmounts=false; Nutcade.render()")
+            a2 = next(amt); line2 = await arrive('token', FEE, a2); await r.wait(800)
+            cs = [c for c in await cards(r) if c['type'] == 'live']
+            check('hide amounts: with it off again the notice shows the amount', bool(line2) and len(cs) == 1 and ('+' + fmtn(a2) + ' SAT') in cs[0]['text'], cs and cs[0]['text'])
+            await dismiss(r)
+
         if want('notif') or want('bg') or want('locked'):
             await settings(r)
             check('notifications: a setting in Settings, off at first', await r.ev("!!document.querySelector('#p_arrNotify') && !document.querySelector('#p_arrNotify').checked"))

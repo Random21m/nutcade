@@ -102,14 +102,14 @@ function arrCardHTML(type, items) {
   const sub = type === 'away' ? '<span class="arr-what">While you were away</span>'
     : one ? `<span class="arr-what">${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span>` : `<span class="arr-what">${esc(arrCount(items.length))}</span>`;
   // (the amount has the first line to itself and is never cut; the second line, what came, gives way instead)
-  return `<div class="arr-row"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-big" data-noi18n>+${esc(money(total))}</span><span class="arr-sp"></span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
+  return `<div class="arr-row"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-big" data-noi18n>+${esc(arrMoney(total))}</span><span class="arr-sp"></span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
     <div class="arr-sub">${sub}<span class="arr-sp"></span><button type="button" class="btn sm arr-more" data-act="arrMore">Details</button></div>`;
 }
 function arrDetailsHTML(type, items) {
   const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
-  const lines = one ? `<dl class="kv"><dt>Amount</dt><dd data-noi18n>+${esc(money(one.a))}</dd><dt>From</dt><dd>${esc(ARR_LABEL[one.k])}</dd><dt>Mint</dt><dd data-noi18n>${esc(mintName(one.m))}</dd></dl>`
-    : `${type === 'away' ? '<div class="arr-note">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
-      <div class="arr-total"><span>Total</span><span data-noi18n>+${esc(money(total))}</span></div>`;
+  const lines = one ? `<dl class="kv"><dt>Amount</dt><dd data-noi18n>+${esc(arrMoney(one.a))}</dd><dt>From</dt><dd>${esc(ARR_LABEL[one.k])}</dd><dt>Mint</dt><dd data-noi18n>${esc(mintName(one.m))}</dd></dl>`
+    : `${type === 'away' ? '<div class="arr-note">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(arrMoney(g.a))}</span></div>`).join('')}</div>
+      <div class="arr-total"><span>Total</span><span data-noi18n>+${esc(arrMoney(total))}</span></div>`;
   return `<div class="arr-details" data-type="${type}" data-ids="${esc(items.map(x => x.id).join(' '))}">${lines}
     <div class="arr-acts"><button type="button" class="btn solid gold" data-act="arrNotes">Open notes</button><button type="button" class="btn" data-act="close">OK</button></div></div>`;
 }
@@ -206,8 +206,8 @@ const arrSysOk = () => !!S.prefs.arrNotify && typeof Notification !== 'undefined
 // wallet: the duress PIN's wallet is a wallet with a PIN, and the real one is too (silence would give the duress PIN away)
 function arrSysMode() { return vault.on ? 'generic' : 'full'; }
 function arrSysBody(items) {
-  if (items.length === 1) { const x = items[0]; return `${tr(ARR_LABEL[x.k])}: +${money(x.a)} · ${mintName(x.m)}`; }
-  return arrGroups(items).map(g => `${tr(ARR_LABEL[g.k])}: ${arrCount(g.n)} · +${money(g.a)}`).join('\n');
+  if (items.length === 1) { const x = items[0]; return `${tr(ARR_LABEL[x.k])}: +${arrMoney(x.a)} · ${mintName(x.m)}`; }
+  return arrGroups(items).map(g => `${tr(ARR_LABEL[g.k])}: ${arrCount(g.n)} · +${arrMoney(g.a)}`).join('\n');
 }
 async function arrSys(title, items) {
   const mode = arrSysMode();

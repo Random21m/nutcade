@@ -3296,6 +3296,8 @@ const fmt = n => maskAmounts ? '•••' : Math.round(num(n)).toLocaleString(n
 const fmtEn = n => Math.round(num(n)).toLocaleString('en-US');   // share cards and share text, which are in English
 const unitTag = () => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '' : 'SAT';
 const money = n => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '₿' + fmt(n) : fmt(n) + ' SAT';
+// money() for what arrives (notices, their Details, the phone notification and the "received" toasts): ••• while Hide amounts is on
+const arrMoney = n => { const was = maskAmounts; maskAmounts = !!S.prefs.hideAmounts; try { return money(n); } finally { maskAmounts = was; } };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 // One spelling per mint: lowercase scheme and host, no default port (:443, :80), no trailing slash. The path keeps
 // its case, since servers may treat /Mint and /mint differently.
@@ -3882,7 +3884,7 @@ async function checkQuoteNow(id, txId) {
         if (proofs === WAIT) return 'waiting';
         if (proofs === ISSUED) {
           const got = await creditDepositRange(w, q).catch(() => null);
-          if (got != null && !S.quotes.some(x => x.quote === q.quote)) { refresh(); document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote })); if (got) arrToast(q.txId, `+${money(got)} received`, 'lime'); return 'paid'; }
+          if (got != null && !S.quotes.some(x => x.quote === q.quote)) { refresh(); document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote })); if (got) arrToast(q.txId, `+${arrMoney(got)} received`, 'lime'); return 'paid'; }
           return 'waiting';
         }
         const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
@@ -3891,7 +3893,7 @@ async function checkQuoteNow(id, txId) {
         dropQuote(q); sfx('coin'); refresh();
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         if (!$('#layer .sheet')) celebrate('in', q.amount);
-        arrToast(q.txId, `+${money(q.amount)} received`, 'lime');   // (src/app_arrive.js: not beside its notice)
+        arrToast(q.txId, `+${arrMoney(q.amount)} received`, 'lime');   // (src/app_arrive.js: not beside its notice)
         return 'paid';
       }
       if (r.state === 'ISSUED') {
@@ -3910,7 +3912,7 @@ async function checkQuoteNow(id, txId) {
         } catch (e) { return 'waiting'; }
         if (S.quotes.some(x => x.quote === q.quote)) return 'waiting';
         refresh();
-        if (got) { sfx('coin'); arrToast(q.txId, `Recovered ${money(got)} from an interrupted deposit`, 'lime'); }
+        if (got) { sfx('coin'); arrToast(q.txId, `Recovered ${arrMoney(got)} from an interrupted deposit`, 'lime'); }
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         return 'paid';
       }
@@ -3929,7 +3931,7 @@ async function checkQuoteNow(id, txId) {
         const line = t && t.status === 'pending' ? updTx(q.txId, { status: 'done', amount: got, ts: Date.now() })
           : addTx({ type: 'in', method: 'onchain', amount: got, mint: q.mint, note: t ? t.note : '', request: q.request, quote: q.quote });
         closeOp(op); save();
-        sfx('coin'); refresh(); arrToast(line && line.id, `+${money(got)} deposited on-chain`, 'lime');
+        sfx('coin'); refresh(); arrToast(line && line.id, `+${arrMoney(got)} deposited on-chain`, 'lime');
         return 'paid';
       }
       if (q.expiry && Date.now() / 1000 > q.expiry) { dropQuote(q); const t = txById(q.txId); if (t && t.status === 'pending') updTx(q.txId, { status: 'expired' }); refresh(); return 'expired'; }
@@ -6345,7 +6347,7 @@ async function receivePayload(p, from) {
     if (req) reqPaid(req.id, tx);
     sfx('coin'); refresh();
     if (!$('#layer .sheet')) celebrate('in', tx.amount);
-    arrToast(tx.id, `+${money(tx.amount)} received${req ? ' for your request' : ''}`, 'lime');
+    arrToast(tx.id, `+${arrMoney(tx.amount)} received${req ? ' for your request' : ''}`, 'lime');
     document.dispatchEvent(new CustomEvent('nutcade:request', { detail: { id: p.id, amount: tx.amount } }));
   } catch (e) { /* already claimed or not valid: nothing to add */ }
 }
@@ -10540,14 +10542,14 @@ function arrCardHTML(type, items) {
   const sub = type === 'away' ? '<span class="arr-what">While you were away</span>'
     : one ? `<span class="arr-what">${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span>` : `<span class="arr-what">${esc(arrCount(items.length))}</span>`;
   // (the amount has the first line to itself and is never cut; the second line, what came, gives way instead)
-  return `<div class="arr-row"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-big" data-noi18n>+${esc(money(total))}</span><span class="arr-sp"></span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
+  return `<div class="arr-row"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-big" data-noi18n>+${esc(arrMoney(total))}</span><span class="arr-sp"></span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
     <div class="arr-sub">${sub}<span class="arr-sp"></span><button type="button" class="btn sm arr-more" data-act="arrMore">Details</button></div>`;
 }
 function arrDetailsHTML(type, items) {
   const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
-  const lines = one ? `<dl class="kv"><dt>Amount</dt><dd data-noi18n>+${esc(money(one.a))}</dd><dt>From</dt><dd>${esc(ARR_LABEL[one.k])}</dd><dt>Mint</dt><dd data-noi18n>${esc(mintName(one.m))}</dd></dl>`
-    : `${type === 'away' ? '<div class="arr-note">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(money(g.a))}</span></div>`).join('')}</div>
-      <div class="arr-total"><span>Total</span><span data-noi18n>+${esc(money(total))}</span></div>`;
+  const lines = one ? `<dl class="kv"><dt>Amount</dt><dd data-noi18n>+${esc(arrMoney(one.a))}</dd><dt>From</dt><dd>${esc(ARR_LABEL[one.k])}</dd><dt>Mint</dt><dd data-noi18n>${esc(mintName(one.m))}</dd></dl>`
+    : `${type === 'away' ? '<div class="arr-note">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(arrMoney(g.a))}</span></div>`).join('')}</div>
+      <div class="arr-total"><span>Total</span><span data-noi18n>+${esc(arrMoney(total))}</span></div>`;
   return `<div class="arr-details" data-type="${type}" data-ids="${esc(items.map(x => x.id).join(' '))}">${lines}
     <div class="arr-acts"><button type="button" class="btn solid gold" data-act="arrNotes">Open notes</button><button type="button" class="btn" data-act="close">OK</button></div></div>`;
 }
@@ -10644,8 +10646,8 @@ const arrSysOk = () => !!S.prefs.arrNotify && typeof Notification !== 'undefined
 // wallet: the duress PIN's wallet is a wallet with a PIN, and the real one is too (silence would give the duress PIN away)
 function arrSysMode() { return vault.on ? 'generic' : 'full'; }
 function arrSysBody(items) {
-  if (items.length === 1) { const x = items[0]; return `${tr(ARR_LABEL[x.k])}: +${money(x.a)} · ${mintName(x.m)}`; }
-  return arrGroups(items).map(g => `${tr(ARR_LABEL[g.k])}: ${arrCount(g.n)} · +${money(g.a)}`).join('\n');
+  if (items.length === 1) { const x = items[0]; return `${tr(ARR_LABEL[x.k])}: +${arrMoney(x.a)} · ${mintName(x.m)}`; }
+  return arrGroups(items).map(g => `${tr(ARR_LABEL[g.k])}: ${arrCount(g.n)} · +${arrMoney(g.a)}`).join('\n');
 }
 async function arrSys(title, items) {
   const mode = arrSysMode();

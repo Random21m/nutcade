@@ -16,6 +16,8 @@ const fmt = n => maskAmounts ? '•••' : Math.round(num(n)).toLocaleString(n
 const fmtEn = n => Math.round(num(n)).toLocaleString('en-US');   // share cards and share text, which are in English
 const unitTag = () => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '' : 'SAT';
 const money = n => (window.NutPrefs && window.NutPrefs.btcSymbol) ? '₿' + fmt(n) : fmt(n) + ' SAT';
+// money() for what arrives (notices, their Details, the phone notification and the "received" toasts): ••• while Hide amounts is on
+const arrMoney = n => { const was = maskAmounts; maskAmounts = !!S.prefs.hideAmounts; try { return money(n); } finally { maskAmounts = was; } };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 // One spelling per mint: lowercase scheme and host, no default port (:443, :80), no trailing slash. The path keeps
 // its case, since servers may treat /Mint and /mint differently.
@@ -602,7 +604,7 @@ async function checkQuoteNow(id, txId) {
         if (proofs === WAIT) return 'waiting';
         if (proofs === ISSUED) {
           const got = await creditDepositRange(w, q).catch(() => null);
-          if (got != null && !S.quotes.some(x => x.quote === q.quote)) { refresh(); document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote })); if (got) arrToast(q.txId, `+${money(got)} received`, 'lime'); return 'paid'; }
+          if (got != null && !S.quotes.some(x => x.quote === q.quote)) { refresh(); document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote })); if (got) arrToast(q.txId, `+${arrMoney(got)} received`, 'lime'); return 'paid'; }
           return 'waiting';
         }
         const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
@@ -611,7 +613,7 @@ async function checkQuoteNow(id, txId) {
         dropQuote(q); sfx('coin'); refresh();
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         if (!$('#layer .sheet')) celebrate('in', q.amount);
-        arrToast(q.txId, `+${money(q.amount)} received`, 'lime');   // (src/app_arrive.js: not beside its notice)
+        arrToast(q.txId, `+${arrMoney(q.amount)} received`, 'lime');   // (src/app_arrive.js: not beside its notice)
         return 'paid';
       }
       if (r.state === 'ISSUED') {
@@ -630,7 +632,7 @@ async function checkQuoteNow(id, txId) {
         } catch (e) { return 'waiting'; }
         if (S.quotes.some(x => x.quote === q.quote)) return 'waiting';
         refresh();
-        if (got) { sfx('coin'); arrToast(q.txId, `Recovered ${money(got)} from an interrupted deposit`, 'lime'); }
+        if (got) { sfx('coin'); arrToast(q.txId, `Recovered ${arrMoney(got)} from an interrupted deposit`, 'lime'); }
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         return 'paid';
       }
@@ -649,7 +651,7 @@ async function checkQuoteNow(id, txId) {
         const line = t && t.status === 'pending' ? updTx(q.txId, { status: 'done', amount: got, ts: Date.now() })
           : addTx({ type: 'in', method: 'onchain', amount: got, mint: q.mint, note: t ? t.note : '', request: q.request, quote: q.quote });
         closeOp(op); save();
-        sfx('coin'); refresh(); arrToast(line && line.id, `+${money(got)} deposited on-chain`, 'lime');
+        sfx('coin'); refresh(); arrToast(line && line.id, `+${arrMoney(got)} deposited on-chain`, 'lime');
         return 'paid';
       }
       if (q.expiry && Date.now() / 1000 > q.expiry) { dropQuote(q); const t = txById(q.txId); if (t && t.status === 'pending') updTx(q.txId, { status: 'expired' }); refresh(); return 'expired'; }
@@ -3065,7 +3067,7 @@ async function receivePayload(p, from) {
     if (req) reqPaid(req.id, tx);
     sfx('coin'); refresh();
     if (!$('#layer .sheet')) celebrate('in', tx.amount);
-    arrToast(tx.id, `+${money(tx.amount)} received${req ? ' for your request' : ''}`, 'lime');
+    arrToast(tx.id, `+${arrMoney(tx.amount)} received${req ? ' for your request' : ''}`, 'lime');
     document.dispatchEvent(new CustomEvent('nutcade:request', { detail: { id: p.id, amount: tx.amount } }));
   } catch (e) { /* already claimed or not valid: nothing to add */ }
 }
