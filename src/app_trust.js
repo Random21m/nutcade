@@ -61,10 +61,9 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.17.1; rewrite this list at every release)
-  'A token you saved while offline is now claimed once, even if you tap Claim now while NUTCADE claims it too.',
-  'The home screen shows your last 2 notes. All notes shows the rest.',
-  'Hide amounts also hides amounts in arrival notices.'
+const WHATS_NEW = [   // (v1.18.0; rewrite this list at every release)
+  'Choose how many recent notes the home screen shows, from 0 to 6, in Settings, Look & sound.',
+  'The Hall of Fame shows each game\'s full name.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);

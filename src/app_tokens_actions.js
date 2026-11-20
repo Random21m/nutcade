@@ -38,5 +38,6 @@ Object.assign(A, {
     if (n) { sfx('coin'); toast(n === 1 ? '1 token taken back' : `${n} tokens taken back`, 'lime'); }
     if (bad.length) { const e = new Error(bad.length === 1 ? "1 token couldn't be taken back." : `${bad.length} tokens couldn't be taken back.`); e.also = bad.join(' · '); e.keep = true; throw e; }
   }),
+  recentN: b => { const n = +b.dataset.v; S.prefs.recentN = Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; save(); refresh(); sfx('select'); },
   qrLogo: b => { S.prefs.qrLogo = b.dataset.v === 'none' ? 'none' : 'acorn'; save(); refresh(); sfx('select'); }
 });

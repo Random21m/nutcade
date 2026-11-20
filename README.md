@@ -84,6 +84,7 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 - **High-score bounties**: put sats on a challenge. The mint locks them to your friend and to a secret only your NUTCADE holds (NUT-14). Beat your score within a week and their NUTCADE gets the secret and claims the sats; otherwise they come back to you
 - **Replays that prove scores**: every game records its inputs, so any phone can replay it and get exactly the same score. Challenges carry the challenger's replay, checked on arrival, and you race their ghost; a bounty only pays out when the winner's replay checks out
 - **NUTCADE tokens**: print sats on paper, like arcade tokens. Pick an amount per token and how many (1 to 20): each is its own Cashu token with its own QR code, read back before printing, that anyone can claim with any Cashu wallet. Unclaimed ones can be taken back, and the Printed tokens list shows which were claimed
+- **Recent notes on the home screen**: choose 0 to 6 of your latest notes to list under Recent (it starts at 2; **All notes** always shows the rest). Kept on this device.
 - **QR code center**: the NUTCADE acorn in the middle of the QR codes NUTCADE shows and prints (or none), only where the code still scans
 - **Treasure hunts**: hide sats behind printable clue cards. The prize is locked to a key split across the cards (Shamir's secret sharing), so any 3 of 5 (or whatever you choose) open the chest, and no single card can
 - **Loaded score cards**: put sats in a high-score or trophy card before you share it. The card carries a QR code, and the first person to scan it wins them
@@ -431,6 +432,10 @@ NUTCADE is free and open source, and it stays that way. Supporting it is optiona
 You can also tip from inside NUTCADE: **Settings → About → Support**. The same address and code are on that screen. Be wary of any other "NUTCADE support" address.
 
 ## Changelog
+
+- **v1.18.0:** a small settings release. Nothing in it changes how money moves.
+  - **Recent notes on the home screen:** you choose how many, from 0 to 6 (**Settings → Look & sound → Recent notes on the home screen**). It starts at 2. At 0 the list is hidden and **All notes** stays. It is kept on this device only.
+  - **Hall of Fame** shows each game's full name, so Nut Flipper, Nut Maze and Nut Poker are no longer all "NUT".
 
 - **v1.17.1:** a small fix release.
   - **A saved token is claimed once.** If you tapped **Claim now** on a token saved while offline at the same moment NUTCADE claimed it by itself, or tried again after a claim whose answer from the mint was lost, NUTCADE could write two records for the same coins. Now one claim is made for each saved token, and a record left by a lost answer is settled first. Your balance was never wrong; this removes the double record. Also, a saved token whose claim got no answer from the mint is no longer marked "already claimed by someone else" while the claim is still being settled.

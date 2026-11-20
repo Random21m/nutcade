@@ -162,6 +162,26 @@ async def main():
             check('privacy: the new code opens no WebSocket and reads no cookie, and sends no body', 'WebSocket' not in tr and 'document.cookie' not in tr and not re.search(r"method:\s*['\"](POST|PUT|PATCH|DELETE)", tr) and not re.search(r"\bbody:\s", tr) and 'sendBeacon' not in tr and 'XMLHttpRequest' not in tr)
         await section('privacy', privacy)
 
+        # ======================= recent notes on the home screen (1.18.0) =======================
+        async def recent_notes():
+            w = await funded(b)
+            await w.ev("(()=>{const t=Nutcade.S.txs[0]; for(let i=0;i<8;i++) Nutcade.S.txs.push(Object.assign({}, t, {id:'rn'+i, ts:t.ts-1000*(i+1)})); Nutcade.render()})()")
+            rows = "document.querySelectorAll('.screen .panel .txs .tx').length"
+            check('recent: 2 notes by default (nothing chosen yet)', await w.ev(rows) == 2, await w.ev(rows))
+            await tab(w, 'settings')
+            check('recent: Settings has a 0 to 6 choice, 2 pressed', await w.ev("[...document.querySelectorAll('[data-act=recentN]')].map(b=>b.textContent+(b.getAttribute('aria-pressed')==='true'?'*':'')).join(',')") == '0,1,2*,3,4,5,6')
+            for n in (0, 1, 6, 3):
+                await w.ev(f"document.querySelector('[data-act=recentN][data-v=\"{n}\"]').click()"); await w.wait(200)
+                saved = await w.ev("JSON.parse(localStorage.getItem('nutcade:prefs')).recentN")
+                await tab(w, 'wallet'); got = await w.ev(rows)
+                check(f'recent: {n} chosen: the home screen lists {n}, it is remembered on this device', got == n and saved == n, (got, saved))
+                if n == 0: check('recent: 0: All notes stays and no empty-state message', await w.ev("!!document.querySelector('[data-act=tab][data-tab=history]') && !/NO PLAYS YET/.test(document.querySelector('.screen').innerText)"))
+                await tab(w, 'settings')
+            await w.ev("Nutcade.S.prefs.recentN = 99; Nutcade.render()"); await tab(w, 'wallet')
+            check('recent: a value outside 0 to 6 falls back to 2', await w.ev(rows) == 2)
+            await w.pg.context.close()
+        await section('recent', recent_notes)
+
         # ======================= hide amounts =======================
         async def hide():
             w = await funded(b)

@@ -2367,7 +2367,7 @@ function viewWallet() {
     <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">${HEART}<span>Support NUTCADE</span></button>
   </section>`;
   const bal = balanceOf(m.url), tot = totalBalance(), po = pendingOut();
-  const recent = S.txs.slice(0, 2);
+  const recent = S.txs.slice(0, recentCount());
   return `<section class="screen">${nag}${legacy}${trustNotices()}
     <div class="credits">
       <div class="row between"><span class="label">Credits</span><span class="row" style="gap:10px">${tot !== bal ? `<span class="tiny muted">All mints ${money(tot)}</span>` : ''}${hideBtn()}${vault.on ? '<button class="lockbtn" data-act="lockNow" aria-label="Lock wallet" title="Lock wallet"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2h1v8H4V7zm1 0h4V5a2 2 0 0 0-4 0zm1 3v3h2v-3z"/></svg></button>' : ''}</span></div>
@@ -2387,7 +2387,7 @@ function viewWallet() {
     <div id="priceMount"></div>
     <div class="panel">
       <div class="row between"><span class="h2">Recent</span>${S.txs.length ? '<button class="linkbtn" data-act="tab" data-tab="history">All notes</button>' : ''}</div>
-      ${recent.length ? `<div class="txs">${recent.map(txRow).join('')}</div>` : `<div class="empty-state"><b>NO PLAYS YET</b>Receive some sats and every transaction shows up here with room for a note.</div>`}
+      ${recent.length ? `<div class="txs">${recent.map(txRow).join('')}</div>` : recentCount() === 0 ? '' : `<div class="empty-state"><b>NO PLAYS YET</b>Receive some sats and every transaction shows up here with room for a note.</div>`}
     </div>
     <div class="panel"><div class="row between"><span class="h2">Arcade</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Play</button></div><div id="topScore" class="tiny muted"></div></div>
     <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">${HEART}<span>Support NUTCADE</span></button>
@@ -2569,7 +2569,9 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.17.1';
+const APP_VERSION = '1.18.0';
+// how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
+const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
 const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
 const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-help', 'Help'], ['set-about', 'About']];
@@ -2637,6 +2639,7 @@ function viewSettings() {
       ${toggle('crt', 'CRT scanlines', '')}
       ${toggle('btcSymbol', 'Show amounts as ₿', '₿1,000 instead of 1,000 SAT.')}
       <div class="field"><label>QR code center</label><div class="seg pt-seg" role="group" aria-label="QR code center">${[['none', 'NONE'], ['acorn', 'NUTCADE ACORN']].map(([k, l]) => `<button data-act="qrLogo" data-v="${k}" aria-pressed="${(S.prefs.qrLogo || 'acorn') === k}">${l}</button>`).join('')}</div><div class="th">The acorn in the middle of the QR codes NUTCADE shows and prints. A code that wouldn't scan with it shows plain, and animated codes stay plain.</div></div>
+      <div class="field"><label>Recent notes on the home screen</label><div class="seg pt-seg" role="group" aria-label="Recent notes on the home screen">${[0, 1, 2, 3, 4, 5, 6].map(n => `<button data-act="recentN" data-v="${n}" aria-pressed="${recentCount() === n}">${n}</button>`).join('')}</div><div class="th">How many of your latest notes the home screen lists. All notes always shows the rest. Kept on this device.</div></div>
       ${window.Arcade ? `<div class="sub">Arcade</div>${window.Arcade.initialsHTML()}` : ''}
       ${toggle('hideAmounts', 'Hide amounts', 'Shows ••• instead of amounts on the wallet, notes and mints screens. You can also tap your balance. Payment screens always show the real amount.')}
     </div>
