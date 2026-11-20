@@ -128,7 +128,7 @@ async def main():
             check('SECURITY.md: GitHub private vulnerability reporting, with the direct link and the steps', 'github.com/Random21m/nutcade/security/advisories/new' in sec and 'private vulnerability reporting' in sec.lower() and 'Report a vulnerability' in sec)
             check('SECURITY.md: no invented email address, Nostr key or account', not re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', sec) and 'npub1' not in sec and 'nostr:' not in sec.lower(), re.findall(r'[\w.+-]+@[\w-]+\.[\w.]+', sec))
             check('SECURITY.md: still says never to put details in a public issue, and still promises a reply', "don't open a public issue" in sec and 'reply within a few days' in sec)
-            check("README: the changelog entry is 'v1.17.0' (Trust & help) and APP_VERSION matches", '- **v1.17.0:**' in readme and re.search(r"APP_VERSION = '1\.17\.0'", SRC['app.js']))
+            check("README: the changelog has 'v1.17.0' (Trust & help) and the newest entry matches APP_VERSION", '- **v1.17.0:**' in readme and (m := re.search(r"APP_VERSION = '(\d+\.\d+\.\d+)'", SRC['app.js'])) and f'- **v{m.group(1)}:**' in readme)
             for h in ('Help & FAQ', 'Checking your 12 words', 'Mint details', 'Hiding amounts'):
                 check(f'README: a section for "{h}"', f'### {h}' in readme)
             check('README: the Features list mentions each item', all(x in readme for x in ('**Help & FAQ**', '**Check your 12 words**', '**Updated to vX**', '**Mint details**', '**Hide amounts**')))
