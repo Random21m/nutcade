@@ -433,7 +433,7 @@ You can also tip from inside NUTCADE: **Settings → About → Support**. The sa
 ## Changelog
 
 - **v1.17.1:** a small fix release.
-  - **A saved token is claimed once.** If you tapped **Claim now** on a token saved while offline at the same moment NUTCADE claimed it by itself, or tried again after a claim whose answer from the mint was lost, NUTCADE could write two records for the same coins. Now one claim is made for each saved token, and a record left by a lost answer is settled first. Your balance was never wrong; this removes the double record.
+  - **A saved token is claimed once.** If you tapped **Claim now** on a token saved while offline at the same moment NUTCADE claimed it by itself, or tried again after a claim whose answer from the mint was lost, NUTCADE could write two records for the same coins. Now one claim is made for each saved token, and a record left by a lost answer is settled first. Your balance was never wrong; this removes the double record. Also, a saved token whose claim got no answer from the mint is no longer marked "already claimed by someone else" while the claim is still being settled.
   - **A shorter home screen:** Recent shows your last 2 notes (**All notes** shows the rest).
   - **Hide amounts** now says it hides arrival notices too.
   - Tests: two checks in the arrival suite wait for earlier steps to finish before they read your balance, so they stop failing now and then.

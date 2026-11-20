@@ -6593,7 +6593,7 @@ async function claimSavedNow() {
   for (const t of S.txs.filter(t => t.status === 'pending' && t.incoming && t.offline && S.mints.find(m => m.url === t.mint))) {
     try { const nt = await claimHeld(t); if (nt) n += nt.amount; }
     catch (e) {
-      if (netErr(e) || e.blocked) continue;
+      if (netErr(e) || e.blocked || e.asked) continue;   // (asked: the request went out and its answer is being settled from its record; the token is not failed)
       if (S.txs.some(x => x.fromIncoming === t.id)) { S.txs = S.txs.filter(x => x.id !== t.id); save(); continue; }   // claimed by this wallet (another device): its line is here already
       updTx(t.id, { status: 'failed', note: (t.note ? t.note + ' · ' : '') + 'already claimed by someone else' });
     }
