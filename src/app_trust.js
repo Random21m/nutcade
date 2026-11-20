@@ -61,9 +61,9 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.20.1; rewrite this list at every release)
-  'A very large balance no longer cuts off the SAT label on small screens.',
-  'Claiming a saved ecash note now shows its amount once, and a second open tab can no longer start a second claim.'
+const WHATS_NEW = [   // (v1.20.2; rewrite this list at every release)
+  'A deposit that was finished again after an interrupted answer now says "+X received" like any other arrival.',
+  'Saved ecash claimed after you come back online no longer shows a toast next to its own arrival notice.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);

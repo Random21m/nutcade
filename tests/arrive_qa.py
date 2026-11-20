@@ -972,9 +972,9 @@ async def main():
             await answer_again()
             done = await r.until(f"(Nutcade.S.txs.find(t=>t.id==={J(line1)})||{{}}).amount==={a1 + a2}", 40000); await r.wait(2500)
             ann = [i for e in (await r.ev(LOG_JS))[log0:] for i in e['ids']]; ts = await r.ev("window.__toasts")
-            said = sorted(set(t for t in ts if 'Recovered' in t and fmtn(a2) in t))
+            said = sorted(set(t for t in ts if 'received' in t and fmtn(a2) in t))
             check('recover onto a line already done: (the new coins credited to it)', ok and done, (ok, done))
-            check('recover onto a line already done: the new sats are said exactly once (the toast "Recovered X"), never lost', done and len(said) == 1 and line1 not in ann, (ts, ann))
+            check('recover onto a line already done: the new sats are said exactly once (the toast "+X received"), never lost', done and len(said) == 1 and line1 not in ann, (ts, ann))
             await dismiss(r); await r.home()
 
         # ---------- system notifications with a duress PIN (finding 3): exactly as with a PIN alone, in both wallets,

@@ -632,7 +632,7 @@ async function checkQuoteNow(id, txId) {
         } catch (e) { return 'waiting'; }
         if (S.quotes.some(x => x.quote === q.quote)) return 'waiting';
         refresh();
-        if (got) { sfx('coin'); arrToast(q.txId, `Recovered ${arrMoney(got)} from an interrupted deposit`, 'lime'); }
+        if (got) { sfx('coin'); arrToast(q.txId, `+${arrMoney(got)} received`, 'lime'); }
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         return 'paid';
       }
@@ -2569,7 +2569,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.20.1';
+const APP_VERSION = '1.20.2';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -3316,7 +3316,7 @@ async function claimSavedNow() {
   if (isOffline()) return 0;
   let n = 0;
   for (const t of S.txs.filter(t => t.status === 'pending' && t.incoming && t.offline && S.mints.find(m => m.url === t.mint))) {
-    try { const nt = await claimHeld(t); if (nt && !claimingByHand.has(t.id)) n += nt.amount; }
+    try { const nt = await claimHeld(t); if (nt && !claimingByHand.has(t.id) && !arrAnnounced(nt.id)) n += nt.amount; }   // (a claim whose notice says it needs no toast beside it)
     catch (e) {
       if (netErr(e) || e.blocked || e.asked) continue;   // (asked: the request went out and its answer is being settled from its record; the token is not failed)
       if (S.txs.some(x => x.fromIncoming === t.id)) { S.txs = S.txs.filter(x => x.id !== t.id); save(); continue; }   // claimed by this wallet (another device): its line is here already

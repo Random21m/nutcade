@@ -3912,7 +3912,7 @@ async function checkQuoteNow(id, txId) {
         } catch (e) { return 'waiting'; }
         if (S.quotes.some(x => x.quote === q.quote)) return 'waiting';
         refresh();
-        if (got) { sfx('coin'); arrToast(q.txId, `Recovered ${arrMoney(got)} from an interrupted deposit`, 'lime'); }
+        if (got) { sfx('coin'); arrToast(q.txId, `+${arrMoney(got)} received`, 'lime'); }
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         return 'paid';
       }
@@ -5849,7 +5849,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.20.1';
+const APP_VERSION = '1.20.2';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -6596,7 +6596,7 @@ async function claimSavedNow() {
   if (isOffline()) return 0;
   let n = 0;
   for (const t of S.txs.filter(t => t.status === 'pending' && t.incoming && t.offline && S.mints.find(m => m.url === t.mint))) {
-    try { const nt = await claimHeld(t); if (nt && !claimingByHand.has(t.id)) n += nt.amount; }
+    try { const nt = await claimHeld(t); if (nt && !claimingByHand.has(t.id) && !arrAnnounced(nt.id)) n += nt.amount; }   // (a claim whose notice says it needs no toast beside it)
     catch (e) {
       if (netErr(e) || e.blocked || e.asked) continue;   // (asked: the request went out and its answer is being settled from its record; the token is not failed)
       if (S.txs.some(x => x.fromIncoming === t.id)) { S.txs = S.txs.filter(x => x.id !== t.id); save(); continue; }   // claimed by this wallet (another device): its line is here already
@@ -10780,9 +10780,9 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.20.1; rewrite this list at every release)
-  'A very large balance no longer cuts off the SAT label on small screens.',
-  'Claiming a saved ecash note now shows its amount once, and a second open tab can no longer start a second claim.'
+const WHATS_NEW = [   // (v1.20.2; rewrite this list at every release)
+  'A deposit that was finished again after an interrupted answer now says "+X received" like any other arrival.',
+  'Saved ecash claimed after you come back online no longer shows a toast next to its own arrival notice.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);

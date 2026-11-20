@@ -446,6 +446,10 @@ You can also tip from inside NUTCADE: **Settings → About → Support**. The sa
 
 ## Changelog
 
+- **v1.20.2:** small wording fixes; nothing in them touches money.
+  - A deposit finished again after an interrupted answer says "+X received", not "Recovered".
+  - The "Back online: claimed X" notice is left out for a saved note whose own arrival notice already says it.
+
 - **v1.20.1:** small fixes.
   - A very large balance (80 million SAT and up) no longer cuts off the SAT label at 320 px.
   - Claim now on a saved ecash note shows its amount once (the automatic "Back online" notice is skipped for it).
