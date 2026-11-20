@@ -64,7 +64,7 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 - **Check your 12 words**: a week after you back up, and then about twice a year, NUTCADE offers to check three of your words against your paper copy (you can say Later or turn the reminder off). The words are compared on your phone; they are never shown, saved or sent. Settings → Backup shows when you last checked and when you last made a backup file
 - **Updated to vX** and **new version ready**: after an update you see one note with what's new and a link to the release and its signed checksums. In a tab left open for days, a message says when a new version is ready, and offers a reload only when no payment or other money step is open. NUTCADE finds out by reading this site's own page; no server is asked
 - **Mint details**: Mints → **Details** shows what a mint says about itself (NUT-06): its contact methods, its terms and its description. This text comes from the mint, so it is shown as plain text, and only web addresses (http or https) become links
-- **Hide amounts**: tap your balance (or the eye beside it, or **Settings → Look & sound → Hide amounts**) to show ••• instead of amounts on the wallet, notes and mints screens. It is remembered on this device. Payment screens and tokens always show the real amount, so you can't send blind
+- **Hide amounts**: tap your balance (or the eye beside it, or **Settings → Look & sound → Hide amounts**) to show ••• instead of amounts on the wallet, notes and mints screens, and in arrival notices. It is remembered on this device. Payment screens and tokens always show the real amount, so you can't send blind
 - **Mints with a request limit** (NUT-06): NUTCADE honours a mint's `max_array_length` and needs at least 128 items per request; a mint below that can't be added (see [Safety](#safety))
 - **Report a problem** from Settings → About, with a form that asks for what happened, the steps, your device and the version, and warns never to paste your 12 words, PIN or tokens
 - Use several mints at once and switch between them
@@ -334,7 +334,7 @@ NUTCADE offers to check your words a week after you back them up, and then about
 
 ### Hiding amounts
 
-Tap your balance, or the eye button beside it (also **Settings → Look & sound → Hide amounts**). The wallet, notes and mints screens, and the amounts in Settings, show ••• instead. It is remembered on this device (and is the same whichever wallet a PIN opens). The sheets where you pay, receive or confirm something are not hidden: you always see what you are about to send. A toast that says "Received 500 SAT" for a moment is not hidden either.
+Tap your balance, or the eye button beside it (also **Settings → Look & sound → Hide amounts**). The wallet, notes and mints screens, the amounts in Settings and arrival notices show ••• instead. It is remembered on this device (and is the same whichever wallet a PIN opens). The sheets where you pay, receive or confirm something are not hidden: you always see what you are about to send. A toast that says "Received 500 SAT" for a moment is not hidden either.
 
 ## Safety
 
@@ -431,6 +431,12 @@ NUTCADE is free and open source, and it stays that way. Supporting it is optiona
 You can also tip from inside NUTCADE: **Settings → About → Support**. The same address and code are on that screen. Be wary of any other "NUTCADE support" address.
 
 ## Changelog
+
+- **v1.17.1:** a small fix release.
+  - **A saved token is claimed once.** If you tapped **Claim now** on a token saved while offline at the same moment NUTCADE claimed it by itself, or tried again after a claim whose answer from the mint was lost, NUTCADE could write two records for the same coins. Now one claim is made for each saved token, and a record left by a lost answer is settled first. Your balance was never wrong; this removes the double record.
+  - **A shorter home screen:** Recent shows your last 2 notes (**All notes** shows the rest).
+  - **Hide amounts** now says it hides arrival notices too.
+  - Tests: two checks in the arrival suite wait for earlier steps to finish before they read your balance, so they stop failing now and then.
 
 - **v1.17.0:** the **Trust & help** release. Nothing in this release changes how money moves.
   - **Help & FAQ** in Settings: plain answers, offline, in all five languages, with a Privacy answer that lists every service NUTCADE contacts.

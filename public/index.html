@@ -5647,7 +5647,7 @@ function viewWallet() {
     <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">${HEART}<span>Support NUTCADE</span></button>
   </section>`;
   const bal = balanceOf(m.url), tot = totalBalance(), po = pendingOut();
-  const recent = S.txs.slice(0, 4);
+  const recent = S.txs.slice(0, 2);
   return `<section class="screen">${nag}${legacy}${trustNotices()}
     <div class="credits">
       <div class="row between"><span class="label">Credits</span><span class="row" style="gap:10px">${tot !== bal ? `<span class="tiny muted">All mints ${money(tot)}</span>` : ''}${hideBtn()}${vault.on ? '<button class="lockbtn" data-act="lockNow" aria-label="Lock wallet" title="Lock wallet"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2h1v8H4V7zm1 0h4V5a2 2 0 0 0-4 0zm1 3v3h2v-3z"/></svg></button>' : ''}</span></div>
@@ -5849,7 +5849,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.17.0';
+const APP_VERSION = '1.17.1';
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
 const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
 const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-help', 'Help'], ['set-about', 'About']];
@@ -6572,13 +6572,26 @@ function holdIncoming(token, note) {
   if (S.txs.some(t => t.incoming === cleanToken(token))) throw new Error('This token is already saved and waiting.');
   return addTx({ type: 'in', method: 'ecash', amount: meta.amount, mint: meta.mint, note: note || meta.memo || '', status: 'pending', incoming: cleanToken(token), offline: true });
 }
+/* One claim at a time for each saved token. A second claim of the same token (the automatic one and "Claim now" together, or
+   a retry after a claim whose answer was lost) would open a second record for the same coins. Together they share one claim;
+   after a lost answer the open record is settled first, and the token is only asked for again if that left nothing of it. */
+function claimHeld(t) {
+  return single('incoming:' + t.id, async () => {
+    for (const op of S.ops.filter(o => o.kind === 'receive' && o.follow && o.follow.k === 'incoming' && o.follow.txId === t.id)) await settleOp(op.id).catch(() => {});
+    if (S.ops.some(o => o.kind === 'receive' && o.follow && o.follow.k === 'incoming' && o.follow.txId === t.id)) throw new Error("Can't reach the mint right now. Try again in a moment.");
+    if (!txById(t.id)) return S.txs.find(x => x.fromIncoming === t.id) || null;   // (settled from its record: its line is here, the saved one is gone)
+    const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: t.id, reqId: t.reqId || null } });
+    incomingClaimed({ txId: t.id, reqId: t.reqId || null }, nt);
+    return nt;
+  });
+}
 let claimingSaved = null;
 function claimSaved() { if (!claimingSaved) claimingSaved = claimSavedNow().finally(() => { claimingSaved = null; }); return claimingSaved; }   // one at a time
 async function claimSavedNow() {
   if (isOffline()) return 0;
   let n = 0;
   for (const t of S.txs.filter(t => t.status === 'pending' && t.incoming && t.offline && S.mints.find(m => m.url === t.mint))) {
-    try { const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: t.id, reqId: t.reqId || null } }); incomingClaimed({ txId: t.id, reqId: t.reqId || null }, nt); n += nt.amount; }
+    try { const nt = await claimHeld(t); if (nt) n += nt.amount; }
     catch (e) {
       if (netErr(e) || e.blocked) continue;
       if (S.txs.some(x => x.fromIncoming === t.id)) { S.txs = S.txs.filter(x => x.id !== t.id); save(); continue; }   // claimed by this wallet (another device): its line is here already
@@ -10762,16 +10775,10 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.17.0; rewrite this list at every release)
-  'Notices when money arrives: a deposit, a token, a payment to your address. NUTCADE tells you, and shows what came in while you were away.',
-  'Help & FAQ in Settings: short answers, offline, in five languages.',
-  'A check of your 12 words a week after your backup, and again twice a year. It happens on your phone only.',
-  'Settings, Backup shows when you last made a backup file.',
-  "Each mint's contact, terms and description, under Details in Mints.",
-  'Change your initials any time, in the Arcade or in Settings.',
-  'Hide amounts: tap your balance to show ••• instead of amounts.',
-  'A note after each update, and a message when a new version is ready to load.',
-  'A Privacy section that lists every service NUTCADE contacts, and why.'
+const WHATS_NEW = [   // (v1.17.1; rewrite this list at every release)
+  'A token you saved while offline is now claimed once, even if you tap Claim now while NUTCADE claims it too.',
+  'The home screen shows your last 2 notes. All notes shows the rest.',
+  'Hide amounts also hides amounts in arrival notices.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);
@@ -11461,9 +11468,8 @@ const A = {
   }),
   claimIncoming: b => run(b, 'CLAIMING', async () => {
     const t = txById(b.dataset.id); if (!t || !t.incoming) return;
-    const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: t.id, reqId: t.reqId || null } });
-    incomingClaimed({ txId: t.id, reqId: t.reqId || null }, nt);
-    sfx('coin'); showDone('in', nt.amount, 'Ecash');
+    const nt = await claimHeld(t);
+    if (nt) { sfx('coin'); showDone('in', nt.amount, 'Ecash'); } else { closeSheet(); refresh(); }
   }),
   nfcScan: async b => {
     const msg = $('#scanMsg'); stopScan();

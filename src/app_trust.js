@@ -61,16 +61,10 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.17.0; rewrite this list at every release)
-  'Notices when money arrives: a deposit, a token, a payment to your address. NUTCADE tells you, and shows what came in while you were away.',
-  'Help & FAQ in Settings: short answers, offline, in five languages.',
-  'A check of your 12 words a week after your backup, and again twice a year. It happens on your phone only.',
-  'Settings, Backup shows when you last made a backup file.',
-  "Each mint's contact, terms and description, under Details in Mints.",
-  'Change your initials any time, in the Arcade or in Settings.',
-  'Hide amounts: tap your balance to show ••• instead of amounts.',
-  'A note after each update, and a message when a new version is ready to load.',
-  'A Privacy section that lists every service NUTCADE contacts, and why.'
+const WHATS_NEW = [   // (v1.17.1; rewrite this list at every release)
+  'A token you saved while offline is now claimed once, even if you tap Claim now while NUTCADE claims it too.',
+  'The home screen shows your last 2 notes. All notes shows the rest.',
+  'Hide amounts also hides amounts in arrival notices.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);

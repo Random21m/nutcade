@@ -1065,6 +1065,8 @@ async def main():
               Nutcade.S.ops.forEach(s); Nutcade.S.txs.filter(t=>t.incoming).forEach(s); return ops.length}})()"""
             SELF_JS = """(()=>{const ops=JSON.parse(localStorage.getItem('nutcade:ops')||'[]'); ops.forEach(o=>o.self=1); localStorage.setItem('nutcade:ops', JSON.stringify(ops)); Nutcade.S.ops.forEach(o=>o.self=1)})()"""
             BAL_JS = "(Nutcade.S.proofs[%s]||[]).reduce((t,p)=>t+p.amount,0)" % J(FREE)
+            async def quiet(w):   # (no money step open and nothing in flight: the balance is not moving)
+                await w.until("Nutcade.S.ops.length===0&&Nutcade.S.pending.length===0", 20000); await w.wait(600)
             HEIR = {'name': 'Bob', 'pubkey': ppk}
             lx = iter(range(21, 999, 3))
             async def own_tok(a): return await rl.ev(f"Nutcade.r8.sendEcash({a}, 'for lunch').then(t=>({{id:t.id, token:t.token, sent:t.sent}}))")
@@ -1135,6 +1137,7 @@ async def main():
                     if modes == '1.16' and not mode.startswith('1.16'): continue
                     tag = f'legacy {name} [{mode}]'
                     await rl.ev("Nutcade.closeSheet()"); await rl.home(); await dismiss(rl); a = next(lx)
+                    await quiet(rl)   # (the cell before it has finished: no record of its is still moving this wallet's balance)
                     t0 = await rl.ev("Date.now()"); pat, own = await start(a)
                     has_op = await rl.until("JSON.parse(localStorage.getItem('nutcade:ops')||'[]').some(o=>o.kind==='receive')", 15000); await rl.wait(2500); await rl.ev("Nutcade.closeSheet()")
                     if name.startswith('a sweep') and mode.startswith('1.16'): await rl.ev(SELF_JS)
@@ -1167,7 +1170,7 @@ async def main():
                         else: said = cs[0]['text'] if cs else ''
                         check(f'{tag}: announced once, as "{label}"', bool(line) and seen.count(line['id']) == 1 and len(cs) == 1 and label in said and (label == 'Came back to you' or 'Came back to you' not in said), (line and line.get('note'), [c['text'] for c in cs], pk))
                     if not mode.endswith('imported'):
-                        b1 = await rl.ev(BAL_JS); st = own and await rl.ev(f"(Nutcade.S.txs.find(t=>t.id==={J(own)})||{{}}).status")
+                        await quiet(rl); b1 = await rl.ev(BAL_JS); st = own and await rl.ev(f"(Nutcade.S.txs.find(t=>t.id==={J(own)})||{{}}).status")
                         check(f'{tag}: books exact (balance up by its line{", our sent token reclaimed" if own else ""})', bool(line) and b1 - b0 == line['amount'] and (not own or st == 'reclaimed'), (b0, b1, line and line['amount'], st))
                     await dismiss(w); await dismiss(rl)
             if imp: await imp.pg.context.close()
