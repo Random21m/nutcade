@@ -80,8 +80,8 @@ async def main():
             if await w.ev(f"Daily.seedOf('{d}')") != fnv('nutcade-daily-' + d): ok = False
         check('seed = FNV-1a of "nutcade-daily-<UTC date>" (matches an independent implementation)', ok)
         ids8 = ['swarm', 'maze', 'brick', 'rocks', 'hop', 'shield', 'nibble', 'flipper']
-        DAILY = ids8 + ['neonRoad']   # the cabinets that join: the eight originals and Neon Road (seeded); never Nut Poker
-        check('the 8 original cabinets and Neon Road join the daily', sorted(await w.ev("Daily.eligible().map(g=>g.id)")) == sorted(DAILY))
+        DAILY = ids8 + ['neonRoad', 'links']   # the cabinets that join: the eight originals, Neon Road and Acorn Links (seeded); never Nut Poker
+        check('the 8 original cabinets, Neon Road and Acorn Links join the daily', sorted(await w.ev("Daily.eligible().map(g=>g.id)")) == sorted(DAILY))
         allids = await w.ev("Arcade.games.map(g => g.id)")
         check('every cabinet in the arcade is either in the daily or Nut Poker', sorted(set(allids) - set(DAILY)) == ['poker'], allids)
         check('Nut Poker is not flagged daily and is not eligible (its shuffle is truly random, so two phones could never play the same deal)',
@@ -115,9 +115,9 @@ async def main():
             out[g.id] = [a.score === c.score && a.frames === c.frames, a.frames > 0, a.score, d.score]; } return out; })()""")
         check('every cabinet plays the same from the same day seed (same inputs, same score and frames)', all(v[0] and v[1] for v in det.values()), det)
         same = await w.ev("""(() => { const out = {}; const seed = Daily.seedOf('2026-11-18'), other = Daily.seedOf('2026-11-19');
-          { for (const g of Arcade.games.filter(g => g.id === 'neonRoad')) { const a = Arcade.layout(g.id, seed), b = Arcade.layout(g.id, seed), c = Arcade.layout(g.id, other); out[g.id] = [a === b, a !== c, a.length]; } }
+          { for (const g of Arcade.games.filter(g => ['neonRoad', 'links'].includes(g.id))) { const a = Arcade.layout(g.id, seed), b = Arcade.layout(g.id, seed), c = Arcade.layout(g.id, other); out[g.id] = [a === b, a !== c, a.length]; } }
           return out; })()""")
-        check('Neon Road starts identically from the same seed (road and traffic), and differently from another day\'s', all(v[0] and v[1] for v in same.values()) and len(same) == 1, same)
+        check('Neon Road and Acorn Links start identically from the same seed (road, traffic, holes), and differently from another day\'s', all(v[0] and v[1] for v in same.values()) and len(same) == 2, same)
         check('another day\'s seed plays differently in most cabinets', sum(1 for v in det.values() if v[2] != v[3]) >= 3, det)
 
         # ---------- the lobby entry ----------

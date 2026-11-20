@@ -165,7 +165,7 @@ async def main():
         # link previews: one description, the right number of games
         html = await w.ev("document.documentElement.outerHTML")
         descs = re.findall(r'<meta (?:name|property)="(?:description|og:description|twitter:description)" content="([^"]*)"', html)
-        check('share text: one meta description and 10 cabinets everywhere', html.count('name="description"') == 1 and all('10 retro arcade cabinets' in d for d in descs) and '7 retro' not in html and '8 retro' not in html, descs)
+        check('share text: one meta description and 11 cabinets everywhere', html.count('name="description"') == 1 and all('11 retro arcade cabinets' in d for d in descs) and '7 retro' not in html and '8 retro' not in html, descs)
         check('no page errors', not w.errs, w.errs[:3])
         await w.pg.context.close()
 

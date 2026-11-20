@@ -109,8 +109,15 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 | Nut Flipper | Pinball: light N-U-T for a multiplier, drop the S-A-T targets, hunt the gold sat |
 | Nut Poker | Five-card draw video poker, jacks or better, for **free credits only** (never sats) |
 | Neon Road | Pseudo-3D night-highway racer: pass traffic, race the clock to each checkpoint |
+| Acorn Links | Overhead arcade golf, nine holes: pull back and let go to swing, mind the wind, water and sand |
 
 Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons (tap **Use D-pad** above the controls if you'd rather have arrow buttons).
+
+**Acorn Links** (how to play): nine holes seen from above. Each hole has a tee, a fairway, a green with a flag, and sand, water and trees. The panel under the screen shows the hole, its par, your strokes, the club, the wind and the distance to the pin (one pixel is two yards).
+- **Phone or mouse:** put a finger anywhere on the course and **drag back** like a slingshot; the ball goes the other way, and how far you pull is the power. Let go to swing. A short **tap** on the course turns the aim to that spot; a tap on the panel changes the club. The dotted line shows where the shot will land, with the wind already counted.
+- **Keyboard:** left/right turn the aim, up/down change the club, **hold Space** to run the power meter (it goes up and down) and let go to swing.
+- The game picks a sensible club for you (driver off the tee, a putter on the green). Sand, rough and trees slow or stop the ball; water and out of bounds cost a stroke and put you back where you hit from. You pick up after par plus four.
+- Points per hole: hole in one 1000, eagle 700, birdie 400, par 250, bogey 100, double bogey 50. After the ninth hole you get 250 for every stroke you are under par overall. The nine holes come from the seed, so challenges, replays and the Daily Challenge play the same course.
 
 **Neon Road** (how to play): you drive down a neon highway toward the sunset, against a clock. The road curves and rolls over hills; slower cars share it, and the grass drags you down. Pass cars for points, hit the checkpoint arch at the end of each stage for extra time and points, and keep going until the time runs out. Every stage has its own colours and tighter curves, and the same seed always builds the same road, so a challenge or a Daily Challenge replays the same course.
 - **Keyboard:** left/right arrows or A/D steer, up or W is gas (the car cruises by itself without it), down or S brakes.
@@ -216,7 +223,7 @@ Tap **Share my score** to see a short note, for example "NUTCADE Daily Challenge
 
 NUTCADE can't ask a server what day it is, so it watches the clock itself: if the device date moves back before a day it has already seen, or reads as before 2025, that day's runs are for fun (not official, not in the streak) and a notice says so until the clock catches up or you tap **My clock is right**. Moving the clock forward just moves you to that day's challenge.
 
-Nine of the ten cabinets can be the daily: the eight originals and Neon Road. **Nut Poker never is**: its deck is shuffled for real, so two phones could never play the same deal. For cabinet authors: a cabinet joins with `daily: true` in its object (all its gameplay randomness must come from the engine's seeded `rnd()`/`ri()`/`RNG()`), and `init(G, seed)` receives the run's seed; a cabinet marked `noChallenge` can't join even with the flag. The details are at the top of `src/daily.js`.
+Ten of the eleven cabinets can be the daily: the eight originals, Neon Road and Acorn Links. **Nut Poker never is**: its deck is shuffled for real, so two phones could never play the same deal. For cabinet authors: a cabinet joins with `daily: true` in its object (all its gameplay randomness must come from the engine's seeded `rnd()`/`ri()`/`RNG()`), and `init(G, seed)` receives the run's seed; a cabinet marked `noChallenge` can't join even with the flag. The details are at the top of `src/daily.js`.
 
 ### Extra Life
 
@@ -384,7 +391,7 @@ Every push runs the suites in `tests/` automatically on GitHub (GitHub Actions) 
 - 41 checks for multinut payments, payment requests (over Nostr and HTTP, including ecash sent by another wallet) and NFC reading and writing
 - 39 checks for trophies, share cards, instant updates, the Nostr mint-list backup and the Lightning address, against a stand-in Nostr relay and npub.cash server that check every signature
 - 24 scanner checks, run before release: camera scans of real tokens and invoices, photo scans, and recognising every kind of code
-- All ten games played through to game over, with high scores, pause, exit, touch controls and sound
+- All eleven games played through to game over, with high scores, pause, exit, touch controls and sound
 - The arcade clock: every cabinet takes 60 steps a second on a faked 30, 60, 120 and 144 Hz screen, a pause or tab switch never makes a game race to catch up, and recorded runs still verify as replays on every cabinet that has them (Nut Poker has none, by design)
 - Nut Poker (43 rule checks and 88 play checks), Neon Road (69) and the Daily Challenge (138), each in five languages and at phone and desktop sizes; the arcade clock (15 checks); 37 arcade smoke checks, which include the GRAND TOUR trophy and the Support button in five languages
 - Every screen at 320, 390, 768 and 1280 pixels wide, checked for overflow and clipped text, and again in each language
@@ -433,6 +440,9 @@ You can also tip from inside NUTCADE: **Settings → About → Support**. The sa
 
 ## Changelog
 
+- **v1.19.0:** a new game, and nothing in it touches money.
+  - **Acorn Links:** nine holes of overhead arcade golf (see how to play above). Drag back and let go to swing; wind, sand, water and trees; high scores with initials, challenges, replays and the Daily Challenge work like the other cabinets. The welcome screen and the share text now say eleven cabinets, and Acorn Links can be the Daily Challenge.
+
 - **v1.18.0:** a small settings release. Nothing in it changes how money moves.
   - **Recent notes on the home screen:** you choose how many, from 0 to 6 (**Settings → Look & sound → Recent notes on the home screen**). It starts at 2. At 0 the list is hidden and **All notes** stays. It is kept on this device only.
   - **Hall of Fame** shows each game's full name, so Nut Flipper, Nut Maze and Nut Poker are no longer all "NUT".
@@ -476,7 +486,7 @@ You can also tip from inside NUTCADE: **Settings → About → Support**. The sa
   - **Neon Road**: a pseudo-3D night-highway racer with curves and hills, traffic, a clock with checkpoints, stages that change colours, a road built from the seed (so challenges and replays race the same course), keyboard and touch controls, and its own chiptune loop.
   - **Daily Challenge**: one cabinet and one seeded level a day for everyone (from the UTC date), a first-run-counts official score, a streak and history, and a Share my score note you post to Nostr only by tapping Post (or copy); clock changes, time zones, midnight UTC and offline posting are handled and tested in five languages. The eight old cabinets and Neon Road can be the daily; Nut Poker never is. The share preview now wraps at spaces instead of in the middle of a word.
   - **Fixed: games ran too fast on 120 Hz and 144 Hz screens.** The arcade took one game step per screen refresh, so every cabinet ran about twice as fast on a 120 Hz phone. It now runs a fixed 60 steps a second whatever the screen, catches up at most a few steps after a pause or a tab switch, and draws once per refresh. Replays and challenges count steps, so they verify as before.
-  - The **GRAND TOUR** trophy now means every cabinet in the arcade ("Play all 10 cabinets"), counted from the cabinet list; players who already earned it keep it. A touch the system cancels (a call, a palm) no longer counts as letting go of Nut Flipper's plunger. The Daily's share sheet says "your relay" for one relay and "your 3 relays" for several, in every language. A made-up challenge link for Nut Poker now says plainly that the cabinet has no challenges, instead of offering to accept one. A result screen from one run can no longer land on the next cabinet you open.
+  - The **GRAND TOUR** trophy now means every cabinet in the arcade ("Play all 11 cabinets"), counted from the cabinet list; players who already earned it keep it. A touch the system cancels (a call, a palm) no longer counts as letting go of Nut Flipper's plunger. The Daily's share sheet says "your relay" for one relay and "your 3 relays" for several, in every language. A made-up challenge link for Nut Poker now says plainly that the cabinet has no challenges, instead of offering to accept one. A result screen from one run can no longer land on the next cabinet you open.
   - Settings → About: the **Donate** button now says **Support** (its sheet was already called Support NUTCADE), in every language.
   - For developers: every cabinet lives in its own `src/game_*.js` and registers one factory in `window.NutCabinets` (see `src/README.md`).
 - **v1.13.1:** a step the mint finished is always booked as itself, never as "Ecash already spent elsewhere", even when the connection drops, the app is closed, the mint answers late, or two phones holding the same wallet send the same step. When the mint turns down a repeat of a step it already did (as when the app resends one whose answer was lost), NUTCADE takes the result from the mint's own signatures for that step, so a token you send is shown right away; a step the mint is still working on waits until it's done; and if a step's request reaches a slow mint after the app had given up on it, the step is settled again as itself. A Lightning deposit the mint already issued is credited, even when the mint turns down a repeat of it. Coins that another device really spent in a different way are still shown as spent elsewhere. (This could happen since 1.12.0; until now Find lost ecash brought the sats back.)
