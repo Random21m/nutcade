@@ -756,9 +756,11 @@ async function receiveTokenNow(token, note, opts = {}) {
   // scanned into Receive), 'auto' when it came back by itself (a gift nobody opened); a part saved to claim later keeps it,
   // and so do the duress PIN's wallet's sats coming back (saved here as "mine" when the duress PIN is turned off)
   const held = f0.k === 'incoming' ? txById(f0.txId) || {} : {};
-  // (your own token handed back over Nostr by the one you sent it to, re-encoded, or saved to claim later: it came back
-  // by itself, as a gift nobody opened does: 'auto', "Came back to you")
-  const came = opts.came || (f0.k === 'incoming' && !held.mine && !held.back);
+  // (your own token handed back over Nostr by the one you sent it to, re-encoded, or saved from Nostr to claim later: it
+  // came back by itself, as a gift nobody opened does: 'auto', "Came back to you". A line saved because you pasted or
+  // scanned it into Receive while offline or its mint couldn't be reached, or a part saved to claim later, says
+  // offline (as 1.15.0 wrote it too): you brought it back by hand, 'hand')
+  const came = opts.came || (f0.k === 'incoming' && !held.mine && !held.back && !held.offline);
   const back = opts.own || ownTx ? (opts.own ? (opts.hand ? 'hand' : 'auto') : came ? 'auto' : 'hand') : heldBack(held);
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: mine });
   const w = await getWallet(meta.mint);

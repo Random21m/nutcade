@@ -8,7 +8,8 @@ reopened / locked; plus two tabs (one notice), a reload mid-arrival, a restore f
 history), the duress PIN's wallet (only the open wallet's own arrivals, the other never shown; system notifications exactly as with
 a PIN alone in both wallets), a sender's memo that reads like the app's own note, your own token in another encoding, a
 deposit recovered after its answer was lost, claims cut off by 1.15.0 settled by this version (after a reload or from
-a 1.15 backup), your own token handed back over Nostr, sound on and off,
+a 1.15 backup), your own token handed back over Nostr, your own token saved to claim later (pasted or scanned while
+offline or its mint is down, never announced), sound on and off,
 system notifications off / on / permission denied, five languages and 320 / 1440 px wide screens.
 
 Exact: a summary's count and total per kind equal the history lines that arrived in that window, and no arrival is
@@ -17,7 +18,7 @@ announced twice (across reloads, tabs and restores).
 Uses two local test mints (ARR_FEE, default 3338, with input fees; ARR_FREE, default 3339, without) and mock_nostr.py
 (ARR_NOSTR, default ws://127.0.0.1:3350/relay; it also stands in for npub.cash). ARR_ONLY=a,b runs some sections
 (open, bg, closed, tabs, reload, notif, sound, locked, restore, duress, own, own2, toast, memo, own3, reenc, recover, sysduress,
-legacy, langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
+legacy, held, langs, amounts, widths, game, till). ARR_SHOTS: where screenshots go
 (default QA_OUT)."""
 import asyncio, json, os, re, time, urllib.request
 from playwright.async_api import async_playwright
@@ -1170,6 +1171,132 @@ async def main():
             check('legacy: no page errors', not [e for e in rl.errs + (imp.errs if imp else []) if 'PAGEERROR' in e], [e for e in rl.errs if 'PAGEERROR' in e][:5])
             await rl.pg.context.close()
             if await r.ev("Nutcade.vault.on && !Nutcade.vault.open"): await unlock(r); await settled(r); await dismiss(r)   # (the main receiver locked itself meanwhile)
+
+        # ---------- your own token brought back by hand and saved to claim later (rk-160c): pasted while offline, a printed
+        # token scanned while its mint can't be reached, pasted at a mint you removed ("Trust mint & claim") while offline
+        # x the saved line as 1.16 saves it / as 1.15.0 saved it x claimed automatically when back online / with "Claim now"
+        # from its line / its claim's answer lost and settled after a reload. Your own coins brought back by hand are never
+        # announced (back 'hand'), as when claimed at once; a stranger's token saved the same way is announced as before;
+        # your own token handed back over Nostr (by a contact, from a mint you removed: saved, then "Trust mint & claim")
+        # came back by itself ("Came back to you"). Books exact: our sent line reclaimed, balance up by the line, one line. ----------
+        if want('held'):
+            hw = await wallet(b, notif=True); await hw.create(); await hw.add_mint(FREE); await hw.use(FREE)
+            await hw.receive_ln(3000); await hw.wait(1500); await dismiss(hw)
+            hv = await wallet(b, notif=True); await hv.create(); await hv.add_mint(FEE); await hv.add_mint(FREE); await hv.use(FREE)   # (sends all it holds at a mint, then removes it; it keeps another mint)
+            await hv.receive_ln(400); await hv.wait(1500); await dismiss(hv); hvpk = await npub_hex(hv)
+            HB = "(Nutcade.S.proofs[%s]||[]).reduce((t,p)=>t+p.amount,0)" % J(FREE)
+            H_SWAP = re.compile(re.escape(FREE) + r'/v1/swap$'); H_HOLD = re.compile(re.escape(FREE) + r'/v1/(restore|checkstate)$'); H_ALL = re.compile(re.escape(FREE) + r'/v1/.*')
+            async def h_lose(route):
+                try: await route.fetch()
+                except Exception: pass
+                await route.abort()
+            async def h_drop(route): await route.abort()
+            async def h_down(route): await route.abort('connectionrefused')
+            H_STRIP = """(()=>{const s=o=>{delete o.back; delete o.self; delete o.mk; delete o.came}, ops=JSON.parse(localStorage.getItem('nutcade:ops')||'[]'), txs=JSON.parse(localStorage.getItem('nutcade:txs')||'[]');
+              ops.forEach(s); txs.filter(t=>t.incoming).forEach(s); localStorage.setItem('nutcade:ops', JSON.stringify(ops)); localStorage.setItem('nutcade:txs', JSON.stringify(txs));
+              Nutcade.S.ops.forEach(s); Nutcade.S.txs.filter(t=>t.incoming).forEach(s); return 1})()"""
+            FAKE_OFF = "Object.defineProperty(navigator, 'onLine', {configurable:true, get:()=>false})"   # (the page reads itself offline: no automatic claim)
+            REAL_ON = "delete navigator.onLine"
+            HELD_JS = "Nutcade.S.txs.filter(t=>t.incoming&&t.status==='pending').map(t=>({id:t.id, offline:!!t.offline, back:t.back||null, mk:t.mk||null, mine:!!t.mine}))"
+            async def h_receive(w, tok, note, scan=False, trust=False):
+                await w.ev("Nutcade.closeSheet()"); await w.home()
+                if scan: await w.ev(f"Nutcade.handleScan({J(tok)})"); await w.wait(400)
+                else:
+                    await w.click('[data-act=receive]'); await w.wait(150); await w.click('[data-act=recvMethod][data-m=ecash]'); await w.wait(100)
+                    await w.fill('#tokIn', tok)
+                if note: await w.fill('#noteIn', note)
+                await w.click('[data-act=doReceiveToken]'); await w.wait(700)
+                if trust:
+                    t = await w.ev("(document.querySelector('[data-act=doReceiveToken]')||{dataset:{}}).dataset.trust||''")
+                    check('held: (an unknown mint: asked to trust it first)', t == '1', t)
+                    await w.click('[data-act=doReceiveToken]'); await w.wait(700)
+                await w.until(f"Nutcade.S.txs.some(t=>t.incoming&&t.status==='pending'&&t.amount>0)", 15000); await w.wait(300); await w.ev("Nutcade.closeSheet()")
+            async def h_claim_now(w, hid):
+                await w.ev(f"(()=>{{const b=document.createElement('button'); b.dataset.act='claimIncoming'; b.dataset.id={J(hid)}; document.body.appendChild(b); b.click(); b.remove()}})()")
+            hl = iter(range(61, 999, 2))
+            # way: (name, wallet, own?) ; save(w, tok) saves it and leaves the page online-able; claim kinds per way
+            async def save_offline(w, tok, own):   # (the context is offline afterwards)
+                await w.pg.context.set_offline(True); await w.wait(300); await h_receive(w, tok, 'pasted back' if own else 'from a friend')
+            async def save_down(w, tok, own):   # (the mint can't be reached from the start: the page opened while it was down; still down afterwards)
+                await w.pg.route(H_ALL, h_down); await w.pg.reload(); await w.wait(800); await settled(w); await dismiss(w)
+                await h_receive(w, tok, '', scan=True)
+            async def save_trust(w, tok, own):   # (at a mint you removed, while offline)
+                await w.pg.context.set_offline(True); await w.wait(300); await h_receive(w, tok, 'pasted back' if own else 'from a friend', trust=True)
+            async def back_on(w, way):   # (the network is back; the mint can be reached)
+                if way == 'down': await w.pg.unroute(H_ALL)
+                else: await w.pg.context.set_offline(False)
+                await w.wait(300)
+            WAYS = {'offline': ('pasted while offline', save_offline), 'down': ('a printed token scanned while its mint is down', save_down),
+                    'trust': ('pasted at a mint you removed, "Trust mint & claim" while offline', save_trust)}
+            H_CELLS = [   # (way, claim, own, label: None = not announced)
+                *[(wy, cl, 'own', None) for wy in ('offline', 'down') for cl in ('auto', 'now', 'lost')],
+                *[('trust', cl, 'own', None) for cl in ('now', 'lost')],
+                *[('offline', cl, 'stranger', 'Ecash claimed') for cl in ('auto', 'lost')],
+                ('down', 'auto', 'stranger', 'Ecash claimed'),
+                *[('nostr', cl, 'nostr', 'Came back to you') for cl in ('now', 'lost')],
+            ]
+            # (a 1.15 record of a claim of your own token, its answer lost, has op.own as one pasted by hand has: taken
+            # back by hand, not announced; the accepted limit of the legacy cells)
+            for way, how, who, label in H_CELLS:
+                for saved_by in ('1.16', '1.15'):
+                    if way == 'nostr' and how == 'lost' and saved_by == '1.15': continue
+                    w = hv if way in ('trust', 'nostr') else hw
+                    await w.ev("Nutcade.closeSheet()"); await w.home(); await dismiss(w)
+                    a = next(hl); own = None
+                    if way in ('trust', 'nostr'):
+                        await w.until(f"{HB}>0", 30000); a = await w.ev(HB)   # (all it holds there)
+                    if who == 'stranger': tok = await token_from(p, a, FREE)
+                    else: o = await w.ev(f"Nutcade.r8.sendEcash({a}, 'lunch', null, {J(FREE)}).then(t=>({{id:t.id, token:t.token, sent:t.sent}}))"); tok = o['token']; own = o['id']
+                    if way in ('trust', 'nostr'):   # (then the mint is removed: nothing left there)
+                        await w.home(); await w.ev(f"(()=>{{const b=document.createElement('button'); b.dataset.act='confirmRemove'; b.dataset.url={J(FREE)}; document.body.appendChild(b); b.click(); b.remove()}})()"); await w.wait(300)
+                    b0 = await w.ev(HB); t0 = await w.ev("Date.now()")
+                    wname = 'over Nostr from a contact, saved (a mint you removed)' if way == 'nostr' else WAYS[way][0]
+                    tag = f"held {'your own token' if who != 'stranger' else 'a stranger' + chr(39) + 's token'} {wname} [{saved_by}, {dict(auto='claimed automatically back online', now='Claim now from its line', lost='its answer lost, settled after a reload')[how]}]"
+                    if way == 'nostr':   # (handed back by Bob, a contact, re-encoded; the mint is unknown now, so it is saved)
+                        bob = await p.ev("(()=>{if(!window.__bobSk) window.__bobSk=crypto.getRandomValues(new Uint8Array(32)); return CashuLib.nostrPub(window.__bobSk)})()")
+                        await w.ev(f"(()=>{{if(!Nutcade.S.contacts.some(c=>c.pubkey==={J(bob)})) Nutcade.S.contacts.push({{id:'bob1', name:'Bob', pubkey:{J(bob)}}})}})()")
+                        res = await p.ev(f"""(async()=>{{const ev=CashuLib.nip17.wrapEvent(window.__bobSk, {{publicKey:{J(hvpk)}}}, JSON.stringify({{mint:{J(FREE)}, unit:'sat', proofs:{J([{k: v for k, v in x.items() if k != 'dleq'} for x in o['sent']])}, memo:'here you go'}}));
+                          return await new Promise(res=>{{const ws=new WebSocket({J(NOSTR)}); ws.onopen=()=>ws.send(JSON.stringify(['EVENT',ev])); ws.onmessage=m=>{{const d=JSON.parse(m.data); if(d[0]==='OK'){{ws.close(); res(d[2])}}}}; setTimeout(()=>res('timeout'),8000)}})}})()""")
+                        await w.until("Nutcade.S.txs.some(t=>t.incoming&&t.status==='pending'&&t.amount>0)", 25000); await w.wait(500)
+                    else:
+                        await WAYS[way][1](w, tok, who != 'stranger')
+                    held = await w.ev(HELD_JS)
+                    check(f'{tag}: (saved to claim later: one line)', len(held) == 1, held)
+                    hid = held[0]['id'] if held else None
+                    if saved_by == '1.15': await w.ev(H_STRIP)
+                    if how == 'lost': await w.pg.route(H_SWAP, h_lose); await w.pg.route(H_HOLD, h_drop)
+                    if how == 'now':   # (before the automatic claim: the page still reads itself offline)
+                        await w.ev(FAKE_OFF); await back_on(w, way); await h_claim_now(w, hid)
+                    elif way == 'trust' or way == 'nostr':
+                        await back_on(w, way); await h_claim_now(w, hid)
+                    else:
+                        await back_on(w, way); await w.ev("window.dispatchEvent(new Event('online'))")
+                    if how == 'lost':
+                        has_op = await w.until("JSON.parse(localStorage.getItem('nutcade:ops')||'[]').some(o=>o.kind==='receive')", 20000); await w.wait(2500); await w.ev("Nutcade.closeSheet()")
+                        if saved_by == '1.15': await w.ev(H_STRIP)
+                        rec = await w.ev("JSON.parse(localStorage.getItem('nutcade:ops')||'[]').filter(o=>o.kind==='receive').map(o=>({back:o.back||null, mk:o.mk||null, own:!!o.own, k:(o.follow||{}).k||null}))")
+                        check(f'{tag}: (the claim\'s answer was lost: its record waits)', has_op and len(rec) == 1, rec)
+                        await w.pg.unroute(H_SWAP); await w.pg.unroute(H_HOLD); await w.pg.reload(); await w.wait(800); await settled(w)
+                    ok = await wait_line(w, f"t.ts>={t0}&&t.amount==={a}", 40000); await w.wait(2500); await w.ev("Nutcade.closeSheet()"); await w.wait(300)
+                    if how == 'now': await w.ev(REAL_ON)
+                    line = await w.ev(f"Nutcade.S.txs.find(t=>t.type==='in'&&t.status==='done'&&t.ts>={t0}&&t.amount==={a})||null")
+                    seen = await w.ev(SEEN_JS) or []; cs = [c for c in await cards(w) if line and line['id'] in c['ids']]
+                    mv = 'hand' if who == 'own' else 'auto' if who == 'nostr' else None
+                    check(f'{tag}: claimed, its line marked back={mv}', ok and bool(line) and line.get('back') == mv, line and {k: line.get(k) for k in ('note', 'amount', 'back', 'self')})
+                    if label is None:
+                        check(f'{tag}: not announced as money arriving', bool(line) and line['id'] not in seen and not cs, (line and line.get('note'), [c['text'] for c in cs]))
+                    else:
+                        pk = None
+                        if cs and cs[0]['type'] == 'away': sr = await summary_rows(w); pk = sr and sorted(sr['rows']); said = (sr or {}).get('text', '')
+                        else: said = cs[0]['text'] if cs else ''
+                        check(f'{tag}: announced once, as "{label}"', bool(line) and seen.count(line['id']) == 1 and len(cs) == 1 and label in said and (label == 'Came back to you' or 'Came back to you' not in said), (line and line.get('note'), [c['text'] for c in cs], pk))
+                    b1 = await w.ev(HB); st = own and await w.ev(f"(Nutcade.S.txs.find(t=>t.id==={J(own)})||{{}}).status")
+                    n_in = await w.ev(f"Nutcade.S.txs.filter(t=>t.type==='in'&&t.ts>={t0}&&t.amount==={a}&&t.status!=='failed').length")
+                    left = await w.ev(f"Nutcade.S.txs.filter(t=>t.incoming&&t.status==='pending').length")
+                    check(f'{tag}: books exact (balance up by its line{", our sent token reclaimed" if own else ""}, one line, nothing left saved)', bool(line) and b1 - b0 == line['amount'] == a and (not own or st == 'reclaimed') and n_in == 1 and left == 0, (b0, b1, line and line['amount'], st, n_in, left))
+                    await dismiss(w)
+            check('held: no page errors', not [e for e in hw.errs + hv.errs if 'PAGEERROR' in e], [e for e in hw.errs + hv.errs if 'PAGEERROR' in e][:5])
+            await hw.pg.context.close(); await hv.pg.context.close()
 
         # ---------- big amounts (up to 9,999,999 SAT) and long labels: the amount is never cut, in every language ----------
         if want('amounts'):
