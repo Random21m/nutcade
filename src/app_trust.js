@@ -67,6 +67,7 @@ const WHATS_NEW = [   // (v1.17.0; rewrite this list at every release)
   'A check of your 12 words a week after your backup, and again twice a year. It happens on your phone only.',
   'Settings, Backup shows when you last made a backup file.',
   "Each mint's contact, terms and description, under Details in Mints.",
+  'Change your initials any time, in the Arcade or in Settings.',
   'Hide amounts: tap your balance to show ••• instead of amounts.',
   'A note after each update, and a message when a new version is ready to load.',
   'A Privacy section that lists every service NUTCADE contacts, and why.'
