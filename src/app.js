@@ -2472,6 +2472,7 @@ function viewWallet() {
     <div id="priceMount"></div>
     <div class="panel">
       <div class="row between"><span class="h2">Recent</span>${visTxs().length ? '<button class="linkbtn" data-act="tab" data-tab="history">All notes</button>' : ''}</div>
+      ${S.txs.filter(unpaidWait).map(t => `<button class="linkbtn waitdep" data-act="tx" data-id="${esc(t.id)}" style="display:block;text-align:left;padding:6px 0">Waiting for an on-chain deposit · Show address</button>`).join('')}
       ${recent.length ? `<div class="txs">${recent.map(txRow).join('')}</div>` : recentCount() === 0 ? '' : `<div class="empty-state"><b>NO PLAYS YET</b>Receive some sats and every transaction shows up here with room for a note.</div>`}
     </div>
     <div class="panel"><div class="row between"><span class="h2">Arcade</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Play</button></div><div id="topScore" class="tiny muted"></div></div>

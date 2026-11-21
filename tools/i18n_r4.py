@@ -11,6 +11,7 @@ ROWS = [
 ("Back", "Volver", "Voltar", "Zurück", "Retour"),
 ("Stop", "Detener", "Parar", "Stopp", "Arrêter"),
 ("Copy link", "Copiar enlace", "Copiar link", "Link kopieren", "Copier le lien"),
+("Waiting for an on-chain deposit · Show address", "Esperando un depósito on-chain · Mostrar dirección", "Aguardando um depósito on-chain · Mostrar endereço", "Warte auf eine On-Chain-Einzahlung · Adresse zeigen", "En attente d'un dépôt on-chain · Afficher l'adresse"),
 ("LOCKED", "BLOQUEADO", "BLOQUEADO", "GESPERRT", "VERROUILLÉ"),
 ("MOVE", "TRASPASO", "TRANSFERÊNCIA", "UMBUCHUNG", "TRANSFERT"),
 ("SALE", "VENTA", "VENDA", "VERKAUF", "VENTE"),
