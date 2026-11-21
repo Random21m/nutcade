@@ -2,8 +2,8 @@
    1. A password on the backup file (optional): PBKDF2-SHA256 (600,000 rounds, like the PIN) and AES-256-GCM, with a random
       salt and iv, in a small self-describing JSON envelope. Without a password the file is exactly as before. A locked
       file asks for its password on import; a wrong one is an error and nothing changes. The password is never stored.
-   2. The file also carries contacts, settings (the ones listed in BK_PREFS: how NUTCADE looks and behaves, never a key
-      or a Lightning address), trophies and arcade progress (high scores, plays, the Daily Challenge days, your initials).
+   2. The file also carries contacts, settings (the ones listed in BK_SET: how NUTCADE looks and behaves, never a key,
+      a relay or a Lightning address), trophies and arcade progress (high scores, plays, the Daily Challenge days, your initials).
       Importing adds them next to what is here and never touches money: coins, history and steps come in as before.
    3. Back up with my phone: a passkey (WebAuthn, its PRF extension) locks the 12 words, and the locked copy is kept on
       Nostr relays, like the mint-list backup. The passkey's PRF output for a fixed salt goes through HKDF into two keys:
@@ -12,9 +12,8 @@
       Restore wallet screen, so a wallet that holds sats is never replaced silently (its sats move into the restored one).
       Never offered by the duress PIN's wallet: it answers "not available right now", as a passkey that can't be used
       would, and no passkey is made. */
-const BK_PREFS = ['sound', 'music', 'crt', 'theme', 'btcSymbol', 'fiat', 'currency', 'hideAmounts', 'arrNotify', 'qrLogo', 'amtFiat', 'recentN', 'lockAfter', 'checkSent', 'nostrBackup', 'nostrInbox', 'ksAuto', 'piggyStep', 'relays'];
 const BK_SCORE_SKIP = ['daily-run', 'daily-clock'];   // (a run in progress and the clock check belong to this device)
-function bkSettings() { const o = {}; for (const k of BK_PREFS) if (S.prefs[k] !== undefined) o[k] = S.prefs[k]; return o; }
+function bkSettings() { const o = {}; for (const k of Object.keys(BK_SET)) if (S.prefs[k] !== undefined) o[k] = S.prefs[k]; return o; }
 function bkArcade() {
   const scores = {};
   try { for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (!key || !key.startsWith('nutcade:scores:')) continue; const id = key.slice(15); if (!BK_SCORE_SKIP.includes(id)) scores[id] = raw.get('scores:' + id, null); } } catch (e) {}
@@ -28,59 +27,85 @@ const bkTxs = () => S.txs.map(bkTx);
 const bkImports = () => S.imports.map(r => Object.assign({}, r, { txs: (r.txs || []).map(bkTx) }));
 const bkTrophies = () => (window.Trophies && window.Trophies.got) ? window.Trophies.got() : store.get('trophies', null);
 // contacts, settings, trophies and arcade progress from a backup: added next to what is here (nothing about money)
+// Each part of a backup's extras is checked value by value (a backup file can be written by anyone) and imported on its
+// own: a bad part is skipped and never stops the rest, or the import of the coins around it.
 function importExtras(d) {
-  const str = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
-  // contacts: each once (by id, or by the same name and addresses)
-  let nc = 0;
-  for (const c of Array.isArray(d.contacts) ? d.contacts : []) {
-    if (!c || typeof c.id !== 'string' || typeof c.name !== 'string' || !c.name.trim()) continue;
-    const x = { id: str(c.id, 40), name: str(c.name, 60), ln: str(c.ln, 200), nostr: str(c.nostr, 200), created: +c.created || Date.now() };
-    if (typeof c.pubkey === 'string' && /^[0-9a-f]{64}$/.test(c.pubkey)) x.pubkey = c.pubkey;
-    if (Array.isArray(c.relays)) x.relays = c.relays.filter(r => typeof r === 'string' && /^wss?:\/\/\S+$/i.test(r)).slice(0, 8);
-    if (S.contacts.some(y => y.id === x.id || (y.name === x.name && (y.ln || '') === x.ln && (y.nostr || '') === x.nostr))) continue;
-    S.contacts.push(x); nc++;
+  if (!d || typeof d !== 'object') return;
+  for (const f of [bkInContacts, bkInSettings, bkInTrophies, bkInArcade]) { try { f(d); } catch (e) {} }
+}
+const isStr = v => typeof v === 'string', isNum = v => typeof v === 'number' && Number.isFinite(v), isObj = v => !!v && typeof v === 'object' && !Array.isArray(v);
+const BK_ID = /^[\w-]{1,40}$/;
+// contacts: through the same rules as saving one by hand (saveContact), never replacing one that is here: a name, a
+// Lightning address of the right shape and/or a Nostr address read from its npub (never a key taken from the file)
+function bkInContacts(d) {
+  if (!Array.isArray(d.contacts)) return;
+  let n = 0;
+  for (const c of d.contacts.slice(0, 200)) {
+    if (S.contacts.length >= 200) break;
+    if (!isObj(c) || !isStr(c.name) || (c.ln != null && !isStr(c.ln)) || (c.nostr != null && !isStr(c.nostr))) continue;
+    const name = c.name.trim().slice(0, 40); if (!name) continue;
+    const ln = (c.ln || '').trim().toLowerCase(); if (ln && !contactLnOk(ln)) continue;
+    let nostr = null; if ((c.nostr || '').trim()) { nostr = parseNostrAddr(c.nostr); if (!nostr) continue; }
+    if (!ln && !nostr) continue;
+    if (S.contacts.some(x => (ln && x.ln === ln) || (nostr && x.pubkey === nostr.pubkey))) continue;   // (a twin here: the one here stays as it is)
+    const id = isStr(c.id) && BK_ID.test(c.id) && !S.contacts.some(x => x.id === c.id) ? c.id : uid();
+    S.contacts.push({ id, name, ln, nostr: nostr ? c.nostr.trim().replace(/^nostr:/i, '') : '', pubkey: nostr ? nostr.pubkey : '', relays: nostr ? nostr.relays : [], created: isNum(c.created) ? c.created : Date.now() });
+    n++;
   }
-  if (nc) store.set('contacts', S.contacts);
-  // settings: only the listed ones, each checked
-  const st = d.settings && typeof d.settings === 'object' ? d.settings : null;
-  if (st) {
-    const ok = {
-      theme: v => THEMES.some(t => t[0] === v), currency: v => CURRENCIES.includes(v), lockAfter: v => [0, 1, 5, 15, 60].includes(v),
-      recentN: v => Number.isInteger(v) && v >= 0 && v <= 6, piggyStep: v => Number.isInteger(v) && v > 0 && v <= 1e6,
-      relays: v => Array.isArray(v) && v.length <= 10 && v.every(r => typeof r === 'string' && /^wss?:\/\/\S+$/i.test(r))
-    };
-    for (const k of BK_PREFS) { if (!(k in st)) continue; const v = st[k]; if (ok[k] ? ok[k](v) : typeof v === 'boolean') S.prefs[k] = Array.isArray(v) ? v.slice() : v; }
-    if (typeof setLang === 'function') setLang();
-  }
-  // trophies: every one earned on either side (the earlier date kept)
-  const tg = d.trophies && typeof d.trophies === 'object' ? d.trophies : null;
-  if (tg) {
+  if (n) { S.contacts.sort((a, b) => a.name.localeCompare(b.name)); store.set('contacts', S.contacts); }
+}
+// settings: only how NUTCADE looks and behaves, each value of its own type and range; nothing that would reach out to a
+// new service, weaken a protection or point Nostr elsewhere (relays, a longer auto-lock, the price feed, notifications)
+const BK_SET = {
+  sound: v => typeof v === 'boolean', music: v => typeof v === 'boolean', crt: v => typeof v === 'boolean', btcSymbol: v => typeof v === 'boolean',
+  hideAmounts: v => typeof v === 'boolean', amtFiat: v => typeof v === 'boolean',
+  fiat: v => v === false, arrNotify: v => v === false, nostrBackup: v => v === false, nostrInbox: v => v === false,   // (off only)
+  checkSent: v => v === true, ksAuto: v => v === true,   // (on only)
+  theme: v => isStr(v) && THEMES.some(t => t[0] === v), currency: v => isStr(v) && CURRENCIES.includes(v), qrLogo: v => v === 'acorn' || v === 'none',
+  recentN: v => Number.isInteger(v) && v >= 0 && v <= 6, piggyStep: v => Number.isInteger(v) && v > 0 && v <= 1e6,
+  lockAfter: v => [1, 5, 15, 60].includes(v) && ((S.prefs.lockAfter ?? 5) === 0 || v <= (S.prefs.lockAfter ?? 5))   // (only a shorter auto-lock)
+};
+function bkInSettings(d) {
+  const st = d.settings; if (!isObj(st)) return;
+  let lock = false;
+  for (const k of Object.keys(BK_SET)) { if (!Object.prototype.hasOwnProperty.call(st, k)) continue; const v = st[k]; if (BK_SET[k](v)) { S.prefs[k] = v; if (k === 'lockAfter') lock = true; } }
+  if (typeof setLang === 'function') setLang();
+  if (lock) armAutoLock();
+}
+// trophies: every one earned on either side (the earlier date kept); games played: the larger counts
+function bkInTrophies(d) {
+  if (isObj(d.trophies)) {
     const got = Object.assign({}, store.get('trophies', null) || {}); let ch = false;
-    for (const [k, v] of Object.entries(tg)) if (/^[\w-]{1,40}$/.test(k) && Number.isFinite(+v) && (!got[k] || +v < got[k])) { got[k] = +v; ch = true; }
+    for (const k of Object.keys(d.trophies).slice(0, 100)) { const v = d.trophies[k]; if (BK_ID.test(k) && isNum(v) && v > 0 && (!isNum(got[k]) || v < got[k])) { got[k] = v; ch = true; } }
     if (ch) { store.set('trophies', got); if (window.Trophies && window.Trophies.reload) window.Trophies.reload(); }
   }
-  const pl = d.plays && typeof d.plays === 'object' ? d.plays : null;
-  if (pl) {
-    const p = store.get('plays', { n: 0, by: {} }) || { n: 0, by: {} }; p.by = p.by || {};
-    if (Number.isFinite(+pl.n)) p.n = Math.max(p.n || 0, Math.floor(+pl.n));
-    for (const [k, v] of Object.entries(pl.by && typeof pl.by === 'object' ? pl.by : {})) if (/^[\w-]{1,40}$/.test(k) && Number.isFinite(+v)) p.by[k] = Math.max(p.by[k] || 0, Math.floor(+v));
-    store.set('plays', p);
+  const pl = d.plays;
+  if (isObj(pl)) {
+    const p = store.get('plays', null); const out = { n: isNum(p && p.n) ? p.n : 0, by: isObj(p && p.by) ? Object.assign({}, p.by) : {} };
+    if (isNum(pl.n) && pl.n >= 0) out.n = Math.max(out.n, Math.floor(pl.n));
+    if (isObj(pl.by)) for (const k of Object.keys(pl.by).slice(0, 100)) { const v = pl.by[k]; if (BK_ID.test(k) && isNum(v) && v >= 0) out.by[k] = Math.max(isNum(out.by[k]) ? out.by[k] : 0, Math.floor(v)); }
+    store.set('plays', out);
   }
-  // arcade: high-score tables (the best five of both), the Daily Challenge days (this device's day kept), initials if none
-  const ar = d.arcade && typeof d.arcade === 'object' ? d.arcade : null;
-  if (ar && ar.scores && typeof ar.scores === 'object') for (const [id, list] of Object.entries(ar.scores)) {
-    if (!/^[\w-]{1,40}$/.test(id) || BK_SCORE_SKIP.includes(id) || !Array.isArray(list)) continue;
-    const mine = raw.get('scores:' + id, []) || [];
+}
+// arcade: high-score tables (the best five of both), the Daily Challenge days (this device's day kept), initials if none
+const INI = /^[A-Z0-9]{3}$/;
+function bkInArcade(d) {
+  const ar = d.arcade; if (!isObj(ar)) return;
+  if (isObj(ar.scores)) for (const id of Object.keys(ar.scores).slice(0, 60)) {
+    const list = ar.scores[id];
+    if (!BK_ID.test(id) || BK_SCORE_SKIP.includes(id) || !Array.isArray(list)) continue;
+    const mine0 = raw.get('scores:' + id, []), mine = Array.isArray(mine0) ? mine0 : [];
     if (id === 'daily') {
       const have = new Set(mine.map(x => x && x.d));
-      const add = list.filter(x => x && /^\d{4}-\d\d-\d\d$/.test(x.d) && Number.isFinite(x.o) && typeof x.g === 'string' && !have.has(x.d));
+      const add = list.slice(0, 400).filter(x => isObj(x) && isStr(x.d) && /^\d{4}-\d\d-\d\d$/.test(x.d) && isNum(x.o) && isStr(x.g) && BK_ID.test(x.g) && !have.has(x.d) && have.add(x.d)).map(x => ({ d: x.d, o: x.o, g: x.g }));
       if (add.length) raw.set('scores:daily', mine.concat(add).sort((a, b) => a.d < b.d ? -1 : 1).slice(-366));
       continue;
     }
-    const seen = new Set(), all = mine.concat(list.filter(x => x && typeof x.n === 'string' && Number.isFinite(x.s))).filter(x => { const k = x.n + ':' + x.s + ':' + x.t; return !seen.has(k) && seen.add(k); });
-    all.sort((a, b) => b.s - a.s); raw.set('scores:' + id, all.slice(0, 5).map(x => ({ n: String(x.n).toUpperCase().slice(0, 3), s: x.s, t: +x.t || 0 })));
+    const ok = x => isObj(x) && isStr(x.n) && INI.test(x.n) && isNum(x.s) && x.s >= 0;
+    const seen = new Set(), all = mine.filter(ok).concat(list.slice(0, 20).filter(ok)).map(x => ({ n: x.n, s: x.s, t: isNum(x.t) ? x.t : 0 })).filter(x => { const k = x.n + ':' + x.s + ':' + x.t; return !seen.has(k) && seen.add(k); });
+    all.sort((a, b) => b.s - a.s); raw.set('scores:' + id, all.slice(0, 5));
   }
-  if (ar && typeof ar.initials === 'string' && /^[A-Z0-9]{3}$/.test(ar.initials) && !raw.get('initials', null)) raw.set('initials', ar.initials);
+  if (isStr(ar.initials) && INI.test(ar.initials) && !raw.get('initials', null)) raw.set('initials', ar.initials);
 }
 
 /* ---------- the password on the backup file ---------- */
@@ -145,7 +170,14 @@ async function phoneCapCheck() {
   return ok;
 }
 phoneCapCheck();
-const pbRec = () => { const r = store.get('phonebk', null); return r && r.pk && r.sk ? r : null; };
+const pbRec = () => { const r = store.get('phonebk', null); return r && r.pk && Array.isArray(r.erase) ? r : null; };
+// the phone backup goes to NUTCADE's default relays and the ones you set (both), so a new phone with the defaults finds it
+const pbRelays = () => [...new Set(BACKUP_RELAYS.concat(relays()))];
+// what removes the copy later, signed now: an empty copy one second newer and a deletion request (NIP-09). The record keeps
+// these two events, not the key that signed them, so Reset and Remove need no passkey and no key is kept on this phone
+const pbTombs = (sk, pk, at) => [
+  L.finalizeEvent({ kind: 30078, created_at: at + 1, tags: [['d', PB_D]], content: '' }, sk),
+  L.finalizeEvent({ kind: 5, created_at: at + 1, tags: [['a', `30078:${pk}:${PB_D}`], ['k', '30078']], content: '' }, sk)];
 const pbFp = async m => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('nutcade-phone-backup-fp:' + m)))).slice(0, 16);
 const pbOff = what => { const e = new Error(what === 'restore' ? "Restore with my phone isn't available right now. Try again later." : "Back up with my phone isn't available right now. Try again later."); e.keep = true; return e; };
 async function pbKeys(secret) {
@@ -194,18 +226,16 @@ async function phoneBackup() {
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(k.pk) }, k.aes, new TextEncoder().encode(body));
   const ts = Math.max(Math.floor(Date.now() / 1000), ((old && old.pk === k.pk && old.at) || 0) + 1);
   const ev = L.finalizeEvent({ kind: 30078, created_at: ts, tags: [['d', PB_D]], content: JSON.stringify({ v: 1, alg: 'A256GCM', iv: b64e(iv), ct: b64e(new Uint8Array(ct)) }) }, k.sk);
-  const n = await relayPublish(ev);
+  const n = await relayPublish(ev, 7000, pbRelays());
   if (!n) { if (!old) pbForgetPasskey(credId); throw new Error('No Nostr relay answered, so nothing was saved. Check your connection and try again.'); }
   if (old && old.pk !== k.pk) await pbErase(old).catch(() => 0);
-  store.set('phonebk', { pk: k.pk, sk: hex(k.sk), credId, at: ts, fp: await pbFp(mnemonic), n });
+  store.set('phonebk', { pk: k.pk, credId, at: ts, fp: await pbFp(mnemonic), n, erase: pbTombs(k.sk, k.pk, ts) });
   return n;
 }
 // the copy on the relays replaced by an empty one, and a deletion request (NIP-09) for it: returns how many relays took it
 async function pbErase(rec, timeout) {
-  const sk = L.hexToBytes(rec.sk), ts = Math.max(Math.floor(Date.now() / 1000), (rec.at || 0) + 1);
-  const blank = L.finalizeEvent({ kind: 30078, created_at: ts, tags: [['d', PB_D]], content: '' }, sk);
-  const del = L.finalizeEvent({ kind: 5, created_at: ts, tags: [['a', `30078:${rec.pk}:${PB_D}`], ['k', '30078']], content: '' }, sk);
-  const [n] = await Promise.all([relayPublish(blank, timeout), relayPublish(del, timeout)]);
+  const [blank, del] = rec.erase, list = pbRelays();
+  const [n] = await Promise.all([relayPublish(blank, timeout, list), relayPublish(del, timeout, list)]);
   return n;
 }
 async function phoneRemove() {
@@ -228,7 +258,7 @@ async function phoneFetch() {
   const r = a.getClientExtensionResults().prf;
   if (!r || !r.results || !r.results.first) throw new Error("This phone or browser can't open a phone backup. Nothing was changed. Use your 12 words.");
   const k = await pbKeys(new Uint8Array(r.results.first));
-  const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 });
+  const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 }, 7000, pbRelays());
   if (!evs.length && !evs.answered) throw new Error('No Nostr relay answered. Check your connection and try again. Nothing was changed.');
   const ev = evs.filter(e => e.pubkey === k.pk && e.kind === 30078 && (e.tags || []).some(t => t[0] === 'd' && t[1] === PB_D) && L.verifyEvent(e)).sort((x, y) => y.created_at - x.created_at)[0];
   if (!ev || !ev.content) throw new Error('No phone backup was found for this passkey. Nothing was changed.');
@@ -241,11 +271,14 @@ async function phoneFetch() {
   } catch (e) { throw bad(); }
   const words = cleanPhrase(body && body.words);
   if (!validPhrase(words)) throw bad();
-  return { words, mints: (Array.isArray(body.mints) ? body.mints : []).filter(u => typeof u === 'string' && /^https?:\/\/\S+$/i.test(u)).map(normUrl) };
+  return { words, mints: (Array.isArray(body.mints) ? body.mints : []).filter(u => typeof u === 'string' && /^https?:\/\/\S+$/i.test(u)).map(normUrl),
+    rec: { pk: k.pk, credId: b64e(new Uint8Array(a.rawId)), at: ev.created_at, n: 0, erase: pbTombs(k.sk, k.pk, ev.created_at) } };
 }
 // the Restore wallet sheet, filled from a phone backup: the words are kept in a hidden field (never shown), the mints ticked
+let pbFrom = null;   // (the phone backup the Restore sheet was filled from: once restored, this wallet keeps its record)
 function phoneFill(r) {
   const f = $('#phraseField'); if (!f) return;
+  pbFrom = r;
   f.innerHTML = '<div class="notice cyan">Your 12 words came from your phone backup. They are not shown here.</div>';
   const i = document.createElement('input'); i.type = 'hidden'; i.id = 'phraseIn'; i.value = r.words; f.appendChild(i);
   const pb = $('#layer [data-act=phoneRestore]'); if (pb) pb.remove();
@@ -263,10 +296,16 @@ function phonePanel() {
   return `<div data-phonecap ${phoneCap ? '' : 'hidden'}><div class="sub">Back up with my phone</div>
       <p class="th" style="margin:0">Locks your 12 words with a passkey (Face ID or fingerprint) and keeps the locked copy on Nostr relays. A new phone gets them back with the same passkey. Your 12 words stay your main backup.</p>
       <div class="row between tiny"><span>Phone backup</span><span data-pbstate style="color:${rec ? 'var(--lime)' : 'var(--dim)'}">${rec ? esc(timeAgo(rec.at * 1000).toUpperCase()) : 'NOT SET UP'}</span></div>
+      <p class="th" style="margin:0;color:var(--gold)" data-pbstale hidden>It holds your old 12 words. Tap Back up again to save the new ones.</p>
       <div class="row wrap"><button class="btn sm violet" data-act="phoneOpen">${rec ? 'Back up again' : 'Back up with my phone'}</button>${rec ? '<button class="btn sm" data-act="phoneRemoveAsk">Remove phone backup</button>' : ''}</div></div>`;
 }
 // an older phone backup (other words than this wallet's now) is shown as out of date
+async function pbKeep(phrase) {
+  const r = pbFrom; pbFrom = null;
+  if (!r || r.words !== phrase || (vault.on && vault.decoy)) return;
+  store.set('phonebk', Object.assign({}, r.rec, { fp: await pbFp(phrase) }));
+}
 async function pbStateCheck() {
   const rec = pbRec(), el = document.querySelector('[data-pbstate]'); if (!rec || !el || !S.seed) return;
-  if (rec.fp && rec.fp !== await pbFp(S.seed.mnemonic)) { el.textContent = tr('OUT OF DATE'); el.style.color = 'var(--gold)'; }
+  if (rec.fp && rec.fp !== await pbFp(S.seed.mnemonic)) { el.textContent = tr('OUT OF DATE'); el.style.color = 'var(--gold)'; const n = document.querySelector('[data-pbstale]'); if (n) n.hidden = false; }
 }

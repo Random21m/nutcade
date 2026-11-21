@@ -3289,11 +3289,12 @@ function parseNostrAddr(v) {
   return null;
 }
 const myEcashAddress = () => L.nprofileEncode({ pubkey: L.nostrPub(nostrKey()), relays: relays().slice(0, 3) });
+const contactLnOk = ln => /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(ln) || /^lnurl1[0-9a-z]+$/.test(ln);
 function saveContact(c) {
   const name = String(c.name || '').trim().slice(0, 40);
   if (!name) throw new Error('Give the contact a name.');
   const ln = String(c.ln || '').trim().toLowerCase();
-  if (ln && !/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(ln) && !/^lnurl1[0-9a-z]+$/.test(ln)) throw new Error("That Lightning address doesn't look right. It should look like name@wallet.com.");
+  if (ln && !contactLnOk(ln)) throw new Error("That Lightning address doesn't look right. It should look like name@wallet.com.");
   let nostr = null;
   if (String(c.nostr || '').trim()) { nostr = parseNostrAddr(c.nostr); if (!nostr) throw new Error("That Nostr address can't be read. Paste an npub or nprofile."); }
   if (!ln && !nostr) throw new Error('Add a Lightning address, a Nostr address, or both.');
@@ -4052,7 +4053,7 @@ async function importBackup(d) {
   for (const k in d.found || {}) { const f = d.found[k]; if (/^[0-9a-f]{64}$/.test(k) && f && typeof f === 'object' && cardNums(f) && f.shares && typeof f.shares === 'object' && typeof f.state === 'string' && !S.found[k]) S.found[k] = f; } saveFound();
   for (const x of Array.isArray(d.blocked) ? d.blocked : []) if (x && typeof x.url === 'string' && /^https?:/i.test(x.url) && !isBlocked(x.url)) S.blocked.push({ url: normUrl(x.url), name: String(x.name || host(x.url)).slice(0, 60), at: +x.at || Date.now() }); saveBlocked();
   if (!S.active && S.mints[0]) S.active = S.mints[0].url;
-  importExtras(d);   // contacts, settings, trophies and arcade progress (nothing about money)
+  try { importExtras(d); } catch (e) {}   // contacts, settings, trophies and arcade progress (nothing about money; never stops the import)
   save();
   settleImported(settle);
   return late;
@@ -4235,6 +4236,7 @@ const A = {
     const same = S.seed && S.seed.mnemonic === phrase;
     const hadBalance = totalBalance() > 0;
     if (!same) setSeed(phrase, true); else { S.seed.backedUp = true; store.set('seed', S.seed); }
+    await pbKeep(phrase).catch(() => {});   // (restored with the phone: that phone backup is this wallet's now)
     if (!same && hadBalance) { line('Moving your current ecash under the restored phrase…'); await secureAll(); }
     else if (!same) { S.seed.secured = true; store.set('seed', S.seed); }
     let total = 0; const fails = [];

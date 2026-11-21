@@ -16,12 +16,22 @@ from r8_qa import wallet, set_pin, unlock, pad, settings, set_lang, PIN, DPIN, L
 J = json.dumps
 NOSTR = 'http://127.0.0.1:3350'
 AUTH = {'protocol': 'ctap2', 'ctap2Version': 'ctap2_1', 'transport': 'internal', 'hasResidentKey': True, 'hasUserVerification': True, 'isUserVerified': True, 'automaticPresenceSimulation': True, 'hasPrf': True}
-WATCH = """window.__toasts = []; window.__logs = [];
+# NUTCADE's default relays (relay.damus.io, nos.lol, relay.primal.net) are pointed at the stand-in relay, so tests never reach a
+# public relay; window.__relayDown sends every relay to a closed port; window.__ws lists the relays each page opened
+RELAY_SHIM = """(() => { const W = window.WebSocket; if (!W || W.__shim) return; window.__ws = [];
+  const MAP = { 'wss://relay.damus.io': 'ws://127.0.0.1:3350/relay', 'wss://nos.lol': 'ws://127.0.0.1:3350/relay', 'wss://relay.primal.net': 'ws://127.0.0.1:3350/relay' };
+  const S = function (u, p) { u = String(u); window.__ws.push(u); const k = u.replace(/\\/+$/, ''); let t = MAP[k] || u;
+    if (window.__relayDown && (MAP[k] || /\\/relay$/.test(k))) t = 'ws://127.0.0.1:3359/relay';
+    return p === undefined ? new W(t) : new W(t, p); };
+  S.prototype = W.prototype; S.__shim = 1; for (const k of ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED']) S[k] = W[k]; window.WebSocket = S; })();
+"""
+WATCH = RELAY_SHIM + """window.__toasts = []; window.__logs = [];
 (() => { for (const k of ['log', 'info', 'warn', 'error', 'debug']) { const o = console[k]; console[k] = function (...a) { try { window.__logs.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')); } catch (e) {} return o.apply(this, a); }; } })();
 document.addEventListener('DOMContentLoaded', () => { new MutationObserver(() => { const t = document.querySelector('#toast');
   if (t && !t.hidden && t.textContent && window.__toasts[window.__toasts.length - 1] !== t.textContent) window.__toasts.push(t.textContent); })
   .observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden'] }); });"""
-NO_PRF_CAP = "(() => { if (window.PublicKeyCredential && PublicKeyCredential.getClientCapabilities) { const g = PublicKeyCredential.getClientCapabilities.bind(PublicKeyCredential); PublicKeyCredential.getClientCapabilities = () => g().then(c => Object.assign({}, c, { 'extension:prf': false })); } })();"
+# a browser without PRF, on any Chromium: no capability list (older Chromium has none) and no platform authenticator either
+NO_PRF_CAP = "(() => { if (window.PublicKeyCredential) { try { delete PublicKeyCredential.getClientCapabilities; } catch (e) {} PublicKeyCredential.getClientCapabilities = undefined; PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = () => Promise.resolve(false); } })();"
 PB = 'nutcade-phone-backup'
 
 
@@ -41,6 +51,12 @@ async def authn(w, prf=True):
     a = await cdp.send('WebAuthn.addVirtualAuthenticator', {'options': dict(AUTH, hasPrf=prf)})
     await w.ev("Nutcade.bk.cap()")
     return cdp, a['authenticatorId']
+
+
+async def forgot(w, cdp, aid):
+    """the passkey is forgotten where the browser can be told (signalUnknownCredential); elsewhere it simply stays"""
+    if await w.ev("!!(window.PublicKeyCredential && PublicKeyCredential.signalUnknownCredential)"): return await creds(cdp, aid) == 0
+    return True
 
 
 async def creds(cdp, aid): return len((await cdp.send('WebAuthn.getCredentials', {'authenticatorId': aid}))['credentials'])
@@ -259,18 +275,18 @@ async def main():
 
         async def relay_down():
             w, words = await funded(b); cdp, aid = await authn(w)
-            await w.ev("Nutcade.S.prefs.relays=['ws://127.0.0.1:3359/relay']; Nutcade.save && 0")
+            await w.ev("window.__relayDown=true")
             n0 = len(pb_events())
             txt, e = await phone_backup(w)
             check("relay down: a clear error, no 'backed up' state, nothing half-saved", 'No Nostr relay answered' in e and not await w.ev("Nutcade.bk.rec()") and len(pb_events()) == n0, e)
             await settings(w)
             check('relay down: Settings still says NOT SET UP', 'NOT SET UP' in await w.ev("document.querySelector('#set-backup').innerText"))
             # with the relay back: it works; then restoring while the relay is down changes nothing
-            await w.ev("Nutcade.S.prefs.relays=['ws://127.0.0.1:3350/relay']")
+            await w.ev("window.__relayDown=false")
             txt, e = await phone_backup(w); await w.ev("Nutcade.closeSheet()")
             check('relay down: once a relay answers, the backup is saved', 'BACKED UP' in txt and await w.ev("!!Nutcade.bk.rec()"), e)
             await settings(w); await w.click('[data-act=seedRestore]'); await w.until("!!document.querySelector('[data-act=phoneRestore]')", 5000)
-            await w.ev("Nutcade.S.prefs.relays=['ws://127.0.0.1:3359/relay']")
+            await w.ev("window.__relayDown=true")
             await w.click('[data-act=phoneRestore]'); await w.until("!!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 20000)
             check('relay down: restoring says no relay answered; nothing changed', 'No Nostr relay answered' in await w.err() and await w.ev("Nutcade.S.seed.mnemonic") == words and await w.bal() == 1000, await w.err())
             check('relay down: no script errors', not w.errs, w.errs[:4])
@@ -342,7 +358,7 @@ async def main():
             await w.until("!!document.querySelector('[data-act=gateCreate]')", 20000); await w.wait(800)
             st = state()
             check('reset: the copy on the relay is gone (replaced, and a deletion asked for)', not any(e['pubkey'] == pk and e['content'] for e in st['events']) and any(e['pubkey'] == pk and e['kind'] == 5 for e in st['events']))
-            check('reset: nothing of it is left on this phone (the record, and the passkey forgotten where the browser allows)', 'phonebk' not in await w.ev("Object.keys(localStorage).join(' ')") and not await w.ev("Nutcade.bk.rec()") and await creds(cdp, aid) == 0)
+            check('reset: nothing of it is left on this phone (the record, and the passkey forgotten where the browser allows)', 'phonebk' not in await w.ev("Object.keys(localStorage).join(' ')") and not await w.ev("Nutcade.bk.rec()") and await forgot(w, cdp, aid))
             await w.ev("Nutcade.bk.cap()"); await w.ev("Nutcade.render()")
             r = await gate_phone(w)
             check('reset: Restore with my phone then restores nothing; nothing changed', 'Nothing was changed' in r and not await w.ev("Nutcade.S.seed"), r[:150])
@@ -350,10 +366,82 @@ async def main():
             y, ywords = await funded(b); cy, ay = await authn(y)
             await phone_backup(y); await y.ev("Nutcade.closeSheet()"); ypk = (await y.ev("Nutcade.bk.rec()"))['pk']
             await settings(y); await y.click('[data-act=phoneRemoveAsk]'); await y.wait(250); await y.click('[data-act=phoneRemoveGo]'); await y.until("!document.querySelector('[data-act=phoneRemoveGo]')", 15000); await y.wait(300)
-            check('remove: Remove phone backup deletes the copy, the record and the passkey', not await y.ev("Nutcade.bk.rec()") and not any(e['pubkey'] == ypk and e['content'] for e in pb_events()) and await creds(cy, ay) == 0)
+            check('remove: Remove phone backup deletes the copy, the record and the passkey', not await y.ev("Nutcade.bk.rec()") and not any(e['pubkey'] == ypk and e['content'] for e in pb_events()) and await forgot(y, cy, ay))
             check('reset/remove: no script errors', not (w.errs + y.errs), (w.errs + y.errs)[:4])
             await w.pg.context.close(); await y.pg.context.close()
         await section('reset', reset_deletes)
+
+        # ======================= custom relays, the record after a restore, a stale backup =======================
+        async def custom_relays():
+            w, words = await funded(b); cdp, aid = await authn(w)
+            await w.ev("Nutcade.S.prefs.relays=['ws://127.0.0.1:3358/relay']; window.__ws=[]")   # (a relay of your own, down right now)
+            txt, e = await phone_backup(w); await w.ev("Nutcade.closeSheet()")
+            opened = await w.ev("window.__ws")
+            check('custom relays: the copy goes to your relays AND the default ones (it is saved although yours is down)', 'BACKED UP' in txt and 'ws://127.0.0.1:3358/relay' in opened and 'wss://relay.damus.io' in opened, (e, opened[:6]))
+            # a new phone that only has the default relays finds it
+            await w.ev("localStorage.clear()"); await w.ev("localStorage.setItem('nutcade:prefs', JSON.stringify({sound:false,music:false,lang:'en'}))")
+            await w.pg.reload(); await w.wait(900); await w.ev("Nutcade.bk.cap()"); await w.ev("Nutcade.render()")
+            r = await gate_phone(w)
+            ok = 'came from your phone backup' in r
+            if ok: await restore_now(w); await leave_gate(w)
+            check('custom relays: a new phone with only the default relays restores it', ok and await w.ev("Nutcade.S.seed && Nutcade.S.seed.mnemonic") == words, r[:150])
+            rec = await w.ev("Nutcade.bk.rec()")
+            check('after a phone restore: this wallet keeps the phone backup record (no key in it, only the signed removal)', bool(rec) and 'sk' not in rec and len(rec.get('erase', [])) == 2 and '"sk"' not in await w.ev("JSON.stringify(Object.assign({},localStorage))"))
+            n0 = await creds(cdp, aid)
+            txt, e = await phone_backup(w); await w.ev("Nutcade.closeSheet()")
+            check('after a phone restore: Back up again reuses the same passkey (no second one)', 'BACKED UP' in txt and await creds(cdp, aid) == n0 and (await w.ev("Nutcade.bk.rec()"))['pk'] == rec['pk'], e)
+            # new words: the phone backup shows OUT OF DATE and says to back up again
+            await w.ev("Nutcade.S.seed.mnemonic='abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'")
+            await settings(w); await w.wait(400)
+            t = await w.ev("document.querySelector('#set-backup').innerText")
+            check('stale: a phone backup of other words shows OUT OF DATE and a line to back up again', 'OUT OF DATE' in t and 'Back up again to save the new ones' in t, t[-300:])
+            check('custom relays: no script errors', not w.errs, w.errs[:4])
+            await w.pg.context.close()
+        await section('custom', custom_relays)
+
+        # ======================= a hostile backup file: the extras can't plant a payee, weaken a setting or stop the import =======================
+        async def hostile():
+            src, words = await funded(b, 600)
+            pk1 = 'a' * 64; pk2 = 'b' * 64
+            d = json.loads(await src.ev("Nutcade.r8.backupData()"))
+            d['contacts'] = [
+                {'id': 'x1', 'name': 'Alice twin', 'ln': 'ALICE@example.com', 'nostr': ''},              # twin of a contact here (same address)
+                {'id': 'c1', 'name': 'Same id', 'ln': 'mallory@example.com', 'nostr': ''},               # same id as the one here: never replaces it
+                {'id': 'x3', 'name': 'Planted', 'ln': '', 'nostr': pk1, 'pubkey': pk2, 'relays': ['wss://evil.example']},   # the key comes from nostr, not the file
+                {'id': 'x4', 'name': 'Bad ln', 'ln': 'javascript:alert(1)', 'nostr': ''},
+                {'id': 'x5', 'name': {'toString': 0}, 'ln': 'bob@example.com'},
+                {'id': 'x6', 'name': 'N' * 90, 'ln': 'carol@example.com', 'nostr': '', 'created': {'toString': 0}},
+                'not a contact', None]
+            d['settings'] = {'relays': ['wss://evil.example'], 'lockAfter': 60, 'fiat': True, 'nostrInbox': True, 'arrNotify': True, 'qrLogo': {'toString': 0}, 'theme': {}, 'currency': 'EUR', 'hideAmounts': 'yes', 'crt': False}
+            d['trophies'] = {'rat': {'toString': 0}, 'big': 'x', 'top5': 123}
+            d['plays'] = {'n': {'toString': 0}, 'by': {'swarm': '9', 'maze': 4}}
+            d['arcade'] = {'scores': {'swarm': [{'n': '<img src=x onerror=alert(1)>', 's': 99999, 't': 1}, {'n': 'ABC', 's': {'toString': 0}}, {'n': 'XYZ', 's': 50, 't': 2}], 'daily': 'oops', 'maze': {'toString': 0}}, 'initials': '<b>'}
+            n = await wallet(b, init=WATCH); await n.create(); await n.add_mint(B); await n.home()
+            await n.ev("Nutcade.S.contacts.push({id:'c1',name:'Alice',ln:'alice@example.com',nostr:'',pubkey:'',relays:[],created:1}); window.NutStore.set('contacts', Nutcade.S.contacts); localStorage.removeItem('nutcade:initials')")
+            await n.ev("Nutcade.S.prefs.lockAfter=5; Nutcade.S.prefs.fiat=false; Nutcade.S.prefs.nostrInbox=false; Nutcade.S.prefs.arrNotify=false")
+            res = await n.ev(f"Nutcade.r8.importBackup(JSON.parse({J(J(d))})).then(()=>'ok', e=>'ERR '+e.message)"); await n.wait(2500)
+            check('hostile: the import itself goes through (coins checked and added, saved)', res == 'ok' and await n.bal() == 600 and await n.ev("JSON.parse(localStorage.getItem('nutcade:proofs')||'{}')") != {}, (res, await n.bal()))
+            cs = await n.ev("Nutcade.S.contacts")
+            by = {c['name']: c for c in cs}
+            check('hostile: a contact here is never replaced (same id, same address)', by.get('Alice', {}).get('ln') == 'alice@example.com' and 'Alice twin' not in by, [c['name'] for c in cs])
+            check('hostile: a contact with the same id comes in as a new, visible contact (its own id)', 'Same id' in by and by['Same id']['id'] != 'c1')
+            check("hostile: a Nostr contact's key is read from its address, never taken from the file", by.get('Planted', {}).get('pubkey') == pk1 and by['Planted']['relays'] == [], by.get('Planted'))
+            check('hostile: a bad Lightning address and a non-text name are dropped; names are cut to 40', 'Bad ln' not in by and not any(c['ln'] == 'bob@example.com' for c in cs) and any(len(c['name']) == 40 for c in cs))
+            p = await n.ev("Nutcade.S.prefs")
+            check('hostile: settings never point Nostr elsewhere, lengthen the auto-lock or turn on a service', p.get('relays') != ['wss://evil.example'] and p.get('lockAfter') == 5 and p.get('nostrInbox') is False and p.get('fiat') is False and p.get('arrNotify') is False, {k: p.get(k) for k in ('relays', 'lockAfter', 'fiat', 'nostrInbox', 'arrNotify')})
+            check('hostile: values of the wrong type are skipped, good ones kept', p.get('theme') != {} and p.get('qrLogo') in (None, 'acorn', 'none') and p.get('hideAmounts') != 'yes' and p.get('currency') == 'EUR' and p.get('crt') is False)
+            t = await n.ev("Trophies.got()"); pl = await n.ev("window.NutStore.get('plays', null)")
+            check('hostile: trophies and plays take only numbers', 'rat' not in t and 'big' not in t and t.get('top5') == 123 and pl['by'].get('maze') == 4 and 'swarm' not in pl['by'] and isinstance(pl['n'], int), (t, pl))
+            sw = await n.ev("JSON.parse(localStorage.getItem('nutcade:scores:swarm')||'[]')")
+            check('hostile: high scores take only 3-letter initials and number scores; initials too', [x['n'] for x in sw] == ['XYZ'] and not await n.ev("localStorage.getItem('nutcade:initials')"), sw)
+            await n.click('[data-act=tab][data-tab=arcade]'); await n.wait(600)
+            check('hostile: nothing from the file runs on the Arcade screen', not await n.ev("!!document.querySelector('.cabinets img, .scores img')"))
+            # a lockAfter that is shorter does come in, and the auto-lock is armed again
+            await n.ev("Nutcade.bk.extras({settings:{lockAfter:1}})")
+            check('hostile: a shorter auto-lock comes in', await n.ev("Nutcade.S.prefs.lockAfter") == 1)
+            check('hostile: no script errors', not (n.errs + src.errs), (n.errs + src.errs)[:4])
+            await n.pg.context.close(); await src.pg.context.close()
+        await section('hostile', hostile)
 
         # ======================= the new text in every language =======================
         async def langs():
