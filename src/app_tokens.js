@@ -15,19 +15,19 @@ function qrPlan(text, mode, plain) {
   const ecl = text.length > 600 ? 'L' : 'M';
   return { qr: qrMake(text, ecl, mode), logo: false, ecl };
 }
-// the acorn's square, in modules: about a fifth of the code across (4-5% of its area), odd so it sits centred
-function logoSpan(n) { let k = Math.max(5, Math.round(n * (window.NutTokens && NutTokens._logoScale || 0.21))); if ((n - k) % 2) k++; return Math.min(k, n - 2); }
+// the acorn's square, in modules: about a quarter of the code across (6% of its area), odd so it sits centred
+function logoSpan(n) { let k = Math.max(5, Math.round(n * (window.NutTokens && NutTokens._logoScale || 0.25))); if ((n - k) % 2) k++; return Math.min(k, n - 2); }
 const ACORN_INK = { '1': '#ffffff', '2': '#000000', '3': '#000000', '4': '#000000' };
-const ACORN_COL = { '1': '#d9822b', '2': '#6b3b12', '3': '#3d2208', '4': '#ffd79a' };
+const ACORN_COL = { '1': '#ff9a1f', '2': '#6b3b12', '3': '#3d2208', '4': '#ffd79a' };
 function drawBadge(x, bx, by, size, ink) {
-  const r = size * 0.18, m = size * 0.06, s = size - 2 * m;
+  const r = size * 0.16, m = size * 0.04, s = size - 2 * m;
   x.save();
   x.beginPath(); if (x.roundRect) x.roundRect(bx + m, by + m, s, s, r); else x.rect(bx + m, by + m, s, s);
-  x.fillStyle = ink ? '#ffffff' : '#1d0b33'; x.fill();
-  x.lineWidth = Math.max(1, size * 0.07); x.strokeStyle = ink ? '#000000' : '#3ee6ff'; x.stroke();
-  const px = (s * 0.72) / ACORN.length, ax = bx + size / 2 - ACORN[0].length * px / 2, ay = by + size / 2 - ACORN.length * px / 2;
+  x.fillStyle = '#ffffff'; x.fill();   // (white with a thick black ring, on screen and on paper: the one look that stands out from the code)
+  x.lineWidth = Math.max(2, size * 0.1); x.strokeStyle = '#000000'; x.stroke();
+  const px = (s * 0.8) / ACORN.length, ax = bx + size / 2 - ACORN[0].length * px / 2, ay = by + size / 2 - ACORN.length * px / 2;
   const pal = ink ? ACORN_INK : ACORN_COL;
-  if (ink) { x.fillStyle = '#000'; ACORN.forEach((row, ry) => [...row].forEach((c, rx) => { if (c !== '.') x.fillRect(ax + rx * px - px * 0.25, ay + ry * px - px * 0.25, px * 1.5, px * 1.5); })); }   // (an outline, so the white body shows)
+  { x.fillStyle = '#000'; ACORN.forEach((row, ry) => [...row].forEach((c, rx) => { if (c !== '.') x.fillRect(ax + rx * px - px * 0.25, ay + ry * px - px * 0.25, px * 1.5, px * 1.5); })); }   // (an outline, so the white body shows)
   ACORN.forEach((row, ry) => [...row].forEach((c, rx) => { if (c !== '.') { x.fillStyle = pal[c]; x.fillRect(ax + rx * px, ay + ry * px, Math.ceil(px), Math.ceil(px)); } }));
   x.restore();
 }

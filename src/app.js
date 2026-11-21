@@ -1645,19 +1645,20 @@ const ACORN = [
 function logoSVG(word = 'NUTCADE', withTag = true, mini = false) {
   // mini: one row (acorn beside the word, no stars or tagline) for the compact header on every screen after setup
   const s = 6, gap = 1, cols = word.length * 6 + (word.length - 1) * gap;
-  const pad = 4, mascotH = mini ? 2 : ACORN.length + 2, ox = mini ? pad + ACORN[0].length + 3 : pad;
+  const pad = 4, mascotH = mini ? 2 : ACORN.length + 2, ox = mini ? ACORN[0].length + 3 : pad;
+  const tTop = mini ? 2 : pad + mascotH;   // (mini: the acorn fills the whole row, the word sits in its middle)
   if (mini) withTag = false;
-  const W = cols + ox + pad, H = mini ? ACORN.length + pad * 2 - 2 : mascotH + 7 + pad * 2 + (withTag ? 6 : 0);
+  const W = cols + ox + (mini ? 3 : pad), H = mini ? ACORN.length + 1 : mascotH + 7 + pad * 2 + (withTag ? 6 : 0);
   const cells = [];
-  [...word].forEach((ch, i) => { const g = GLYPHS[ch]; if (!g) return; g.forEach((row, y) => [...row].forEach((b, x) => { if (b === '1') cells.push([ox + i * 7 + x, pad + mascotH + y - (mini ? 1 : 0)]); })); });
+  [...word].forEach((ch, i) => { const g = GLYPHS[ch]; if (!g) return; g.forEach((row, y) => [...row].forEach((b, x) => { if (b === '1') cells.push([ox + i * 7 + x, tTop + y]); })); });
   const rect = (x, y, c, o = 0) => `<rect x="${(x - o) * s}" y="${(y - o) * s}" width="${s + o * 2 * s}" height="${s + o * 2 * s}" fill="${c}"/>`;
   const layer = (dx, dy, c, o = 0) => cells.map(([x, y]) => rect(x + dx, y + dy, c, o)).join('');
-  const ax = mini ? pad - 1 : Math.floor(W / 2 - ACORN[0].length / 2), ay = mini ? pad - 2 : pad - 1;
-  const ac = { '1': '#b8651f', '2': '#6b3b12', '3': '#3d2208', '4': '#ffd79a' };
+  const ax = mini ? 0 : Math.floor(W / 2 - ACORN[0].length / 2), ay = mini ? 0.5 : pad - 1;
+  const ac = { '1': '#ff9a1f', '2': '#8a4a14', '3': '#4a2a0a', '4': '#fff0c8' };   // (a brighter orange, a white outline: it reads at a glance on every theme)
   let acorn = '';
   ACORN.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') acorn += rect(ax + x + 0.5, ay + y, ac[c]); }));
   let acornOutline = '';
-  ACORN.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') acornOutline += rect(ax + x + 0.5, ay + y, '#0a0717', 0.5); }));
+  ACORN.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') acornOutline += rect(ax + x + 0.5, ay + y, '#ffffff', 0.5); }));
   const stars = mini ? '' : [[2, 3], [W - 4, 2], [W - 8, 9], [6, 10], [W - 3, 14]].map(([x, y]) => `<g fill="#2de2ff"><rect x="${x * s}" y="${(y - .5) * s}" width="${s}" height="${s * 2}"/><rect x="${(x - .5) * s}" y="${y * s}" width="${s * 2}" height="${s}"/></g>`).join('');
   const tagTop = (pad + mascotH + 7 + 1.6) * s, tagH = 4 * s, tagY = tagTop + tagH / 2;
   return `<svg viewBox="0 0 ${W * s} ${H * s}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NUTCADE logo" shape-rendering="crispEdges">
@@ -1667,12 +1668,12 @@ function logoSVG(word = 'NUTCADE', withTag = true, mini = false) {
 </linearGradient></defs>
 ${stars}
 <g>${acornOutline}${acorn}</g>
-<g transform="skewX(-8) translate(${Math.round(Math.tan(8 * Math.PI / 180) * (pad + mascotH + 3.5 - (mini ? 1 : 0)) * s)} 0)">
+<g transform="skewX(-8) translate(${Math.round(Math.tan(8 * Math.PI / 180) * (tTop + 3.5) * s)} 0)">
 <g>${layer(0, 0, '#0a0717', 1)}</g>
 <g>${layer(2, 2, '#ff3d8b')}</g>
 <g>${layer(1, 1, '#2de2ff')}</g>
 <g>${layer(0, 0, '#0a0717', .5)}</g>
-<g fill="url(#chrome)"><rect x="${ox * s}" y="${(pad + mascotH - (mini ? 1 : 0)) * s}" width="${cols * s}" height="${7 * s}" fill="url(#chrome)" mask="url(#letters)"/></g>
+<g fill="url(#chrome)"><rect x="${ox * s}" y="${tTop * s}" width="${cols * s}" height="${7 * s}" fill="url(#chrome)" mask="url(#letters)"/></g>
 <mask id="letters" maskUnits="userSpaceOnUse">${layer(0, 0, '#fff')}</mask>
 </g>
 ${withTag ? `<g class="tagline"><text x="${W * s / 2}" y="${tagY}" dominant-baseline="central" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="${s * 2.6}" fill="#ffcf3a" stroke="#0a0717" stroke-width="${s * 0.6}" stroke-linejoin="round" paint-order="stroke" textLength="${Math.round((W - 8) * s)}" lengthAdjust="spacingAndGlyphs">INSERT ECASH · PRESS START</text></g>` : ''}

@@ -39,8 +39,8 @@ button{cursor:pointer}
 .marquee{position:relative;text-align:center;padding:18px 8px 14px;border:3px solid var(--violet);border-radius:var(--r);
   background:linear-gradient(180deg,var(--mq1),var(--mq2));box-shadow:0 0 0 3px var(--void),0 0 0 6px var(--pink),0 0 26px var(--glow)}
 .marquee .logo{filter:var(--logo-filter)}
-.marquee.mini{padding:13px 8px 11px}
-.marquee.mini .logo svg{width:auto;height:38px;max-width:100%}
+.marquee.mini{padding:14px 8px 12px}
+.marquee.mini .logo svg{width:auto;height:50px;max-width:100%}
 .marquee .logo svg{display:block;width:100%;height:auto;max-width:400px;margin:0 auto;filter:drop-shadow(0 0 10px var(--pink));filter:drop-shadow(0 0 10px color-mix(in srgb,var(--pink) 35%,transparent))}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .pad-keys{display:none;font-size:18px;color:var(--dim);text-align:center}
@@ -531,7 +531,7 @@ ol.steps{margin:0;padding-left:24px;display:grid;gap:8px;font-size:19px;line-hei
 /* the lock screen with Face ID: a slimmer header and keys so the button and Forgot PIN fit a 640 px screen */
 @media (max-height:700px){
   .lockwrap.bio{padding-top:8px}
-  .lockwrap.bio .marquee.mini{padding:8px 8px 6px}.lockwrap.bio .marquee.mini .logo svg{height:30px}
+  .lockwrap.bio .marquee.mini{padding:14px 8px 12px}.lockwrap.bio .marquee.mini .logo svg{height:38px}
   .lockwrap.bio .screen{margin-top:10px}
   .lockwrap.bio .pin-k{height:50px}.lockwrap.bio .pin-keys{gap:10px}.lockwrap.bio .pinpad{gap:8px}
 }
@@ -557,7 +557,7 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 /* very short phones (320x568): the same slimmer lock screen, with or without Face ID */
 @media (max-height:600px){
   .lockwrap{padding-top:8px}
-  .lockwrap .marquee.mini{padding:8px 8px 6px}.lockwrap .marquee.mini .logo svg{height:30px}
+  .lockwrap .marquee.mini{padding:14px 8px 12px}.lockwrap .marquee.mini .logo svg{height:38px}
   .lockwrap .screen{margin-top:8px}
   .lockwrap .pin-k,.lockwrap.bio .pin-k{height:44px}.lockwrap .pin-keys,.lockwrap.bio .pin-keys{gap:8px}.lockwrap .pinpad,.lockwrap.bio .pinpad{gap:6px}.lockwrap .gate{padding:12px}
   .lockwrap .pinpad > .th:not(.warn){display:none}
