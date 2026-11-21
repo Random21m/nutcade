@@ -528,8 +528,9 @@ ol.steps{margin:0;padding-left:24px;display:grid;gap:8px;font-size:19px;line-hei
 @media (max-height:700px){.ck{min-height:48px}.cash-body{gap:10px;margin-top:10px}.cash-display{padding:10px;gap:6px}.cash-display .inp{min-height:40px}.cash-amt{line-height:1.1}.cash-charge{min-height:48px}.cash-keys{gap:6px}}
 .cash-charge{white-space:nowrap}
 @media (max-width:360px){.cash-charge{font-size:11px;padding-inline:8px}}
-/* the lock screen with Face ID: a slimmer header and keys so the button and Forgot PIN fit a 640 px screen */
+/* the lock screen on a short phone (with Face ID: slimmer keys too) so the button and Forgot PIN fit a 640 px screen */
 @media (max-height:700px){
+  .lockwrap .marquee.mini .logo svg{height:44px}   /* (the lock header keeps the home header's look, a little smaller so the keys fit) */
   .lockwrap.bio{padding-top:8px}
   .lockwrap.bio .marquee.mini{padding:14px 8px 12px}.lockwrap.bio .marquee.mini .logo svg{height:38px}
   .lockwrap.bio .screen{margin-top:10px}

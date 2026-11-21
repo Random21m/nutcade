@@ -27,7 +27,7 @@ function drawBadge(x, bx, by, size, ink) {
   x.lineWidth = Math.max(2, size * 0.1); x.strokeStyle = '#000000'; x.stroke();
   const px = (s * 0.8) / ACORN.length, ax = bx + size / 2 - ACORN[0].length * px / 2, ay = by + size / 2 - ACORN.length * px / 2;
   const pal = ink ? ACORN_INK : ACORN_COL;
-  { x.fillStyle = '#000'; ACORN.forEach((row, ry) => [...row].forEach((c, rx) => { if (c !== '.') x.fillRect(ax + rx * px - px * 0.25, ay + ry * px - px * 0.25, px * 1.5, px * 1.5); })); }   // (an outline, so the white body shows)
+  x.fillStyle = '#000'; ACORN.forEach((row, ry) => [...row].forEach((c, rx) => { if (c !== '.') x.fillRect(ax + rx * px - px * 0.25, ay + ry * px - px * 0.25, px * 1.5, px * 1.5); }));   // (a black outline, so the white body shows)
   ACORN.forEach((row, ry) => [...row].forEach((c, rx) => { if (c !== '.') { x.fillStyle = pal[c]; x.fillRect(ax + rx * px, ay + ry * px, Math.ceil(px), Math.ceil(px)); } }));
   x.restore();
 }
