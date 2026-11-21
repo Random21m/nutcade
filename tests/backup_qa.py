@@ -7,7 +7,7 @@ scores come back, money is never overwritten. Duress: a backup of the real walle
 Phone: create / restore / wrong passkey / no PRF support (hidden, and a passkey without PRF) / relay down / two devices /
 PIN + duress / reset deletes the backup; the 12 words never appear in a toast, a log or on screen.
 S_ONLY=a,b runs some sections (their names start with those letters)."""
-import asyncio, json, os, sys, urllib.request
+import asyncio, json, os, socket, sys, time, urllib.parse, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from playwright.async_api import async_playwright
 from wallet_qa import check, results, B
@@ -22,6 +22,7 @@ RELAY_SHIM = """(() => { const W = window.WebSocket; if (!W || W.__shim) return;
   const MAP = { 'wss://relay.damus.io': 'ws://127.0.0.1:3350/relay', 'wss://nos.lol': 'ws://127.0.0.1:3350/relay', 'wss://relay.primal.net': 'ws://127.0.0.1:3350/relay' };
   const S = function (u, p) { u = String(u); window.__ws.push(u); const k = u.replace(/\\/+$/, ''); let t = MAP[k] || u;
     if (window.__relayDown && (MAP[k] || /\\/relay$/.test(k))) t = 'ws://127.0.0.1:3359/relay';
+    if (window.__blackhole && (k === 'wss://nos.lol' || k === 'wss://relay.primal.net')) t = 'ws://127.0.0.1:3357/relay';   // (a relay that never answers)
     return p === undefined ? new W(t) : new W(t, p); };
   S.prototype = W.prototype; S.__shim = 1; for (const k of ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED']) S[k] = W[k]; window.WebSocket = S; })();
 """
@@ -90,10 +91,13 @@ async def phone_backup(w, pin=None):
     return await w.sheet_text(), await w.err()
 
 
+PB_DONE = "!!document.querySelector('#phraseField .notice') || (window.__toasts||[]).some(t=>/Nothing was changed|available|wasn't found/.test(t))"
+
+
 async def gate_phone(w):
-    """the start screen's Restore with my phone; returns the sheet text or the red toast"""
-    await w.gate_step('gatePhone', "!!document.querySelector('#phraseField .notice') || (window.__toasts||[]).some(t=>/Nothing was changed|available/.test(t))", tick='#ack', ms=20000)
-    await w.wait(1200)
+    """the start screen's Restore with my phone; returns the sheet text or the red toast (waits for the real outcome)"""
+    await w.gate_step('gatePhone', PB_DONE, tick='#ack', ms=60000)
+    await w.until(PB_DONE, 60000); await w.wait(800)
     return await w.sheet_text() if await w.ev("!!document.querySelector('#phraseField')") else ' | '.join(await w.ev("window.__toasts"))
 
 
@@ -159,6 +163,8 @@ async def main():
             await n.fill('#restorePw', 'correct horse'); await n.click('[data-act=doRestore]'); await n.until("!document.querySelector('#restoreIn')", 60000); await n.wait(800)
             check('import: the right password restores the wallet (coins checked at the mint)', await n.bal() == 1000 and await n.ev("Nutcade.S.seed.mnemonic") == words, await n.bal())
             check('import: contacts, settings, trophies, plays and arcade scores came back', await n.ev("Nutcade.S.contacts.some(c=>c.name==='Alice') && Nutcade.S.prefs.theme==='amber' && Nutcade.S.prefs.currency==='EUR' && !!Trophies.got().rat && window.NutStore.get('plays').n===7 && JSON.parse(localStorage.getItem('nutcade:scores:swarm'))[0].s===4321 && JSON.parse(localStorage.getItem('nutcade:scores:daily')).length===1"))
+            await n.until("(window.__toasts||[]).some(t=>/^Contacts: /.test(t))", 8000)
+            check('import: it says how many contacts were added and skipped', any(t.startswith('Contacts: 1 added, 0 skipped') for t in await n.ev("window.__toasts")), await n.ev("window.__toasts"))
             check('import: the password field is emptied and the password is not stored', 'correct horse' not in await n.ev("JSON.stringify(Object.assign({}, localStorage))"))
 
             # a plain old file (1.22 and before: no extras) still imports; a wallet holding sats keeps them, its words and contacts
@@ -353,6 +359,17 @@ async def main():
             await phone_backup(w, PIN); await w.ev("Nutcade.closeSheet()")
             pk = (await w.ev("Nutcade.bk.rec()"))['pk']
             check('reset: the copy is on the relay before', any(e['pubkey'] == pk and e['content'] for e in pb_events()))
+            # every step that deletes the phone backup or makes it out of date says so on its screen
+            for act, key, pat in (('resetAsk', 'reset', 'also deletes your phone backup'), ('seedRestore', 'restore', 'out of date until'), ('restore', 'import', 'out of date until'), ('newSeedAsk', 'newseed', 'out of date until'), ('phoneRemoveAsk', 'phone', 'will not bring this wallet back')):
+                await settings(w)
+                if act == 'newSeedAsk': await w.ev("(()=>{const b=document.createElement('button'); b.dataset.act='newSeedAsk'; document.querySelector('#app').appendChild(b); b.click(); b.remove()})()")   # (no button for it on screen today)
+                else: await w.click(f'[data-act={act}]')
+                await guard_if(w, PIN); await w.wait(250)
+                check(f'warned: {act} says what happens to the phone backup', pat in await w.sheet_text(), (await w.sheet_text())[:160])
+                await w.ev("Nutcade.closeSheet()")
+            await w.pg.reload(); await w.wait(800); await w.ev("Nutcade.bk.cap()"); await w.click('[data-act=forgotPin]'); await w.wait(300)
+            check('warned: Forgot PIN says a phone backup is not deleted by that reset', 'is not deleted by this reset' in await w.sheet_text())
+            await w.ev("Nutcade.closeSheet()"); await unlock(w, PIN)
             await settings(w); await w.click('[data-act=resetAsk]'); await guard_if(w, PIN); await w.until("!!document.querySelector('#confirmWord')", 5000)
             await w.fill('#confirmWord', 'RESET'); await w.click('[data-act=doReset]')
             await w.until("!!document.querySelector('[data-act=gateCreate]')", 20000); await w.wait(800)
@@ -364,8 +381,15 @@ async def main():
             check('reset: Restore with my phone then restores nothing; nothing changed', 'Nothing was changed' in r and not await w.ev("Nutcade.S.seed"), r[:150])
             # Remove phone backup (Settings) does the same, after the PIN
             y, ywords = await funded(b); cy, ay = await authn(y)
+            await settings(y); await y.click('[data-act=resetAsk]'); await y.wait(250)
+            check('warned: without a phone backup the Reset sheet does not mention one', 'phone backup' not in await y.sheet_text())
+            await y.ev("Nutcade.closeSheet()")
             await phone_backup(y); await y.ev("Nutcade.closeSheet()"); ypk = (await y.ev("Nutcade.bk.rec()"))['pk']
-            await settings(y); await y.click('[data-act=phoneRemoveAsk]'); await y.wait(250); await y.click('[data-act=phoneRemoveGo]'); await y.until("!document.querySelector('[data-act=phoneRemoveGo]')", 15000); await y.wait(300)
+            # the passkey deleted in the password manager: Back up again says so and points to Remove (which needs no passkey)
+            await cy.send('WebAuthn.clearCredentials', {'authenticatorId': ay})
+            txt, e = await phone_backup(y)
+            check("passkey gone: Back up again says the passkey wasn't found and offers Remove phone backup", "passkey wasn't found" in e and await y.ev("!!document.querySelector('#sheetErr [data-act=phoneRemoveAsk]')"), e)
+            await y.click('#sheetErr [data-act=phoneRemoveAsk]'); await y.until("!!document.querySelector('[data-act=phoneRemoveGo]')", 5000); await y.click('[data-act=phoneRemoveGo]'); await y.until("!document.querySelector('[data-act=phoneRemoveGo]')", 15000); await y.wait(300)
             check('remove: Remove phone backup deletes the copy, the record and the passkey', not await y.ev("Nutcade.bk.rec()") and not any(e['pubkey'] == ypk and e['content'] for e in pb_events()) and await forgot(y, cy, ay))
             check('reset/remove: no script errors', not (w.errs + y.errs), (w.errs + y.errs)[:4])
             await w.pg.context.close(); await y.pg.context.close()
@@ -377,7 +401,7 @@ async def main():
             await w.ev("Nutcade.S.prefs.relays=['ws://127.0.0.1:3358/relay']; window.__ws=[]")   # (a relay of your own, down right now)
             txt, e = await phone_backup(w); await w.ev("Nutcade.closeSheet()")
             opened = await w.ev("window.__ws")
-            check('custom relays: the copy goes to your relays AND the default ones (it is saved although yours is down)', 'BACKED UP' in txt and 'ws://127.0.0.1:3358/relay' in opened and 'wss://relay.damus.io' in opened, (e, opened[:6]))
+            check('custom relays: the copy goes to your relays AND the default ones (it is saved although yours is down)', 'BACKED UP' in txt and any(urllib.parse.urlparse(u).port == 3358 for u in opened) and any(urllib.parse.urlparse(u).hostname == 'relay' + '.damus.io' for u in opened), (e, opened[:6]))
             # a new phone that only has the default relays finds it
             await w.ev("localStorage.clear()"); await w.ev("localStorage.setItem('nutcade:prefs', JSON.stringify({sound:false,music:false,lang:'en'}))")
             await w.pg.reload(); await w.wait(900); await w.ev("Nutcade.bk.cap()"); await w.ev("Nutcade.render()")
@@ -390,6 +414,19 @@ async def main():
             n0 = await creds(cdp, aid)
             txt, e = await phone_backup(w); await w.ev("Nutcade.closeSheet()")
             check('after a phone restore: Back up again reuses the same passkey (no second one)', 'BACKED UP' in txt and await creds(cdp, aid) == n0 and (await w.ev("Nutcade.bk.rec()"))['pk'] == rec['pk'], e)
+            # two phones with the same synced passkey: phone A's record, phone B updates to new words, then A taps Back up again
+            rec_a = await w.ev("Nutcade.bk.rec()")
+            w2 = 'legal winner thank year wave sausage worth useful legal winner thank yellow'
+            await w.ev(f"Nutcade.S.seed.mnemonic={J(w2)}")   # (phone B: its own copy, new words)
+            txt, e = await phone_backup(w); await w.ev("Nutcade.closeSheet()")
+            check('synced passkey: a copy this phone saved itself is updated to its new words without asking', 'BACKED UP' in txt, e)
+            await w.ev(f"window.NutStore.set('phonebk', {J(rec_a)}); Nutcade.S.seed.mnemonic={J(words)}")   # (phone A, with its older record)
+            t0 = [x['created_at'] for x in pb_events() if x['pubkey'] == rec['pk']]
+            txt, e = await phone_backup(w)
+            check('synced passkey: a newer copy with other words is never replaced silently (a warning and Replace anyway)', 'holds other 12 words' in e and await w.ev("!!document.querySelector('#sheetErr [data-act=phoneGoForce]')") and [x['created_at'] for x in pb_events() if x['pubkey'] == rec['pk']] == t0, e)
+            await w.click('#sheetErr [data-act=phoneGoForce]'); await w.until("/BACKED UP/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 30000)
+            check('synced passkey: Replace anyway replaces it', 'BACKED UP' in await w.sheet_text(), await w.err())
+            await w.ev("Nutcade.closeSheet()")
             # new words: the phone backup shows OUT OF DATE and says to back up again
             await w.ev("Nutcade.S.seed.mnemonic='abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'")
             await settings(w); await w.wait(400)
@@ -411,8 +448,9 @@ async def main():
                 {'id': 'x4', 'name': 'Bad ln', 'ln': 'javascript:alert(1)', 'nostr': ''},
                 {'id': 'x5', 'name': {'toString': 0}, 'ln': 'bob@example.com'},
                 {'id': 'x6', 'name': 'N' * 90, 'ln': 'carol@example.com', 'nostr': '', 'created': {'toString': 0}},
+                {'id': 'x7', 'name': ' alice ', 'ln': 'evil2@example.com', 'nostr': ''},              # the same name as a contact here: skipped
                 'not a contact', None]
-            d['settings'] = {'relays': ['wss://evil.example'], 'lockAfter': 60, 'fiat': True, 'nostrInbox': True, 'arrNotify': True, 'qrLogo': {'toString': 0}, 'theme': {}, 'currency': 'EUR', 'hideAmounts': 'yes', 'crt': False}
+            d['settings'] = {'relays': ['wss://evil.example'], 'lockAfter': 60, 'fiat': True, 'nostrInbox': True, 'arrNotify': True, 'qrLogo': {'toString': 0}, 'theme': {}, 'currency': 'EUR', 'hideAmounts': 'yes', 'crt': False, 'piggyStep': 50}
             d['trophies'] = {'rat': {'toString': 0}, 'big': 'x', 'top5': 123}
             d['plays'] = {'n': {'toString': 0}, 'by': {'swarm': '9', 'maze': 4}}
             d['arcade'] = {'scores': {'swarm': [{'n': '<img src=x onerror=alert(1)>', 's': 99999, 't': 1}, {'n': 'ABC', 's': {'toString': 0}}, {'n': 'XYZ', 's': 50, 't': 2}], 'daily': 'oops', 'maze': {'toString': 0}}, 'initials': '<b>'}
@@ -424,6 +462,8 @@ async def main():
             cs = await n.ev("Nutcade.S.contacts")
             by = {c['name']: c for c in cs}
             check('hostile: a contact here is never replaced (same id, same address)', by.get('Alice', {}).get('ln') == 'alice@example.com' and 'Alice twin' not in by, [c['name'] for c in cs])
+            check('hostile: a contact with the same name as one here (any case) is skipped', not any(c['ln'] == 'evil2@example.com' for c in cs))
+            check('hostile: a piggy-bank step other than 10, 100 or 1000 is skipped', (await n.ev("Nutcade.S.prefs.piggyStep")) != 50 and await n.ev("Nutcade.bk.extras({settings:{piggyStep:1000}}), Nutcade.S.prefs.piggyStep") == 1000)
             check('hostile: a contact with the same id comes in as a new, visible contact (its own id)', 'Same id' in by and by['Same id']['id'] != 'c1')
             check("hostile: a Nostr contact's key is read from its address, never taken from the file", by.get('Planted', {}).get('pubkey') == pk1 and by['Planted']['relays'] == [], by.get('Planted'))
             check('hostile: a bad Lightning address and a non-text name are dropped; names are cut to 40', 'Bad ln' not in by and not any(c['ln'] == 'bob@example.com' for c in cs) and any(len(c['name']) == 40 for c in cs))
@@ -442,6 +482,32 @@ async def main():
             check('hostile: no script errors', not (n.errs + src.errs), (n.errs + src.errs)[:4])
             await n.pg.context.close(); await src.pg.context.close()
         await section('hostile', hostile)
+
+        # ======================= a relay that never answers doesn't hold anything up =======================
+        async def slow_relay():
+            hole = socket.socket(); hole.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); hole.bind(('127.0.0.1', 3357)); hole.listen(64)   # (takes connections, never answers)
+            try:
+                w, words = await funded(b); cdp, aid = await authn(w); await w.ev("window.__blackhole=true")
+                t0 = time.time(); txt, e = await phone_backup(w); dt = time.time() - t0; await w.ev("Nutcade.closeSheet()")
+                check(f'dead relay: Back up with my phone finishes in a few seconds ({dt:.1f} s)', 'BACKED UP' in txt and dt < 10, e)
+                await fresh(w); await w.ev("window.__blackhole=true")
+                t0 = time.time(); r = await gate_phone(w); dt = time.time() - t0
+                check(f'dead relay: Restore with my phone finishes in a few seconds ({dt:.1f} s)', 'came from your phone backup' in r and dt < 12, r[:120])
+                await restore_now(w); await leave_gate(w)
+                await phone_backup(w); await w.ev("Nutcade.closeSheet(); window.__blackhole=true")
+                await settings(w); await w.click('[data-act=resetAsk]'); await w.wait(250); await w.fill('#confirmWord', 'RESET')
+                t0 = time.time(); await w.click('[data-act=doReset]')
+                for _ in range(100):   # (the page reloads on its own: ask again until the start screen is there)
+                    try:
+                        if await w.ev("!!document.querySelector('[data-act=gateCreate]')"): break
+                    except Exception: pass
+                    await asyncio.sleep(0.2)
+                dt = time.time() - t0
+                check(f'dead relay: Reset still takes only a few seconds ({dt:.1f} s)', dt < 8)
+                check('dead relay: no script errors', not w.errs, w.errs[:4])
+                await w.pg.context.close()
+            finally: hole.close()
+        await section('slow', slow_relay)
 
         # ======================= the new text in every language =======================
         async def langs():

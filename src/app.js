@@ -2429,7 +2429,7 @@ function openConfirmPhrase() {
 function openRestore() {
   const curated = CURATED.filter(c => !c.test);
   const urls = [...new Set(S.mints.map(m => m.url).concat(curated.map(c => c.url)))];
-  openSheet('Restore wallet', `
+  openSheet('Restore wallet', `${pbWarn('replace')}
     ${S.seed ? `<div class="notice">This replaces your current wallet with the one from these 12 words.${totalBalance() ? ` The ${money(totalBalance())} here moves into the restored wallet, so nothing is lost.` : ''} Write down your current words first if you might want this wallet back.</div>` : '<div class="th">Use the 12 words from a previous NUTCADE or another Cashu wallet like cashu.me.</div>'}
     <button class="btn block violet" data-act="phoneRestore" data-phonecap ${phoneCap ? '' : 'hidden'}>Restore with my phone</button>
     <div class="field" id="phraseField"><label for="phraseIn">Your 12 words</label><textarea id="phraseIn" class="inp" placeholder="word1 word2 word3 …" autocomplete="off" autocapitalize="off" spellcheck="false" data-input="phrase"></textarea><div id="phraseOk" class="tiny muted">Separate words with spaces.</div></div>
@@ -2807,33 +2807,34 @@ function backupKeyFrom(seed) { const tag = new TextEncoder().encode('cashu-mint-
 const BACKUP_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];   // cashu.me's defaults, so either app finds the other's backup
 const relays = () => (S.prefs.relays && S.prefs.relays.length) ? S.prefs.relays : BACKUP_RELAYS;
 
-function relayPublish(ev, timeout = 7000, list = relays()) {
+// (early: once one relay said OK, the rest get that many ms more, so a relay that never answers can't hold the step up)
+function relayPublish(ev, timeout = 7000, list = relays(), early = 0) {
   if (writeGuard.paused) return Promise.resolve(0);   // a paused tab sends nothing (the tab in charge does)
   return new Promise(res => {
-    let ok = 0, left = 0; const socks = []; let fin = false;
+    let ok = 0, left = 0, soon = false; const socks = []; let fin = false;
     const end = () => { if (fin) return; fin = true; socks.forEach(s => { try { s.close(); } catch (e) {} }); res(ok); };
     for (const r of list) {
       let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
       socks.push(ws); left++;
       const drop = () => { if (ws._done) return; ws._done = true; if (--left <= 0) end(); };
       ws.onopen = () => ws.send(JSON.stringify(['EVENT', ev]));
-      ws.onmessage = m => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } if (d[0] === 'OK' && d[1] === ev.id) { if (d[2]) ok++; try { ws.close(); } catch (e) {} drop(); } };
+      ws.onmessage = m => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } if (d[0] === 'OK' && d[1] === ev.id) { if (d[2]) { ok++; if (early && !soon) { soon = true; setTimeout(end, early); } } try { ws.close(); } catch (e) {} drop(); } };
       ws.onerror = drop; ws.onclose = drop;
     }
     if (!left) end();
     setTimeout(end, timeout);
   });
 }
-function relayQuery(filter, timeout = 7000, list = relays()) {
+function relayQuery(filter, timeout = 7000, list = relays(), early = 0) {
   return new Promise(res => {
-    const out = new Map(); let left = 0, answered = 0; const socks = []; let fin = false;   // (answered: relays that finished the query)
+    const out = new Map(); let left = 0, answered = 0, soon = false; const socks = []; let fin = false;   // (answered: relays that finished the query; early: as for relayPublish)
     const end = () => { if (fin) return; fin = true; socks.forEach(s => { try { s.close(); } catch (e) {} }); res(Object.assign([...out.values()], { answered })); };
     for (const r of list) {
       let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
       socks.push(ws); left++;
       const drop = () => { if (ws._done) return; ws._done = true; if (--left <= 0) end(); };
       ws.onopen = () => ws.send(JSON.stringify(['REQ', 'nc', filter]));
-      ws.onmessage = m => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } if (d[0] === 'EVENT' && d[2] && d[2].id) out.set(d[2].id, d[2]); else if (d[0] === 'EOSE' || d[0] === 'CLOSED') { if (d[0] === 'EOSE') answered++; try { ws.close(); } catch (e) {} drop(); } };
+      ws.onmessage = m => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } if (d[0] === 'EVENT' && d[2] && d[2].id) out.set(d[2].id, d[2]); else if (d[0] === 'EOSE' || d[0] === 'CLOSED') { if (d[0] === 'EOSE') { answered++; if (early && !soon) { soon = true; setTimeout(end, early); } } try { ws.close(); } catch (e) {} drop(); } };
       ws.onerror = drop; ws.onclose = drop;
     }
     if (!left) end();
@@ -4171,7 +4172,7 @@ const A = {
   reconcileAll: b => run(b, '…', async () => { for (const p of [...S.pending]) await reconcile(p, { force: true }).catch(() => {}); refresh(); }),
   pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } refresh(); sfx('blip'); },
   backup: () => pinGuard('backup', () => showBackupText(backupData())),
-  restore: () => pinGuard('import', () => openSheet('Import backup', `<div class="field"><span class="flabel">Backup file</span><div class="row filepick"><label class="btn sm violet"><span>Choose a file</span><input id="restoreFile" type="file" accept=".json,application/json"></label><span id="restoreFileName" class="tiny muted">No file chosen</span></div></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`)),
+  restore: () => pinGuard('import', () => openSheet('Import backup', `${pbWarn('replace')}<div class="field"><span class="flabel">Backup file</span><div class="row filepick"><label class="btn sm violet"><span>Choose a file</span><input id="restoreFile" type="file" accept=".json,application/json"></label><span id="restoreFileName" class="tiny muted">No file chosen</span></div></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`)),
   doRestore: b => !guardHeld('import') ? closeSheet() : run(b, 'CHECKING', async () => {
     let d; try { d = JSON.parse(val('restoreIn')); } catch (e) { throw new Error("That isn't valid backup text."); }
     if (!d || d.app !== 'nutcade') throw new Error('Not a NUTCADE backup.');
@@ -4180,8 +4181,10 @@ const A = {
       const pw = val('restorePw'); if (!pw) throw new Error("Type the backup's password.");
       d = await unlockBackup(d, pw); const i = $('#restorePw'); if (i) i.value = '';
     }
+    bkContactsIn = null;
     const waiting = await importBackup(d);
     closeSheet(); render();
+    const ci = bkContactsIn; if (ci && ci.added + ci.skipped) setTimeout(() => toast(`Contacts: ${ci.added} added, ${ci.skipped} skipped (the same name or address is already here, or it wasn't valid).`, ci.skipped ? 'gold' : 'cyan'), 4300);
     toast(waiting.length ? `Backup restored. Waiting to check with ${waiting.map(u => (S.mints.find(m => m.url === u) || {}).name || host(u)).join(', ')}.` : 'Backup restored.', waiting.length ? 'gold' : 'lime');
   }),
   importsRetry: b => run(b, 'CHECKING', async () => {
@@ -4282,6 +4285,7 @@ const A = {
   lockNow: () => { sfx('blip'); lockNow(true); },
   forgotPin: () => openSheet('Forgot PIN', `<p style="margin:0">Your PIN can't be recovered: it's the key to the encrypted wallet on this device. You can reset the wallet here and restore it with your 12 words and mint list.</p>
     <div class="notice red">Without your 12 words, resetting loses your sats for good.</div>
+    <div class="th" data-phonecap ${phoneCap ? '' : 'hidden'}>A phone backup, if you made one, is not deleted by this reset: it stays on the Nostr relays, and Restore with my phone can bring the wallet back.</div>
     <div class="field"><label for="confirmWord">Type RESET to delete the locked wallet</label><input id="confirmWord" class="inp" autocomplete="off" autocapitalize="characters"></div>
     <button class="btn solid red block" data-act="doReset">Reset and restore with 12 words</button><div id="sheetErr"></div>`),
   scan: b => { sfx('select'); openScanner(b.dataset.hint); },
@@ -4343,7 +4347,7 @@ const A = {
     });
   },
   ctrBump: b => { counterSource.advanceToAtLeast(b.dataset.id, (S.counters[b.dataset.id] || 0) + 10); refresh(); },
-  newSeedAsk: () => pinGuard('newseed', () => openSheet('New recovery phrase', `<p style="margin:0">NUTCADE will create a new 12-word phrase, show it for you to write down, then move your ${money(totalBalance())} under it. The mint may charge a small fee for the move.</p>
+  newSeedAsk: () => pinGuard('newseed', () => openSheet('New recovery phrase', `${pbWarn('replace')}<p style="margin:0">NUTCADE will create a new 12-word phrase, show it for you to write down, then move your ${money(totalBalance())} under it. The mint may charge a small fee for the move.</p>
     <div class="field"><label for="confirmWord">Type NEW to continue</label><input id="confirmWord" class="inp" autocomplete="off" autocapitalize="characters"></div>
     <button class="btn solid red block" data-act="doNewSeed">Create new phrase</button><div id="sheetErr"></div>`)),
   doNewSeed: () => {
@@ -4352,7 +4356,7 @@ const A = {
     setSeed(newMnemonic(), false); S.seed.secured = totalBalance() === 0; store.set('seed', S.seed);
     closeSheet(); gate = { step: 'show' }; render(); window.scrollTo(0, 0);
   },
-  resetAsk: () => pinGuard('reset', () => openSheet('Reset wallet', `<div class="notice red">This deletes your recovery phrase, ecash, notes and history from this browser, then returns you to the start screen to create a new wallet or restore one. ${totalBalance() ? `If you don't have your 12 words and mint list, your ${money(totalBalance())} is lost forever.` : 'Your wallet is empty.'}</div>
+  resetAsk: () => pinGuard('reset', () => openSheet('Reset wallet', `${pbWarn('reset')}<div class="notice red">This deletes your recovery phrase, ecash, notes and history from this browser, then returns you to the start screen to create a new wallet or restore one. ${totalBalance() ? `If you don't have your 12 words and mint list, your ${money(totalBalance())} is lost forever.` : 'Your wallet is empty.'}</div>
     ${S.mints.length ? `<div class="th">Your mints, to write down with your words:</div><div class="code" style="color:var(--ink)">${S.mints.map(m => esc(m.url)).join('<br>')}</div>` : ''}
     <div class="field"><label for="confirmWord">Type RESET to confirm</label><input id="confirmWord" class="inp" autocomplete="off" autocapitalize="characters"></div>
     <button class="btn solid red block" data-act="doReset">Reset wallet</button><div id="sheetErr"></div>`)),

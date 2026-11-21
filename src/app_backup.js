@@ -35,22 +35,25 @@ function importExtras(d) {
 }
 const isStr = v => typeof v === 'string', isNum = v => typeof v === 'number' && Number.isFinite(v), isObj = v => !!v && typeof v === 'object' && !Array.isArray(v);
 const BK_ID = /^[\w-]{1,40}$/;
+let bkContactsIn = null;   // (what the last import did with the file's contacts: { added, skipped }, told to you after it)
 // contacts: through the same rules as saving one by hand (saveContact), never replacing one that is here: a name, a
 // Lightning address of the right shape and/or a Nostr address read from its npub (never a key taken from the file)
 function bkInContacts(d) {
   if (!Array.isArray(d.contacts)) return;
-  let n = 0;
+  let n = 0; bkContactsIn = { added: 0, skipped: 0 };
   for (const c of d.contacts.slice(0, 200)) {
     if (S.contacts.length >= 200) break;
-    if (!isObj(c) || !isStr(c.name) || (c.ln != null && !isStr(c.ln)) || (c.nostr != null && !isStr(c.nostr))) continue;
-    const name = c.name.trim().slice(0, 40); if (!name) continue;
-    const ln = (c.ln || '').trim().toLowerCase(); if (ln && !contactLnOk(ln)) continue;
-    let nostr = null; if ((c.nostr || '').trim()) { nostr = parseNostrAddr(c.nostr); if (!nostr) continue; }
-    if (!ln && !nostr) continue;
-    if (S.contacts.some(x => (ln && x.ln === ln) || (nostr && x.pubkey === nostr.pubkey))) continue;   // (a twin here: the one here stays as it is)
+    const bad = () => { bkContactsIn.skipped++; };
+    if (!isObj(c) || !isStr(c.name) || (c.ln != null && !isStr(c.ln)) || (c.nostr != null && !isStr(c.nostr))) { bad(); continue; }
+    const name = c.name.trim().slice(0, 40); if (!name) { bad(); continue; }
+    const ln = (c.ln || '').trim().toLowerCase(); if (ln && !contactLnOk(ln)) { bad(); continue; }
+    let nostr = null; if ((c.nostr || '').trim()) { nostr = parseNostrAddr(c.nostr); if (!nostr) { bad(); continue; } }
+    if (!ln && !nostr) { bad(); continue; }
+    const nm = name.toLowerCase();   // (a twin here, by address or by name, "Mom" and "mom " alike: the one here stays as it is)
+    if (S.contacts.some(x => (ln && x.ln === ln) || (nostr && x.pubkey === nostr.pubkey) || String(x.name || '').trim().toLowerCase() === nm)) { bkContactsIn.skipped++; continue; }
     const id = isStr(c.id) && BK_ID.test(c.id) && !S.contacts.some(x => x.id === c.id) ? c.id : uid();
     S.contacts.push({ id, name, ln, nostr: nostr ? c.nostr.trim().replace(/^nostr:/i, '') : '', pubkey: nostr ? nostr.pubkey : '', relays: nostr ? nostr.relays : [], created: isNum(c.created) ? c.created : Date.now() });
-    n++;
+    n++; bkContactsIn.added++;
   }
   if (n) { S.contacts.sort((a, b) => a.name.localeCompare(b.name)); store.set('contacts', S.contacts); }
 }
@@ -62,7 +65,7 @@ const BK_SET = {
   fiat: v => v === false, arrNotify: v => v === false, nostrBackup: v => v === false, nostrInbox: v => v === false,   // (off only)
   checkSent: v => v === true, ksAuto: v => v === true,   // (on only)
   theme: v => isStr(v) && THEMES.some(t => t[0] === v), currency: v => isStr(v) && CURRENCIES.includes(v), qrLogo: v => v === 'acorn' || v === 'none',
-  recentN: v => Number.isInteger(v) && v >= 0 && v <= 6, piggyStep: v => Number.isInteger(v) && v > 0 && v <= 1e6,
+  recentN: v => Number.isInteger(v) && v >= 0 && v <= 6, piggyStep: v => [10, 100, 1000].includes(v),
   lockAfter: v => [1, 5, 15, 60].includes(v) && ((S.prefs.lockAfter ?? 5) === 0 || v <= (S.prefs.lockAfter ?? 5))   // (only a shorter auto-lock)
 };
 function bkInSettings(d) {
@@ -196,7 +199,12 @@ async function pbSecret(rec, what) {
   const noPrf = () => new Error("This phone or browser can't lock your words with a passkey. Nothing was saved. Your 12 words are still your backup.");
   try {
     if (rec && rec.credId) {
-      const a = await navigator.credentials.get({ publicKey: { challenge: rnd(32), allowCredentials: [{ type: 'public-key', id: b64d(rec.credId) }], userVerification: 'required', timeout: 120000, extensions: { prf: { eval: { first: salt } } } } });
+      let a;
+      try { a = await navigator.credentials.get({ publicKey: { challenge: rnd(32), allowCredentials: [{ type: 'public-key', id: b64d(rec.credId) }], userVerification: 'required', timeout: 120000, extensions: { prf: { eval: { first: salt } } } } }); }
+      catch (e) {   // (no such passkey any more, or the step was cancelled: Remove phone backup needs no passkey, then a new one can be made)
+        if (e && /NotAllowed|Abort|InvalidState|Security|NotSupported/i.test(e.name || '')) { const x = new Error("Your phone backup's passkey wasn't found, or the step was cancelled. If you deleted the passkey, tap Remove phone backup, then back up again."); x.fix = { act: 'phoneRemoveAsk', label: 'Remove phone backup' }; throw x; }
+        throw e;
+      }
       const r = a.getClientExtensionResults().prf; if (!r || !r.results || !r.results.first) throw noPrf();
       return { secret: new Uint8Array(r.results.first), credId: rec.credId };
     }
@@ -215,18 +223,36 @@ async function pbSecret(rec, what) {
   } catch (e) { if (e && /NotAllowed|Abort|InvalidState|Security|NotSupported/i.test(e.name || '')) throw pbOff(what); throw e; }
 }
 // lock the 12 words and put them on the relays; the local record only once a relay said OK
-async function phoneBackup() {
+// the copy on the relays for this passkey now: { ev, words } (words null when it can't be opened), null when there is none
+async function pbCurrent(k) {
+  const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 }, 6000, pbRelays(), 1500);
+  if (!evs.length && !evs.answered) throw new Error('No Nostr relay answered, so nothing was saved. Check your connection and try again.');
+  const ev = evs.filter(e => e.pubkey === k.pk && e.kind === 30078 && (e.tags || []).some(t => t[0] === 'd' && t[1] === PB_D) && L.verifyEvent(e)).sort((x, y) => y.created_at - x.created_at)[0];
+  if (!ev || !ev.content) return null;
+  try {
+    const box = JSON.parse(ev.content);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(box.iv), additionalData: new TextEncoder().encode(k.pk) }, k.aes, b64d(box.ct));
+    return { ev, words: cleanPhrase(JSON.parse(new TextDecoder().decode(pt)).words) };
+  } catch (e) { return { ev, words: null }; }
+}
+async function phoneBackup(force) {
   if (vault.on && vault.decoy) throw pbOff('backup');   // (the duress PIN's wallet: no passkey is made, nothing is sent)
   if (!S.seed) throw new Error('Create or restore a wallet first.');
   if (isOffline()) throw new Error('Back up with my phone needs a connection. Try again online.');
   const old = pbRec(), mnemonic = S.seed.mnemonic;
   const { secret, credId } = await pbSecret(old, 'backup');
   const k = await pbKeys(secret);
+  // a synced passkey is shared by your phones: a copy of other 12 words (another phone, another wallet) is never replaced
+  // without asking; if no relay can say what is there, nothing is replaced
+  let cur; try { cur = await pbCurrent(k); } catch (e) { if (!old) pbForgetPasskey(credId); throw e; }
+  // (a copy this phone saved itself, and nothing newer since, is simply updated: new words after New recovery phrase)
+  const mine = cur && old && old.pk === k.pk && cur.ev.created_at <= old.at && cur.words && old.fp === await pbFp(cur.words);
+  if (cur && cur.words !== mnemonic && !mine && !force) { const x = new Error('The copy on the Nostr relays for this passkey holds other 12 words, saved from another phone or another wallet. Replacing it means that phone backup is lost.'); x.fix = { act: 'phoneGoForce', label: 'Replace anyway' }; throw x; }
   const iv = rnd(12), body = JSON.stringify({ v: 1, words: mnemonic, mints: S.mints.map(m => m.url).slice(0, 20), at: Math.floor(Date.now() / 1000) });
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(k.pk) }, k.aes, new TextEncoder().encode(body));
-  const ts = Math.max(Math.floor(Date.now() / 1000), ((old && old.pk === k.pk && old.at) || 0) + 1);
+  const ts = Math.max(Math.floor(Date.now() / 1000), ((old && old.pk === k.pk && old.at) || 0) + 1, cur ? cur.ev.created_at + 1 : 0);
   const ev = L.finalizeEvent({ kind: 30078, created_at: ts, tags: [['d', PB_D]], content: JSON.stringify({ v: 1, alg: 'A256GCM', iv: b64e(iv), ct: b64e(new Uint8Array(ct)) }) }, k.sk);
-  const n = await relayPublish(ev, 7000, pbRelays());
+  const n = await relayPublish(ev, 6000, pbRelays(), 1500);
   if (!n) { if (!old) pbForgetPasskey(credId); throw new Error('No Nostr relay answered, so nothing was saved. Check your connection and try again.'); }
   if (old && old.pk !== k.pk) await pbErase(old).catch(() => 0);
   store.set('phonebk', { pk: k.pk, credId, at: ts, fp: await pbFp(mnemonic), n, erase: pbTombs(k.sk, k.pk, ts) });
@@ -235,7 +261,7 @@ async function phoneBackup() {
 // the copy on the relays replaced by an empty one, and a deletion request (NIP-09) for it: returns how many relays took it
 async function pbErase(rec, timeout) {
   const [blank, del] = rec.erase, list = pbRelays();
-  const [n] = await Promise.all([relayPublish(blank, timeout, list), relayPublish(del, timeout, list)]);
+  const [n] = await Promise.all([relayPublish(blank, timeout || 6000, list, 1500), relayPublish(del, timeout || 6000, list, 1500)]);
   return n;
 }
 async function phoneRemove() {
@@ -258,7 +284,7 @@ async function phoneFetch() {
   const r = a.getClientExtensionResults().prf;
   if (!r || !r.results || !r.results.first) throw new Error("This phone or browser can't open a phone backup. Nothing was changed. Use your 12 words.");
   const k = await pbKeys(new Uint8Array(r.results.first));
-  const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 }, 7000, pbRelays());
+  const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 }, 6000, pbRelays(), 1500);
   if (!evs.length && !evs.answered) throw new Error('No Nostr relay answered. Check your connection and try again. Nothing was changed.');
   const ev = evs.filter(e => e.pubkey === k.pk && e.kind === 30078 && (e.tags || []).some(t => t[0] === 'd' && t[1] === PB_D) && L.verifyEvent(e)).sort((x, y) => y.created_at - x.created_at)[0];
   if (!ev || !ev.content) throw new Error('No phone backup was found for this passkey. Nothing was changed.');
@@ -275,6 +301,9 @@ async function phoneFetch() {
     rec: { pk: k.pk, credId: b64e(new Uint8Array(a.rawId)), at: ev.created_at, n: 0, erase: pbTombs(k.sk, k.pk, ev.created_at) } };
 }
 // the Restore wallet sheet, filled from a phone backup: the words are kept in a hidden field (never shown), the mints ticked
+// one passkey step at a time (a second tap, or a button drawn again while one runs, does nothing)
+let pbBusy = false;
+const pbOnce = fn => async () => { if (pbBusy) return; pbBusy = true; try { return await fn(); } finally { pbBusy = false; } };
 let pbFrom = null;   // (the phone backup the Restore sheet was filled from: once restored, this wallet keeps its record)
 function phoneFill(r) {
   const f = $('#phraseField'); if (!f) return;
@@ -289,6 +318,12 @@ function phoneFill(r) {
     else { const n = list.querySelectorAll('[data-rmint]').length; list.insertAdjacentHTML('afterbegin', `<label class="toggle" for="rmp${n}" style="font-size:19px"><span style="overflow-wrap:anywhere;min-width:0" data-noi18n>${esc(host(u))}</span><input id="rmp${n}" type="checkbox" data-rmint="${esc(u)}" checked></label>`); }
   }
   const fm = $('#layer [data-act=findMints]'); if (fm) fm.click();   // (the mint-list backup on Nostr, as for typed words)
+}
+// what a step does to a phone backup made in this wallet, said on that step's screen (nothing when there is none)
+function pbWarn(kind) {
+  if (!pbRec()) return '';
+  if (kind === 'reset') return '<div class="notice red">This also deletes your phone backup from the Nostr relays, so Restore with my phone will not bring this wallet back. Without your 12 words, your sats are gone for good.</div>';
+  return '<div class="notice">Your phone backup holds this wallet\'s 12 words. If this changes them, the phone backup is out of date until you tap Back up again in Settings.</div>';
 }
 function phonePanel() {
   const rec = pbRec();
