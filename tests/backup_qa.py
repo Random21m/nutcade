@@ -20,7 +20,19 @@ AUTH = {'protocol': 'ctap2', 'ctap2Version': 'ctap2_1', 'transport': 'internal',
 # public relay; window.__relayDown sends every relay to a closed port; window.__ws lists the relays each page opened
 RELAY_SHIM = """(() => { const W = window.WebSocket; if (!W || W.__shim) return; window.__ws = [];
   const MAP = { 'wss://relay.damus.io': 'ws://127.0.0.1:3350/relay', 'wss://nos.lol': 'ws://127.0.0.1:3350/relay', 'wss://relay.primal.net': 'ws://127.0.0.1:3350/relay' };
-  const S = function (u, p) { u = String(u); window.__ws.push(u); const k = u.replace(/\\/+$/, ''); let t = MAP[k] || u;
+  // stand-in relays inside the page (their events kept in sessionStorage, so they outlive a reload): __fk = { url: { ev, delay, frozen } }
+  window.__fk = { get: () => { try { return JSON.parse(sessionStorage.getItem('__fk') || '{}'); } catch (e) { return {}; } }, set: o => sessionStorage.setItem('__fk', JSON.stringify(o)) };
+  const dOf = e => (e.tags.find(t => t[0] === 'd') || [])[1];
+  function Fake(u) { this._u = u; this.readyState = 0; setTimeout(() => { this.readyState = 1; this.onopen && this.onopen({}); }, 5); }
+  Fake.prototype.send = function (str) { const m = JSON.parse(str), all = window.__fk.get(), c = all[this._u];
+    const emit = d => setTimeout(() => { if (this.readyState === 1 && this.onmessage) this.onmessage({ data: JSON.stringify(d) }); }, c.delay || 0);
+    if (m[0] === 'EVENT') { const e = m[1]; if (c.frozen) return emit(['OK', e.id, false, 'frozen']);
+      if (e.kind !== 5) { if (c.ev.some(x => x.kind === e.kind && x.pubkey === e.pubkey && dOf(x) === dOf(e) && x.created_at > e.created_at)) return emit(['OK', e.id, false, 'older']);
+        c.ev = c.ev.filter(x => !(x.kind === e.kind && x.pubkey === e.pubkey && dOf(x) === dOf(e))); c.ev.push(e); window.__fk.set(all); }
+      return emit(['OK', e.id, true, '']); }
+    if (m[0] === 'REQ') { const f = m[2]; for (const e of c.ev.filter(e => (!f.kinds || f.kinds.includes(e.kind)) && (!f.authors || f.authors.includes(e.pubkey)))) emit(['EVENT', m[1], e]); emit(['EOSE', m[1]]); } };
+  Fake.prototype.close = function () { this.readyState = 3; };
+  const S = function (u, p) { u = String(u); window.__ws.push(u); const k = u.replace(/\\/+$/, ''); if (window.__fk.get()[k]) return new Fake(k); let t = MAP[k] || u;
     if (window.__relayDown && (MAP[k] || /\\/relay$/.test(k))) t = 'ws://127.0.0.1:3359/relay';
     if (window.__blackhole && (k === 'wss://nos.lol' || k === 'wss://relay.primal.net')) t = 'ws://127.0.0.1:3357/relay';   // (a relay that never answers)
     return p === undefined ? new W(t) : new W(t, p); };
@@ -482,6 +494,49 @@ async def main():
             check('hostile: no script errors', not (n.errs + src.errs), (n.errs + src.errs)[:4])
             await n.pg.context.close(); await src.pg.context.close()
         await section('hostile', hostile)
+
+        # ======================= relays that disagree: the newest copy wins, not the fastest relay's =======================
+        async def newest():
+            w, words = await funded(b); cdp, aid = await authn(w)
+            fk = {'wss://relay.damus.io': {'ev': [], 'delay': 30}, 'wss://nos.lol': {'ev': [], 'delay': 2500}, 'wss://relay.primal.net': {'ev': [], 'delay': 2500}}
+            await w.ev(f"window.__fk.set({J(fk)}); Nutcade.S.prefs.relays=[]")   # (only the three default relays, all stand-ins here)
+            txt, e = await phone_backup(w); await w.ev("Nutcade.closeSheet()")
+            rec1 = await w.ev("Nutcade.bk.rec()")
+            check('newest: backed up to the three relays', 'BACKED UP' in txt and all(len(v['ev']) == 1 for v in (await w.ev("window.__fk.get()")).values()), e)
+            # the fast relay misses the next copy (new words W2); the slow two get it
+            w2 = 'legal winner thank year wave sausage worth useful legal winner thank yellow'
+            await w.ev("(()=>{ const f=window.__fk.get(); f['wss://relay.damus.io'].frozen=true; window.__fk.set(f) })()")
+            await w.ev(f"Nutcade.S.seed.mnemonic={J(w2)}"); txt, e = await phone_backup(w); await w.ev("Nutcade.closeSheet()")
+            await w.ev("(()=>{ const f=window.__fk.get(); f['wss://relay.damus.io'].frozen=false; window.__fk.set(f) })()")
+            check('newest: the new words reached the slow relays only', 'BACKED UP' in txt, e)
+            # a phone with the old words and the old record taps Back up again: it must see the newest copy and warn
+            await w.ev(f"window.NutStore.set('phonebk', {J(rec1)}); Nutcade.S.seed.mnemonic={J(words)}")
+            t0 = time.time(); txt, e = await phone_backup(w); dt = time.time() - t0
+            check(f'newest: Back up again sees the newest copy on the slow relays and warns ({dt:.1f} s)', 'holds other 12 words' in e, e)
+            await w.ev("Nutcade.closeSheet()")
+            # a new phone restores: the newest copy, though the fast relay answers first with the old one
+            await w.ev("localStorage.clear(); localStorage.setItem('nutcade:prefs', JSON.stringify({sound:false,music:false,lang:'en'}))")
+            await w.pg.reload(); await w.wait(900); await w.ev("Nutcade.bk.cap()"); await w.ev("Nutcade.render()")
+            r = await gate_phone(w)
+            check('newest: restoring gets the newest words, not the fast relay\'s old copy', 'came from your phone backup' in r and await w.ev("document.querySelector('#phraseIn').value") == w2, r[:120])
+            await w.ev("Nutcade.closeSheet(); sessionStorage.removeItem('__fk')")
+            check('newest: no script errors', not w.errs, w.errs[:4])
+            await w.pg.context.close()
+        await section('newest', newest)
+
+        # ======================= a passkey step left waiting never blocks the next one =======================
+        async def pending_step():
+            w, words = await funded(b); cdp, aid = await authn(w)
+            await cdp.send('WebAuthn.setAutomaticPresenceSimulation', {'authenticatorId': aid, 'enabled': False})   # (the passkey prompt now waits)
+            await settings(w); await w.click('[data-act=phoneOpen]'); await w.wait(250); await w.click('[data-act=phoneGo]'); await w.wait(800)
+            await w.ev("Nutcade.closeSheet()"); await w.wait(300)   # (closed while the passkey is still asked for)
+            await cdp.send('WebAuthn.setAutomaticPresenceSimulation', {'authenticatorId': aid, 'enabled': True})
+            t0 = time.time(); txt, e = await phone_backup(w); dt = time.time() - t0
+            check(f'pending: after closing a screen whose passkey step was waiting, the next Back up works at once ({dt:.1f} s)', 'BACKED UP' in txt and dt < 20, (e, txt[:80]))
+            check('pending: no stray error toast from the cancelled step', not any('available right now' in t or "wasn't found" in t for t in await w.ev("window.__toasts")), await w.ev("window.__toasts"))
+            check('pending: no script errors', not w.errs, w.errs[:4])
+            await w.pg.context.close()
+        await section('pending', pending_step)
 
         # ======================= a relay that never answers doesn't hold anything up =======================
         async def slow_relay():

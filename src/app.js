@@ -2208,6 +2208,7 @@ function fitNums(root) {
   });
 }
 function closeSheet() {
+  pbSheetClosed($('#layer .sheet'));   // (a phone-backup step started on this screen is cancelled)
   if (typeof sheetCleanup === 'function') sheetCleanup(); sheetCleanup = null;
   const had = !!$('#layer').firstChild, inLayer = document.activeElement && document.activeElement.closest('#layer');
   $('#layer').innerHTML = '';

@@ -200,7 +200,7 @@ async function pbSecret(rec, what) {
   try {
     if (rec && rec.credId) {
       let a;
-      try { a = await navigator.credentials.get({ publicKey: { challenge: rnd(32), allowCredentials: [{ type: 'public-key', id: b64d(rec.credId) }], userVerification: 'required', timeout: 120000, extensions: { prf: { eval: { first: salt } } } } }); }
+      try { a = await navigator.credentials.get({ publicKey: { challenge: rnd(32), allowCredentials: [{ type: 'public-key', id: b64d(rec.credId) }], userVerification: 'required', timeout: 120000, extensions: { prf: { eval: { first: salt } } } }, signal: pbSig || undefined }); }
       catch (e) {   // (no such passkey any more, or the step was cancelled: Remove phone backup needs no passkey, then a new one can be made)
         if (e && /NotAllowed|Abort|InvalidState|Security|NotSupported/i.test(e.name || '')) { const x = new Error("Your phone backup's passkey wasn't found, or the step was cancelled. If you deleted the passkey, tap Remove phone backup, then back up again."); x.fix = { act: 'phoneRemoveAsk', label: 'Remove phone backup' }; throw x; }
         throw e;
@@ -213,11 +213,11 @@ async function pbSecret(rec, what) {
       rp: { name: 'NUTCADE', id: location.hostname }, user: { id, name: 'NUTCADE 12-word backup', displayName: 'NUTCADE 12-word backup' },
       challenge: rnd(32), pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
       authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' },
-      timeout: 120000, extensions: { prf: { eval: { first: salt } } } } });
+      timeout: 120000, extensions: { prf: { eval: { first: salt } } } }, signal: pbSig || undefined });
     const credId = b64e(new Uint8Array(cred.rawId)), ext = cred.getClientExtensionResults().prf;
     if (!ext || ext.enabled === false) { pbForgetPasskey(credId); throw noPrf(); }
     if (ext.results && ext.results.first) return { secret: new Uint8Array(ext.results.first), credId };
-    const a = await navigator.credentials.get({ publicKey: { challenge: rnd(32), allowCredentials: [{ type: 'public-key', id: b64d(credId) }], userVerification: 'required', timeout: 120000, extensions: { prf: { eval: { first: salt } } } } });
+    const a = await navigator.credentials.get({ publicKey: { challenge: rnd(32), allowCredentials: [{ type: 'public-key', id: b64d(credId) }], userVerification: 'required', timeout: 120000, extensions: { prf: { eval: { first: salt } } } }, signal: pbSig || undefined });
     const r = a.getClientExtensionResults().prf; if (!r || !r.results || !r.results.first) { pbForgetPasskey(credId); throw noPrf(); }
     return { secret: new Uint8Array(r.results.first), credId };
   } catch (e) { if (e && /NotAllowed|Abort|InvalidState|Security|NotSupported/i.test(e.name || '')) throw pbOff(what); throw e; }
@@ -225,7 +225,7 @@ async function pbSecret(rec, what) {
 // lock the 12 words and put them on the relays; the local record only once a relay said OK
 // the copy on the relays for this passkey now: { ev, words } (words null when it can't be opened), null when there is none
 async function pbCurrent(k) {
-  const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 }, 6000, pbRelays(), 1500);
+  const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 }, 5000, pbRelays());   // (every relay asked, up to 5 s: the newest copy wins, never only the fastest relay's)
   if (!evs.length && !evs.answered) throw new Error('No Nostr relay answered, so nothing was saved. Check your connection and try again.');
   const ev = evs.filter(e => e.pubkey === k.pk && e.kind === 30078 && (e.tags || []).some(t => t[0] === 'd' && t[1] === PB_D) && L.verifyEvent(e)).sort((x, y) => y.created_at - x.created_at)[0];
   if (!ev || !ev.content) return null;
@@ -236,6 +236,7 @@ async function pbCurrent(k) {
   } catch (e) { return { ev, words: null }; }
 }
 async function phoneBackup(force) {
+  const sig = pbSig;
   if (vault.on && vault.decoy) throw pbOff('backup');   // (the duress PIN's wallet: no passkey is made, nothing is sent)
   if (!S.seed) throw new Error('Create or restore a wallet first.');
   if (isOffline()) throw new Error('Back up with my phone needs a connection. Try again online.');
@@ -252,6 +253,7 @@ async function phoneBackup(force) {
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(k.pk) }, k.aes, new TextEncoder().encode(body));
   const ts = Math.max(Math.floor(Date.now() / 1000), ((old && old.pk === k.pk && old.at) || 0) + 1, cur ? cur.ev.created_at + 1 : 0);
   const ev = L.finalizeEvent({ kind: 30078, created_at: ts, tags: [['d', PB_D]], content: JSON.stringify({ v: 1, alg: 'A256GCM', iv: b64e(iv), ct: b64e(new Uint8Array(ct)) }) }, k.sk);
+  pbStop(sig);   // (a step replaced or closed meanwhile publishes nothing)
   const n = await relayPublish(ev, 6000, pbRelays(), 1500);
   if (!n) { if (!old) pbForgetPasskey(credId); throw new Error('No Nostr relay answered, so nothing was saved. Check your connection and try again.'); }
   if (old && old.pk !== k.pk) await pbErase(old).catch(() => 0);
@@ -277,14 +279,14 @@ async function phoneFetch() {
   if (isOffline()) throw new Error('Restore with my phone needs a connection. Try again online.');
   const salt = await pbPrfSalt();
   let a;
-  try { a = await navigator.credentials.get({ publicKey: { challenge: rnd(32), userVerification: 'required', timeout: 120000, extensions: { prf: { eval: { first: salt } } } } }); }
+  try { a = await navigator.credentials.get({ publicKey: { challenge: rnd(32), userVerification: 'required', timeout: 120000, extensions: { prf: { eval: { first: salt } } } }, signal: pbSig || undefined }); }
   catch (e) { if (e && /NotAllowed|Abort|Security|NotSupported|InvalidState/i.test(e.name || '')) throw new Error('The passkey step was cancelled. Nothing was changed.'); throw e; }
   const uh = a.response && a.response.userHandle ? new Uint8Array(a.response.userHandle) : null;
   if (!uh || uh.length < 4 || PB_TAG.some((x, i) => uh[i] !== x)) throw new Error("That passkey isn't a NUTCADE phone backup. Nothing was changed.");
   const r = a.getClientExtensionResults().prf;
   if (!r || !r.results || !r.results.first) throw new Error("This phone or browser can't open a phone backup. Nothing was changed. Use your 12 words.");
   const k = await pbKeys(new Uint8Array(r.results.first));
-  const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 }, 6000, pbRelays(), 1500);
+  const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 }, 5000, pbRelays());   // (every relay asked, up to 5 s: the newest copy wins, never only the fastest relay's)
   if (!evs.length && !evs.answered) throw new Error('No Nostr relay answered. Check your connection and try again. Nothing was changed.');
   const ev = evs.filter(e => e.pubkey === k.pk && e.kind === 30078 && (e.tags || []).some(t => t[0] === 'd' && t[1] === PB_D) && L.verifyEvent(e)).sort((x, y) => y.created_at - x.created_at)[0];
   if (!ev || !ev.content) throw new Error('No phone backup was found for this passkey. Nothing was changed.');
@@ -302,8 +304,18 @@ async function phoneFetch() {
 }
 // the Restore wallet sheet, filled from a phone backup: the words are kept in a hidden field (never shown), the mints ticked
 // one passkey step at a time (a second tap, or a button drawn again while one runs, does nothing)
-let pbBusy = false;
-const pbOnce = fn => async () => { if (pbBusy) return; pbBusy = true; try { return await fn(); } finally { pbBusy = false; } };
+// A new tap replaces a step still waiting for its passkey (that one is cancelled and says nothing), and closing the
+// screen a step was started on cancels it, so nothing is left holding the next step up
+let pbRun = null, pbSig = null;
+const pbOnce = fn => async () => {
+  if (pbRun) pbRun.ac.abort();
+  const me = pbRun = { ac: new AbortController(), sheet: $('#layer .sheet') }; pbSig = me.ac.signal;
+  try { const r = await fn(me.ac.signal); return r; }
+  catch (e) { if (pbRun !== me || me.ac.signal.aborted) return; throw e; }
+  finally { if (pbRun === me) { pbRun = null; pbSig = null; } }
+};
+function pbSheetClosed(sheet) { try { if (pbRun && sheet && pbRun.sheet === sheet) pbRun.ac.abort(); } catch (e) {} }   // (also before this file's lines have run)
+const pbStop = sig => { if (sig && sig.aborted) throw Object.assign(new Error('replaced'), { name: 'AbortError' }); };
 let pbFrom = null;   // (the phone backup the Restore sheet was filled from: once restored, this wallet keeps its record)
 function phoneFill(r) {
   const f = $('#phraseField'); if (!f) return;

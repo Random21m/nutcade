@@ -14,8 +14,8 @@ Object.assign(A, {
     <div class="th">Keep your 12 words on paper too. They are still your main backup.</div>
     <button class="btn solid gold block" data-act="phoneGo">${pbRec() ? 'Back up again' : 'Back up with my phone'}</button><div id="sheetErr"></div>`)),
   phoneGoForce: b => A.phoneGo(b, true),
-  phoneGo: (b, force) => !guardHeld('phone') ? closeSheet() : run(b, 'WAITING', pbOnce(async () => {
-    const n = await phoneBackup(force === true); sfx('coin');
+  phoneGo: (b, force) => !guardHeld('phone') ? closeSheet() : run(b, 'WAITING', pbOnce(async sig => {
+    const n = await phoneBackup(force === true); if (sig.aborted) return; sfx('coin');
     setBody(`<div style="text-align:center;display:grid;gap:12px"><div style="font-family:var(--f-display);font-size:15px;color:var(--lime)">BACKED UP!</div>
       <p style="margin:0">Your 12 words are locked with your passkey and saved on ${n} relay${n === 1 ? '' : 's'}. On a new phone, tap Restore with my phone.</p>
       <button class="btn solid gold block" data-act="close">Done</button></div>`);
@@ -27,6 +27,6 @@ Object.assign(A, {
     <button class="btn solid red block" data-act="phoneRemoveGo">Remove phone backup</button><div id="sheetErr"></div>`)),
   phoneRemoveGo: b => !guardHeld('phone') ? closeSheet() : run(b, 'REMOVING', async () => { await phoneRemove(); closeSheet(); refresh(); toast('Phone backup removed.', 'gold'); }),
   // the start screen (no wallet yet: nothing to ask), or the Restore wallet sheet (opened through the PIN guard)
-  gatePhone: b => guardOn() ? pinGuard('restore', openRestore) : run(b, 'WAITING', pbOnce(async () => { const r = await phoneFetch(); openRestore(); phoneFill(r); })),
-  phoneRestore: b => !guardHeld('restore') ? closeSheet() : run(b, 'WAITING', pbOnce(async () => { phoneFill(await phoneFetch()); }))
+  gatePhone: b => guardOn() ? pinGuard('restore', openRestore) : run(b, 'WAITING', pbOnce(async sig => { const r = await phoneFetch(); if (sig.aborted) return; openRestore(); phoneFill(r); })),
+  phoneRestore: b => !guardHeld('restore') ? closeSheet() : run(b, 'WAITING', pbOnce(async sig => { const r = await phoneFetch(); if (!sig.aborted) phoneFill(r); }))
 });
