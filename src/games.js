@@ -1044,7 +1044,7 @@ function showEntry(score, seed) {
     <button class="btn solid gold block" type="submit">Save score</button></form></div>`;
   const inp = box.querySelector('#ini'); inp.focus(); inp.select();
   inp.addEventListener('input', () => { inp.value = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
-  box.querySelector('form').addEventListener('submit', e => { e.preventDefault(); const n = (inp.value || last).padEnd(3, 'A'); store.set('initials', n); addScore(cur.id, n, score); A().sfx('coin');
+  box.querySelector('form').addEventListener('submit', e => { e.preventDefault(); const n = (inp.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || last).padEnd(3, 'A'); store.set('initials', n); addScore(cur.id, n, score); A().sfx('coin');
     box.innerHTML = `<div class="scrim" style="align-items:center"><div class="sheet initials" style="border-radius:8px;border-bottom:3px solid var(--cyan);max-width:340px">
       <div style="font-family:var(--f-display);font-size:12px;color:var(--lime)">SCORE SAVED</div>
       <div style="font-family:var(--f-display);font-size:18px">${pad6(score)} ${n}</div>

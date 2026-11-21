@@ -8,7 +8,8 @@
    A loaded score card is the same thing with one card: K = N = 1. */
 const HUNT_KIND = 30078, HUNT_D = 'nutcade-hunt';
 S.hunts = store.get('hunts', []);        // ours: { pub, k, n, amount, note, txId, until, created, cards: [url], loaded? }
-S.found = store.get('found', {});        // clues we've scanned: pub -> { k, n, shares: { x: b64 }, state, amount, note }
+S.found = Object.assign(Object.create(null), store.get('found', {}));  /* no prototype: a clue-card key can never reach Object.prototype */
+const foundOf = k => Object.prototype.hasOwnProperty.call(S.found, k) ? S.found[k] : undefined;        // clues we've scanned: pub -> { k, n, shares: { x: b64 }, state, amount, note }
 const saveHunts = () => store.set('hunts', S.hunts.slice(0, 30));
 const saveFound = () => store.set('found', S.found);
 
@@ -41,7 +42,7 @@ function shamirJoin(shares) {
 const huntBase = () => location.origin + location.pathname;
 const cardUrl = (pub, x, k, n, y) => `${huntBase()}#hunt=${pub}.${x}.${k}.${n}.${b64url(y)}`;
 async function huntKey(sk) { return crypto.subtle.importKey('raw', await crypto.subtle.digest('SHA-256', new TextEncoder().encode('nutcade-hunt:' + hex(sk))), 'AES-GCM', false, ['encrypt', 'decrypt']); }
-function huntWon(f, t) { const x = S.found[f.pub]; if (x && x.state !== 'won') { x.state = 'won'; if (t) x.amount = t.amount; saveFound(); } }
+function huntWon(f, t) { const x = foundOf(f.pub); if (x && x.state !== 'won') { x.state = 'won'; if (t) x.amount = t.amount; saveFound(); } }
 async function makeHunt(amount, k, n, days, note, loaded) {
   if (!(n >= 1 && n <= 12 && k >= 1 && k <= n)) throw new Error('Pick 1 to 12 cards, and how many of them open the chest.');
   if (!(await mintCan(S.active, 11))) throw new Error(`${host(S.active)} can't lock ecash to a key (NUT-11). Pick another mint.`);
@@ -96,7 +97,7 @@ async function onHuntCard(str) {
   if (needSeed()) return;
   const c = readCard(str); if (!c) { toast("That clue card isn't valid.", 'gold'); return; }
   if (S.hunts.some(h => h.pub === c.pub)) { toast("That's one of your own cards. Hide it well!", 'gold'); return; }
-  const f = S.found[c.pub] || (S.found[c.pub] = { k: c.k, n: c.n, shares: {}, state: 'hunting', at: Date.now() });
+  const f = foundOf(c.pub) || (S.found[c.pub] = { k: c.k, n: c.n, shares: {}, state: 'hunting', at: Date.now() });
   const fresh = !f.shares[c.x]; f.shares[c.x] = c.y; saveFound();
   sfx(fresh ? 'coin' : 'blip');
   openHunt(c.pub);
@@ -110,12 +111,12 @@ async function fetchHunt(pub) {
   try { return JSON.parse(ev.content); } catch (e) { return null; }
 }
 async function peekHunt(pub) {   // the prize and note are public, so hunters see what they're after from the first card
-  const f = S.found[pub]; if (!f) return;
+  const f = foundOf(pub); if (!f) return;
   const d = await fetchHunt(pub).catch(() => null);
   if (d) { f.amount = num(d.amount); f.note = String(d.note || '').slice(0, 140); f.until = num(d.until); saveFound(); }
 }
 async function openChest(pub) {
-  const f = S.found[pub]; if (!f) return;
+  const f = foundOf(pub); if (!f) return;
   const shares = Object.entries(f.shares).slice(0, f.k).map(([x, y]) => ({ x: +x, y: unb64url(y) }));
   const sk = shamirJoin(shares);
   if (L.nostrPub(sk) !== pub) { f.state = 'bad'; saveFound(); toast("These clue cards don't fit together. One of them may be from another hunt.", 'pink'); openHunt(pub); return; }
@@ -142,7 +143,7 @@ async function openChest(pub) {
 const CHEST = ['..yyyyyyyy..', '.ybbbbbbbby.', 'ybbbbbbbbbby', 'yyyyyyyyyyyy', 'ybbbbyybbbby', 'ybbbbyybbbby', 'ybbbbbbbbbby', 'yyyyyyyyyyyy'];
 const chestSVG = open => `<svg class="chest ${open ? 'open' : ''}" viewBox="0 0 12 8" width="96" height="64" aria-hidden="true">${CHEST.map((r, y) => [...r].map((ch, x) => ch === '.' ? '' : `<rect x="${x}" y="${y}" width="1" height="1" fill="${ch === 'y' ? 'var(--gold)' : open ? '#3a2410' : 'var(--brown,#b8651f)'}"/>`).join('')).join('')}</svg>`;
 function openHunt(pub) {
-  const f = S.found[pub]; if (!f) return;
+  const f = foundOf(pub); if (!f) return;
   const got = Object.keys(f.shares).length, need = f.k;
   const pips = Array.from({ length: f.n }, (_, i) => `<span class="pip ${f.shares[i + 1] ? 'on' : ''}">${i + 1}</span>`).join('');
   const state = f.state === 'won' ? `<div class="hunt-big lime">TREASURE!</div><div class="tiny">${money(f.amount || 0)} landed in your wallet.</div>`

@@ -61,8 +61,8 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.22.1; rewrite this list at every release)
-  'New support address. The Support screen, its QR code and the tip button now use the new address. Check it matches the README before you send anything.'
+const WHATS_NEW = [   // (v1.22.2; rewrite this list at every release)
+  'Security tidy-up: a few small safeguards behind the code scanner's warnings (clue cards, initials, test coins). Nothing you use changes.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);

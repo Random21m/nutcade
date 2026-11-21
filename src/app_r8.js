@@ -597,8 +597,8 @@ function simulateCoins(w, held, D, m) {
     if (st.stuck) return null;
     const ids = new Set(st.I.map(p => p.secret)), f = feeOfPs(w, st.I), c = st.I.reduce((t, p) => t + p.amount, 0) - f - st.C.reduce((t, x) => t + x, 0);
     ps = ps.filter(p => !ids.has(p.secret)); fees += f; n++;
-    for (const a of st.C) { const p = { amount: a, id: kid, secret: 'sim' + i + ':' + Math.random() }; ps.push(p); reserved.add(p.secret); }
-    for (const a of st.outs || splitAmt(c)) ps.push({ amount: a, id: kid, secret: 'sim' + i + ':' + Math.random() });
+    for (const a of st.C) { const p = { amount: a, id: kid, secret: 'sim' + i + ':' + hex(rnd(8)) }; ps.push(p); reserved.add(p.secret); }
+    for (const a of st.outs || splitAmt(c)) ps.push({ amount: a, id: kid, secret: 'sim' + i + ':' + hex(rnd(8)) });
   }
   return null;
 }
