@@ -4036,8 +4036,9 @@ async function importBackup(d) {
   for (const h of d.heirlooms || []) if (h && h.token && !S.heirlooms.find(x => x.token === h.token)) { S.heirlooms.push(h); if (h.state === 'waiting') settle.heirlooms.push(h.token); } saveHeir();
   // (a bounty whose challenge the backup's device hadn't sent yet is sent from here only as the very message it kept)
   for (const c of d.challenges || []) if (c && !S.challenges.find(x => x.id === c.id && x.dir === c.dir)) { for (const x of c.bounties || []) if (x && x.unsent && !x.wrap) delete x.unsent; S.challenges.push(c); if (c.dir === 'in' && c.bounty) settle.chals.push(c.id); } saveChallenges();
-  for (const h of d.hunts || []) if (h && /^[0-9a-f]{64}$/.test(h.pub) && !S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
-  for (const k in d.found || {}) if (/^[0-9a-f]{64}$/.test(k) && !S.found[k]) S.found[k] = d.found[k]; saveFound();
+  const cardNums = o => Number.isInteger(o.k) && Number.isInteger(o.n) && o.k >= 1 && o.k <= o.n && o.n <= 12;   // a hunt or clue entry from a backup must have real numbers
+  for (const h of d.hunts || []) if (h && typeof h === 'object' && /^[0-9a-f]{64}$/.test(h.pub) && cardNums(h) && !S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
+  for (const k in d.found || {}) { const f = d.found[k]; if (/^[0-9a-f]{64}$/.test(k) && f && typeof f === 'object' && cardNums(f) && f.shares && typeof f.shares === 'object' && typeof f.state === 'string' && !S.found[k]) S.found[k] = f; } saveFound();
   for (const x of Array.isArray(d.blocked) ? d.blocked : []) if (x && typeof x.url === 'string' && /^https?:/i.test(x.url) && !isBlocked(x.url)) S.blocked.push({ url: normUrl(x.url), name: String(x.name || host(x.url)).slice(0, 60), at: +x.at || Date.now() }); saveBlocked();
   if (!S.active && S.mints[0]) S.active = S.mints[0].url;
   save();

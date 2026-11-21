@@ -8517,7 +8517,7 @@ async function loadCard(amount) {
 function huntsPanel() {
   const mine = S.hunts.filter(h => !h.loaded).slice(0, 4), found = Object.entries(S.found).filter(([, f]) => f.state === 'hunting' || f.state === 'opening').slice(0, 4);
   if (!mine.length && !found.length) return '';
-  const st = h => { const t = txById(h.txId); return !t ? '' : h.unpub && t.status === 'pending' ? '<span class="chip pending">WAITING FOR A RELAY</span>' : t.status === 'claimed' ? '<span class="chip ecash">OPENED</span>' : t.status === 'reclaimed' ? '<span class="chip claimed">CAME BACK</span>' : `<span class="chip pending">${h.k} OF ${h.n}</span>`; };
+  const st = h => { const t = txById(h.txId); return !t ? '' : h.unpub && t.status === 'pending' ? '<span class="chip pending">WAITING FOR A RELAY</span>' : t.status === 'claimed' ? '<span class="chip ecash">OPENED</span>' : t.status === 'reclaimed' ? '<span class="chip claimed">CAME BACK</span>' : `<span class="chip pending">${+h.k | 0} OF ${+h.n | 0}</span>`; };
   return `<div class="panel"><span class="h2">Treasure hunts</span><div class="txs">
     ${mine.map(h => `<button class="tx out" data-act="huntCards" data-pub="${esc(h.pub)}"><span class="ico" aria-hidden="true">✦</span><span class="mid"><div class="note">${esc(tr('Your hunt'))}</div><div class="meta">${st(h)}</div></span><span class="amt">${fmt(h.amount)}</span></button>`).join('')}
     ${found.map(([pub, f]) => `<button class="tx in" data-act="huntShow" data-pub="${esc(pub)}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note">${esc(tr('Hunting'))}</div><div class="meta"><span class="chip ln">CLUE ${Object.keys(f.shares).length}/${+f.k | 0}</span></div></span><span class="amt">${f.amount ? fmt(f.amount) : '???'}</span></button>`).join('')}
@@ -11378,8 +11378,9 @@ async function importBackup(d) {
   for (const h of d.heirlooms || []) if (h && h.token && !S.heirlooms.find(x => x.token === h.token)) { S.heirlooms.push(h); if (h.state === 'waiting') settle.heirlooms.push(h.token); } saveHeir();
   // (a bounty whose challenge the backup's device hadn't sent yet is sent from here only as the very message it kept)
   for (const c of d.challenges || []) if (c && !S.challenges.find(x => x.id === c.id && x.dir === c.dir)) { for (const x of c.bounties || []) if (x && x.unsent && !x.wrap) delete x.unsent; S.challenges.push(c); if (c.dir === 'in' && c.bounty) settle.chals.push(c.id); } saveChallenges();
-  for (const h of d.hunts || []) if (h && /^[0-9a-f]{64}$/.test(h.pub) && !S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
-  for (const k in d.found || {}) if (/^[0-9a-f]{64}$/.test(k) && !S.found[k]) S.found[k] = d.found[k]; saveFound();
+  const cardNums = o => Number.isInteger(o.k) && Number.isInteger(o.n) && o.k >= 1 && o.k <= o.n && o.n <= 12;   // a hunt or clue entry from a backup must have real numbers
+  for (const h of d.hunts || []) if (h && typeof h === 'object' && /^[0-9a-f]{64}$/.test(h.pub) && cardNums(h) && !S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
+  for (const k in d.found || {}) { const f = d.found[k]; if (/^[0-9a-f]{64}$/.test(k) && f && typeof f === 'object' && cardNums(f) && f.shares && typeof f.shares === 'object' && typeof f.state === 'string' && !S.found[k]) S.found[k] = f; } saveFound();
   for (const x of Array.isArray(d.blocked) ? d.blocked : []) if (x && typeof x.url === 'string' && /^https?:/i.test(x.url) && !isBlocked(x.url)) S.blocked.push({ url: normUrl(x.url), name: String(x.name || host(x.url)).slice(0, 60), at: +x.at || Date.now() }); saveBlocked();
   if (!S.active && S.mints[0]) S.active = S.mints[0].url;
   save();
