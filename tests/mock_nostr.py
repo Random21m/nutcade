@@ -1,7 +1,7 @@
 """Local stand-ins for a Nostr relay and the npub.cash v2 API, used by round2_qa.py.
 
 Run: python mock_nostr.py [port]   (default 3350)
-  ws://127.0.0.1:PORT/relay                 Nostr relay (EVENT / REQ / CLOSE, replaceable kinds)
+  ws://127.0.0.1:PORT/relay                 Nostr relay (EVENT / REQ / CLOSE, replaceable kinds, NIP-09 deletion)
   http://127.0.0.1:PORT/api/v2/...          npub.cash v2: user/info, user/mint, wallet/quotes (NIP-98 auth)
   ws://127.0.0.1:PORT/api/v2/ws/quote       npub.cash quote updates (challenge, then "update" messages)
   POST /test/pay?pubkey=HEX&amount=N&lock=1 test helper: create a (locked) mint quote at the user's mint
@@ -81,6 +81,13 @@ async def relay(ws: WebSocket):
                             if old['created_at'] > e['created_at']: ok = False
                             else: del events[k]
                 if ok: events[e['id']] = e
+                if ok and e['kind'] == 5:   # NIP-09 deletion requests: only the author's own events, up to the request's time
+                    for t in e['tags']:
+                        if len(t) < 2: continue
+                        for k, old in list(events.items()):
+                            if old['pubkey'] != e['pubkey'] or old['kind'] == 5 or old['created_at'] > e['created_at']: continue
+                            od = next((x[1] for x in old['tags'] if x[0] == 'd'), '')
+                            if (t[0] == 'e' and old['id'] == t[1]) or (t[0] == 'a' and t[1] == f"{old['kind']}:{old['pubkey']}:{od}"): del events[k]
                 log.append(('event', e['kind'], ok))
                 await ws.send_text(json.dumps(['OK', e.get('id'), ok, '' if ok else 'invalid: bad signature or older']))
                 if ok: await fanout(e)
