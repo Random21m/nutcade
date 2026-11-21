@@ -665,3 +665,7 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .minfo-list{display:grid;gap:6px}
 .minfo-row{display:grid;gap:2px;overflow-wrap:anywhere}
 .minfo-row a,.sheet-body a:not(.btn){color:var(--cyan)}
+/* mint reliability from MintRadar (1.24): a symbol and a word, colours only from the theme */
+.chip.rdr{font-family:var(--f-display);font-size:9px;line-height:20px;white-space:nowrap}
+.chip.rdr.good{color:var(--lime)} .chip.rdr.shaky{color:var(--gold)} .chip.rdr.down{color:var(--red)}
+#radarSugg:empty,[data-radar]:empty{display:none}

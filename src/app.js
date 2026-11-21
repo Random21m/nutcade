@@ -1612,7 +1612,7 @@ function setLang() {
 
 /* ---------- sound ---------- */
 const PREF_DEFAULTS = { sound: true, music: true, crt: true, theme: 'neon', btcSymbol: false, fiat: true, currency: 'USD',
-  checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100, ksAuto: true };
+  checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100, ksAuto: true, mintRadar: false };
 for (const k in PREF_DEFAULTS) if (S.prefs[k] === undefined) S.prefs[k] = PREF_DEFAULTS[k];
 S.p2pk = store.get('p2pk', []);   // [{pub, priv, created, used}]
 S.requests = store.get('requests', []);
@@ -2295,6 +2295,7 @@ function render() {
   if (tab === 'arcade' && window.Arcade) { window.Arcade.mountList($('#arcadeScreen')); const cp = challengePanel(); if (cp) $('#arcadeScreen').insertAdjacentHTML('beforeend', cp); if (window.Trophies) window.Trophies.mount($('#arcadeScreen')); }
   if (tab === 'mints' && S.mints.some(m => !health[m.url] || Date.now() - health[m.url].at > 5 * 60e3)) setTimeout(checkHealth, 0);
   if (window.Trophies) setTimeout(() => window.Trophies.checkWallet(), 0);
+  if (radarOn() && (tab === 'wallet' || tab === 'mints')) setTimeout(radarEnsure, 0);
   setTimeout(liveSync, 0);
   setTimeout(dmListen, 0);
   setTimeout(nwcListen, 0);
@@ -2444,7 +2445,7 @@ function viewWallet() {
   const m = activeMint();
   const nag = S.seed && !S.seed.backedUp ? `<div class="notice red row between" style="flex-wrap:wrap"><span>Your recovery phrase isn't backed up yet.</span><button class="btn sm red" data-act="seedShow">Back up now</button></div>` : '';
   const legacy = S.seed && !S.seed.secured && totalBalance() > 0 && S.seed.backedUp ? `<div class="notice row between" style="flex-wrap:wrap"><span>${money(totalBalance())} here isn't covered by your phrase yet.</span><button class="btn sm gold" data-act="secureAll">Protect it</button></div>` : '';
-  if (!m) return `<section class="screen">${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}
+  if (!m) return `<section class="screen">${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}${radarWarn()}
     <div class="credits" style="text-align:center;justify-items:center"><div class="label">Credits</div><div class="credit-num">0<small>${unitTag()}</small></div>
     <div class="spinner" style="font-size:11px">INSERT MINT TO START</div></div>
     <div class="panel"><p style="margin:0">NUTCADE holds Bitcoin as Cashu ecash. A mint issues the ecash, so pick one first. Try a test mint if you want to play with fake sats.</p>
@@ -2456,7 +2457,7 @@ function viewWallet() {
   </section>`;
   const bal = balanceOf(m.url), tot = totalBalance(), po = pendingOut();
   const recent = visTxs().slice(0, recentCount());
-  return `<section class="screen">${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}
+  return `<section class="screen">${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}${radarWarn()}
     <div class="credits">
       <div class="row between"><span class="label">Credits</span><span class="row" style="gap:10px">${tot !== bal ? `<span class="tiny muted">All mints ${money(tot)}</span>` : ''}${hideBtn()}${vault.on ? '<button class="lockbtn" data-act="lockNow" aria-label="Lock wallet" title="Lock wallet"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2h1v8H4V7zm1 0h4V5a2 2 0 0 0-4 0zm1 3v3h2v-3z"/></svg></button>' : ''}</span></div>
       <div class="credit-num tap" data-act="hideToggle" title="${S.prefs.hideAmounts ? 'Tap to show amounts' : 'Tap to hide amounts'}" aria-live="polite">${S.prefs.btcSymbol ? '₿' : ''}${fmt(bal)}<small>${unitTag()}</small></div>
@@ -2503,12 +2504,12 @@ function viewHistory() {
 function viewMints() {
   return `<section class="screen">
     <div class="row between"><h2 class="h2">Your mints</h2><button class="btn sm gold" data-act="pickMint">Add mint</button></div>
-    ${healthPanel()}
+    ${healthPanel()}${radarWarn()}${radarNote()}
     ${S.mints.length ? `<div class="txs">${S.mints.map(m => `<div class="panel ${m.url === S.active ? 'hot' : ''}" style="gap:8px">
       <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="uname" style="font-family:var(--f-display);font-size:11px;line-height:1.5;color:var(--gold)">${esc(m.name)}</div><div class="tiny muted" data-noi18n style="overflow-wrap:anywhere">${esc(host(m.url))}</div></div>
       <div style="font-family:var(--f-display);font-size:12px;white-space:nowrap">${fmt(balanceOf(m.url))}</div></div>
       <div class="row between" style="gap:8px">${mintHealthLine(m)}${reportChip(m.url)}</div>
-      <div class="row" style="flex-wrap:wrap;gap:6px">${methodChips(m)}</div>
+      <div class="row" style="flex-wrap:wrap;gap:6px">${radarSpan(m.url)}${methodChips(m)}</div>
       ${blockedNotice(m.url)}${minNotice(m.url)}${ksLine(m)}
       <div class="row" style="flex-wrap:wrap">${m.url === S.active ? '<span class="chip ecash">ACTIVE</span>' : `<button class="btn sm lime" data-act="useMint" data-url="${esc(m.url)}">Use</button>`}${isBlocked(m.url) ? '<span class="chip failed">BLOCKED</span>' : ''}
       <button class="btn sm" data-act="refreshMint" data-url="${esc(m.url)}">Refresh</button>
@@ -2663,7 +2664,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.23.0';
+const APP_VERSION = '1.24.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -2747,6 +2748,7 @@ function viewSettings() {
       <div class="field"><label for="p_currency">Currency</label><select id="p_currency" class="inp" data-act="prefSelect" data-k="currency" ${S.prefs.fiat ? '' : 'disabled'}>${CURRENCIES.map(c => `<option data-noi18n ${c === S.prefs.currency ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
       ${toggle('checkSent', 'Check if sent ecash was claimed', 'Asks your mints in the background. Turn off to contact them less.')}
       ${toggle('nostrInbox', 'Receive ecash sent over Nostr', 'Listens on Nostr relays for ecash friends send to your ecash address. Requests you made still arrive for 30 days when this is off.')}
+      ${toggle('mintRadar', 'Show mint reliability', "Asks MintRadar (mintradar.org) for its public list of mint health, so MintRadar sees your phone's internet address. It does not learn which mints you use: NUTCADE downloads the whole list and compares it on this phone. It is an operational health signal, not a statement that a mint holds your sats or is safe to deposit into. Off by default.")}
     </div>
 
     <div class="panel" id="set-piggy"><span class="h2">Piggy bank</span>
@@ -3526,7 +3528,7 @@ function methodChips(m) {
 function openMintPicker() {
   const known = new Set(S.mints.map(m => m.url));
   const card = (u, name, blurb, extra = '') => `<div class="panel" style="gap:8px;background:var(--panel-2)" data-probe="${esc(u)}">
-    <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="row" style="gap:8px"><span class="dot off"></span><span class="uname" style="font-family:var(--f-display);font-size:10px;line-height:1.5;color:var(--gold)" data-name>${esc(name)}</span></div>
+    <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="row" style="gap:8px"><span class="dot off"></span><span class="uname" style="font-family:var(--f-display);font-size:10px;line-height:1.5;color:var(--gold)" data-name>${esc(name)}</span>${radarSpan(u)}</div>
     <div class="tiny muted" data-noi18n style="overflow-wrap:anywhere">${esc(host(u))}</div></div>
     ${known.has(u) ? '<span class="chip ecash">ADDED</span>' : `<button class="btn sm lime" data-act="addMint" data-url="${esc(u)}">Add</button>`}</div>
     <div class="tiny">${esc(blurb)}</div><div class="row" style="gap:6px;flex-wrap:wrap" data-chips>${extra}</div></div>`;
@@ -3535,9 +3537,10 @@ function openMintPicker() {
     ${S.mints.length ? `<div class="field"><label>Your mints</label><div class="txs">${S.mints.map(m => `<button class="tx in" data-act="useMint" data-url="${esc(m.url)}"><span class="ico">${m.url === S.active ? '★' : '·'}</span><span class="mid"><div class="note">${esc(m.name)}</div><div class="meta">${esc(host(m.url))}</div></span><span class="amt">${fmt(balanceOf(m.url))}</span></button>`).join('')}</div></div>` : ''}
     <div class="field"><label for="mintUrl">Mint address</label><div class="row inrow"><input id="mintUrl" class="inp" data-noi18n placeholder="https://mint.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn solid gold" data-act="addMintUrl">Add</button></div></div>
     <div id="mintErr"></div>
+    <div id="radarSugg">${radarSuggHTML()}</div>
     <div class="field"><label>Popular mints</label><div class="txs">${CURATED.map(c => card(c.url, c.name, c.blurb, c.test ? '<span class="chip failed">TEST SATS</span>' : '')).join('')}</div></div>
     <div class="field"><label>Discovered on Nostr</label><div id="nostrList" class="txs"><button class="btn block violet" data-act="discover">Find mints people recommend</button></div></div>`,
-    body => { probeAll(body); return null; });
+    body => { probeAll(body); radarEnsure(); return null; });
 }
 async function probeCard(el) {
   const u = el.dataset.probe; if (el.dataset.done) return; el.dataset.done = '1';
@@ -3596,7 +3599,7 @@ function renderDiscovered(recs, final) {
   const rows = [...recs.entries()].filter(([u, r]) => r.pubs.size > 0 && !curated.has(u)).sort((a, b) => b[1].pubs.size - a[1].pubs.size).slice(0, 25);
   if (!rows.length) { el.innerHTML = final ? '<div class="empty-state">No recommendations came back from Nostr relays. Add a mint by address instead.</div>' : busyHTML('LISTENING TO RELAYS'); return; }
   el.innerHTML = (final ? '' : busyHTML('LISTENING TO RELAYS')) + rows.map(([u, r]) => `<div class="panel" style="gap:8px;background:var(--panel-2)" data-probe="${esc(u)}">
-    <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="row" style="gap:8px"><span class="dot off"></span><span style="font-family:var(--f-display);font-size:10px;color:var(--gold)" data-name>${esc(host(u))}</span></div>
+    <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="row" style="gap:8px"><span class="dot off"></span><span style="font-family:var(--f-display);font-size:10px;color:var(--gold)" data-name>${esc(host(u))}</span>${radarSpan(u)}</div>
     <div class="tiny muted" data-noi18n style="overflow-wrap:anywhere">${esc(host(u))}</div></div>
     ${known.has(u) ? '<span class="chip ecash">ADDED</span>' : `<button class="btn sm lime" data-act="addMint" data-url="${esc(u)}">Add</button>`}</div>
     <div class="tiny" style="color:var(--pink)">★ ${r.pubs.size} recommendation${r.pubs.size === 1 ? '' : 's'}</div>
@@ -3916,6 +3919,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_trust.js@@*/
 /*@@app_sendall.js@@*/
 /*@@app_backup.js@@*/
+/*@@app_radar.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4171,7 +4175,7 @@ const A = {
   stopWatch: b => { const t = txById(b.dataset.id); S.quotes = S.quotes.filter(q => q.quote !== t.quote); updTx(t.id, { status: 'expired' }); closeSheet(); refresh(); },
   reconcileTx: b => run(b, 'CHECKING', async () => { const t = txById(b.dataset.id); const p = S.pending.find(x => x.txId === t.id); if (!p) { toast('Nothing pending for this one', 'cyan'); return; } const r = await reconcile(p, { force: true }); const cp = (txById(t.id) || {}).changePending; toast(cp ? "Paid. Its change hasn't come back yet; NUTCADE keeps trying." : { paid: 'Payment confirmed', returned: 'Payment failed. Sats returned.', pending: 'Still in flight' }[r], r === 'pending' || cp ? 'gold' : 'lime'); closeSheet(); refresh(); }),
   reconcileAll: b => run(b, '…', async () => { for (const p of [...S.pending]) await reconcile(p, { force: true }).catch(() => {}); refresh(); }),
-  pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } refresh(); sfx('blip'); },
+  pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'mintRadar') { if (b.checked) { radar.next = 0; radarEnsure(); } else radarOff(); } if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } refresh(); sfx('blip'); },
   backup: () => pinGuard('backup', () => showBackupText(backupData())),
   restore: () => pinGuard('import', () => openSheet('Import backup', `${pbWarn('replace')}<div class="field"><span class="flabel">Backup file</span><div class="row filepick"><label class="btn sm violet"><span>Choose a file</span><input id="restoreFile" type="file" accept=".json,application/json"></label><span id="restoreFileName" class="tiny muted">No file chosen</span></div></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`)),
   doRestore: b => !guardHeld('import') ? closeSheet() : run(b, 'CHECKING', async () => {
@@ -4625,6 +4629,7 @@ readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
 window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON }, storage: { health: () => ({ bad: saveBad(), keys: [...saveHealth.failed.keys()], told: saveHealth.told }), pct: () => usePct(), bytes: () => useBytes(), check: () => useCheck(), level: () => useLevel } };
 window.Nutcade.bk = { cap: () => phoneCapCheck(), rec: () => pbRec(), fetch: () => phoneFetch(), lock: (t, p) => lockBackup(t, p), unlock: (d, p) => unlockBackup(d, p), extras: d => importExtras(d) };
+window.Nutcade.mr = { radar, parse: radarParse, ensure: radarEnsure, bkSent: () => Object.keys(bkSettings()), bkAllowed: () => Object.keys(BK_SET) };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}

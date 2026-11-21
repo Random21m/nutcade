@@ -61,9 +61,9 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.23.0; rewrite this list at every release)
-  'The backup file can be protected with a password, and it now also saves contacts, settings, trophies and arcade progress.',
-  'New, optional: Back up with my phone locks your 12 words with a passkey and keeps the locked copy on Nostr relays.'
+const WHATS_NEW = [   // (v1.24.0; rewrite this list at every release)
+  'New, optional and off by default: Show mint reliability (Settings, Privacy) adds a Reliable, Shaky or Mint down label to your mints and suggests mints when you add one, from the public MintRadar list.',
+  'It is a health signal only: it never moves your sats or picks a mint for you.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);
@@ -239,6 +239,7 @@ const HELP = [
     'Nostr relays (relay.damus.io, nos.lol and relay.primal.net): for game challenges and payments between contacts, apps you connect with Wallet Connect, your encrypted mint list, requests you made and ecash sent to your ecash address. A contact or a payment request can name relays of its own, which are used when you send to them.',
     'Two more relays (relay.nostr.band and relay.cashumints.space) are asked only when you tap Find mints people recommend.',
     'Coinbase, for the price and the price chart, only while Show Bitcoin price is on.',
+    'MintRadar (mintradar.org), only while Show mint reliability is on: it sees the internet address of your phone when NUTCADE downloads its public list of mint health. NUTCADE asks for the whole list, so MintRadar never learns which mints you use.',
     'npub.cash, while your Lightning address is on, and npubx.cash, when you tip from inside the app (the tip address is an npubx.cash address).',
     'The web address of any Lightning address, LNURL, voucher or payment request you pay or scan, and of a Nostr profile when you zap it. It sees that one request.',
     'This website, to load NUTCADE, its QR scanner and the update check. GitHub, which hosts it, sees these requests like any website visit.',

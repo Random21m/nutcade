@@ -73,6 +73,8 @@ jobs:
             suites: sendall
           - name: backup
             suites: backup
+          - name: radar
+            suites: radar
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out
