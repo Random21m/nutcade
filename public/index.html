@@ -5589,6 +5589,10 @@ function render() {
 window.addEventListener('resize', () => { clearTimeout(fitNums.t); fitNums.t = setTimeout(() => { document.querySelectorAll('.credit-num,.cash-amt,.cash-charge').forEach(el => { el.style.fontSize = el.dataset.fs || ''; }); fitNums(); }, 150); });
 function refresh() { if ($('#layer .sheet')) { /* keep sheet */ } const y = window.scrollY; render(); window.scrollTo(0, y); }
 
+// An on-chain receive note nobody has paid yet (made when Receive > on-chain shows an address) stays on its record but is
+// left out of Recent and Notes until a payment arrives; display only: nothing about the deposit or the money changes.
+const unpaidWait = t => t.method === 'onchain' && t.type === 'in' && t.status === 'pending' && !t.amount;
+const visTxs = () => S.txs.filter(t => !unpaidWait(t));
 function txRow(t) {
   const sign = t.type === 'in' ? '+' : '-';   // the pixel font's hyphen sits mid-height; its − glyph falls back to the baseline
   const method = { ln: 'LN', ecash: 'ECASH', onchain: 'ON-CHAIN', fee: 'FEE' }[t.method];
@@ -5728,7 +5732,7 @@ function viewWallet() {
     <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">${HEART}<span>Support NUTCADE</span></button>
   </section>`;
   const bal = balanceOf(m.url), tot = totalBalance(), po = pendingOut();
-  const recent = S.txs.slice(0, recentCount());
+  const recent = visTxs().slice(0, recentCount());
   return `<section class="screen">${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}
     <div class="credits">
       <div class="row between"><span class="label">Credits</span><span class="row" style="gap:10px">${tot !== bal ? `<span class="tiny muted">All mints ${money(tot)}</span>` : ''}${hideBtn()}${vault.on ? '<button class="lockbtn" data-act="lockNow" aria-label="Lock wallet" title="Lock wallet"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2h1v8H4V7zm1 0h4V5a2 2 0 0 0-4 0zm1 3v3h2v-3z"/></svg></button>' : ''}</span></div>
@@ -5747,7 +5751,7 @@ function viewWallet() {
     ${importsPanel()}${ksAskPanel()}${splitPanels()}${piggyPanel()}${extraPanel()}${huntsPanel()}
     <div id="priceMount"></div>
     <div class="panel">
-      <div class="row between"><span class="h2">Recent</span>${S.txs.length ? '<button class="linkbtn" data-act="tab" data-tab="history">All notes</button>' : ''}</div>
+      <div class="row between"><span class="h2">Recent</span>${visTxs().length ? '<button class="linkbtn" data-act="tab" data-tab="history">All notes</button>' : ''}</div>
       ${recent.length ? `<div class="txs">${recent.map(txRow).join('')}</div>` : recentCount() === 0 ? '' : `<div class="empty-state"><b>NO PLAYS YET</b>Receive some sats and every transaction shows up here with room for a note.</div>`}
     </div>
     <div class="panel"><div class="row between"><span class="h2">Arcade</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Play</button></div><div id="topScore" class="tiny muted"></div></div>
@@ -5759,16 +5763,16 @@ function viewHistory() {
   const q = histQuery.toLowerCase();
   // an amount typed the way the language writes it (25.000, 25 000, 25,000) matches 25000
   const qAmt = /^[\d\s.,\u00a0\u202f'’]+$/.test(q) ? q.replace(/[^\d]/g, '') : q;
-  const list = S.txs.filter(t => (histFilter === 'all' || t.type === histFilter) && (!histTag || tagsOf(t.note).includes(histTag)) && (!q || (t.note || '').toLowerCase().includes(q) || (noteText(t.note) || '').toLowerCase().includes(q) || (qAmt && String(t.amount).includes(qAmt))));
-  const noted = S.txs.filter(t => t.note).length;
-  const counts = {}; S.txs.forEach(t => tagsOf(t.note).forEach(g => { counts[g] = (counts[g] || 0) + 1; }));
+  const list = visTxs().filter(t => (histFilter === 'all' || t.type === histFilter) && (!histTag || tagsOf(t.note).includes(histTag)) && (!q || (t.note || '').toLowerCase().includes(q) || (noteText(t.note) || '').toLowerCase().includes(q) || (qAmt && String(t.amount).includes(qAmt))));
+  const noted = visTxs().filter(t => t.note).length;
+  const counts = {}; visTxs().forEach(t => tagsOf(t.note).forEach(g => { counts[g] = (counts[g] || 0) + 1; }));
   const tags = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 14);
   return `<section class="screen">
-    <div class="row between"><div style="display:grid;gap:4px"><h2 class="h2">Notes</h2><span class="tiny muted">${noted}/${S.txs.length} noted</span></div><span class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-end;min-width:0">${S.txs.some(t => t.print) ? '<button class="btn sm violet" data-act="ptList">Printed tokens</button>' : ''}${S.txs.length ? '<button class="btn sm" data-act="csv">Export CSV</button>' : ''}</span></div>
+    <div class="row between"><div style="display:grid;gap:4px"><h2 class="h2">Notes</h2><span class="tiny muted">${noted}/${visTxs().length} noted</span></div><span class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-end;min-width:0">${visTxs().some(t => t.print) ? '<button class="btn sm violet" data-act="ptList">Printed tokens</button>' : ''}${visTxs().length ? '<button class="btn sm" data-act="csv">Export CSV</button>' : ''}</span></div>
     <div class="field"><label for="hq">Search notes</label><input id="hq" class="inp" type="search" placeholder="pizza, rent, Satoshi…" value="${esc(histQuery)}" data-input="hq" autocomplete="off"></div>
     <div class="seg three" role="group" aria-label="Filter">${[['all', 'ALL'], ['in', 'IN'], ['out', 'OUT']].map(([k, l]) => `<button data-act="hf" data-f="${k}" aria-pressed="${histFilter === k}">${l}</button>`).join('')}</div>
     ${tags.length ? `<div class="tagrow" role="group" aria-label="Tags">${tags.map(([g, n]) => `<button class="tag" data-noi18n data-act="htag" data-tag="${esc(g)}" aria-pressed="${histTag === g}">#${esc(g)} <span>${n}</span></button>`).join('')}</div>` : `<div class="tiny muted">Tip: add #tags to notes, like #food or #rent, to group them.</div>`}
-    <div class="txs" id="txList">${list.length ? list.map(txRow).join('') : `<div class="empty-state"><b>${S.txs.length ? 'NO MATCH' : 'GAME OVER?'}</b>${S.txs.length ? 'No transaction matches that search.' : 'Not yet. Your first transaction will land here.'}</div>`}</div>
+    <div class="txs" id="txList">${list.length ? list.map(txRow).join('') : `<div class="empty-state"><b>${visTxs().length ? 'NO MATCH' : 'GAME OVER?'}</b>${visTxs().length ? 'No transaction matches that search.' : 'Not yet. Your first transaction will land here.'}</div>`}</div>
   </section>`;
 }
 
@@ -5935,7 +5939,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.22.2';
+const APP_VERSION = '1.22.3';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -10871,8 +10875,8 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.22.2; rewrite this list at every release)
-  'Security tidy-up: a few small safeguards behind the code scanner warnings (clue cards, initials, test coins). Nothing you use changes.'
+const WHATS_NEW = [   // (v1.22.3; rewrite this list at every release)
+  'A receive note for an on-chain address nobody has paid yet is now hidden until a payment arrives. The price chart link now opens Settings at Show Bitcoin price.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);
@@ -11613,6 +11617,7 @@ const A = {
     if (num(mq.amount) !== sats) throw new Error(`The invoice asked for ${money(num(mq.amount))} instead of ${money(sats)}. Nothing was sent.`);
     showMeltQuote('ln', mq, b.dataset.t, note);
   }),
+  priceSettings: () => { tab = 'settings'; closeSheet(); render(); window.scrollTo(0, 0); sfx('blip'); const el = document.getElementById('p_fiat'); if (el) { const row = el.closest('label') || el; row.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); try { el.focus({ preventScroll: true }); } catch (e) {} } },
   jump: b => { const el = document.getElementById(b.dataset.id); if (el) el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); },
   setTheme: b => { S.prefs.theme = b.dataset.t; save(); refresh(); sfx('select'); },
   backupDownload: () => pinGuard('backup', () => {
@@ -12659,7 +12664,7 @@ window.Trophies = { DEFS, reload, checkWallet, played, progress, gameOver, mount
       </div>
       <div class="seg pc-seg" role="group" aria-label="Time range">${Object.keys(RANGES).map(k => `<button type="button" data-range="${k}" aria-pressed="${k === st.range}">${k}</button>`).join('')}</div>
       <div class="pc-wrap"><canvas class="pc-canvas" tabindex="0" role="img" aria-label="Bitcoin price chart"></canvas><div class="pc-tip" hidden></div><div class="pc-msg" data-pc="msg" hidden></div></div>
-      <div class="th pc-src">Prices from Coinbase · <button class="linkbtn" data-act="tab" data-tab="settings" style="font-size:inherit;padding:0">turn off in Settings</button></div>
+      <div class="th pc-src">Prices from Coinbase · <button class="linkbtn" data-act="priceSettings" style="font-size:inherit;padding:0">turn off in Settings</button></div>
     </div>`;
     el.querySelectorAll('[data-range]').forEach(b => b.onclick = () => {
       st.range = b.dataset.range; store.set('priceRange', st.range); st.hover = null;

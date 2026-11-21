@@ -61,8 +61,8 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.22.2; rewrite this list at every release)
-  'Security tidy-up: a few small safeguards behind the code scanner warnings (clue cards, initials, test coins). Nothing you use changes.'
+const WHATS_NEW = [   // (v1.22.3; rewrite this list at every release)
+  'A receive note for an on-chain address nobody has paid yet is now hidden until a payment arrives. The price chart link now opens Settings at Show Bitcoin price.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);

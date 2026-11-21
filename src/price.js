@@ -90,7 +90,7 @@
       </div>
       <div class="seg pc-seg" role="group" aria-label="Time range">${Object.keys(RANGES).map(k => `<button type="button" data-range="${k}" aria-pressed="${k === st.range}">${k}</button>`).join('')}</div>
       <div class="pc-wrap"><canvas class="pc-canvas" tabindex="0" role="img" aria-label="Bitcoin price chart"></canvas><div class="pc-tip" hidden></div><div class="pc-msg" data-pc="msg" hidden></div></div>
-      <div class="th pc-src">Prices from Coinbase · <button class="linkbtn" data-act="tab" data-tab="settings" style="font-size:inherit;padding:0">turn off in Settings</button></div>
+      <div class="th pc-src">Prices from Coinbase · <button class="linkbtn" data-act="priceSettings" style="font-size:inherit;padding:0">turn off in Settings</button></div>
     </div>`;
     el.querySelectorAll('[data-range]').forEach(b => b.onclick = () => {
       st.range = b.dataset.range; store.set('priceRange', st.range); st.hover = null;
