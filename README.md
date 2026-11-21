@@ -419,7 +419,7 @@ NUTCADE has no account, no tracking, no analytics and no ads. Your recovery phra
 - **Nostr relays** (relay.damus.io, nos.lol, relay.primal.net), to send and receive game challenges with your contacts, to talk to apps you connect with Wallet Connect, to save your encrypted mint list when it changes and to look for it when you restore (turn this off in Settings → Backup), to receive payments for requests you made in the last 30 days, to deliver payments to requests you pay, to receive ecash friends send to your ecash address (turn this off in Settings → Privacy), to publish the one note you just previewed when you tap **Post** under **Share my score**, and to look up a Nostr profile when you zap it. A contact, a payment request or a Wallet Connect link can name relays of its own, which are used when you send to them. Payments you send over Nostr are signed with a one-time key, so they aren't linked to you. Challenges and their scores are signed with your NUTCADE Nostr key so friends know they're from you
 - **Two more Nostr relays** (relay.nostr.band and relay.cashumints.space), only when you tap **Find mints people recommend**
 - **Coinbase** (api.coinbase.com, api.exchange.coinbase.com and ws-feed.exchange.coinbase.com), for the price and chart, only while **Show Bitcoin price** is on
-- **npub.cash**, while your Lightning address is turned on (it sees the amounts and times of payments to your address, not the rest of your wallet), and when you tip from inside the app (the support address is an npub.cash address)
+- **npub.cash**, while your Lightning address is turned on (it sees the amounts and times of payments to your address, not the rest of your wallet), and **npubx.cash**, when you tip from inside the app (the support address is an npubx.cash address)
 - **The web address of a Lightning address, LNURL, voucher or payment request** you pay or scan (for example the domain after the @ in name@wallet.com), and of a Nostr profile's Lightning address when you zap it. That server sees the one request
 - **This website** (random21m.github.io/nutcade): it loads NUTCADE and its QR decoder (only when you open the scanner), and, in a tab left open for days, the update check reads this site's own page. GitHub, which hosts the site, sees these requests like any website visit. No other server is asked about versions or notices
 - **GitHub pages** (the source, the release notes, the problem form and the private security report), only when you tap a link to them
@@ -446,14 +446,15 @@ Follow NUTCADE on Nostr: **npub1mzmequd6893lj36mh5jcs9qayz0vf732m8qyycv79lfylyqv
 
 NUTCADE is free and open source, and it stays that way. Supporting it is optional and changes nothing about how it works. If you enjoy it, you can send a few sats over Lightning:
 
-<p><img src="docs/support-qr.png" alt="QR code for the Lightning address npub18wnvs7ncun8exphx8h7r9c6p9kg6jagpe8ck0g2qll0ushv8rp4slzjlpw@npub.cash" width="200"></p>
+<p><img src="docs/support-qr.png" alt="QR code for the Lightning address npub1qh7gzgypv0zjf6txpg679nwye2ue405cxp5ktt3ftw8kmdgnh83qpsdq60@npubx.cash" width="200"></p>
 
-**npub18wnvs7ncun8exphx8h7r9c6p9kg6jagpe8ck0g2qll0ushv8rp4slzjlpw@npub.cash**
+**npub1qh7gzgypv0zjf6txpg679nwye2ue405cxp5ktt3ftw8kmdgnh83qpsdq60@npubx.cash**
 
 You can also tip from inside NUTCADE: **Settings → About → Support**. The same address and code are on that screen. Be wary of any other "NUTCADE support" address.
 
 ## Changelog
 
+- **v1.22.1:** new support address: **npub1qh7gzgypv0zjf6txpg679nwye2ue405cxp5ktt3ftw8kmdgnh83qpsdq60@npubx.cash**. The Support screen, its QR code (`docs/support-qr.png`) and the tip button use it; the old address is no longer shown. The tip button now asks npubx.cash for the invoice, so npubx.cash is named in the Privacy list. Nothing else changed.
 - **v1.22.0:** Send all.
   - **Send all** on the send screens for an ecash token, a Lightning address or LNURL, and on-chain: everything at the active mint, less the fees. NUTCADE works out the amount from the mint's own fees (and, for Lightning and on-chain, from the mint's quote) and shows the amount and fees before anything is sent; Cancel changes nothing. Only the active mint is used; your other mints are not touched. A Lightning invoice has its own amount, so it has no Send all.
   - Fees as large as the balance, or an amount left below the smallest payment allowed, are refused with a message. The spending limit and its PIN, the piggy bank, and the recovery of a failed payment work as for any payment, and if the balance changed in between nothing is sent.

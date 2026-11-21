@@ -2655,7 +2655,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.22.0';
+const APP_VERSION = '1.22.1';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -3857,7 +3857,7 @@ function openLnAddr() {
 }
 
 /* ---------- support / donations ---------- */
-const DONATE = { address: 'npub18wnvs7ncun8exphx8h7r9c6p9kg6jagpe8ck0g2qll0ushv8rp4slzjlpw@npub.cash', lnurl: 'LNURL1DP68GURN8GHJ7MNSW43ZUCMPWD5Z7TNHV4KXCTTTDEHHWM30D3H82UNVWQHKUUR4VGCNSAMWWEENWMNRW4HRSETCWP58SWRGXAERJCEKWQUKKEEKDFSKWUR98P3KKVR8XFCKCMPSW4EKSA3CWFCRGUMV0F4XCURH3RKF5Z' };
+const DONATE = { address: 'npub1qh7gzgypv0zjf6txpg679nwye2ue405cxp5ktt3ftw8kmdgnh83qpsdq60@npubx.cash', lnurl: 'LNURL1DP68GURN8GHJ7MNSW438STNRV9EKSTEWWAJKCMPDDDHX7AMW9AKXUATJD3CZ7MNSW43RZUTGXANH5EMEWPMRQ7N2VCM8G7RSVUMRWWTWWAUK2VN4V56RQDTR0PCR26M5WSEKVARH8P4K6ER8DE5RSVM3WPEKGUFKXQJL2Q8P' };
 function openSupport() {
   const m = activeMint();
   const canTip = m && supports(m, 'melt', 'bolt11');

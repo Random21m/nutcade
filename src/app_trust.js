@@ -61,9 +61,8 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.22.0; rewrite this list at every release)
-  'Send all: send everything at a mint in one go, as an ecash token, to a Lightning address or on-chain. NUTCADE works out the fees and shows exactly what will leave before anything is sent.',
-  'Send all uses only the mint you picked: your other mints are not touched. The spending limit and your PIN apply as for any payment.'
+const WHATS_NEW = [   // (v1.22.1; rewrite this list at every release)
+  'New support address. The Support screen, its QR code and the tip button now use the new address. Check it matches the README before you send anything.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);
@@ -239,7 +238,7 @@ const HELP = [
     'Nostr relays (relay.damus.io, nos.lol and relay.primal.net): for game challenges and payments between contacts, apps you connect with Wallet Connect, your encrypted mint list, requests you made and ecash sent to your ecash address. A contact or a payment request can name relays of its own, which are used when you send to them.',
     'Two more relays (relay.nostr.band and relay.cashumints.space) are asked only when you tap Find mints people recommend.',
     'Coinbase, for the price and the price chart, only while Show Bitcoin price is on.',
-    'npub.cash, while your Lightning address is on, and when you tip from inside the app (the tip address is an npub.cash address).',
+    'npub.cash, while your Lightning address is on, and npubx.cash, when you tip from inside the app (the tip address is an npubx.cash address).',
     'The web address of any Lightning address, LNURL, voucher or payment request you pay or scan, and of a Nostr profile when you zap it. It sees that one request.',
     'This website, to load NUTCADE, its QR scanner and the update check. GitHub, which hosts it, sees these requests like any website visit.',
     'GitHub pages (the source, release notes and the problem report form), only when you tap a link to them.'], after: [

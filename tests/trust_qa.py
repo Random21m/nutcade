@@ -154,6 +154,21 @@ async def main():
             helptext = SRC['app_trust.js']
             hs = helptext[helptext.index("What does NUTCADE contact"):helptext.index("Reporting a problem")]
             check('privacy: so does the Help answer (the hosts, in the same words)', all(h in hs for h in claimed - {'api.exchange.coinbase.com', 'ws-feed.exchange.coinbase.com', 'api.coinbase.com', 'mint.minibits.cash', 'mint.cubabitcoin.org', 'testnut.cashu.space', 'nofees.testnut.cashu.space'}) and 'Coinbase' in hs and 'Minibits' in hs and 'Cuba Bitcoin' in hs and '8333.space' in hs, hs[:60])
+            # the support address (1.22.1): one address everywhere, the LNURL and the QR picture say the same thing, the old one is gone
+            SUP = 'npub1qh7gzgypv0zjf6txpg679nwye2ue405cxp5ktt3ftw8kmdgnh83qpsdq60@npubx.cash'
+            OLDS = 'npub18wnvs7ncun8exphx8h7r9c6p9kg6jagpe8ck0g2qll0ushv8rp4slzjlpw'
+            m = re.search(r"DONATE = \{ address: '([^']+)', lnurl: '([^']+)'", SRC['app.js'])
+            def bech(s):
+                C = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'; a = b = 0; r = bytearray()
+                for ch in s.lower()[6:-6]:
+                    a = a << 5 | C.index(ch); b += 5
+                    if b >= 8: b -= 8; r.append(a >> b & 255)
+                    a &= (1 << b) - 1
+                return r.decode()
+            u_, d_ = SUP.split('@')
+            check('support: the Support screen address is the new one, and its LNURL decodes to that address\'s own lightning address page', bool(m) and m.group(1) == SUP and bech(m.group(2)) == f'https://{d_}/.well-known/lnurlp/{u_}', m and (m.group(1), bech(m.group(2))))
+            sup_in_readme = readme[readme.index('## Support the project'):readme.index('## Changelog')]
+            check('support: the README names the same address (twice) and not the old one', sup_in_readme.count(SUP) == 2 and OLDS not in sup_in_readme and OLDS not in code, sup_in_readme.count(SUP))
             check('privacy: no analytics, tracking or advertising code (no gtag, pixel, sentry, matomo, plausible)', not re.search(r'gtag|google-analytics|matomo|plausible|sentry|mixpanel|segment\.|fbq\(|hotjar', code, re.I))
             # every network call in the new code goes to this site's own files (the update check) or to a mint the person already uses
             tr = SRC['app_trust.js']
@@ -428,7 +443,7 @@ async def main():
                 await w.click('.notice [data-act=whatsNew]'); await w.wait(300)
                 st = await w.sheet_text()
                 links = await w.ev("[...document.querySelectorAll('#layer a')].map(a=>({h:a.getAttribute('href'),t:a.target,r:a.rel}))")
-                check(f'updated, {label}: the sheet lists what is new and links to the release page and the signed checksums', "What's new in v" + APP_VERSION in await w.ev("document.querySelector('#layer h3').innerText") and await w.ev("document.querySelectorAll('#layer .gate-list li').length") >= 2 and any(l['h'] == f'https://github.com/Random21m/nutcade/releases/tag/v{APP_VERSION}' for l in links) and any(l['h'] == 'SHA256SUMS.txt' for l in links), (links, st[:100]))
+                check(f'updated, {label}: the sheet lists what is new and links to the release page and the signed checksums', "What's new in v" + APP_VERSION in await w.ev("document.querySelector('#layer h3').innerText") and await w.ev("document.querySelectorAll('#layer .gate-list li').length") >= 1 and any(l['h'] == f'https://github.com/Random21m/nutcade/releases/tag/v{APP_VERSION}' for l in links) and any(l['h'] == 'SHA256SUMS.txt' for l in links), (links, st[:100]))
                 check(f'updated, {label}: external links open in a new tab with rel=noopener', all(l['t'] == '_blank' and 'noopener' in l['r'] for l in links), links)
                 check(f'updated, {label}: opening it contacts nobody for it (no GitHub or other new host; the links wait for a tap)', not [r for r in w.reqs if 'github' in r[1] or 'SHA256' in r[1] or 'releases' in r[1]], [r[1] for r in w.reqs][:3])
                 check(f'updated, {label}: it is marked as seen, and the note is gone', await w.ev(f"JSON.parse(localStorage.getItem('nutcade:prefs')).seenVersion==={J(APP_VERSION)}") and not await w.ev("/Updated to v/.test(document.querySelector('.screen').innerText)"))
