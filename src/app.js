@@ -926,6 +926,13 @@ function sendEcash(amount, note, lockTo, url = S.active, opts = {}) { return too
 async function sendEcashNow(amount, note, lockTo, url, opts) {
   piggyGuard(amount);
   const w = await getWallet(url);
+  if (opts.all) {   // Send all (app_sendall.js): still exactly what the confirm screen showed, or nothing is sent
+    const p = allEcashPlan(w, S.proofs[url] || [], url);
+    if (p.amount !== amount || p.spend !== opts.all.spend || lockTo) throw allChanged();
+    const hold = limitGate(p.spend, { free: opts.noLimit, grant: opts.grant, approved: opts.approved });
+    try { return await sendEcashSwap(w, amount, note, null, url, opts, undefined, hold); }
+    finally { hold.release(); }
+  }
   if (sum(S.proofs[url] || []) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
   const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}) }, keep: w.defaultOutputType() } : undefined;
   // the spending limit, with the most this can take: the swap's own numbers, fees included
@@ -946,13 +953,13 @@ async function sendEcashSwap(w, amount, note, lockTo, url, opts, outCfg, hold) {
   let have;
   const attempt = async () => {
     have = [...(S.proofs[url] || [])];
-    const all = !opts.pick && have.length && amount === maxSendable(w, have) && w._selectProofs;   // (tokens: not when the coins are fixed)
+    const all = !opts.pick && have.length && (opts.all || amount === maxSendable(w, have)) && w._selectProofs;   // (tokens: not when the coins are fixed; Send all: always)
     const pick = all ? w._selectProofs : null;
     if (all) w._selectProofs = ps => ({ keep: [], send: ps });
     try { return await journaled(url, 'send', { inputs: have, amount, note, locked: !!lockTo, tx: Object.assign({ locked: lockTo || null }, opts.txx || {}), follow: opts.follow || null, lim: limRec(hold) }, (cb, o) => rSend(o, w, amount, have, { includeFees: true, onCountersReserved: cb }, outCfg)); }
     finally { if (all) w._selectProofs = pick; }
   };
-  const { r: { keep, send }, op } = await spentRetry(url, attempt).catch(e => { throw shortOf(e, w, url, amount, false); });
+  const { r: { keep, send }, op } = await spentRetry(url, attempt).catch(e => { throw opts.all && /not enough (funds|proofs)/i.test(String(e && e.message || '')) ? allChanged() : shortOf(e, w, url, amount, false); });
   const used = new Set(have.map(p => p.secret));
   S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep));
   const token = L.getEncodedToken({ mint: url, proofs: send, unit: 'sat' });
@@ -1877,14 +1884,18 @@ function lnurlToUrl(v) {
 }
 function openPayLnurl(target) {
   openSheet('Pay', `<div class="tiny muted">To</div><div class="code" style="color:var(--ink)">${esc(target.length > 48 ? target.slice(0, 24) + '…' + target.slice(-12) : target)}</div>
-    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>
+    <div class="field"><div class="row between"><label for="amtIn">Amount (SAT)</label><button class="linkbtn tiny" data-act="lnurlAll" data-t="${esc(target)}">Send all</button></div><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200"></div>
     <button class="btn solid pink block" data-act="lnurlQuote" data-t="${esc(target)}">Get quote</button><div id="sheetErr"></div>`);
 }
-async function lnurlInvoice(target, sats, comment) {
+async function lnurlInfo(target) {
   const base = await fetch(lnurlToUrl(target)).then(r => { if (!r.ok) throw new Error(`That address didn't answer (${r.status}).`); return r.json(); });
   if (base.status === 'ERROR') throw new Error(base.reason || 'That address returned an error.');
   if (base.tag !== 'payRequest' || !base.callback) throw new Error("That address isn't set up to receive payments.");
+  return base;
+}
+async function lnurlInvoice(target, sats, comment, base) {   // (base: the address's answer, already fetched)
+  base = base || await lnurlInfo(target);
   const msat = sats * 1000;
   if (msat < base.minSendable || msat > base.maxSendable) throw new Error(`This address accepts ${money(Math.ceil(base.minSendable / 1000))} to ${money(Math.floor(base.maxSendable / 1000))}.`);
   const u = new URL(base.callback); u.searchParams.set('amount', String(msat));
@@ -2644,7 +2655,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.21.0';
+const APP_VERSION = '1.22.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -3619,7 +3630,7 @@ function openSend(method = 'ecash') {
   if (needMint()) return;
   const m = activeMint(); let inner = '';
   if (method === 'ecash') inner = `
-    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="500" autocomplete="off"></div>
+    <div class="field"><div class="row between"><label for="amtIn">Amount (SAT)</label><button class="linkbtn tiny" data-act="allEcash">Send all</button></div><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="500" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="High score bet with Alex"></div>
     ${giftFields()}
     <button class="btn solid pink block" data-act="doSendEcash">Create token</button>
@@ -3631,7 +3642,7 @@ function openSend(method = 'ecash') {
     <button class="btn solid pink block" data-act="doMeltQuote" data-k="ln">Get quote</button>` : notSupported('Lightning payments');
   else inner = supports(m, 'melt', 'onchain') ? `
     <div class="field"><div class="row between"><label for="destIn">Bitcoin address</label><button class="btn sm violet" data-act="scan" data-hint="Point at a Bitcoin address."><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h5v1H2v4H1zm9 0h5v5h-1V2h-4zM1 10h1v4h4v1H1zm13 0h1v5h-5v-1h4zM4 4h3v3H4zm5 0h3v3H9zM4 9h3v3H4zm5 0h1v1H9zm2 0h1v1h-1zm-2 2h1v1H9zm2 1h1v1h-1z"/></svg>Scan</button></div><input id="destIn" class="inp" placeholder="bc1q…" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="50000" autocomplete="off"></div>
+    <div class="field"><div class="row between"><label for="amtIn">Amount (SAT)</label><button class="linkbtn tiny" data-act="allOnchain">Send all</button></div><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="50000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Move to cold storage"></div>
     <button class="btn solid pink block" data-act="doMeltQuote" data-k="onchain">Get fee options</button>${minMax(methodInfo(m, 'melt', 'onchain')) ? `<div class="tiny muted">${minMax(methodInfo(m, 'melt', 'onchain'))}</div>` : ''}` : notSupported('On-chain withdrawals');
   openSheet('Send', `${contactChips()}${methodSeg('send', method)}<div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>${inner}<div id="sheetErr"></div>`);
@@ -3709,23 +3720,24 @@ function showDone(dir, amount, how, extra = '') {
     ${extra}<button class="btn solid gold block" data-act="close">Continue</button></div>`);
   refresh();
 }
-function showMeltQuote(kind, mq, dest, note) {
+function showMeltQuote(kind, mq, dest, note, all) {   // (all: a Send all quote, app_sendall.js)
   const amount = num(mq.amount);
   const head = $('#layer .sheet-head h3'); if (head) { head.textContent = tr('Pay'); head.closest('.sheet').setAttribute('aria-label', tr('Pay')); }
   const opts = kind === 'onchain' ? (mq.fee_options || []) : [];
   const worst = kind === 'ln' ? costShown(S.active, amount, mq.fee_reserve) : meltCost(S.active, amount, Math.max(0, ...(mq.fee_options || []).map(o => num(o.fee_reserve))));
   const feeRow = kind === 'ln' ? costRows(worst) : worst.mintFee ? `<dt>Mint fee, at most</dt><dd>${money(worst.mintFee)}</dd>` : '';
-  setBody(`<dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd ${AUTO_NOTE.test(note) ? '' : 'data-noi18n'}>${esc(note)}</dd>` : ''}</dl>
+  setBody(`${all ? `<div class="notice cyan">Send all: everything at this mint, less the fees.</div>${all.capped ? `<div class="tiny muted">The most this address or mint takes in one payment is ${money(all.max)}, so the rest stays at this mint.</div>` : ''}` : ''}<dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd ${AUTO_NOTE.test(note) ? '' : 'data-noi18n'}>${esc(note)}</dd>` : ''}</dl>
     ${opts.length ? `<div class="field"><label>Fee speed</label><div class="txs">${opts.map((o, i) => `<label class="tx out" style="cursor:pointer"><span class="ico"><input type="radio" name="fee" value="${o.fee_index}" ${i === 0 ? 'checked' : ''} style="accent-color:var(--pink)"></span><span class="mid"><div class="note">${esc(tr(`~${o.estimated_blocks} block${o.estimated_blocks === 1 ? '' : 's'}`))}</div><div class="meta">≈ ${Math.round(o.estimated_blocks * 10)} min</div></span><span class="amt">${fmt(o.fee_reserve)}</span></label>`).join('')}</div></div>` : ''}
     ${kind === 'ln' ? changeNote(S.active) : ''}
-    ${kind === 'ln' && balanceOf(S.active) < worst.total ? `<div class="notice">${esc((activeMint() || {}).name || 'This mint')} holds ${money(balanceOf(S.active))}, not enough on its own.${S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? ' You can split the payment across your mints.' : ''}</div>` : ''}
-    <button class="btn solid pink block" id="payBtn">Pay ${money(amount)}</button>
-    ${kind === 'ln' && S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? `<button class="btn block violet" id="mppBtn">Pay from several mints</button>` : ''}<div id="sheetErr"></div>`, body => {
+    ${kind === 'ln' && !all && balanceOf(S.active) < worst.total ? `<div class="notice">${esc((activeMint() || {}).name || 'This mint')} holds ${money(balanceOf(S.active))}, not enough on its own.${S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? ' You can split the payment across your mints.' : ''}</div>` : ''}
+    <button class="btn solid pink block" id="payBtn">Pay ${money(amount)}</button>${all ? '<button class="btn block" data-act="close">Cancel</button>' : ''}
+    ${kind === 'ln' && !all && S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? `<button class="btn block violet" id="mppBtn">Pay from several mints</button>` : ''}<div id="sheetErr"></div>`, body => {
     const mb = body.querySelector('#mppBtn'); if (mb) mb.onclick = () => openMultinut(mq.request, amount, dest, note);
     body.querySelector('#payBtn').onclick = e => run(e.currentTarget, 'PAYING', async () => {
       const fi = kind === 'onchain' ? parseInt((body.querySelector('input[name=fee]:checked') || {}).value || '0', 10) : 0;
       const zx = zapByQuote.get(mq.quote);
-      const tx = await payMelt(kind, mq, fi, note, dest, S.active, zx || {});
+      if (all && S.active !== all.url) throw allChanged();   // (Send all: only from the mint it was worked out for)
+      const tx = await payMelt(kind, mq, fi, note, dest, all ? all.url : S.active, zx || {});
       const isAddr = kind === 'ln' && /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(dest);
       const ct = isAddr && (S.contacts.find(c => c.ln === dest.toLowerCase()) || null);
       if (ct) updTx(tx.id, { contactId: ct.id, contactName: ct.name });
@@ -3889,6 +3901,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_tokens.js@@*/
 /*@@app_arrive.js@@*/
 /*@@app_trust.js@@*/
+/*@@app_sendall.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4438,6 +4451,7 @@ const A = {
 /*@@app_tokens_actions.js@@*/
 /*@@app_arrive_actions.js@@*/
 /*@@app_trust_actions.js@@*/
+/*@@app_sendall_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;

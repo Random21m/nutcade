@@ -61,10 +61,9 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.21.0; rewrite this list at every release)
-  "If this browser can't save your wallet (storage full), NUTCADE now says so in red on the wallet screen, with what to do, instead of failing silently.",
-  'Settings, Backup shows how much storage NUTCADE uses, and the wallet screen warns when it is 70% and 90% full.',
-  'On iPhone, the wallet screen reminds you to add NUTCADE to your Home Screen, so Safari does not delete your wallet.'
+const WHATS_NEW = [   // (v1.22.0; rewrite this list at every release)
+  'Send all: send everything at a mint in one go, as an ecash token, to a Lightning address or on-chain. NUTCADE works out the fees and shows exactly what will leave before anything is sent.',
+  'Send all uses only the mint you picked: your other mints are not touched. The spending limit and your PIN apply as for any payment.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);
