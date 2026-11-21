@@ -144,20 +144,20 @@ const CHEST = ['..yyyyyyyy..', '.ybbbbbbbby.', 'ybbbbbbbbbby', 'yyyyyyyyyyyy', '
 const chestSVG = open => `<svg class="chest ${open ? 'open' : ''}" viewBox="0 0 12 8" width="96" height="64" aria-hidden="true">${CHEST.map((r, y) => [...r].map((ch, x) => ch === '.' ? '' : `<rect x="${x}" y="${y}" width="1" height="1" fill="${ch === 'y' ? 'var(--gold)' : open ? '#3a2410' : 'var(--brown,#b8651f)'}"/>`).join('')).join('')}</svg>`;
 function openHunt(pub) {
   const f = foundOf(pub); if (!f) return;
-  const got = Object.keys(f.shares).length, need = f.k;
-  const pips = Array.from({ length: f.n }, (_, i) => `<span class="pip ${f.shares[i + 1] ? 'on' : ''}">${i + 1}</span>`).join('');
+  const got = Object.keys(f.shares).length, need = +f.k | 0;
+  const pips = Array.from({ length: Math.min(+f.n | 0, 12) }, (_, i) => `<span class="pip ${f.shares[i + 1] ? 'on' : ''}">${i + 1}</span>`).join('');
   const state = f.state === 'won' ? `<div class="hunt-big lime">TREASURE!</div><div class="tiny">${money(f.amount || 0)} landed in your wallet.</div>`
     : f.state === 'gone' ? '<div class="hunt-big pink">TOO LATE</div><div class="tiny">Someone opened this chest first.</div>'
     : f.state === 'bad' ? '<div class="hunt-big pink">WRONG CARDS</div><div class="tiny">These cards don\'t rebuild the same key.</div>'
     : f.state === 'opening' ? busyHTML('OPENING THE CHEST')
     : `<div class="hunt-big">CLUE ${Math.min(got, need)}/${need}</div><div class="tiny">${got >= need ? 'All the clues you need!' : `Find ${need - got} more clue card${need - got > 1 ? 's' : ''} to open the chest.`}</div>`;
   const body = `<div class="hunt" data-hunt>${chestSVG(f.state === 'won')}${state}
-    ${f.n > 1 ? `<div class="pips" aria-label="${got} of ${f.n} cards found">${pips}</div>` : ''}
+    ${(+f.n | 0) > 1 ? `<div class="pips" aria-label="${got} of ${+f.n | 0} cards found">${pips}</div>` : ''}
     ${f.amount ? `<div class="tiny muted">Prize: ${money(f.amount)}${f.until ? ` · until ${fmtDay(f.until)}` : ''}</div>` : ''}${f.note ? `<div class="notice" data-noi18n>${esc(f.note)}</div>` : ''}
-    ${f.state === 'hunting' && got >= need ? `<button class="btn solid gold block" data-act="huntOpen" data-pub="${pub}">Open the chest</button>` : ''}
+    ${f.state === 'hunting' && got >= need ? `<button class="btn solid gold block" data-act="huntOpen" data-pub="${esc(pub)}">Open the chest</button>` : ''}
     ${f.state === 'hunting' && got < need ? '<button class="btn block violet" data-act="scan">Scan the next clue</button>' : ''}
     <div id="sheetErr"></div></div>`;
-  if ($('#layer [data-hunt]')) setBody(body); else openSheet(f.n === 1 ? 'Loaded card' : 'Treasure hunt', body);
+  if ($('#layer [data-hunt]')) setBody(body); else openSheet((+f.n | 0) === 1 ? 'Loaded card' : 'Treasure hunt', body);
 }
 
 /* ---------- making a hunt ---------- */
@@ -174,7 +174,7 @@ function openHuntNew() {
     <button class="btn solid gold block" data-act="huntCreate">Hide the treasure</button><div id="sheetErr"></div>`);
 }
 function huntCardsHTML(h) {
-  return `<div class="hunt-cards">${h.cards.map((u, i) => `<div class="hunt-card"><div class="hc-top"><b>CLUE ${i + 1} OF ${h.n}</b><span>${h.k === h.n ? 'You need every card' : `Any ${h.k} open the chest`}</span></div>
+  return `<div class="hunt-cards">${h.cards.map((u, i) => `<div class="hunt-card"><div class="hc-top"><b>CLUE ${i + 1} OF ${+h.n | 0}</b><span>${h.k === h.n ? 'You need every card' : `Any ${+h.k | 0} open the chest`}</span></div>
     ${qrBlock(u, `Clue card ${i + 1}`)}<div class="hc-prize">${money(h.amount)} TREASURE</div>${h.note ? `<div class="hc-note" data-noi18n>${esc(h.note)}</div>` : ''}<div class="hc-foot">Scan with your phone camera · NUTCADE</div></div>`).join('')}</div>`;
 }
 function openHuntCards(pub) {
@@ -195,7 +195,7 @@ function huntsPanel() {
   if (!mine.length && !found.length) return '';
   const st = h => { const t = txById(h.txId); return !t ? '' : h.unpub && t.status === 'pending' ? '<span class="chip pending">WAITING FOR A RELAY</span>' : t.status === 'claimed' ? '<span class="chip ecash">OPENED</span>' : t.status === 'reclaimed' ? '<span class="chip claimed">CAME BACK</span>' : `<span class="chip pending">${h.k} OF ${h.n}</span>`; };
   return `<div class="panel"><span class="h2">Treasure hunts</span><div class="txs">
-    ${mine.map(h => `<button class="tx out" data-act="huntCards" data-pub="${h.pub}"><span class="ico" aria-hidden="true">✦</span><span class="mid"><div class="note">${esc(tr('Your hunt'))}</div><div class="meta">${st(h)}</div></span><span class="amt">${fmt(h.amount)}</span></button>`).join('')}
-    ${found.map(([pub, f]) => `<button class="tx in" data-act="huntShow" data-pub="${pub}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note">${esc(tr('Hunting'))}</div><div class="meta"><span class="chip ln">CLUE ${Object.keys(f.shares).length}/${f.k}</span></div></span><span class="amt">${f.amount ? fmt(f.amount) : '???'}</span></button>`).join('')}
+    ${mine.map(h => `<button class="tx out" data-act="huntCards" data-pub="${esc(h.pub)}"><span class="ico" aria-hidden="true">✦</span><span class="mid"><div class="note">${esc(tr('Your hunt'))}</div><div class="meta">${st(h)}</div></span><span class="amt">${fmt(h.amount)}</span></button>`).join('')}
+    ${found.map(([pub, f]) => `<button class="tx in" data-act="huntShow" data-pub="${esc(pub)}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note">${esc(tr('Hunting'))}</div><div class="meta"><span class="chip ln">CLUE ${Object.keys(f.shares).length}/${+f.k | 0}</span></div></span><span class="amt">${f.amount ? fmt(f.amount) : '???'}</span></button>`).join('')}
   </div></div>`;
 }

@@ -5596,7 +5596,7 @@ function txRow(t) {
   const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.print ? '<span class="chip ecash">PRINTED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '') + (t.nwc ? '<span class="chip ecash">NWC</span>' : '') + (t.zap ? '<span class="chip claimed">ZAP</span>' : '') + (t.refused && t.status === 'pending' && isBlocked(t.mint) ? '<span class="chip failed">BLOCKED</span>' : '');
   const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : t.method === 'fee' ? (num(t.fee) ? '-' + fmt(t.fee) : fmt(0)) : (moved ? sign : '') + fmt(t.amount);
   const wide = amt.length > 11;   // a huge amount gets its own line under the note instead of squeezing the chips
-  return `<button class="tx ${t.type}" data-act="tx" data-id="${t.id}"><span class="ico" aria-hidden="true">${t.type === 'in' ? '↓' : '↑'}</span>
+  return `<button class="tx ${esc(t.type)}" data-act="tx" data-id="${esc(t.id)}"><span class="ico" aria-hidden="true">${t.type === 'in' ? '↓' : '↑'}</span>
     <span class="mid"><div class="note ${t.note ? '' : 'empty'}">${esc(noteText(t.note) || 'Add a note…')}</div>
     <div class="meta"><span class="chip ${t.method === 'ecash' ? 'ecash' : 'ln'}">${method}</span>${stat}<span${Date.now() - t.ts >= 604800e3 ? ' data-noi18n' : ''}>${timeAgo(t.ts)}</span></div></span>
     <span class="amt${wide ? ' wide' : ''}${moved ? '' : ' void'}">${amt}</span></button>`;
@@ -5799,7 +5799,7 @@ function hydrateFromVault() {
   // keys that joined the vault in a later version (the Extra Life, treasure hunts) move in from plain storage
   loadWalletState();
   S.limits = d.limits || null;
-  S.hunts = d.hunts || []; S.found = d.found || {}; S.imports = d.imports || [];
+  S.hunts = d.hunts || []; S.found = Object.assign(Object.create(null), d.found || {}); S.imports = d.imports || [];
   S.seed = d.seed || null; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || []; S.nwc = d.nwc || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null;
   seedBytes = null; raw.del('pinfails'); requestPersist(); mergeMintSpellings();
   nwcSince = Math.floor(Date.now() / 1000);   // Wallet Connect requests sent while it was locked are refused, not paid now
@@ -5946,7 +5946,7 @@ function viewSettings() {
   const inflight = S.pending.length;   // (a paid payment still waiting for its change counts: Check stuck payments retries it)
   return `<section class="screen settings">
     <h2 class="h2">Settings</h2>
-    <nav class="set-index" aria-label="Settings sections">${SECTIONS.map(([id, l]) => `<button class="chip ecash" data-act="jump" data-id="${id}">${l}</button>`).join('')}</nav>
+    <nav class="set-index" aria-label="Settings sections">${SECTIONS.map(([id, l]) => `<button class="chip ecash" data-act="jump" data-id="${esc(id)}">${l}</button>`).join('')}</nav>
 
     <div class="panel" id="set-security"><span class="h2">Security</span>
       <div class="row between tiny"><span>PIN lock &amp; encryption</span><span style="color:${vault.on ? 'var(--lime)' : 'var(--gold)'}">${vault.on ? 'ON' : 'OFF'}</span></div>
@@ -6589,13 +6589,13 @@ async function sendToContactNostr(c, amount, note) {
 }
 function contactChips() {
   if (!S.contacts.length) return '';
-  return `<div class="field"><label>To a contact</label><div class="tagrow">${S.contacts.slice(0, 12).map(c => `<button class="tag" data-noi18n data-act="payContact" data-id="${c.id}">${esc(c.name)}</button>`).join('')}<button class="tag" data-act="contactsOpen">Manage</button></div></div>`;
+  return `<div class="field"><label>To a contact</label><div class="tagrow">${S.contacts.slice(0, 12).map(c => `<button class="tag" data-noi18n data-act="payContact" data-id="${esc(c.id)}">${esc(c.name)}</button>`).join('')}<button class="tag" data-act="contactsOpen">Manage</button></div></div>`;
 }
 function openContacts() {
   if (needSeed()) return;
   openSheet('Contacts', `
     <p style="margin:0">Save the people you pay. A contact can have a Lightning address, a Nostr address for sending ecash (npub or nprofile), or both. Contacts stay on this device${vault.on ? ', encrypted with your PIN' : ''}.</p>
-    ${S.contacts.length ? `<div class="txs">${S.contacts.map(c => `<div class="tx in contact"><span class="ico" aria-hidden="true">${esc(c.name.slice(0, 1).toUpperCase())}</span><span class="mid"><div class="note" data-noi18n>${esc(c.name)}</div><div class="meta">${c.ln ? `<span class="chip ln">LN</span>` : ''}${c.pubkey ? '<span class="chip ecash">NOSTR</span>' : ''}<span class="addr" data-noi18n>${esc(c.ln || (c.nostr.slice(0, 16) + '…')).replace(/([@.])/g, '$1<wbr>')}</span></div></span><span class="row cbtns"><button class="btn sm pink" data-act="payContact" data-id="${c.id}">Pay</button><button class="btn sm" data-act="contactEdit" data-id="${c.id}">Edit</button></span></div>`).join('')}</div>` : '<div class="empty-state"><b>NO CONTACTS</b>Add someone you pay often.</div>'}
+    ${S.contacts.length ? `<div class="txs">${S.contacts.map(c => `<div class="tx in contact"><span class="ico" aria-hidden="true">${esc(c.name.slice(0, 1).toUpperCase())}</span><span class="mid"><div class="note" data-noi18n>${esc(c.name)}</div><div class="meta">${c.ln ? `<span class="chip ln">LN</span>` : ''}${c.pubkey ? '<span class="chip ecash">NOSTR</span>' : ''}<span class="addr" data-noi18n>${esc(c.ln || (c.nostr.slice(0, 16) + '…')).replace(/([@.])/g, '$1<wbr>')}</span></div></span><span class="row cbtns"><button class="btn sm pink" data-act="payContact" data-id="${esc(c.id)}">Pay</button><button class="btn sm" data-act="contactEdit" data-id="${esc(c.id)}">Edit</button></span></div>`).join('')}</div>` : '<div class="empty-state"><b>NO CONTACTS</b>Add someone you pay often.</div>'}
     <button class="btn solid gold block" data-act="contactEdit">Add a contact</button>
     <div class="sub">Your ecash address</div>
     <p class="th" style="margin:0">Give this to friends so they can send you ecash over Nostr from NUTCADE or cashu.me.</p>
@@ -6608,8 +6608,8 @@ function openContactEdit(id, prefill = {}) {
     <div class="field"><label for="cName">Name</label><input id="cName" class="inp" data-noi18n maxlength="40" value="${esc(c.name)}" placeholder="Alex" autocomplete="off"></div>
     <div class="field"><label for="cLn">Lightning address (optional)</label><input id="cLn" class="inp" data-noi18n value="${esc(c.ln)}" placeholder="alex@wallet.com" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
     <div class="field"><label for="cNostr">Nostr address for ecash (optional)</label><input id="cNostr" class="inp" value="${esc(c.nostr)}" placeholder="npub1… or nprofile1…" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-    <button class="btn solid gold block" data-act="contactSave" data-id="${id || ''}">Save</button>
-    ${id ? `<button class="btn block red" data-act="contactDel" data-id="${id}">Delete contact</button>` : prefill.nostr ? `<button class="btn block" data-act="zapOpen" data-pk="${esc(prefill.nostr)}">Zap them without saving</button>` : ''}<div id="sheetErr"></div>`);
+    <button class="btn solid gold block" data-act="contactSave" data-id="${esc(id || '')}">Save</button>
+    ${id ? `<button class="btn block red" data-act="contactDel" data-id="${esc(id)}">Delete contact</button>` : prefill.nostr ? `<button class="btn block" data-act="zapOpen" data-pk="${esc(prefill.nostr)}">Zap them without saving</button>` : ''}<div id="sheetErr"></div>`);
 }
 function openPayContact(id) {
   const c = contactById(id); if (!c) return;
@@ -6620,8 +6620,8 @@ function openPayContact(id) {
     <div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
     <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Lunch"></div>
-    ${c.pubkey ? `<button class="btn solid pink block" data-act="contactEcash" data-id="${c.id}">Send ecash over Nostr</button><button class="btn block" data-act="zapContact" data-id="${c.id}">Zap <span data-noi18n>${esc(c.name)}</span></button>` : ''}
-    ${canLn ? `<button class="btn ${c.pubkey ? '' : 'solid pink'} block" data-act="contactLn" data-id="${c.id}">Pay ${esc(c.ln)}</button>` : c.ln ? `<div class="tiny muted">${esc(m.name)} can't pay Lightning. Pick another mint to pay ${esc(c.ln)}.</div>` : ''}
+    ${c.pubkey ? `<button class="btn solid pink block" data-act="contactEcash" data-id="${esc(c.id)}">Send ecash over Nostr</button><button class="btn block" data-act="zapContact" data-id="${esc(c.id)}">Zap <span data-noi18n>${esc(c.name)}</span></button>` : ''}
+    ${canLn ? `<button class="btn ${c.pubkey ? '' : 'solid pink'} block" data-act="contactLn" data-id="${esc(c.id)}">Pay ${esc(c.ln)}</button>` : c.ln ? `<div class="tiny muted">${esc(m.name)} can't pay Lightning. Pick another mint to pay ${esc(c.ln)}.</div>` : ''}
     <div id="sheetErr"></div>`);
 }
 
@@ -7039,19 +7039,19 @@ function openTx(id) {
   if (t.status === 'failed' && t.type === 'out') extra = `<div class="notice">${t.cost ? `This payment didn't go through. The ecash came back, except ${money(t.cost)} the mint kept as its fee for getting it ready.` : "This payment didn't go through. Nothing left your wallet."}</div>`;
   else if (t.method === 'fee') extra = `<div class="notice">The mint kept this fee when a payment didn't go through. The rest of the ecash came back to your wallet.</div>`;
   else if (t.status === 'pending' && t.incoming && isBlocked(t.mint)) extra = `${errHTML(blockedErr(t.mint))}<div class="tiny muted">This ecash waits here. Unblock the mint to claim it.</div>`;
-  else if (t.status === 'pending' && t.incoming && t.refused) extra = `<div class="notice">This ecash was refused while its mint was blocked. The mint is unblocked now, so you can claim it.</div><button class="btn block lime" data-act="claimIncoming" data-id="${t.id}">Claim now</button>`;
-  else if (t.status === 'pending' && t.incoming && t.offline) extra = `<div class="notice">Saved while offline. NUTCADE claims it automatically when the mint can be reached.</div><button class="btn block lime" data-act="claimIncoming" data-id="${t.id}">Claim now</button>`;
-  else if (t.status === 'pending' && t.incoming) extra = `<div class="notice">This ecash came from ${esc(host(t.mint))}, a mint you don't use yet. Claiming adds that mint and trusts it with ${money(t.amount)}.</div><button class="btn block lime" data-act="claimIncoming" data-id="${t.id}">Trust mint &amp; claim</button>`;
+  else if (t.status === 'pending' && t.incoming && t.refused) extra = `<div class="notice">This ecash was refused while its mint was blocked. The mint is unblocked now, so you can claim it.</div><button class="btn block lime" data-act="claimIncoming" data-id="${esc(t.id)}">Claim now</button>`;
+  else if (t.status === 'pending' && t.incoming && t.offline) extra = `<div class="notice">Saved while offline. NUTCADE claims it automatically when the mint can be reached.</div><button class="btn block lime" data-act="claimIncoming" data-id="${esc(t.id)}">Claim now</button>`;
+  else if (t.status === 'pending' && t.incoming) extra = `<div class="notice">This ecash came from ${esc(host(t.mint))}, a mint you don't use yet. Claiming adds that mint and trusts it with ${money(t.amount)}.</div><button class="btn block lime" data-act="claimIncoming" data-id="${esc(t.id)}">Trust mint &amp; claim</button>`;
   else if (t.status === 'pending' && t.method === 'ecash' && t.token) extra = `${t.lockUntil ? `<div class="notice cyan">Locked to ${esc(t.giftTo || 'one person')}. ${Date.now() < t.lockUntil ? `If they haven't claimed it by ${fmtDay(t.lockUntil)}, it comes back to you automatically.` : 'The lock has run out, so you can take it back.'}</div>` : ''}${qrBlock(t.token, 'Ecash token QR')}<div class="code">${esc(t.token)}</div>
-    <div class="row" style="flex-wrap:wrap"><button class="btn sm pink" data-act="copy" data-text="${esc(t.token)}">Copy token</button>${nfcOK() ? `<button class="btn sm violet" data-act="nfcWrite" data-text="${esc(t.token)}">Write to NFC</button>` : ''}${ctBtn(t.token)}<button class="btn sm" data-act="checkClaim" data-id="${t.id}">Check claimed</button>${t.lockUntil ? (Date.now() < t.lockUntil ? `<button class="btn sm" disabled>Back on ${fmtDay(t.lockUntil)}</button>` : `<button class="btn sm gold" data-act="giftTake" data-id="${t.id}">Take it back</button>`) : `<button class="btn sm gold" data-act="reclaim" data-id="${t.id}">Reclaim</button>`}</div>`;
-  else if (t.status === 'pending' && t.type === 'in' && t.method === 'ln') extra = quotePaid(S.quotes.find(x => x.quote === t.quote)) ? `<div class="notice">${PAID_COLLECTING}</div>` : `<button class="btn block lime" data-act="resumeInvoice" data-id="${t.id}">Show invoice</button>`;
-  else if (t.status === 'pending' && t.type === 'in' && t.method === 'onchain') extra = `<div class="row" style="flex-wrap:wrap"><button class="btn sm lime" data-act="resumeAddr" data-id="${t.id}">Show address</button><button class="btn sm red" data-act="stopWatch" data-id="${t.id}">Stop watching</button></div>`;
-  else if (t.status === 'pending' && t.type === 'out') extra = `<button class="btn block violet" data-act="reconcileTx" data-id="${t.id}">Check payment</button>`;
-  else if (t.changePending && t.type === 'out') extra = `<div class="notice">This payment went through. Its change (the unused fee reserve) hasn't come back from the mint yet, so the fee shown is the most it can be. NUTCADE keeps trying, and the fee drops when the change is back.</div><button class="btn block violet" data-act="reconcileTx" data-id="${t.id}">Try now</button>`;
+    <div class="row" style="flex-wrap:wrap"><button class="btn sm pink" data-act="copy" data-text="${esc(t.token)}">Copy token</button>${nfcOK() ? `<button class="btn sm violet" data-act="nfcWrite" data-text="${esc(t.token)}">Write to NFC</button>` : ''}${ctBtn(t.token)}<button class="btn sm" data-act="checkClaim" data-id="${esc(t.id)}">Check claimed</button>${t.lockUntil ? (Date.now() < t.lockUntil ? `<button class="btn sm" disabled>Back on ${fmtDay(t.lockUntil)}</button>` : `<button class="btn sm gold" data-act="giftTake" data-id="${esc(t.id)}">Take it back</button>`) : `<button class="btn sm gold" data-act="reclaim" data-id="${esc(t.id)}">Reclaim</button>`}</div>`;
+  else if (t.status === 'pending' && t.type === 'in' && t.method === 'ln') extra = quotePaid(S.quotes.find(x => x.quote === t.quote)) ? `<div class="notice">${PAID_COLLECTING}</div>` : `<button class="btn block lime" data-act="resumeInvoice" data-id="${esc(t.id)}">Show invoice</button>`;
+  else if (t.status === 'pending' && t.type === 'in' && t.method === 'onchain') extra = `<div class="row" style="flex-wrap:wrap"><button class="btn sm lime" data-act="resumeAddr" data-id="${esc(t.id)}">Show address</button><button class="btn sm red" data-act="stopWatch" data-id="${esc(t.id)}">Stop watching</button></div>`;
+  else if (t.status === 'pending' && t.type === 'out') extra = `<button class="btn block violet" data-act="reconcileTx" data-id="${esc(t.id)}">Check payment</button>`;
+  else if (t.changePending && t.type === 'out') extra = `<div class="notice">This payment went through. Its change (the unused fee reserve) hasn't come back from the mint yet, so the fee shown is the most it can be. NUTCADE keeps trying, and the fee drops when the change is back.</div><button class="btn block violet" data-act="reconcileTx" data-id="${esc(t.id)}">Try now</button>`;
   openSheet(t.method === 'fee' ? 'Mint fee' : t.type === 'in' ? 'Received' : 'Sent', `
     <div class="credit-num${moved ? '' : ' void'}" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${moved ? (t.type === 'in' ? '+' : '-') : ''}${head ? fmt(head) : '…'}<small>${unitTag()}</small></div>
     <div class="field"><label for="noteEdit">Note</label><textarea id="noteEdit" class="inp" maxlength="500" placeholder="What was this for?">${esc(noteText(t.note))}</textarea></div>
-    <button class="btn solid gold block" data-act="saveNote" data-id="${t.id}">Save note</button>
+    <button class="btn solid gold block" data-act="saveNote" data-id="${esc(t.id)}">Save note</button>
     <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(TX_STATUS[t.status] || t.status)}</dd>${t.fee && t.method !== 'fee' ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
     <dt>Mint</dt><dd data-noi18n>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd data-noi18n>${fmtDate(t.ts, true)}</dd>
     ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.nwcName ? `<dt>App</dt><dd data-noi18n>${esc(t.nwcName)}</dd>` : ''}${t.lnurlw ? `<dt>Voucher</dt><dd data-noi18n>${esc(t.lnurlw)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.print ? `<dt>Printed token</dt><dd data-noi18n>#${esc(t.print.code)}</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
@@ -7070,7 +7070,7 @@ function openRequest() {
     ${S.mints.length ? `<label class="toggle" for="onlyMine"><span><span class="tl">Only from my mints</span><span class="th">The payer must use one of the mints you use, so you never get ecash from a mint you don't trust.</span></span><input id="onlyMine" type="checkbox" checked></label>` : ''}
     <button class="btn solid lime block" data-act="reqCreate">Create request</button>
     <button class="btn block pink" data-act="splitOpen">Split a bill with friends instead</button>
-    ${recent.length ? `<div class="sub">Recent requests</div><div class="txs">${recent.map(r => `<button class="tx in" data-act="reqShow" data-id="${r.id}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note ${r.memo ? '' : 'empty'}">${esc(r.memo || 'No description')}</div><div class="meta"><span>${timeAgo(r.created)}</span>${r.paid.length ? `<span class="chip claimed">PAID ×${r.paid.length}</span>` : ''}</div></span><span class="amt">${r.amount ? fmt(r.amount) : esc(tr('ANY'))}</span></button>`).join('')}</div>` : ''}
+    ${recent.length ? `<div class="sub">Recent requests</div><div class="txs">${recent.map(r => `<button class="tx in" data-act="reqShow" data-id="${esc(r.id)}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note ${r.memo ? '' : 'empty'}">${esc(r.memo || 'No description')}</div><div class="meta"><span>${timeAgo(r.created)}</span>${r.paid.length ? `<span class="chip claimed">PAID ×${r.paid.length}</span>` : ''}</div></span><span class="amt">${r.amount ? fmt(r.amount) : esc(tr('ANY'))}</span></button>`).join('')}</div>` : ''}
     <div id="sheetErr"></div>`);
 }
 function showRequest(r) {
@@ -8468,20 +8468,20 @@ const CHEST = ['..yyyyyyyy..', '.ybbbbbbbby.', 'ybbbbbbbbbby', 'yyyyyyyyyyyy', '
 const chestSVG = open => `<svg class="chest ${open ? 'open' : ''}" viewBox="0 0 12 8" width="96" height="64" aria-hidden="true">${CHEST.map((r, y) => [...r].map((ch, x) => ch === '.' ? '' : `<rect x="${x}" y="${y}" width="1" height="1" fill="${ch === 'y' ? 'var(--gold)' : open ? '#3a2410' : 'var(--brown,#b8651f)'}"/>`).join('')).join('')}</svg>`;
 function openHunt(pub) {
   const f = foundOf(pub); if (!f) return;
-  const got = Object.keys(f.shares).length, need = f.k;
-  const pips = Array.from({ length: f.n }, (_, i) => `<span class="pip ${f.shares[i + 1] ? 'on' : ''}">${i + 1}</span>`).join('');
+  const got = Object.keys(f.shares).length, need = +f.k | 0;
+  const pips = Array.from({ length: Math.min(+f.n | 0, 12) }, (_, i) => `<span class="pip ${f.shares[i + 1] ? 'on' : ''}">${i + 1}</span>`).join('');
   const state = f.state === 'won' ? `<div class="hunt-big lime">TREASURE!</div><div class="tiny">${money(f.amount || 0)} landed in your wallet.</div>`
     : f.state === 'gone' ? '<div class="hunt-big pink">TOO LATE</div><div class="tiny">Someone opened this chest first.</div>'
     : f.state === 'bad' ? '<div class="hunt-big pink">WRONG CARDS</div><div class="tiny">These cards don\'t rebuild the same key.</div>'
     : f.state === 'opening' ? busyHTML('OPENING THE CHEST')
     : `<div class="hunt-big">CLUE ${Math.min(got, need)}/${need}</div><div class="tiny">${got >= need ? 'All the clues you need!' : `Find ${need - got} more clue card${need - got > 1 ? 's' : ''} to open the chest.`}</div>`;
   const body = `<div class="hunt" data-hunt>${chestSVG(f.state === 'won')}${state}
-    ${f.n > 1 ? `<div class="pips" aria-label="${got} of ${f.n} cards found">${pips}</div>` : ''}
+    ${(+f.n | 0) > 1 ? `<div class="pips" aria-label="${got} of ${+f.n | 0} cards found">${pips}</div>` : ''}
     ${f.amount ? `<div class="tiny muted">Prize: ${money(f.amount)}${f.until ? ` · until ${fmtDay(f.until)}` : ''}</div>` : ''}${f.note ? `<div class="notice" data-noi18n>${esc(f.note)}</div>` : ''}
-    ${f.state === 'hunting' && got >= need ? `<button class="btn solid gold block" data-act="huntOpen" data-pub="${pub}">Open the chest</button>` : ''}
+    ${f.state === 'hunting' && got >= need ? `<button class="btn solid gold block" data-act="huntOpen" data-pub="${esc(pub)}">Open the chest</button>` : ''}
     ${f.state === 'hunting' && got < need ? '<button class="btn block violet" data-act="scan">Scan the next clue</button>' : ''}
     <div id="sheetErr"></div></div>`;
-  if ($('#layer [data-hunt]')) setBody(body); else openSheet(f.n === 1 ? 'Loaded card' : 'Treasure hunt', body);
+  if ($('#layer [data-hunt]')) setBody(body); else openSheet((+f.n | 0) === 1 ? 'Loaded card' : 'Treasure hunt', body);
 }
 
 /* ---------- making a hunt ---------- */
@@ -8498,7 +8498,7 @@ function openHuntNew() {
     <button class="btn solid gold block" data-act="huntCreate">Hide the treasure</button><div id="sheetErr"></div>`);
 }
 function huntCardsHTML(h) {
-  return `<div class="hunt-cards">${h.cards.map((u, i) => `<div class="hunt-card"><div class="hc-top"><b>CLUE ${i + 1} OF ${h.n}</b><span>${h.k === h.n ? 'You need every card' : `Any ${h.k} open the chest`}</span></div>
+  return `<div class="hunt-cards">${h.cards.map((u, i) => `<div class="hunt-card"><div class="hc-top"><b>CLUE ${i + 1} OF ${+h.n | 0}</b><span>${h.k === h.n ? 'You need every card' : `Any ${+h.k | 0} open the chest`}</span></div>
     ${qrBlock(u, `Clue card ${i + 1}`)}<div class="hc-prize">${money(h.amount)} TREASURE</div>${h.note ? `<div class="hc-note" data-noi18n>${esc(h.note)}</div>` : ''}<div class="hc-foot">Scan with your phone camera · NUTCADE</div></div>`).join('')}</div>`;
 }
 function openHuntCards(pub) {
@@ -8519,8 +8519,8 @@ function huntsPanel() {
   if (!mine.length && !found.length) return '';
   const st = h => { const t = txById(h.txId); return !t ? '' : h.unpub && t.status === 'pending' ? '<span class="chip pending">WAITING FOR A RELAY</span>' : t.status === 'claimed' ? '<span class="chip ecash">OPENED</span>' : t.status === 'reclaimed' ? '<span class="chip claimed">CAME BACK</span>' : `<span class="chip pending">${h.k} OF ${h.n}</span>`; };
   return `<div class="panel"><span class="h2">Treasure hunts</span><div class="txs">
-    ${mine.map(h => `<button class="tx out" data-act="huntCards" data-pub="${h.pub}"><span class="ico" aria-hidden="true">✦</span><span class="mid"><div class="note">${esc(tr('Your hunt'))}</div><div class="meta">${st(h)}</div></span><span class="amt">${fmt(h.amount)}</span></button>`).join('')}
-    ${found.map(([pub, f]) => `<button class="tx in" data-act="huntShow" data-pub="${pub}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note">${esc(tr('Hunting'))}</div><div class="meta"><span class="chip ln">CLUE ${Object.keys(f.shares).length}/${f.k}</span></div></span><span class="amt">${f.amount ? fmt(f.amount) : '???'}</span></button>`).join('')}
+    ${mine.map(h => `<button class="tx out" data-act="huntCards" data-pub="${esc(h.pub)}"><span class="ico" aria-hidden="true">✦</span><span class="mid"><div class="note">${esc(tr('Your hunt'))}</div><div class="meta">${st(h)}</div></span><span class="amt">${fmt(h.amount)}</span></button>`).join('')}
+    ${found.map(([pub, f]) => `<button class="tx in" data-act="huntShow" data-pub="${esc(pub)}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note">${esc(tr('Hunting'))}</div><div class="meta"><span class="chip ln">CLUE ${Object.keys(f.shares).length}/${+f.k | 0}</span></div></span><span class="amt">${f.amount ? fmt(f.amount) : '???'}</span></button>`).join('')}
   </div></div>`;
 }
 
@@ -9384,7 +9384,7 @@ function pinChangeRefuse() { pinChangeUse(true); return pinChangeErr(); }
 async function realOpens(pin) { const rec = raw.get('vault', {}); try { await unwrapDek(rec.pin, await kekFromPin(pin, b64d(rec.kdf.salt), rec.kdf.iter)); return true; } catch (e) { return false; } }
 const randBox = n => ({ iv: b64e(rnd(12)), ct: b64e(rnd(n)) });
 // an unused second part: random bytes shaped like a real one (salt, wrapped key, a small wallet's data)
-function fillerSlot() { return { kdf: { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(rnd(16)) }, pin: randBox(48), data: randBox(1800 + Math.floor(Math.random() * 2400)) }; }
+function fillerSlot() { return { kdf: { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(rnd(16)) }, pin: randBox(48), data: randBox(1800 + ((r => (r[0] << 8 | r[1]) % 2400)(rnd(2)))) }; }
 // one PIN try: both parts, always, in parallel
 async function pinToKeys(pin) {
   const rec = raw.get('vault'), slot = rec.slot;
@@ -11378,8 +11378,8 @@ async function importBackup(d) {
   for (const h of d.heirlooms || []) if (h && h.token && !S.heirlooms.find(x => x.token === h.token)) { S.heirlooms.push(h); if (h.state === 'waiting') settle.heirlooms.push(h.token); } saveHeir();
   // (a bounty whose challenge the backup's device hadn't sent yet is sent from here only as the very message it kept)
   for (const c of d.challenges || []) if (c && !S.challenges.find(x => x.id === c.id && x.dir === c.dir)) { for (const x of c.bounties || []) if (x && x.unsent && !x.wrap) delete x.unsent; S.challenges.push(c); if (c.dir === 'in' && c.bounty) settle.chals.push(c.id); } saveChallenges();
-  for (const h of d.hunts || []) if (!S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
-  for (const k in d.found || {}) if (!S.found[k]) S.found[k] = d.found[k]; saveFound();
+  for (const h of d.hunts || []) if (h && /^[0-9a-f]{64}$/.test(h.pub) && !S.hunts.find(x => x.pub === h.pub)) S.hunts.push(h); saveHunts();
+  for (const k in d.found || {}) if (/^[0-9a-f]{64}$/.test(k) && !S.found[k]) S.found[k] = d.found[k]; saveFound();
   for (const x of Array.isArray(d.blocked) ? d.blocked : []) if (x && typeof x.url === 'string' && /^https?:/i.test(x.url) && !isBlocked(x.url)) S.blocked.push({ url: normUrl(x.url), name: String(x.name || host(x.url)).slice(0, 60), at: +x.at || Date.now() }); saveBlocked();
   if (!S.active && S.mints[0]) S.active = S.mints[0].url;
   save();

@@ -230,7 +230,7 @@ function pinChangeRefuse() { pinChangeUse(true); return pinChangeErr(); }
 async function realOpens(pin) { const rec = raw.get('vault', {}); try { await unwrapDek(rec.pin, await kekFromPin(pin, b64d(rec.kdf.salt), rec.kdf.iter)); return true; } catch (e) { return false; } }
 const randBox = n => ({ iv: b64e(rnd(12)), ct: b64e(rnd(n)) });
 // an unused second part: random bytes shaped like a real one (salt, wrapped key, a small wallet's data)
-function fillerSlot() { return { kdf: { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(rnd(16)) }, pin: randBox(48), data: randBox(1800 + Math.floor(Math.random() * 2400)) }; }
+function fillerSlot() { return { kdf: { alg: 'PBKDF2-SHA256', iter: PBKDF2_ITER, salt: b64e(rnd(16)) }, pin: randBox(48), data: randBox(1800 + ((r => (r[0] << 8 | r[1]) % 2400)(rnd(2)))) }; }
 // one PIN try: both parts, always, in parallel
 async function pinToKeys(pin) {
   const rec = raw.get('vault'), slot = rec.slot;
