@@ -71,6 +71,8 @@ jobs:
             suites: storage
           - name: sendall
             suites: sendall
+          - name: backup
+            suites: backup
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out

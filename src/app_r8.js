@@ -179,7 +179,8 @@ const GUARD = {
   nwcEdit: ['Wallet Connect', 'Enter your PIN to change this connection.'],
   reset: ['Reset wallet', 'Enter your PIN to reset this wallet.'],
   export: ['Export ecash', 'Enter your PIN to export your ecash.'],
-  newseed: ['New recovery phrase', 'Enter your PIN to make a new recovery phrase.']
+  newseed: ['New recovery phrase', 'Enter your PIN to make a new recovery phrase.'],
+  phone: ['Back up with my phone', 'Enter your PIN to back up your 12 words with your phone.']
 };
 const guard = { run: null, pass: null };
 const guardOn = () => !!(vault.on && vault.open && (S.seed || totalBalance() > 0));

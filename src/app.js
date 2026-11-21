@@ -2372,6 +2372,7 @@ function viewGate() {
       <label class="ack" for="ack"><input id="ack" type="checkbox" data-gatecheck="ack"><span>I understand NUTCADE is new, experimental software, that mints hold the Bitcoin behind my ecash, and that my 12 words are the only way to recover my sats.</span></label>
       <button class="btn solid gold block" data-act="gateCreate" data-needs="ack" disabled>Create a new wallet</button>
       <button class="btn block" data-act="gateRestore" data-needs="ack" disabled>Restore from recovery phrase</button>
+      <button class="btn block violet" data-act="gatePhone" data-needs="ack" data-phonecap disabled ${phoneCap ? '' : 'hidden'}>Restore with my phone</button>
     </div></section>`;
   const words = S.seed.mnemonic.split(' ');
   if (gate.step === 'show') return `<section class="screen">
@@ -2430,7 +2431,8 @@ function openRestore() {
   const urls = [...new Set(S.mints.map(m => m.url).concat(curated.map(c => c.url)))];
   openSheet('Restore wallet', `
     ${S.seed ? `<div class="notice">This replaces your current wallet with the one from these 12 words.${totalBalance() ? ` The ${money(totalBalance())} here moves into the restored wallet, so nothing is lost.` : ''} Write down your current words first if you might want this wallet back.</div>` : '<div class="th">Use the 12 words from a previous NUTCADE or another Cashu wallet like cashu.me.</div>'}
-    <div class="field"><label for="phraseIn">Your 12 words</label><textarea id="phraseIn" class="inp" placeholder="word1 word2 word3 …" autocomplete="off" autocapitalize="off" spellcheck="false" data-input="phrase"></textarea><div id="phraseOk" class="tiny muted">Separate words with spaces.</div></div>
+    <button class="btn block violet" data-act="phoneRestore" data-phonecap ${phoneCap ? '' : 'hidden'}>Restore with my phone</button>
+    <div class="field" id="phraseField"><label for="phraseIn">Your 12 words</label><textarea id="phraseIn" class="inp" placeholder="word1 word2 word3 …" autocomplete="off" autocapitalize="off" spellcheck="false" data-input="phrase"></textarea><div id="phraseOk" class="tiny muted">Separate words with spaces.</div></div>
     <div class="field"><div class="row between"><label>Mints to scan</label><button class="btn sm violet" data-act="findMints">Find my mints on Nostr</button></div><div id="nostrMints" class="tiny muted"></div><div class="txs" id="rmList">${urls.map((u, i) => `<label class="toggle" for="rm${i}" style="font-size:19px"><span style="overflow-wrap:anywhere;min-width:0" data-noi18n>${esc(host(u))}</span><input id="rm${i}" type="checkbox" data-rmint="${esc(u)}" ${S.mints.find(m => m.url === u) ? 'checked' : ''}></label>`).join('')}</div></div>
     <div class="field"><label for="rmExtra">Other mint addresses (one per line)</label><textarea id="rmExtra" class="inp" data-noi18n placeholder="https://mint.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea></div>
     <button class="btn solid gold block" data-act="doRestorePhrase">Restore</button>
@@ -2660,7 +2662,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.22.3';
+const APP_VERSION = '1.23.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -2698,7 +2700,10 @@ function viewSettings() {
       <div class="sub">Backup file</div>
       <p class="th" style="margin:0">Your phrase, ecash, notes and history in one file. Anyone with it can spend your sats.</p>
       ${backupFileRow()}
+      <p class="th" style="margin:0">It also holds your contacts, settings, trophies and arcade progress.</p>
+      <label class="toggle set" for="bkLock"><span><span class="tl">Protect with a password</span><span class="th">The file can only be opened with the password you choose.</span></span><input id="bkLock" type="checkbox" ${bkLockOn ? 'checked' : ''}></label>
       <div class="row wrap"><button class="btn sm gold" data-act="backupDownload">Download backup</button><button class="btn sm" data-act="restore">Import backup</button></div>
+      ${phonePanel()}
       <div class="sub">Restore a wallet</div>
       <p class="th" style="margin:0">Moving from another wallet? Use the 12 words from a previous NUTCADE or another Cashu wallet like cashu.me. Any sats in this wallet move into the restored one.</p>
       <button class="btn sm gold" data-act="seedRestore">Restore wallet from 12 words</button>
@@ -2821,14 +2826,14 @@ function relayPublish(ev, timeout = 7000, list = relays()) {
 }
 function relayQuery(filter, timeout = 7000, list = relays()) {
   return new Promise(res => {
-    const out = new Map(); let left = 0; const socks = []; let fin = false;
-    const end = () => { if (fin) return; fin = true; socks.forEach(s => { try { s.close(); } catch (e) {} }); res([...out.values()]); };
+    const out = new Map(); let left = 0, answered = 0; const socks = []; let fin = false;   // (answered: relays that finished the query)
+    const end = () => { if (fin) return; fin = true; socks.forEach(s => { try { s.close(); } catch (e) {} }); res(Object.assign([...out.values()], { answered })); };
     for (const r of list) {
       let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
       socks.push(ws); left++;
       const drop = () => { if (ws._done) return; ws._done = true; if (--left <= 0) end(); };
       ws.onopen = () => ws.send(JSON.stringify(['REQ', 'nc', filter]));
-      ws.onmessage = m => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } if (d[0] === 'EVENT' && d[2] && d[2].id) out.set(d[2].id, d[2]); else if (d[0] === 'EOSE' || d[0] === 'CLOSED') { try { ws.close(); } catch (e) {} drop(); } };
+      ws.onmessage = m => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } if (d[0] === 'EVENT' && d[2] && d[2].id) out.set(d[2].id, d[2]); else if (d[0] === 'EOSE' || d[0] === 'CLOSED') { if (d[0] === 'EOSE') answered++; try { ws.close(); } catch (e) {} drop(); } };
       ws.onerror = drop; ws.onclose = drop;
     }
     if (!left) end();
@@ -3907,6 +3912,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_arrive.js@@*/
 /*@@app_trust.js@@*/
 /*@@app_sendall.js@@*/
+/*@@app_backup.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4046,6 +4052,7 @@ async function importBackup(d) {
   for (const k in d.found || {}) { const f = d.found[k]; if (/^[0-9a-f]{64}$/.test(k) && f && typeof f === 'object' && cardNums(f) && f.shares && typeof f.shares === 'object' && typeof f.state === 'string' && !S.found[k]) S.found[k] = f; } saveFound();
   for (const x of Array.isArray(d.blocked) ? d.blocked : []) if (x && typeof x.url === 'string' && /^https?:/i.test(x.url) && !isBlocked(x.url)) S.blocked.push({ url: normUrl(x.url), name: String(x.name || host(x.url)).slice(0, 60), at: +x.at || Date.now() }); saveBlocked();
   if (!S.active && S.mints[0]) S.active = S.mints[0].url;
+  importExtras(d);   // contacts, settings, trophies and arcade progress (nothing about money)
   save();
   settleImported(settle);
   return late;
@@ -4079,7 +4086,16 @@ function importsPanel() {
    outputs and secrets, so the wallet restored from this backup settles it there. Settling is by secret at the mint, so
    the same step settled on both devices gives the same coins, never two sets. */
 const showBackupText = data => openSheet('Backup', `<div class="notice red">This contains your recovery phrase and spendable ecash. Keep it private.</div><div class="code" style="max-height:200px">${esc(data)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(data)}">Copy backup</button>`);
-const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: S.txs, p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: S.imports, quotes: S.quotes, requests: S.requests }, null, 1);
+// Reset wallet: every record of the wallet goes (see doReset)
+function wipeWallet() {
+  // the vault is closed first, so nothing written below can land in it (or bring it back); then every record of the
+  // wallet goes, with the PIN, its tries and changes, and only the device's own settings and arcade tables stay
+  vault.on = false; vault.open = false; vault.decoy = false; vault.dek = null; vault.data = {};
+  try { for (const k of Object.keys(localStorage)) { if (!k.startsWith('nutcade:')) continue; const n = k.slice(8); if (n === 'prefs' || (devKey(n) && !/^(vault|pinfails|pinchg|gen)$/.test(n))) continue; localStorage.removeItem(k); } } catch (e) {}
+  try { npcSocketStop(); dmStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
+  location.reload();
+}
+const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: bkTxs(), p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: bkImports(), quotes: S.quotes, requests: S.requests, contacts: S.contacts, settings: bkSettings(), trophies: bkTrophies(), plays: store.get('plays', null), arcade: bkArcade() }, null, 1);
 const A = {
   close: () => closeSheet(),
   tab: b => { if (tab === 'history' && b.dataset.tab !== 'history') { histFilter = 'all'; histQuery = ''; histTag = ''; } tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); sfx('blip'); },
@@ -4158,6 +4174,11 @@ const A = {
   doRestore: b => !guardHeld('import') ? closeSheet() : run(b, 'CHECKING', async () => {
     let d; try { d = JSON.parse(val('restoreIn')); } catch (e) { throw new Error("That isn't valid backup text."); }
     if (!d || d.app !== 'nutcade') throw new Error('Not a NUTCADE backup.');
+    if (isLocked(d)) {   // (a locked file: its password first; a wrong one changes nothing)
+      if (!restorePwField()) return;
+      const pw = val('restorePw'); if (!pw) throw new Error("Type the backup's password.");
+      d = await unlockBackup(d, pw); const i = $('#restorePw'); if (i) i.value = '';
+    }
     const waiting = await importBackup(d);
     closeSheet(); render();
     toast(waiting.length ? `Backup restored. Waiting to check with ${waiting.map(u => (S.mints.find(m => m.url === u) || {}).name || host(u)).join(', ')}.` : 'Backup restored.', waiting.length ? 'gold' : 'lime');
@@ -4280,12 +4301,10 @@ const A = {
   jump: b => { const el = document.getElementById(b.dataset.id); if (el) el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); },
   setTheme: b => { S.prefs.theme = b.dataset.t; save(); refresh(); sfx('select'); },
   backupDownload: () => pinGuard('backup', () => {
+    if (bkLockOn) return openLockSheet();   // ("Protect with a password": the password first, then the locked file)
     const data = backupData();
-    try {
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
-      a.download = `nutcade-backup-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 4000); S.prefs.backupFileAt = Date.now(); save(); if (tab === 'settings' && !$('#layer .sheet')) refresh(); toast('Backup file downloaded. Keep it private.', 'lime');
-    } catch (e) { showBackupText(data); }
+    try { saveBackupFile(data); if (tab === 'settings' && !$('#layer .sheet')) refresh(); toast('Backup file downloaded. Keep it private.', 'lime'); }
+    catch (e) { showBackupText(data); }
   }),
   sweepOpen: () => {
     const urls = [...new Set(S.mints.map(m => m.url).concat(CURATED.filter(c => !c.test).map(c => c.url)))];
@@ -4339,12 +4358,11 @@ const A = {
     if (!guardHeld('reset')) { closeSheet(); return; }   // (Forgot PIN on the lock screen: the wallet isn't open, nothing to ask)
     if (val('confirmWord').trim().toUpperCase() !== 'RESET') { showErr(new Error('Type RESET to confirm.')); return; }
     if (vault.on && vault.open && vault.decoy) { resetPart().then(() => location.reload(), e => showErr(e)); return; }   // (the duress PIN's wallet is emptied; the real wallet is never touched)
-    // the vault is closed first, so nothing written below can land in it (or bring it back); then every record of the
-    // wallet goes, with the PIN, its tries and changes, and only the device's own settings and arcade tables stay
-    vault.on = false; vault.open = false; vault.decoy = false; vault.dek = null; vault.data = {};
-    try { for (const k of Object.keys(localStorage)) { if (!k.startsWith('nutcade:')) continue; const n = k.slice(8); if (n === 'prefs' || (devKey(n) && !/^(vault|pinfails|pinchg|gen)$/.test(n))) continue; localStorage.removeItem(k); } } catch (e) {}
-    try { npcSocketStop(); dmStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
-    location.reload();
+    // a phone backup made here: its copy on the relays is replaced by an empty one and a deletion is asked for, first
+    // (a few seconds at most; a relay that is down keeps its locked copy, see the README)
+    const pb = pbRec();
+    if (pb) { const btn = $('[data-act=doReset]'); if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner">RESETTING</span>'; } pbErase(pb, 4000).catch(() => 0).then(() => { pbForgetPasskey(pb.credId); wipeWallet(); }); return; }
+    wipeWallet();
   },
   swapToken: b => run(b, 'SWAPPING', async () => {
     const r = await swapIn(val('tokIn'), val('noteIn').trim());
@@ -4459,6 +4477,7 @@ const A = {
 /*@@app_arrive_actions.js@@*/
 /*@@app_trust_actions.js@@*/
 /*@@app_sendall_actions.js@@*/
+/*@@app_backup_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;
@@ -4477,7 +4496,8 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => {
   const b = e.target.closest('[data-act="pref"]'); if (b) A.pref(b);
   if (e.target.id === 'scanFile' && e.target.files[0]) scanPhoto(e.target.files[0]);
-  if (e.target.id === 'restoreFile' && e.target.files[0]) { const nm = $('#restoreFileName'); if (nm) { nm.textContent = e.target.files[0].name; nm.setAttribute('data-noi18n', ''); } e.target.files[0].text().then(t => { const box = $('#restoreIn'); if (box) box.value = t; }).catch(() => {}); }
+  if (e.target.id === 'restoreFile' && e.target.files[0]) { const nm = $('#restoreFileName'); if (nm) { nm.textContent = e.target.files[0].name; nm.setAttribute('data-noi18n', ''); } e.target.files[0].text().then(t => { const box = $('#restoreIn'); if (box) { box.value = t; restorePwField(); } }).catch(() => {}); }
+  if (e.target.id === 'bkLock') bkLockOn = e.target.checked;
   const sel = e.target.closest('[data-act="prefSelect"]'); if (sel) { S.prefs[sel.dataset.k] = sel.dataset.k === 'lockAfter' ? +sel.value : sel.value; save(); if (sel.dataset.k === 'lockAfter') { armAutoLock(); return; } if (sel.dataset.k === 'lang') { setLang(); refresh(); return; } if (sel.dataset.k === 'piggyStep') { S.prefs.piggyStep = +sel.value; save(); refresh(); return; } price = { rate: null, at: 0, cur: null }; fetchPrice(true); }
   if (e.target.id === 'nwcPer') { const f = $('#nwcAmtF'); if (f) f.hidden = e.target.value === 'none'; }
   if (e.target.id === 'giftOn') { const box = $('#giftBox'); if (box) box.hidden = !e.target.checked; sfx('blip'); }
@@ -4597,6 +4617,7 @@ function readHashLink() { try { const h = decodeURIComponent(location.hash || ''
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
 window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON }, storage: { health: () => ({ bad: saveBad(), keys: [...saveHealth.failed.keys()], told: saveHealth.told }), pct: () => usePct(), bytes: () => useBytes(), check: () => useCheck(), level: () => useLevel } };
+window.Nutcade.bk = { cap: () => phoneCapCheck(), rec: () => pbRec(), fetch: () => phoneFetch(), lock: (t, p) => lockBackup(t, p), unlock: (d, p) => unlockBackup(d, p), extras: d => importExtras(d) };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */
 try { if ('serviceWorker' in navigator && window.top === window.self && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}
