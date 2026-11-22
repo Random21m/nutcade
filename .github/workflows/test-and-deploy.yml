@@ -81,6 +81,8 @@ jobs:
             suites: remind
           - name: nutzap
             suites: nutzap
+          - name: p2bk
+            suites: p2bk
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out

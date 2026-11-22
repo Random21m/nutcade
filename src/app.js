@@ -78,7 +78,7 @@ function useScan() {
 }
 useScan();
 // the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
-const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub'];
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'p2bk'];
 const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const walletPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const inVault = k => vault.on && !devKey(k);
@@ -938,7 +938,11 @@ async function sendEcashNow(amount, note, lockTo, url, opts) {
     finally { hold.release(); }
   }
   if (sum(S.proofs[url] || []) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
-  const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}) }, keep: w.defaultOutputType() } : undefined;
+  // Pay to Blinded Key (app_p2bk.js): a gift, bounty or nutzap (opts.blind) locks blinded keys while the setting is on. Only
+  // here, where the lock is built: blindKeys blinds the receiver's key and our refund key together, never one of them alone
+  const blind = !!(lockTo && opts.blind && p2bkOn());
+  if (blind) opts = Object.assign({}, opts, { txx: Object.assign({}, opts.txx || {}, { blinded: true }) });   // (on the line and on its journal record)
+  const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}, blind ? { blindKeys: true } : {}) }, keep: w.defaultOutputType() } : undefined;
   // the spending limit, with the most this can take: the swap's own numbers, fees included
   if (belowMin(url) && !opts.noBatch) {   // (a mint that dropped below the minimum: its sats can still leave, in steps)
     if (opts.pick) throw minErr(url);   // (tokens: coins fixed by the caller at a cost already shown are never made another, dearer way: a printed token stops here)
@@ -1616,7 +1620,7 @@ function setLang() {
 
 /* ---------- sound ---------- */
 const PREF_DEFAULTS = { sound: true, music: true, crt: true, theme: 'neon', btcSymbol: false, fiat: true, currency: 'USD',
-  checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100, ksAuto: true, mintRadar: false, remind: true, nutzap: false };
+  checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100, ksAuto: true, mintRadar: false, remind: true, nutzap: false, p2bk: false };
 for (const k in PREF_DEFAULTS) if (S.prefs[k] === undefined) S.prefs[k] = PREF_DEFAULTS[k];
 S.p2pk = store.get('p2pk', []);   // [{pub, priv, created, used}]
 S.requests = store.get('requests', []);
@@ -2670,7 +2674,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.28.0';
+const APP_VERSION = '1.29.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -2755,6 +2759,7 @@ function viewSettings() {
       ${toggle('checkSent', 'Check if sent ecash was claimed', 'Asks your mints in the background. Turn off to contact them less.')}
       ${toggle('nostrInbox', 'Receive ecash sent over Nostr', 'Listens on Nostr relays for ecash friends send to your ecash address. Requests you made still arrive for 30 days when this is off.')}
       ${nzSettingsHTML()}
+      ${p2bkSettingsHTML()}
       ${toggle('mintRadar', 'Show mint reliability', "Asks MintRadar (mintradar.org) for its public list of mint health, so MintRadar sees your phone's internet address. It does not learn which mints you use: NUTCADE downloads the whole list and compares it on this phone. It is an operational health signal, not a statement that a mint holds your sats or is safe to deposit into. Off by default.")}
     </div>
 
@@ -3152,7 +3157,8 @@ function onGiftWrap(ev) {
 async function receivePayload(p, from) {
   if ((p.unit || 'sat') !== 'sat') return;
   const mint = normUrl(p.mint);
-  const proofs = p.proofs.map(x => Object.assign({}, x, { amount: num(x.amount) }));
+  if (p.proofs.some(x => !x || (x.p2pk_e !== undefined && !p2bkE(x.p2pk_e)))) return;   // (a blinded lock's E must be a point: app_p2bk.js)
+  const proofs = p.proofs.map(x => Object.assign({}, x, { amount: num(x.amount) }, x.p2pk_e !== undefined ? { p2pk_e: p2bkE(x.p2pk_e) } : {}));
   const token = L.getEncodedToken({ mint, proofs, unit: 'sat' });
   if (S.txs.some(t => t.token === token || t.incoming === token)) return;
   const req = S.requests.find(r => r.id && r.id === p.id);
@@ -3808,7 +3814,7 @@ function openTx(id) {
     <button class="btn solid gold block" data-act="saveNote" data-id="${esc(t.id)}">Save note</button>
     <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(TX_STATUS[t.status] || t.status)}</dd>${t.fee && t.method !== 'fee' ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
     <dt>Mint</dt><dd data-noi18n>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd data-noi18n>${fmtDate(t.ts, true)}</dd>
-    ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.nwcName ? `<dt>App</dt><dd data-noi18n>${esc(t.nwcName)}</dd>` : ''}${t.lnurlw ? `<dt>Voucher</dt><dd data-noi18n>${esc(t.lnurlw)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.print ? `<dt>Printed token</dt><dd data-noi18n>#${esc(t.print.code)}</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${nzTxRow(t)}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
+    ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.nwcName ? `<dt>App</dt><dd data-noi18n>${esc(t.nwcName)}</dd>` : ''}${t.lnurlw ? `<dt>Voucher</dt><dd data-noi18n>${esc(t.lnurlw)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.print ? `<dt>Printed token</dt><dd data-noi18n>#${esc(t.print.code)}</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${nzTxRow(t)}${t.blinded ? '<dt>Receiver</dt><dd>Hidden in the ecash (P2BK)</dd>' : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
     ${extra}${t.print ? '<button class="btn block" data-act="ptList">Printed tokens</button>' : ''}<div id="sheetErr"></div>`);   // tokens
 }
 
@@ -3941,6 +3947,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_dleq.js@@*/
 /*@@app_remind.js@@*/
 /*@@app_nutzap.js@@*/
+/*@@app_p2bk.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every

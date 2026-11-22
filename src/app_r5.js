@@ -46,7 +46,7 @@ async function createBounty(c, k, amount) {
   if (!(await mintCan(S.active, 14))) throw new Error(`${host(S.active)} can't lock sats to a secret (NUT-14). Pick another mint for bounties.`);
   const pre = rnd(32), H = await sha256hex(pre), until = Math.floor(Date.now() / 1000 + ((window.__nutcadeTest && __nutcadeTest.bountySecs) || BOUNTY_DAYS * 86400));
   const g = gameById(c.game);
-  const tx = await sendEcash(amount, `Bounty for ${k.name}: beat ${pad6(c.score)} on ${g ? g.name : c.game}`, '02' + k.pubkey, S.active, { locktime: until, hashlock: H, txx: { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name },
+  const tx = await sendEcash(amount, `Bounty for ${k.name}: beat ${pad6(c.score)} on ${g ? g.name : c.game}`, '02' + k.pubkey, S.active, { locktime: until, hashlock: H, blind: true, txx: { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name },
     follow: { k: 'bounty', chal: c.id, contact: k.id, b: { to: k.pubkey, name: k.name, pre: hex(pre), H, amount, until: until * 1000 } } });
   updTx(tx.id, { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name, bounty: c.id });
   c.bounties = (c.bounties || []).concat([{ to: k.pubkey, name: k.name, txId: tx.id, pre: hex(pre), H, amount, until: until * 1000, state: 'open' }]);
@@ -88,7 +88,9 @@ async function readBounty(bo, rec) {
     for (const p of d.proofs) {
       const sec = JSON.parse(p.secret); if (sec[0] !== 'HTLC') return null;
       const keys = ((sec[1].tags || []).find(t => t[0] === 'pubkeys') || []).slice(1);
-      if (!keys.includes(myLockPub())) return null;
+      // our key, or (Pay to Blinded Key, app_p2bk.js) our key blinded with the coin's E: the "pubkeys" keys are slots 1, 2...
+      const E = p.p2pk_e === undefined ? null : p2bkE(p.p2pk_e); if (p.p2pk_e !== undefined && !E) return null;
+      if (!keys.some((k, j) => p2bkMine(k, myLockPub(), myLockPriv(), E, j + 1))) return null;
       if (H && sec[1].data !== H) return null; H = sec[1].data;
     }
     // the proofs carry a little extra for the mint's fee; show the amount the challenger put up when it's covered

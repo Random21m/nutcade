@@ -101,6 +101,9 @@ function nzLock(secret) {
   }
   return s[1].data.toLowerCase();
 }
+// a coin locked to our receiving key: the key itself with no E on the coin, or (Pay to Blinded Key, app_p2bk.js) our key
+// blinded for slot 0 with the coin's E; never both, and the lock's other rules (nzLock) stay as they are
+const nzMine = p => p2bkMine(nzLock(p.secret), nzPub(), nzPriv(), p.p2pk_e || null, 0);
 const nzWho = pk => { const c = S.contacts.find(x => x.pubkey === pk); return c ? c.name : shortNpub(pk); };
 // a sender's comment as it is shown: one line, no hashtags (they would become your history tags) and no quotes (it can't pass for the app's text)
 const nzComment = c => String(c || '').replace(/[\s\u200b-\u200f\u2028-\u202e\u2066-\u2069]+/g, ' ').replace(/[#"\u201c\u201d\u00ab\u00bb]/g, '').trim().slice(0, 120);
@@ -218,11 +221,11 @@ async function nzEvent(ev) {
     if (!p || typeof p.id !== 'string' || typeof p.secret !== 'string' || p.secret.length > NZ_SECRET || typeof p.C !== 'string' || !/^0[23][0-9a-f]{64}$/i.test(p.C) || !Number.isSafeInteger(a) || a <= 0) return skip('bad');
     const q = { id: p.id, amount: a, secret: p.secret, C: p.C };
     if (p.dleq && typeof p.dleq === 'object') q.dleq = { e: String(p.dleq.e || ''), s: String(p.dleq.s || ''), r: String(p.dleq.r || '') };
+    if (nzHas(p, 'p2pk_e')) { const e = p2bkE(p.p2pk_e); if (!e) return skip('bad'); q.p2pk_e = e; }   // (a blinded lock: the sender's E, a point on the curve, kept on the coin)
     proofs.push(q);
   }
   if (new Set(proofs.map(p => p.secret)).size !== proofs.length) return skip('bad');
-  const pub = nzPub();
-  if (!proofs.every(p => nzLock(p.secret) === pub)) return skip('lock');
+  if (!proofs.every(nzMine)) return skip('lock');
   // the coins must be the mint's: its sat keysets, and every DLEQ proof checked against its saved keys
   if (!S.mintkeys[mint]) { try { await getWallet(mint); } catch (e) {} }
   const ks = S.mintkeys[mint];
@@ -275,7 +278,7 @@ async function nzClaim(t0, force, hand) {
         const st = await inTime(w.checkProofsStates(ps), 20000);
         if (st.length === ps.length && st.every(x => x && x.state === 'UNSPENT')) refused = true;   // (every coin unspent, and the mint still says no)
         else if (st.length === ps.length && !S.ops.some(o => o.follow && o.follow.k === 'incoming' && o.follow.txId === cur.id)) {
-          const left = ps.filter((p, i) => !(st[i] && st[i].state === 'SPENT')).map(p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq ? { dleq: p.dleq } : {}));
+          const left = ps.filter((p, i) => !(st[i] && st[i].state === 'SPENT')).map(p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq ? { dleq: p.dleq } : {}, p.p2pk_e ? { p2pk_e: p.p2pk_e } : {}));
           if (!left.length) { S.txs = S.txs.filter(x => x.id !== cur.id); save(); refresh(); return null; }
           if (left.length < ps.length) { updTx(cur.id, { incoming: L.getEncodedToken({ mint: cur.mint, proofs: left, unit: 'sat' }), amount: sum(left) }); await saveNow(); }
         }
@@ -322,7 +325,7 @@ function nzPick(info, amount) {
   if (!ok.length) { const e = keepErr(new Error("You don't have that much at a mint they take nutzaps at. Nothing was sent.")); e.raw = mine.map(m => `${host(m.url)}: ${money(balanceOf(m.url))}`).join(', '); throw e; }
   return ok.find(m => m.url === S.active) || ok.sort((a, b) => balanceOf(b.url) - balanceOf(a.url))[0];
 }
-const nzProof = p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq && p.dleq.e && p.dleq.s && p.dleq.r ? { dleq: { e: String(p.dleq.e), s: String(p.dleq.s), r: String(p.dleq.r) } } : {});
+const nzProof = p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq && p.dleq.e && p.dleq.s && p.dleq.r ? { dleq: { e: String(p.dleq.e), s: String(p.dleq.s), r: String(p.dleq.r) } } : {}, p.p2pk_e ? { p2pk_e: String(p.p2pk_e) } : {});   // (p2pk_e: a blinded lock's E, NUT-28)
 const nzRelaysFor = z => { const l = nzRelays(z.relays); return (l.length ? l : nzMyRelays()).slice(0, 8); };
 // the nutzap's event, made once and kept on its line before it is sent (sending it again is the same event)
 async function nzDeliverOne(id) {
@@ -355,7 +358,7 @@ async function nzSendTo(target, info, amount, comment) {
   const m = nzPick(info, amount), name = String(target.name || shortNpub(target.pubkey)).trim().slice(0, 40);
   const txx = { nz: { to: target.pubkey, u: m.u, relays: nzRelays(info.relays).slice(0, 8), c: String(comment || '').slice(0, 280) } };
   if (target.contactId) Object.assign(txx, { contactId: target.contactId, contactName: name });
-  const tx = await sendEcash(amount, `Nutzap to ${name}`, nzKeyOf(info.pub), m.url, { txx });
+  const tx = await sendEcash(amount, `Nutzap to ${name}`, nzKeyOf(info.pub), m.url, { txx, blind: true });   // (blinded when Hide who gets it is on: app_p2bk.js)
   const ok = await single('nzsend:' + tx.id, () => nzDeliverOne(tx.id)).catch(() => false);
   return { tx: txById(tx.id) || tx, ok: !!ok };
 }

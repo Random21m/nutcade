@@ -76,7 +76,9 @@ const DQ = (() => {
     const hash = hexOf(L.sha256(new TextEncoder().encode(unc(R1) + unc(R2) + unc(A) + unc(C_))));
     return hash === d.e;
   }
-  return { proofOk, wellFormed, hashToCurve, point, unc };
+  // a point as 02/03 + x (33 bytes as hex), or null at infinity
+  const comp = p => { const a = aff(p); return a ? ((a[1] & 1n) ? '03' : '02') + h64(a[0]) : null; };
+  return { proofOk, wellFormed, hashToCurve, point, unc, mul, add, comp, xOf: p => { const a = aff(p); return a ? h64(a[0]) : null; }, G, N };
 })();
 
 /* ---------- the mints' public keys, saved for offline use ---------- */
