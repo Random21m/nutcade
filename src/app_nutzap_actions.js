@@ -13,6 +13,10 @@ Object.assign(A, {
     if (ok) return showDone('out', sats, `Nutzap to ${z.name}`);
     setBody(`<div class="notice">The nutzap was made, but no Nostr relay has taken it yet. Its ecash is locked to them, and NUTCADE keeps trying to deliver it.</div><button class="btn block" data-act="close">Close</button>`);
   }),
+  nzClaim: b => run(b, 'CLAIMING', async () => {
+    const nt = await nzClaim({ id: b.dataset.id }, true, true);
+    if (nt) { sfx('coin'); showDone('in', nt.amount, 'Nutzap'); } else { closeSheet(); refresh(); }
+  }),
   nzRetry: b => run(b, 'SENDING', async () => {
     const t = txById(b.dataset.id); if (!t || !t.nz) return;
     const ok = await single('nzsend:' + t.id, () => nzDeliverOne(t.id));

@@ -78,7 +78,7 @@ function useScan() {
 }
 useScan();
 // the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
-const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince'];
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub'];
 const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const walletPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const inVault = k => vault.on && !devKey(k);
@@ -840,14 +840,15 @@ async function receiveTokenNow(token, note, opts = {}) {
   const back = opts.own || ownTx ? (opts.own ? (opts.hand ? 'hand' : 'auto') : came ? 'auto' : 'hand') : heldBack(held);
   if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: mine });
   const w = await getWallet(meta.mint);
-  if (belowMin(meta.mint) && !mine) throw minErr(meta.mint);   // (no new deposits at a mint below the minimum)
+  const nzHeld = f0.k === 'incoming' && !!(held.nz || held.nzPart);   // (a nutzap already taken and waiting here: its coins are at that mint already; app_nutzap.js)
+  if (belowMin(meta.mint) && !mine && !nzHeld) throw minErr(meta.mint);   // (no new deposits at a mint below the minimum)
   const sm = smallMint(meta.mint);   // a token with more coins than the mint takes in one request: claimed in parts
-  if (sm && !opts.part && (!opts.follow || mine)) {   // (our own token taken back too)
+  if (sm && !opts.part && (!opts.follow || mine || nzHeld)) {   // (our own token taken back too; a waiting nutzap too)
     let ps = []; try { ps = w.decodeToken(token).proofs || []; } catch (e) {}
     if (ps.length > sm || bitsOf(Math.max(0, sum(ps) - feeOfPs(w, ps))) > sm) {
       const parts = tokenParts(w, ps, sm);
       if (!parts) throw new Error(`${host(meta.mint)} takes at most ${sm} coins per request and charges a fee to claim, so each part of this token gives back its coins less that fee, and for some of its coins that needs more than ${sm} coins back. It can't be claimed there in any parts. Nothing was spent: the token still holds its sats, for when the mint takes more coins per request.`);
-      if (parts.length > 1) return receiveInParts(w, meta, token, note, parts, ownTx || null, mine, back);
+      if (parts.length > 1) return receiveInParts(w, meta, token, note, parts, ownTx || null, mine, back, nzHeld ? { nzPart: 1 } : null);
     }
   }
   let res;
@@ -4119,7 +4120,7 @@ function wipeWallet() {
   // wallet goes, with the PIN, its tries and changes, and only the device's own settings and arcade tables stay
   vault.on = false; vault.open = false; vault.decoy = false; vault.dek = null; vault.data = {};
   try { for (const k of Object.keys(localStorage)) { if (!k.startsWith('nutcade:')) continue; const n = k.slice(8); if (n === 'prefs' || (devKey(n) && !/^(vault|pinfails|pinchg|gen)$/.test(n))) continue; localStorage.removeItem(k); } } catch (e) {}
-  try { npcSocketStop(); dmStop(); nzStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince', 'nutzap', 'nzInfo', 'nzSince']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
+  try { npcSocketStop(); dmStop(); nzStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
   location.reload();
 }
 const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: bkTxs(), p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: bkImports(), quotes: S.quotes, requests: S.requests, contacts: S.contacts, settings: bkSettings(), trophies: bkTrophies(), plays: store.get('plays', null), arcade: bkArcade() }, null, 1);

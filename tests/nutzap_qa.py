@@ -39,7 +39,7 @@ def tags(e, k): return [t for t in e['tags'] if t and t[0] == k]
 
 HELPERS = """
 window.__nzEv = (proofs, x) => CashuLib.finalizeEvent({ kind: 9321, created_at: Math.floor(Date.now() / 1000) + (x.dt || 0), content: x.c || '',
-  tags: proofs.map(p => ['proof', JSON.stringify({ id: p.id, amount: Number(p.amount), secret: p.secret, C: p.C })]).concat([['u', x.u], ['unit', 'sat'], ['p', x.p]]) }, crypto.getRandomValues(new Uint8Array(32)));
+  tags: proofs.map(p => ['proof', JSON.stringify(Object.assign({ id: p.id, amount: Number(p.amount), secret: p.secret, C: p.C }, p.dleq && x.dleq !== false ? { dleq: p.dleq } : {}))]).concat([['u', x.u], ['unit', 'sat'], ['p', x.p]]) }, crypto.getRandomValues(new Uint8Array(32)));
 window.__nzPublish = ev => new Promise(r => { const ws = new WebSocket(%s); ws.onopen = () => ws.send(JSON.stringify(['EVENT', ev]));
   ws.onmessage = m => { const d = JSON.parse(m.data); if (d[0] === 'OK') { try { ws.close(); } catch (e) {} r(d[2]); } }; setTimeout(() => r(false), 5000); });
 """ % J(RELAY)
@@ -150,7 +150,7 @@ async def main():
                 ctx['ev1'] = e
             i = await nz_in(bo)
             check('receive: Bob got exactly 100 SAT, once', got and await bo.bal() == bb0 + 100 and len(i) == 1, (await bo.bal() - bb0, i))
-            check('receive: his line says who sent it, with the comment', i and i[0]['status'] == 'done' and i[0]['note'].startswith('Nutzap from npub1') and i[0]['note'].endswith(': thanks') and i[0]['from'] == A_PK, i)
+            check('receive: his line says who sent it, with the comment', i and i[0]['status'] == 'done' and i[0]['note'].startswith('Nutzap from npub1') and i[0]['note'].endswith(': "thanks"') and i[0]['from'] == A_PK, i)
             check('receive: nothing is left waiting', not await bo.ev("Nutcade.S.txs.some(t=>t.status==='pending'&&t.incoming)"))
             check('send/receive: no page errors', not al.errs and not bo.errs, (al.errs[:3], bo.errs[:3]))
         await section('send', send)
@@ -193,21 +193,111 @@ async def main():
                   r == 'untrusted' and await bo.bal() == bb0 and len(await nz_in(bo)) == n0 and not await bo.ev("Nutcade.S.mints.some(m=>m.url==='http://127.0.0.1:3338')"), r)
         await section('untrusted', untrusted)
 
+        async def hardening():
+            # (fix round 1) the receiver proves coins are the mint's before anything becomes a line
+            bb0, n0 = await bo.bal(), len(await nz_in(bo)); bpub = ctx.get('bpub')
+            ps = await al.ev(f"Nutcade.r8.sendEcash(20, 'nz hard', {J(bpub)}).then(t=>t.sent)")
+            rp = await al.ev("NutZap.randomPub()")
+            async def ev_of(proofs, **x):
+                return await al.ev(f"__nzEv({J(proofs)}, Object.assign({{u:{J(M)}, p:{J(B_PK)}}}, {J(x)}))")
+            async def res(proofs, **x): return await bo.ev(f"NutZap.event({J(await ev_of(proofs, **x))})")
+            forged = [dict(p, C=rp) for p in ps]
+            r = {'forged': await res(forged), 'noproof': await res(ps, dleq=False),
+                 'keyset': await res([dict(p, id='00ffffffffffffff') for p in ps]),
+                 'many': await res([dict(ps[0], secret=json.dumps(['P2PK', {'nonce': '%064x' % i, 'data': bpub}])) for i in range(65)]),
+                 'long': await res([dict(ps[0], secret=json.dumps(['P2PK', {'nonce': 'a' * 600, 'data': bpub}]))])}
+            check('hardening: coins whose DLEQ proof is wrong (made up) are refused as forged', r['forged'] == 'forged', r)
+            check('hardening: coins without a DLEQ proof are refused', r['noproof'] == 'noproof', r)
+            check('hardening: coins on a keyset that is not one of the mint\'s sat keysets are refused', r['keyset'] == 'keyset', r)
+            check('hardening: more than 64 coins, or a secret over 512 characters, are refused', r['many'] == 'bad' and r['long'] == 'bad', r)
+            check('hardening: none of them became a line or credited anything', await bo.bal() == bb0 and len(await nz_in(bo)) == n0 and not await bo.ev("Nutcade.S.txs.some(t=>t.incoming&&t.status==='pending')"))
+            # the lock: only a plain P2PK lock to the receiving key
+            def sec(tags): return json.dumps(['P2PK', {'nonce': 'ab' * 32, 'data': bpub, 'tags': tags}])
+            ok_t = [[], [['sigflag', 'SIG_INPUTS']], [['sigflag', 'SIG_INPUTS'], ['n_sigs', '1']]]
+            bad_t = [[['locktime', '1700000000']], [['refund', rp]], [['pubkeys', rp]], [['n_sigs', '2']], [['sigflag', 'SIG_ALL']], [['sigflag', 'SIG_INPUTS'], ['sigflag', 'SIG_ALL']], [['sigflag', 'SIG_INPUTS', 'x']]]
+            lk_ok = [await bo.ev(f"NutZap.lock({J(sec(t))})") for t in ok_t]; lk_bad = [await bo.ev(f"NutZap.lock({J(sec(t))})") for t in bad_t]
+            check('lock: no tags, sigflag SIG_INPUTS, and n_sigs 1 are taken', all(x == bpub for x in lk_ok), lk_ok)
+            check('lock: locktime, refund keys, other pubkeys, n_sigs 2, SIG_ALL and mixed sigflags are refused', all(x is None for x in lk_bad), lk_bad)
+            r2 = await res([dict(ps[0], secret=sec([['locktime', '1700000000']]))])
+            check('lock: such a nutzap is refused as not locked to this wallet', r2 == 'lock', r2)
+            # trust: only the mints used now (a mint once published is not trusted again by a nutzap), not kept as seen
+            await bo.ev("Nutcade.S.prefs.nzInfo.mints.push('http://127.0.0.1:3338')")
+            e3 = await ev_of(ps, u='http://127.0.0.1:3338', dt=5)
+            r3 = await bo.ev(f"NutZap.event({J(e3)})")
+            check('trust: a mint only in the info published before is not trusted, and the event is not kept as seen', r3 == 'untrusted' and not await bo.ev(f"NutZap.seen().includes({J(e3['id'])})") and not await bo.ev("Nutcade.S.mints.some(m=>m.url==='http://127.0.0.1:3338')"), r3)
+            await bo.ev("Nutcade.S.prefs.nzInfo.mints=Nutcade.S.prefs.nzInfo.mints.filter(u=>u!=='http://127.0.0.1:3338')")
+            # at most 20 nutzaps wait at once: more are looked at again later
+            await bo.ev(f"for (let i=0;i<20;i++) Nutcade.S.txs.push({{id:'nzfake'+i, type:'in', method:'ecash', status:'pending', incoming:'cashuBfake'+i, amount:1, mint:{J(M)}, ts:Date.now(), nz:{{id:'f'+i, next:Date.now()+3600e3}}}})")
+            good = await ev_of(ps, c='real', dt=6)
+            r4 = await bo.ev(f"NutZap.event({J(good)})")
+            check('cap: with 20 nutzaps already waiting, a new one is kept to look at later, no line', r4 == 'full' and await bo.ev("NutZap.waiting()") == 1 and await bo.bal() == bb0, r4)
+            await bo.ev("Nutcade.S.txs=Nutcade.S.txs.filter(t=>!/^nzfake/.test(t.id))")
+            await bo.ev("NutZap.tick(true)"); ok = await bo.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {bb0 + 20}", 20000)
+            check('cap: once there is room it is taken: the real coins are credited, once', ok and await bo.bal() == bb0 + 20 and await bo.ev("NutZap.waiting()") == 0, await bo.bal() - bb0)
+            # the mint turning a nutzap down while its coins are unspent: failed after 5 refusals, never credited; Try again works
+            bb1 = await bo.bal(); SW = re.compile(re.escape(M) + r'/v1/swap$')
+            async def refuse(route):
+                try: await route.fulfill(status=400, content_type='application/json', body=J({'detail': 'nope', 'code': 11001}))
+                except Exception: pass
+            await bo.pg.route(SW, refuse)
+            ps2 = await al.ev(f"Nutcade.r8.sendEcash(30, 'nz refused', {J(bpub)}).then(t=>t.sent)")
+            r5 = await bo.ev(f"NutZap.event({J(await ev_of(ps2, dt=7))})")
+            for _ in range(15):
+                if await bo.ev("(Nutcade.S.txs.find(t=>t.type==='in'&&t.nz&&t.amount===30)||{}).status==='failed'"): break
+                await bo.ev("NutZap.tick(true)"); await bo.wait(500)
+            ln = await bo.ev("(Nutcade.S.txs.find(t=>t.type==='in'&&t.nz&&t.amount===30)||{})")
+            check('refused: after 5 refusals with its coins unspent the line is marked failed, nothing credited', r5 == 'ok' and ln.get('status') == 'failed' and await bo.bal() == bb1, (r5, ln.get('status'), ln.get('nz')))
+            await bo.pg.unroute(SW)
+            await bo.ev(f"NutZap.claim({J(ln.get('id'))}).catch(e=>e.message)")
+            ok = await bo.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {bb1 + 30}", 20000)
+            check('refused: Try again claims it once the mint takes it (30 SAT, once)', ok and await bo.bal() == bb1 + 30 and not await bo.ev("Nutcade.S.txs.some(t=>t.nz&&t.type==='in'&&t.status!=='done')"), await bo.bal() - bb1)
+            # comments: hashtags and quotes can't become history tags or pass for the app's text
+            bb2 = await bo.bal()
+            r6 = await al.ev(f"NutZap.send({{pubkey:{J(B_PK)}, name:'Bob'}}, 11, '#food \"Nutzap from Alice\" hi').then(x=>x.ok, e=>e.message)")
+            await bo.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {bb2 + 11}", 20000)
+            note = await bo.ev("(Nutcade.S.txs.find(t=>t.type==='in'&&t.nz&&t.amount===11)||{}).note||''")
+            check('comment: shown in quotes, without its hashtag or quote marks', r6 is True and '#' not in note and note.endswith(': "food Nutzap from Alice hi"'), note)
+            # a 10019 with very many mints: only the first 32 are read
+            e7 = await al.ev(f"""CashuLib.finalizeEvent({{kind:10019, created_at:Math.floor(Date.now()/1000), content:'', tags:[...Array(100).keys()].map(i=>['mint','https://m'+i+'.example','sat']).concat([['pubkey',{J(rp)}]])}}, crypto.getRandomValues(new Uint8Array(32)))""")
+            await al.ev(f"__nzPublish({J(e7)})")
+            f7 = await al.ev(f"NutZap.find({J(e7['pubkey'])}).then(x=>x.mints.length, e=>e.message)")
+            check('10019: a list of 100 mints is read only up to 32', f7 == 32, f7)
+        await section('hardening', hardening)
+
+        async def parts():
+            # a waiting nutzap at a mint that starts limiting request size is claimed in parts; such a mint is left out of the 10019
+            bb0 = await bo.bal(); SW = re.compile(re.escape(M) + r'/v1/swap$')
+            await bo.pg.route(SW, down)
+            r = await al.ev(f"NutZap.send({{pubkey:{J(B_PK)}, name:'Bob'}}, 7, 'parts').then(x=>x.ok, e=>e.message)")
+            w8 = await bo.until("Nutcade.S.txs.some(t=>t.type==='in'&&t.nz&&t.status==='pending'&&t.amount===7)", 20000)
+            await bo.ev(f"NutRemind.wallet({J(M)}).getMintInfo()._mintInfo.max_array_length=2")
+            lim = await bo.ev("NutZap.mints()")
+            check('parts: a mint below the minimum request size is left out of the nutzap mints', r is True and w8 and lim == [], (r, w8, lim))
+            await bo.pg.unroute(SW); await bo.ev("NutZap.tick(true)")
+            ok = await bo.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {bb0 + 7}", 30000); await bo.wait(1500)
+            n = await bo.ev("Nutcade.S.txs.filter(t=>t.type==='in'&&/\\(part \\d+ of \\d+\\)/.test(t.note||'')&&/parts/.test(t.note||'')).length")
+            check('parts: the waiting nutzap is claimed in parts, credited once (7 SAT)', ok and await bo.bal() == bb0 + 7 and n >= 2 and not await bo.ev("Nutcade.S.txs.some(t=>t.nz&&t.type==='in'&&t.status==='pending')"), (await bo.bal() - bb0, n))
+            await bo.ev(f"delete NutRemind.wallet({J(M)}).getMintInfo()._mintInfo.max_array_length")
+            check('parts: with the limit gone the mint is listed again', await bo.ev("NutZap.mints()") == [M])
+            await bo.ev("NutZap.tick(true)")
+            check('parts: and published again in the 10019', await bo.until(f"(NutZap.info()||{{}}).mints && NutZap.info().mints.join()==={J(M)}", 15000))
+        await section('parts', parts)
+
         async def mintdown():
             # the receiver's mint is down: the nutzap waits, is never credited, then is credited once
             bb0 = await bo.bal(); RX = re.compile(re.escape(M) + r'/v1/.*')
             await bo.pg.route(RX, down)
             r = await al.ev(f"NutZap.send({{pubkey:{J(B_PK)}, name:'Bob'}}, 150, '').then(x=>x.ok, e=>e.message)")
             check('mint down (receiver): the nutzap is sent', r is True, r)
-            w8 = await bo.until("Nutcade.S.txs.some(t=>t.type==='in'&&t.nz&&t.status==='pending'&&t.amount===150)", 15000)
+            w8 = await bo.until("NutZap.waiting() === 1", 25000)
             await bo.ev("NutZap.tick()"); await bo.wait(1500)
-            check('mint down (receiver): recorded as waiting (150 SAT), not credited', w8 and await bo.bal() == bb0, (w8, await bo.bal() - bb0))
+            check('mint down (receiver): kept waiting to be checked (the mint can\'t say whether the coins are spent), no line, not credited', w8 and await bo.bal() == bb0 and not await bo.ev("Nutcade.S.txs.some(t=>t.nz&&t.type==='in'&&t.amount===150)"), (w8, await bo.bal() - bb0))
             await bo.pg.unroute(RX)
             await bo.ev("NutZap.tick(true)")
             ok = await bo.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {bb0 + 150}", 20000); await bo.wait(800)
             await bo.ev("NutZap.tick(true)"); await bo.wait(800)
             i = [x for x in await nz_in(bo) if x['amount'] == 150]
-            check('mint down (receiver): once the mint is back it is credited, once, and the line is done', ok and await bo.bal() == bb0 + 150 and len(i) == 1 and i[0]['status'] == 'done', (await bo.bal() - bb0, i))
+            check('mint down (receiver): once the mint is back it is credited, once, and the line is done', ok and await bo.bal() == bb0 + 150 and len(i) == 1 and i[0]['status'] == 'done' and await bo.ev("NutZap.waiting()") == 0, (await bo.bal() - bb0, i))
             # the sender's mint is down: nothing is lost
             ab0, z0 = await al.bal(), len(evs(9321, A_PK))
             await al.pg.route(RX, down)
@@ -284,12 +374,14 @@ async def main():
             await e.pg.reload(); await e.wait(800); await unlock(e, DPIN); await e.wait(800)
             dpk = await me(e); n10 = len(evs(10019)); db0 = await e.bal()
             check('duress: the duress wallet has nutzaps off and listens to nothing', await e.ev("Nutcade.S.prefs.nutzap") is not True and await e.ev("NutZap.live()") == 0)
-            await settings(e); await e.click('#p_nutzap'); await e.wait(1500)
-            t = await e.toast()
-            check('duress: turning nutzaps on answers "aren\'t available right now" and stays off', "aren't available right now" in t and await e.ev("Nutcade.S.prefs.nutzap") is not True and not await e.ev("document.querySelector('#p_nutzap').checked"), t)
-            check('duress: nothing is published (no new 10019)', len(evs(10019)) == n10 and not evs(10019, dpk))
+            await settings(e); await e.click('#p_nutzap'); await e.wait(1000)
+            st1 = await e.ev("document.querySelector('#set-privacy').innerText")
+            await e.wait(8500); await settings(e); st2 = await e.ev("document.querySelector('#set-privacy').innerText")
+            check('duress: the toggle appears to work: it stays on and shows SAVING…, then RELAYS DIDN\'T ANSWER, like a wallet whose relays are down',
+                  await e.ev("Nutcade.S.prefs.nutzap") is True and await e.ev("document.querySelector('#p_nutzap').checked") and 'SAVING' in st1 and "RELAYS DIDN'T ANSWER" in st2, (st1[-200:], st2[-200:]))
+            check('duress: nothing is published (no new 10019) and nothing listened to', len(evs(10019)) == n10 and not evs(10019, dpk) and await e.ev("NutZap.live()") == 0)
             r = await e.ev(f"NutZap.send({{pubkey:{J(B_PK)}, name:'Bob'}}, 10, '').then(()=>'sent', x=>x.message)")
-            check('duress: sending a nutzap is refused the same way, nothing spent', "aren't available right now" in r and await e.bal() == db0, r)
+            check('duress: sending a nutzap answers as when relays can\'t be reached (as the real wallet could), nothing spent, nothing published', "Couldn't reach your Nostr relays" in r and await e.bal() == db0 and not evs(9321, dpk), r)
             r = await al.ev(f"NutZap.send({{pubkey:{J(E_PK)}, name:'Ed'}}, 55, '').then(x=>x.ok, x=>x.message)")
             await e.wait(3000)
             check('duress: a nutzap to the real wallet is not claimed by the duress wallet', r is True and await e.bal() == db0 and not await e.ev("Nutcade.S.txs.some(t=>t.nz)"), r)
@@ -299,6 +391,40 @@ async def main():
             check('duress: back in the real wallet, nutzaps are still on and the nutzap is claimed', ok and await e.ev("Nutcade.S.prefs.nutzap") is True and await e.ev("NutZap.pub()") == epub, (ok, await e.bal() - rb0))
             await e.pg.context.close()
         await section('duress', duress)
+
+        async def unpub():
+            # (fix round 1) turning nutzaps off always withdraws the 10019, whatever happened to the publish
+            f = await wallet(b, 'nz-fred'); await f.create(); await f.add_mint(M); await f.use(M); FP = await me(f)
+            def has_info(): return any(tags(e, 'pubkey') for e in evs(10019, FP))
+            await settings(f); await f.click('#p_nutzap'); await f.click('#p_nutzap')   # (on and off at once: the publish is still on its way)
+            ok = await f.until("!Nutcade.S.prefs.nzUnpub && !Nutcade.S.prefs.nzPubTry && !Nutcade.S.prefs.nzInfo", 20000); await f.wait(500)
+            check('unpublish: on then off within the publish window leaves no nutzap info on the relay', ok and not has_info(), [e['tags'] for e in evs(10019, FP)])
+            await nz_on(f); check('unpublish: (on again: published)', has_info())
+            await f.ev("""(()=>{ const os = WebSocket.prototype.send; WebSocket.prototype.send = function (d) { if (window.__nzBlockU && typeof d === 'string' && d.startsWith('["EVENT"') && (d.includes('"kind":10019') || d.includes('"kind":5,'))) return; return os.call(this, d); } })()""")
+            await f.ev("window.__nzBlockU=true"); await settings(f); await f.click('#p_nutzap')
+            await f.until("!!(Nutcade.S.prefs.nzUnpub && Nutcade.S.prefs.nzUnpub.tries>0)", 20000)
+            check('unpublish: a relay that did not confirm is kept to try again', await f.ev("(Nutcade.S.prefs.nzUnpub||{}).relays||[]") == [RELAY] and has_info())
+            await f.ev("window.__nzBlockU=false"); await f.ev("NutZap.tick(true)")
+            ok = await f.until("!Nutcade.S.prefs.nzUnpub", 20000); await f.wait(300)
+            check('unpublish: tried again, the relay confirms and the info is gone', ok and not has_info(), [e['tags'] for e in evs(10019, FP)])
+            r = await f.ev(f"NutZap.event(__nzEv([], {{u:{J(M)}, p:{J(FP)}}}))")
+            check('off: with nutzaps off an incoming nutzap is not looked at', r == 'off', r)
+            await nz_on(f)
+            new = [e for e in evs(10019, FP) if tags(e, 'pubkey')]; dels = evs(5, FP)
+            check('unpublish: published again later, after the deletion (never at or below its time)', new and dels and min(e['created_at'] for e in new) > max(e['created_at'] for e in dels) if True else False, ([e['created_at'] for e in new], [e['created_at'] for e in dels]))
+            await f.pg.context.close()
+        await section('unpub', unpub)
+
+        async def relays2():
+            g = await wallet(b, 'nz-gina'); await g.create(); await g.add_mint(M); await g.use(M)
+            await g.ev(f"Nutcade.S.prefs.relays=[{J(RELAY)}, {J(RELAY + '?b=1')}]")
+            await nz_on(g); ok = await g.until("NutZap.live() === 2", 10000)
+            await g.ev("NutZap.socks()[0].close()"); await g.wait(500)
+            dropped = await g.ev("NutZap.live()")
+            back = await g.until("NutZap.live() === 2", 15000)
+            check('listen: a relay that drops is opened again while the other stays up', ok and dropped == 1 and back, (ok, dropped, back))
+            await g.pg.context.close()
+        await section('relays2', relays2)
 
         async def langs():
             for lang in ('es', 'pt', 'de', 'fr'):
