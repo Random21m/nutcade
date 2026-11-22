@@ -227,7 +227,7 @@ async function pbSecret(rec, what) {
 async function pbCurrent(k) {
   const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 }, 5000, pbRelays());   // (every relay asked, up to 5 s: the newest copy wins, never only the fastest relay's)
   if (!evs.length && !evs.answered) throw new Error('No Nostr relay answered, so nothing was saved. Check your connection and try again.');
-  const ev = evs.filter(e => e.pubkey === k.pk && e.kind === 30078 && (e.tags || []).some(t => t[0] === 'd' && t[1] === PB_D) && L.verifyEvent(e)).sort((x, y) => y.created_at - x.created_at)[0];
+  const ev = evs.filter(e => e.pubkey === k.pk && e.kind === 30078 && (e.tags || []).some(t => t[0] === 'd' && t[1] === PB_D) && L.verifyEvent(e)).sort((x, y) => y.created_at - x.created_at || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))[0];
   if (!ev || !ev.content) return null;
   try {
     const box = JSON.parse(ev.content);
@@ -253,7 +253,7 @@ async function phoneBackup(force) {
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(k.pk) }, k.aes, new TextEncoder().encode(body));
   const ts = Math.max(Math.floor(Date.now() / 1000), ((old && old.pk === k.pk && old.at) || 0) + 1, cur ? cur.ev.created_at + 1 : 0);
   const ev = L.finalizeEvent({ kind: 30078, created_at: ts, tags: [['d', PB_D]], content: JSON.stringify({ v: 1, alg: 'A256GCM', iv: b64e(iv), ct: b64e(new Uint8Array(ct)) }) }, k.sk);
-  pbStop(sig);   // (a step replaced or closed meanwhile publishes nothing)
+  try { pbStop(sig); } catch (e) { if (!old) pbForgetPasskey(credId); throw e; }   // (a step replaced or closed meanwhile publishes nothing, and leaves no new passkey behind)
   const n = await relayPublish(ev, 6000, pbRelays(), 1500);
   if (!n) { if (!old) pbForgetPasskey(credId); throw new Error('No Nostr relay answered, so nothing was saved. Check your connection and try again.'); }
   if (old && old.pk !== k.pk) await pbErase(old).catch(() => 0);
@@ -288,7 +288,7 @@ async function phoneFetch() {
   const k = await pbKeys(new Uint8Array(r.results.first));
   const evs = await relayQuery({ kinds: [30078], authors: [k.pk], '#d': [PB_D], limit: 5 }, 5000, pbRelays());   // (every relay asked, up to 5 s: the newest copy wins, never only the fastest relay's)
   if (!evs.length && !evs.answered) throw new Error('No Nostr relay answered. Check your connection and try again. Nothing was changed.');
-  const ev = evs.filter(e => e.pubkey === k.pk && e.kind === 30078 && (e.tags || []).some(t => t[0] === 'd' && t[1] === PB_D) && L.verifyEvent(e)).sort((x, y) => y.created_at - x.created_at)[0];
+  const ev = evs.filter(e => e.pubkey === k.pk && e.kind === 30078 && (e.tags || []).some(t => t[0] === 'd' && t[1] === PB_D) && L.verifyEvent(e)).sort((x, y) => y.created_at - x.created_at || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))[0];
   if (!ev || !ev.content) throw new Error('No phone backup was found for this passkey. Nothing was changed.');
   const bad = () => new Error("This phone backup couldn't be opened with this passkey. Nothing was changed.");
   let body;
