@@ -78,7 +78,7 @@ function useScan() {
 }
 useScan();
 // the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
-const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater'];
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince'];
 const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const walletPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const inVault = k => vault.on && !devKey(k);
@@ -889,6 +889,7 @@ function dropClaimedIncoming() {
   const n = S.txs.length; S.txs = S.txs.filter(t => !(t.incoming && (t.status === 'pending' || t.status === 'failed') && got.has(t.id))); if (S.txs.length !== n) save();
 }
 function incomingClaimed(f, t) {
+  const was = txById(f.txId); if (t && was && was.nz && !(txById(t.id) || {}).nz) updTx(t.id, { nz: was.nz });   // (a nutzap's line keeps who sent it)
   S.txs = S.txs.filter(x => x.id !== f.txId);
   if (t && f.txId) updTx(t.id, { fromIncoming: f.txId });   // (a copy of this wallet still holding the saved token knows it was claimed here)
   if (f.reqId) reqPaid(f.reqId, t);
@@ -1614,7 +1615,7 @@ function setLang() {
 
 /* ---------- sound ---------- */
 const PREF_DEFAULTS = { sound: true, music: true, crt: true, theme: 'neon', btcSymbol: false, fiat: true, currency: 'USD',
-  checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100, ksAuto: true, mintRadar: false, remind: true };
+  checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100, ksAuto: true, mintRadar: false, remind: true, nutzap: false };
 for (const k in PREF_DEFAULTS) if (S.prefs[k] === undefined) S.prefs[k] = PREF_DEFAULTS[k];
 S.p2pk = store.get('p2pk', []);   // [{pub, priv, created, used}]
 S.requests = store.get('requests', []);
@@ -2252,7 +2253,7 @@ function render() {
   if (S.prefs.fiat && S.seed) fetchPrice();
   let body = '';
   if (tabLocked) {
-    npcSocketStop(); liveSync(); dmStop(); nwcStop();
+    npcSocketStop(); liveSync(); dmStop(); nwcStop(); nzStop();
     app.innerHTML = `<div class="wrap">${marqueeHTML(false)}
       <section class="screen"><div class="panel hot"><span class="h2" style="color:var(--pink)">Open in another tab</span>
       <p style="margin:0">NUTCADE is already open in another tab or window. Running two copies at once can make them overwrite each other's ecash, so this one is paused.</p>
@@ -2302,6 +2303,7 @@ function render() {
   setTimeout(liveSync, 0);
   setTimeout(dmListen, 0);
   setTimeout(nwcListen, 0);
+  setTimeout(nzListen, 0);   // (nutzaps: src/app_nutzap.js)
   netBanner();
   if (pendingLink && S.seed && S.seed.backedUp) { const t = pendingLink; pendingLink = null; setTimeout(() => openLink(t), 300); }
   if (S.prefs.npc) npcSocketStart();
@@ -2322,7 +2324,7 @@ function txRow(t) {
   const sign = t.type === 'in' ? '+' : '-';   // the pixel font's hyphen sits mid-height; its − glyph falls back to the baseline
   const method = { ln: 'LN', ecash: 'ECASH', onchain: 'ON-CHAIN', fee: 'FEE' }[t.method];
   const moved = !(t.status === 'failed' || t.status === 'expired');   // a failed or expired payment moved nothing: its amount is struck through
-  const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.print ? '<span class="chip ecash">PRINTED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '') + (t.nwc ? '<span class="chip ecash">NWC</span>' : '') + (t.zap ? '<span class="chip claimed">ZAP</span>' : '') + (t.refused && t.status === 'pending' && isBlocked(t.mint) ? '<span class="chip failed">BLOCKED</span>' : '');
+  const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.print ? '<span class="chip ecash">PRINTED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '') + (t.nwc ? '<span class="chip ecash">NWC</span>' : '') + (t.zap ? '<span class="chip claimed">ZAP</span>' : '') + (t.nz ? '<span class="chip claimed">NUTZAP</span>' : '') + (t.refused && t.status === 'pending' && isBlocked(t.mint) ? '<span class="chip failed">BLOCKED</span>' : '');
   const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : t.method === 'fee' ? (num(t.fee) ? '-' + fmt(t.fee) : fmt(0)) : (moved ? sign : '') + fmt(t.amount);
   const wide = amt.length > 11;   // a huge amount gets its own line under the note instead of squeezing the chips
   return `<button class="tx ${esc(t.type)}" data-act="tx" data-id="${esc(t.id)}"><span class="ico" aria-hidden="true">${t.type === 'in' ? '↓' : '↑'}</span>
@@ -2344,7 +2346,7 @@ function fmtDate(ms, withTime) {
   catch (e) { return d.toDateString(); }
 }
 // Notes NUTCADE writes itself (not ones you typed) are shown in your language.
-const AUTO_NOTE = /^(Sats for the duress PIN wallet$|Back from the duress PIN's wallet$|Mint fee for splitting a payment into smaller requests$|Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life( |$)|Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step|keeping Extra Life going)$|Ecash already spent elsewhere$|Payment request couldn't be delivered: the sats came back$|To |Zap to |Wallet Connect: |LNURL voucher$|Printed token \d+ of \d+$)|\((part \d+ of \d+|cancelled at the till)\)$/;
+const AUTO_NOTE = /^(Sats for the duress PIN wallet$|Back from the duress PIN's wallet$|Mint fee for splitting a payment into smaller requests$|Recovered with recovery phrase|Restored from another phrase|Restored from backup$|Lightning address|Lightning payment|Tip to NUTCADE|Reclaimed: |Gift came back|Moved (from|to) |Sale(: | #cashier)|Swap to |Bounty (for|from) |Extra Life( |$)|Treasure hunt(: |$)|Loaded score card|Swapped from |Gift( for |$)|Payment request$|Mint fee for a failed payment$|Mint fee for (moving ecash under your phrase|an interrupted step|keeping Extra Life going)$|Ecash already spent elsewhere$|Payment request couldn't be delivered: the sats came back$|To |Zap to |Nutzap (from|to) |Wallet Connect: |LNURL voucher$|Printed token \d+ of \d+$)|\((part \d+ of \d+|cancelled at the till)\)$/;
 function noteText(n) {
   if (!n) return n;
   const pt = /^(?:(.*) )?\((part \d+ of \d+)\)$/.exec(n);   // a part's number in your language, whatever note comes before it (or none)
@@ -2667,7 +2669,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.27.0';
+const APP_VERSION = '1.28.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -2751,6 +2753,7 @@ function viewSettings() {
       <div class="field"><label for="p_currency">Currency</label><select id="p_currency" class="inp" data-act="prefSelect" data-k="currency" ${S.prefs.fiat ? '' : 'disabled'}>${CURRENCIES.map(c => `<option data-noi18n ${c === S.prefs.currency ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
       ${toggle('checkSent', 'Check if sent ecash was claimed', 'Asks your mints in the background. Turn off to contact them less.')}
       ${toggle('nostrInbox', 'Receive ecash sent over Nostr', 'Listens on Nostr relays for ecash friends send to your ecash address. Requests you made still arrive for 30 days when this is off.')}
+      ${nzSettingsHTML()}
       ${toggle('mintRadar', 'Show mint reliability', "Asks MintRadar (mintradar.org) for its public list of mint health, so MintRadar sees your phone's internet address. It does not learn which mints you use: NUTCADE downloads the whole list and compares it on this phone. It is an operational health signal, not a statement that a mint holds your sats or is safe to deposit into. Off by default.")}
     </div>
 
@@ -3348,7 +3351,7 @@ function openContactEdit(id, prefill = {}) {
     <div class="field"><label for="cLn">Lightning address (optional)</label><input id="cLn" class="inp" data-noi18n value="${esc(c.ln)}" placeholder="alex@wallet.com" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
     <div class="field"><label for="cNostr">Nostr address for ecash (optional)</label><input id="cNostr" class="inp" value="${esc(c.nostr)}" placeholder="npub1… or nprofile1…" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
     <button class="btn solid gold block" data-act="contactSave" data-id="${esc(id || '')}">Save</button>
-    ${id ? `<button class="btn block red" data-act="contactDel" data-id="${esc(id)}">Delete contact</button>` : prefill.nostr ? `<button class="btn block" data-act="zapOpen" data-pk="${esc(prefill.nostr)}">Zap them without saving</button>` : ''}<div id="sheetErr"></div>`);
+    ${id ? `<button class="btn block red" data-act="contactDel" data-id="${esc(id)}">Delete contact</button>` : prefill.nostr ? `<button class="btn block" data-act="zapOpen" data-pk="${esc(prefill.nostr)}">Zap them without saving</button><button class="btn block" data-act="nzOpen" data-pk="${esc(prefill.nostr)}">Nutzap them without saving</button>` : ''}<div id="sheetErr"></div>`);
 }
 function openPayContact(id) {
   const c = contactById(id); if (!c) return;
@@ -3359,7 +3362,7 @@ function openPayContact(id) {
     <div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
     <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Lunch"></div>
-    ${c.pubkey ? `<button class="btn solid pink block" data-act="contactEcash" data-id="${esc(c.id)}">Send ecash over Nostr</button><button class="btn block" data-act="zapContact" data-id="${esc(c.id)}">Zap <span data-noi18n>${esc(c.name)}</span></button>` : ''}
+    ${c.pubkey ? `<button class="btn solid pink block" data-act="contactEcash" data-id="${esc(c.id)}">Send ecash over Nostr</button><button class="btn block" data-act="zapContact" data-id="${esc(c.id)}">Zap <span data-noi18n>${esc(c.name)}</span></button><button class="btn block" data-act="nzOpen" data-id="${esc(c.id)}">Send a nutzap</button>` : ''}
     ${canLn ? `<button class="btn ${c.pubkey ? '' : 'solid pink'} block" data-act="contactLn" data-id="${esc(c.id)}">Pay ${esc(c.ln)}</button>` : c.ln ? `<div class="tiny muted">${esc(m.name)} can't pay Lightning. Pick another mint to pay ${esc(c.ln)}.</div>` : ''}
     <div id="sheetErr"></div>`);
 }
@@ -3784,8 +3787,9 @@ function openTx(id) {
   const method = { ln: 'Lightning', ecash: 'Ecash', onchain: 'On-chain', fee: 'Mint fee' }[t.method];
   const mint = S.mints.find(m => m.url === t.mint);
   const moved = !(t.status === 'failed' || t.status === 'expired'), head = t.method === 'fee' ? t.fee : t.amount;
-  let extra = '';
-  if (t.status === 'failed' && t.type === 'out') extra = `<div class="notice">${t.cost ? `This payment didn't go through. The ecash came back, except ${money(t.cost)} the mint kept as its fee for getting it ready.` : "This payment didn't go through. Nothing left your wallet."}</div>`;
+  let extra = nzTxExtra(t);   // (a nutzap: src/app_nutzap.js)
+  if (extra) {}
+  else if (t.status === 'failed' && t.type === 'out') extra = `<div class="notice">${t.cost ? `This payment didn't go through. The ecash came back, except ${money(t.cost)} the mint kept as its fee for getting it ready.` : "This payment didn't go through. Nothing left your wallet."}</div>`;
   else if (t.method === 'fee') extra = `<div class="notice">The mint kept this fee when a payment didn't go through. The rest of the ecash came back to your wallet.</div>`;
   else if (t.status === 'pending' && t.incoming && isBlocked(t.mint)) extra = `${errHTML(blockedErr(t.mint))}<div class="tiny muted">This ecash waits here. Unblock the mint to claim it.</div>`;
   else if (t.status === 'pending' && t.incoming && t.refused) extra = `<div class="notice">This ecash was refused while its mint was blocked. The mint is unblocked now, so you can claim it.</div><button class="btn block lime" data-act="claimIncoming" data-id="${esc(t.id)}">Claim now</button>`;
@@ -3803,7 +3807,7 @@ function openTx(id) {
     <button class="btn solid gold block" data-act="saveNote" data-id="${esc(t.id)}">Save note</button>
     <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(TX_STATUS[t.status] || t.status)}</dd>${t.fee && t.method !== 'fee' ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
     <dt>Mint</dt><dd data-noi18n>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd data-noi18n>${fmtDate(t.ts, true)}</dd>
-    ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.nwcName ? `<dt>App</dt><dd data-noi18n>${esc(t.nwcName)}</dd>` : ''}${t.lnurlw ? `<dt>Voucher</dt><dd data-noi18n>${esc(t.lnurlw)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.print ? `<dt>Printed token</dt><dd data-noi18n>#${esc(t.print.code)}</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
+    ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.nwcName ? `<dt>App</dt><dd data-noi18n>${esc(t.nwcName)}</dd>` : ''}${t.lnurlw ? `<dt>Voucher</dt><dd data-noi18n>${esc(t.lnurlw)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.print ? `<dt>Printed token</dt><dd data-noi18n>#${esc(t.print.code)}</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${nzTxRow(t)}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
     ${extra}${t.print ? '<button class="btn block" data-act="ptList">Printed tokens</button>' : ''}<div id="sheetErr"></div>`);   // tokens
 }
 
@@ -3935,6 +3939,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_radar.js@@*/
 /*@@app_dleq.js@@*/
 /*@@app_remind.js@@*/
+/*@@app_nutzap.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4114,7 +4119,7 @@ function wipeWallet() {
   // wallet goes, with the PIN, its tries and changes, and only the device's own settings and arcade tables stay
   vault.on = false; vault.open = false; vault.decoy = false; vault.dek = null; vault.data = {};
   try { for (const k of Object.keys(localStorage)) { if (!k.startsWith('nutcade:')) continue; const n = k.slice(8); if (n === 'prefs' || (devKey(n) && !/^(vault|pinfails|pinchg|gen)$/.test(n))) continue; localStorage.removeItem(k); } } catch (e) {}
-  try { npcSocketStop(); dmStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
+  try { npcSocketStop(); dmStop(); nzStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince', 'nutzap', 'nzInfo', 'nzSince']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
   location.reload();
 }
 const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: bkTxs(), p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: bkImports(), quotes: S.quotes, requests: S.requests, contacts: S.contacts, settings: bkSettings(), trophies: bkTrophies(), plays: store.get('plays', null), arcade: bkArcade() }, null, 1);
@@ -4190,7 +4195,7 @@ const A = {
   stopWatch: b => { const t = txById(b.dataset.id); S.quotes = S.quotes.filter(q => q.quote !== t.quote); updTx(t.id, { status: 'expired' }); closeSheet(); refresh(); },
   reconcileTx: b => run(b, 'CHECKING', async () => { const t = txById(b.dataset.id); const p = S.pending.find(x => x.txId === t.id); if (!p) { toast('Nothing pending for this one', 'cyan'); return; } const r = await reconcile(p, { force: true }); const cp = (txById(t.id) || {}).changePending; toast(cp ? "Paid. Its change hasn't come back yet; NUTCADE keeps trying." : { paid: 'Payment confirmed', returned: 'Payment failed. Sats returned.', pending: 'Still in flight' }[r], r === 'pending' || cp ? 'gold' : 'lime'); closeSheet(); refresh(); }),
   reconcileAll: b => run(b, '…', async () => { for (const p of [...S.pending]) await reconcile(p, { force: true }).catch(() => {}); refresh(); }),
-  pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'mintRadar') { if (b.checked) { radar.next = 0; radarEnsure(); } else radarOff(); } if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } refresh(); sfx('blip'); },
+  pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'mintRadar') { if (b.checked) { radar.next = 0; radarEnsure(); } else radarOff(); } if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } if (b.dataset.k === 'nutzap') nzToggled(b.checked); refresh(); sfx('blip'); },
   backup: () => pinGuard('backup', () => showBackupText(backupData())),
   restore: () => pinGuard('import', () => openSheet('Import backup', `${pbWarn('replace')}<div class="field"><span class="flabel">Backup file</span><div class="row filepick"><label class="btn sm violet"><span>Choose a file</span><input id="restoreFile" type="file" accept=".json,application/json"></label><span id="restoreFileName" class="tiny muted">No file chosen</span></div></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`)),
   doRestore: b => !guardHeld('import') ? closeSheet() : run(b, 'CHECKING', async () => {
@@ -4505,6 +4510,7 @@ const A = {
 /*@@app_sendall_actions.js@@*/
 /*@@app_backup_actions.js@@*/
 /*@@app_remind_actions.js@@*/
+/*@@app_nutzap_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;
@@ -4619,6 +4625,7 @@ async function tickBody(startup) {
     retryBounties().catch(() => {}),
     retryHunts().catch(() => {}),
     deliverReqPays().catch(() => {}),
+    nzTick().catch(() => {}),   // nutzaps waiting to be claimed or delivered (app_nutzap.js)
     recheckImported().catch(() => {})
   ]);
   if (S.prefs.nostrBackup && S.mints.length && S.prefs.mintBackupList !== S.mints.map(m => m.url).join(' ') && Date.now() - mintBackupTry > 10 * 60e3) scheduleMintBackup(startup ? 4000 : 0);

@@ -272,6 +272,7 @@ function loadWalletState() {
   S.piggy = d.piggy || { saved: 0 }; S.mintlog = d.mintlog || {}; S.mintkeys = d.mintkeys || {}; S.heirlooms = d.heirlooms || []; S.challenges = d.challenges || []; S.blocked = d.blocked || [];
   seenWraps.clear(); for (const x of d.dmseen || []) seenWraps.add(x);
   nwcSeen.clear(); for (const x of d.nwcseen || []) nwcSeen.add(x);
+  nzSeen.clear(); for (const x of d.nzseen || []) nzSeen.add(x);
   myGen = raw.get('gen', 0);
   if (window.Trophies && window.Trophies.reload) window.Trophies.reload();
 }
@@ -391,7 +392,7 @@ async function duressOff() {
 }
 // Reset wallet, inside the duress PIN's wallet: that wallet starts over empty (still opened by its PIN); the rest of
 // the vault, the real wallet included, is left exactly as it was
-async function resetPart() { npcSocketStop(); dmStop(); vault.data = {}; queueVaultWrite(); await vault.chain; }
+async function resetPart() { npcSocketStop(); dmStop(); nzStop(); vault.data = {}; queueVaultWrite(); await vault.chain; }
 // the PIN of the wallet that is open, for the steps that need it (a limit, the duress PIN). live(): the pad it was
 // typed on is still open for the same step (see pinSubmit); what the step acts on is taken when OK is pressed, and
 // once the PIN is checked the step goes ahead only if nothing changed meanwhile (the PIN is never used for another step)

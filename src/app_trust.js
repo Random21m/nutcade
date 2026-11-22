@@ -61,12 +61,12 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.27.0, with the v1.26.0 items; rewrite this list at every release)
+const WHATS_NEW = [   // (v1.28.0, with the v1.27.0 items; rewrite this list at every release)
+  'Nutzaps (NIP-61): send ecash zaps to people on Nostr, locked to their key so only they can claim them. Open a contact and tap Send a nutzap.',
+  'New, optional and off by default: Receive nutzaps (Settings, Privacy) publishes where people can send you nutzaps, with a receiving key made from your 12 words, and claims the ones that arrive.',
+  'Nutzaps are public on Nostr: anyone can see who sent one, to whom and how much.',
   'Unclaimed-token reminders: when a token you sent is still unclaimed after 30 days, the wallet screen offers to take it back.',
-  'It says so sooner when the mint is retiring the keys of that token, because once the keys are gone its sats are lost for everyone.',
   'Turn the reminders off in Settings with Remind me about unclaimed tokens.',
-  'Offline token check: a token you receive while offline is checked against its mint\'s signature, and a fake one is refused at once.',
-  'A check can\'t show the coins are unspent: only the mint can, when you claim them online.',
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);

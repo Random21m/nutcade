@@ -79,6 +79,8 @@ jobs:
             suites: dleq
           - name: remind
             suites: remind
+          - name: nutzap
+            suites: nutzap
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out

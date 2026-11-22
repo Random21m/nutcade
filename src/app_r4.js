@@ -135,7 +135,7 @@ function evenPriv(privHex) {   // the private key whose public key starts with 0
 }
 const myLockPub = () => '02' + L.nostrPub(nostrKey());
 const myLockPriv = () => evenPriv(hex(nostrKey()));
-const allPrivs = () => p2pkPrivs().concat(S.seed ? [myLockPriv()] : []);
+const allPrivs = () => p2pkPrivs().concat(S.seed ? [myLockPriv(), nzPriv()] : []);   // (nzPriv: the nutzap receiving key, src/app_nutzap.js)
 function lockPubFrom(v) {
   v = String(v || '').trim();
   if (validPub(v)) return v.toLowerCase();

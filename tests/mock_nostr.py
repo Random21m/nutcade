@@ -1,7 +1,7 @@
 """Local stand-ins for a Nostr relay and the npub.cash v2 API, used by round2_qa.py.
 
 Run: python mock_nostr.py [port]   (default 3350)
-  ws://127.0.0.1:PORT/relay                 Nostr relay (EVENT / REQ / CLOSE, replaceable kinds, NIP-09 deletion)
+  ws://127.0.0.1:PORT/relay                 Nostr relay (EVENT / REQ / CLOSE, replaceable kinds incl. 10019, NIP-09 deletion)
   http://127.0.0.1:PORT/api/v2/...          npub.cash v2: user/info, user/mint, wallet/quotes (NIP-98 auth)
   ws://127.0.0.1:PORT/api/v2/ws/quote       npub.cash quote updates (challenge, then "update" messages)
   POST /test/pay?pubkey=HEX&amount=N&lock=1 test helper: create a (locked) mint quote at the user's mint
@@ -74,7 +74,7 @@ async def relay(ws: WebSocket):
             if m[0] == 'EVENT':
                 e = m[1]
                 ok = verify(e)
-                if ok and 30000 <= e['kind'] < 40000:
+                if ok and (30000 <= e['kind'] < 40000 or e['kind'] == 10019):   # (parameterized replaceable, and NIP-61 nutzap info: one per author)
                     d = next((t[1] for t in e['tags'] if t[0] == 'd'), '')
                     for k, old in list(events.items()):
                         if old['kind'] == e['kind'] and old['pubkey'] == e['pubkey'] and next((t[1] for t in old['tags'] if t[0] == 'd'), '') == d:
