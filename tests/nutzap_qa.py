@@ -264,6 +264,52 @@ async def main():
             check('10019: a list of 100 mints is read only up to 32', f7 == 32, f7)
         await section('hardening', hardening)
 
+        async def taint():
+            # (fix round 2) values from Nostr events: relays through one strict check, mints only as our own, keys own-only, text escaped
+            bb0 = await bo.bal()
+            bad = ['javascript:alert(1)', 'file:///etc/passwd', 'http://127.0.0.1:3350/relay', 'ws://user:pw@127.0.0.1:3350/relay', 'ws://127.0.0.1:3350/re lay', 'wss://', 'ws://' + 'a' * 300 + '.example']
+            r1 = [await bo.ev(f"NutZap.relay({J(u)})") for u in bad]
+            check('relays: javascript:, file:, http:, credentials, spaces, no host and over-long addresses are refused', all(x is None for x in r1), r1)
+            r2 = await bo.ev(f"NutZap.relay({J(RELAY + '/')})")
+            check('relays: a good one comes back in one fixed spelling', r2 == RELAY, r2)
+            rp = await al.ev("NutZap.randomPub()")
+            e1 = await al.ev(f"""CashuLib.finalizeEvent({{kind:10019, created_at:Math.floor(Date.now()/1000), content:'', tags:{J([['relay', u] for u in bad] + [['relay', 'wss://ok.example/relay'], ['mint', M, 'sat'], ['pubkey', rp]])}}}, crypto.getRandomValues(new Uint8Array(32)))""")
+            await al.ev(f"__nzPublish({J(e1)})")
+            f1 = await al.ev(f"NutZap.find({J(e1['pubkey'])}).then(x=>x, e=>e.message)")
+            check('relays: from a 10019 only the valid relay is kept', isinstance(f1, dict) and f1['relays'] == ['wss://ok.example/relay'], f1)
+            check('mints: a mint from a 10019 that is ours is used as our own stored address', isinstance(f1, dict) and f1['mints'][0].get('own') == M, f1)
+            # a 9321 whose mint is not one of ours: never fetched, never a key
+            hits = []
+            async def watch(route):
+                hits.append(route.request.url)
+                try: await route.abort()
+                except Exception: pass
+            await bo.pg.route(re.compile(r'https?://evil\.example/.*'), watch)
+            ps = await al.ev(f"Nutcade.r8.sendEcash(5, 'nz taint', {J(ctx.get('bpub'))}).then(t=>t.sent)")
+            e2 = await al.ev(f"__nzEv({J(ps)}, {{u:'http://evil.example', p:{J(B_PK)}, dt:8}})")
+            r3 = await bo.ev(f"NutZap.event({J(e2)})"); await bo.wait(800)
+            gone = await bo.ev("!Object.keys(Nutcade.S.mintlog||{}).some(k=>/evil/.test(k)) && !Object.keys(Nutcade.S.mintkeys||{}).some(k=>/evil/.test(k)) && !Nutcade.S.mints.some(m=>/evil/.test(m.url))")
+            check('mints: a 9321 at a mint that is not ours is refused, never fetched, never used as a key', r3 == 'untrusted' and not hits and gone, (r3, hits, gone))
+            # a __proto__ keyset id does nothing
+            e3 = await al.ev(f"__nzEv({J([dict(p, id='__proto__') for p in ps])}, {{u:{J(M)}, p:{J(B_PK)}, dt:9}})")
+            r4 = await bo.ev(f"NutZap.event({J(e3)})")
+            clean = await bo.ev("Object.getOwnPropertyNames(Object.prototype).every(k=>['constructor','__defineGetter__','__defineSetter__','hasOwnProperty','__lookupGetter__','__lookupSetter__','isPrototypeOf','propertyIsEnumerable','toString','valueOf','__proto__','toLocaleString'].includes(k))")
+            check('keys: a proof on keyset "__proto__" is refused and nothing is added to Object.prototype', r4 == 'keyset' and clean and await bo.bal() == bb0, (r4, clean))
+            # text from an event or a name shows as text
+            r5 = await al.ev(f"NutZap.send({{pubkey:{J(B_PK)}, name:'Bob'}}, 6, '<img src=x onerror=window.__xss=1>').then(x=>x.ok, e=>e.message)")
+            await bo.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {bb0 + 6}", 20000)
+            await bo.ev("Nutcade.closeSheet()"); await bo.click('[data-act=tab][data-tab=history]'); await bo.wait(300)
+            tid = await bo.ev("(Nutcade.S.txs.find(t=>t.type==='in'&&t.nz&&t.amount===6)||{}).id")
+            await bo.ev(f"document.querySelector('[data-act=tx][data-id=\"{tid}\"]').click()"); await bo.wait(400)
+            x1 = await bo.ev("({xss: window.__xss === undefined, img: !document.querySelector('img[src=\"x\"]'), text: document.body.innerText.includes('<img src=x')})")
+            check('text: a comment with <img onerror> shows as text in history and its screen, never as HTML', r5 is True and all(x1.values()), x1)
+            await bo.ev("Nutcade.closeSheet()")
+            await al.ev(f"NutZap.open({{pubkey:{J(B_PK)}, name:'<img src=x onerror=window.__xss2=1>'}})"); await al.until("!document.querySelector('#layer .spinner')", 12000); await al.wait(300)
+            x2 = await al.ev("({xss: window.__xss2 === undefined, img: !document.querySelector('img[src=\"x\"]'), text: (document.querySelector('#layer')||{}).innerText.includes('<img src=x')})")
+            check('text: a name with <img onerror> shows as text on the nutzap screen', all(x2.values()), x2)
+            await al.ev("Nutcade.closeSheet()")
+        await section('taint', taint)
+
         async def parts():
             # a waiting nutzap at a mint that starts limiting request size is claimed in parts; such a mint is left out of the 10019
             bb0 = await bo.bal(); SW = re.compile(re.escape(M) + r'/v1/swap$')

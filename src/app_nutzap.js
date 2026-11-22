@@ -60,7 +60,22 @@ const nzLive = () => nzOn() && !tabLocked && !(vault.on && !vault.open) && !writ
 // 128: twice the most coins a nutzap may hold, so one taken can always be claimed in one request at a mint listed here)
 const nzMints = () => S.mints.map(m => m.url).filter(u => !isBlocked(u) && !belowMin(u));
 const nzTrusted = url => nzMints().includes(url);
-const nzWant = () => [relays().slice(0, 8).join(' '), nzMints().join(' '), nzPub()].join('|');
+// THE check for every relay address nutzaps use (yours, a contact's, the ones a 10019 lists): ws:// or wss:// only, a host,
+// no user name or password, no spaces or control characters, at most 200 characters; returned as one fixed spelling, or null
+function nzRelay(u) {
+  if (typeof u !== 'string' || u.length > 200 || /[\s\x00-\x1f\x7f]/.test(u) || !/^wss?:\/\//i.test(u)) return null;
+  let x; try { x = new URL(u); } catch (e) { return null; }
+  if ((x.protocol !== 'ws:' && x.protocol !== 'wss:') || !x.hostname || x.username || x.password || x.hash) return null;
+  const out = (x.protocol + '//' + x.host + x.pathname + x.search).replace(/\/+$/, '');
+  return out.length <= 200 ? out : null;
+}
+const nzRelays = list => { const out = []; for (const u of list || []) { const r = nzRelay(u); if (r && !out.includes(r)) out.push(r); } return out; };
+const nzMyRelays = () => nzRelays(relays()).slice(0, 8);
+// one of OUR mints, as we store it, for a mint address someone else wrote (exact match once normalised), or null:
+// an address from a Nostr event is never fetched, stored or used as a key itself
+const nzOwnMint = u => { if (typeof u !== 'string' || u.length > 300 || !/^https?:\/\//i.test(u.trim())) return null; const n = normUrl(u); return nzMints().find(x => x === n) || null; };
+const nzHas = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+const nzWant = () => [nzMyRelays().join(' '), nzMints().join(' '), nzPub()].join('|');
 const nzNextTs = () => Math.max(Math.floor(Date.now() / 1000), num(S.prefs.nzTs) + 1);   // (after anything of ours published before)
 const nzSeen = new Set(raw.get('nzseen', []));
 function nzMark(id) { if (!id || nzSeen.has(id)) return; nzSeen.add(id); raw.set('nzseen', [...nzSeen].slice(-1000)); }
@@ -94,7 +109,7 @@ const nzComment = c => String(c || '').replace(/[\s\u200b-\u200f\u2028-\u202e\u2
 let nzState = null, nzTry = 0, nzDecoyT = 0;
 async function nzPublish() {
   if (!nzOn()) return 0;
-  const rl = relays().slice(0, 8), mints = nzMints(), pub = nzPub(), key = nzWant();
+  const rl = nzMyRelays(), mints = nzMints(), pub = nzPub(), key = nzWant();
   const ts = nzNextTs();
   const ev = L.finalizeEvent({ kind: 10019, created_at: ts, tags: rl.map(r => ['relay', r]).concat(mints.map(u => ['mint', u, 'sat']), [['pubkey', pub]]), content: '' }, nostrKey());
   // the attempt is on disk before it goes out: if nutzaps are turned off meanwhile, or it times out but a relay kept it, it is withdrawn
@@ -113,7 +128,7 @@ async function nzUnpublishStart() {
   const tried = S.prefs.nzPubTry, info = S.prefs.nzInfo;
   if (!tried && !info) return 0;
   const sk = nostrKey(), pk = L.nostrPub(sk), ts = nzNextTs();
-  const rl = [...new Set(((tried || {}).relays || []).concat((info || {}).relays || [], relays()))].slice(0, 16);
+  const rl = nzRelays(((tried || {}).relays || []).concat((info || {}).relays || [], relays())).slice(0, 16);
   const empty = L.finalizeEvent({ kind: 10019, created_at: ts, tags: [], content: '' }, sk);
   const del = L.finalizeEvent({ kind: 5, created_at: ts, tags: [['a', `10019:${pk}:`], ['k', '10019']], content: '' }, sk);
   S.prefs.nzTs = ts; S.prefs.nzUnpub = { evs: [empty, del], relays: rl, tries: 0 }; delete S.prefs.nzPubTry; delete S.prefs.nzInfo;
@@ -153,7 +168,7 @@ function nzSettingsHTML() {
 const nzSocks = new Map(), nzBack = new Map();   // relay -> its socket; relay -> { n, at } (its own backoff)
 function nzListen() {
   if (!nzLive()) { nzStop(); return; }
-  const want = relays();
+  const want = nzMyRelays();
   for (const [r, ws] of nzSocks) if (!want.includes(r)) { nzSocks.delete(r); try { ws.close(); } catch (e) {} }
   const f = { kinds: [9321], '#p': [L.nostrPub(nostrKey())] };
   if (S.prefs.nzSince) f.since = Math.max(0, num(S.prefs.nzSince) - NZ_BACK);   // (a restored wallet has none: everything sent to it is looked at)
@@ -192,9 +207,9 @@ async function nzEvent(ev) {
   if (!tg('p').some(t => t[1] === L.nostrPub(nostrKey()))) return 'bad';
   const skip = why => { nzMark(ev.id); nzWaitSet(ev, false); return why; };
   const u = (tg('u')[0] || [])[1]; if (!u || !/^https?:\/\//i.test(u.trim())) return skip('bad');
-  const mint = normUrl(u);
+  const mint = nzOwnMint(u);   // (our own stored address of that mint, or none: untrusted)
   const unit = (tg('unit')[0] || [])[1]; if (unit && unit !== 'sat') return skip('unit');
-  if (!nzTrusted(mint)) { nzWaitSet(ev, false); return 'untrusted'; }   // (not kept as seen: taken if you add that mint and it comes again)
+  if (!mint || !nzTrusted(mint)) { nzWaitSet(ev, false); return 'untrusted'; }   // (not kept as seen: taken if you add that mint and it comes again)
   const pt = tg('proof'); if (!pt.length || pt.length > NZ_COINS) return skip('bad');
   let proofs = [];
   for (const t of pt) {
@@ -212,7 +227,7 @@ async function nzEvent(ev) {
   if (!S.mintkeys[mint]) { try { await getWallet(mint); } catch (e) {} }
   const ks = S.mintkeys[mint];
   if (!ks) { nzWaitSet(ev, true); return 'nokeys'; }   // (the mint can't be reached and its keys aren't saved: looked at again later)
-  if (!proofs.every(p => ks[p.id] && ks[p.id][String(p.amount)])) return skip('keyset');
+  if (!proofs.every(p => nzHas(ks, p.id) && nzHas(ks[p.id], String(p.amount)))) return skip('keyset');   // (own keys only: never one from Object.prototype)
   let token; try { token = L.getEncodedToken({ mint, proofs, unit: 'sat' }); } catch (e) { return skip('bad'); }
   const dq = offlineCheck(token).state;
   if (dq !== 'ok') return skip(dq === 'bad' ? 'forged' : 'noproof');
@@ -283,7 +298,7 @@ const nzDecoyWait = async () => { await sleep(6500 + Math.floor(Math.random() * 
 async function nzFind(pubkey, extra) {
   if (!/^[0-9a-f]{64}$/.test(String(pubkey || ''))) throw new Error("That Nostr address can't be read. Paste an npub or nprofile.");
   if (nzDecoy()) return nzDecoyWait();
-  const list = [...new Set((extra || []).filter(u => /^wss?:\/\//.test(u)).concat(relays()))].slice(0, 8);
+  const list = nzRelays((extra || []).concat(relays())).slice(0, 8);
   const evs = await relayQuery({ kinds: [10019], authors: [pubkey], limit: 5 }, 7000, list, 1500);
   const ev = evs.filter(e => e && e.kind === 10019 && e.pubkey === pubkey && Array.isArray(e.tags) && L.verifyEvent(e)).sort((a, b) => b.created_at - a.created_at)[0];
   if (!ev && !evs.answered) throw nzNoRelay();
@@ -294,12 +309,12 @@ async function nzFind(pubkey, extra) {
   for (const t of tg('mint').slice(0, NZ_MINT_TAGS)) {   // (a list longer than that is cut: a lookup can't be made to take forever)
     if (t.length > 2 && !t.slice(2).includes('sat')) continue;   // (units listed, and sat isn't one of them)
     if (t[1].length > 300 || !/^https?:\/\//i.test(t[1].trim())) continue;
-    const url = normUrl(t[1]); if (!urls.has(url)) { urls.add(url); mints.push({ u: t[1], url }); }
+    const url = normUrl(t[1]); if (!urls.has(url)) { urls.add(url); mints.push({ u: t[1], url, own: nzOwnMint(t[1]) }); }   // (own: our stored address, the only one ever used)
   }
   if (!pub || !mints.length) throw nzNoInfo();
-  return { pub, mints, relays: tg('relay').map(t => t[1]).filter(u => u.length <= 300 && /^wss?:\/\//.test(u)).slice(0, 8) };
+  return { pub, mints, relays: nzRelays(tg('relay').map(t => t[1])).slice(0, 8) };
 }
-const nzUsable = info => info.mints.filter(m => S.mints.some(x => x.url === m.url) && !isBlocked(m.url));
+const nzUsable = info => info.mints.filter(m => m.own && !isBlocked(m.own)).map(m => ({ u: m.u, url: m.own }));
 function nzPick(info, amount) {
   const mine = nzUsable(info);
   if (!mine.length) { const e = keepErr(new Error("They take nutzaps only at mints you don't use. Add one of their mints to send them a nutzap. Nothing was sent.")); e.raw = info.mints.map(m => host(m.url)).join(', '); throw e; }
@@ -308,7 +323,7 @@ function nzPick(info, amount) {
   return ok.find(m => m.url === S.active) || ok.sort((a, b) => balanceOf(b.url) - balanceOf(a.url))[0];
 }
 const nzProof = p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq && p.dleq.e && p.dleq.s && p.dleq.r ? { dleq: { e: String(p.dleq.e), s: String(p.dleq.s), r: String(p.dleq.r) } } : {});
-const nzRelaysFor = z => { const l = (z.relays || []).filter(u => /^wss?:\/\//.test(u)); return (l.length ? l : relays()).slice(0, 8); };
+const nzRelaysFor = z => { const l = nzRelays(z.relays); return (l.length ? l : nzMyRelays()).slice(0, 8); };
 // the nutzap's event, made once and kept on its line before it is sent (sending it again is the same event)
 async function nzDeliverOne(id) {
   let t = txById(id); if (!t || t.type !== 'out' || t.delivered || t.status !== 'pending' || !t.nz || !Array.isArray(t.sent) || !t.sent.length) return !!(t && t.delivered);
@@ -338,7 +353,7 @@ async function nzSendTo(target, info, amount, comment) {
   amount = num(amount); if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('Enter an amount in sats, like 1000.');
   if (!info || !nzKeyOf(info.pub)) throw nzNoInfo();
   const m = nzPick(info, amount), name = String(target.name || shortNpub(target.pubkey)).trim().slice(0, 40);
-  const txx = { nz: { to: target.pubkey, u: m.u, relays: info.relays || [], c: String(comment || '').slice(0, 280) } };
+  const txx = { nz: { to: target.pubkey, u: m.u, relays: nzRelays(info.relays).slice(0, 8), c: String(comment || '').slice(0, 280) } };
   if (target.contactId) Object.assign(txx, { contactId: target.contactId, contactName: name });
   const tx = await sendEcash(amount, `Nutzap to ${name}`, nzKeyOf(info.pub), m.url, { txx });
   const ok = await single('nzsend:' + tx.id, () => nzDeliverOne(tx.id)).catch(() => false);
@@ -398,6 +413,6 @@ async function nzTickNow(force) {
 window.NutZap = {
   pub: () => nzPub(), me: () => L.nostrPub(nostrKey()), path: NZ_PATH, info: () => S.prefs.nzInfo || null, live: () => [...nzSocks.values()].filter(s => s.readyState <= 1).length,
   event: ev => nzQueue(ev), tick: force => nzTick(!!force), seen: () => [...nzSeen], find: (pk, rl) => nzFind(pk, rl || []), mints: () => nzMints(), waiting: () => nzWaiting().length,
-  claim: id => nzClaim({ id }, true, true), lock: s => nzLock(s), socks: () => [...nzSocks.values()],
+  claim: id => nzClaim({ id }, true, true), relay: u => nzRelay(u), lock: s => nzLock(s), socks: () => [...nzSocks.values()],
   send: (target, amount, comment) => nzSend(target, amount, comment), open: target => openNutzap(target), randomPub: () => hex(L.getPubKeyFromPrivKey(rnd(32)))
 };
