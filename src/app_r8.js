@@ -272,6 +272,7 @@ function loadWalletState() {
   S.piggy = d.piggy || { saved: 0 }; S.mintlog = d.mintlog || {}; S.mintkeys = d.mintkeys || {}; S.heirlooms = d.heirlooms || []; S.challenges = d.challenges || []; S.blocked = d.blocked || [];
   seenWraps.clear(); for (const x of d.dmseen || []) seenWraps.add(x);
   nwcSeen.clear(); for (const x of d.nwcseen || []) nwcSeen.add(x);
+  nzSeen.clear(); for (const x of d.nzseen || []) nzSeen.add(x);
   myGen = raw.get('gen', 0);
   if (window.Trophies && window.Trophies.reload) window.Trophies.reload();
 }
@@ -391,7 +392,7 @@ async function duressOff() {
 }
 // Reset wallet, inside the duress PIN's wallet: that wallet starts over empty (still opened by its PIN); the rest of
 // the vault, the real wallet included, is left exactly as it was
-async function resetPart() { npcSocketStop(); dmStop(); vault.data = {}; queueVaultWrite(); await vault.chain; }
+async function resetPart() { npcSocketStop(); dmStop(); nzStop(); vault.data = {}; queueVaultWrite(); await vault.chain; }
 // the PIN of the wallet that is open, for the steps that need it (a limit, the duress PIN). live(): the pad it was
 // typed on is still open for the same step (see pinSubmit); what the step acts on is taken when OK is pressed, and
 // once the PIN is checked the step goes ahead only if nothing changed meanwhile (the PIN is never used for another step)
@@ -713,8 +714,8 @@ function tokenParts(w, proofs, m) {
   };
   return go(0) ? parts.map(g => g.slice()) : null;
 }
-async function receiveInParts(w, meta, token, note, parts, own, mine, back) {
-  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true, mk: 1 }, mine ? { mine: true } : {}, back ? { back } : {})));   // (mk: its mark, or none for an Extra Life left to you, is what it says)
+async function receiveInParts(w, meta, token, note, parts, own, mine, back, extra) {   // (extra: kept on each part's line, a nutzap's mark)
+  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true, mk: 1 }, mine ? { mine: true } : {}, back ? { back } : {}, extra || {})));   // (mk: its mark, or none for an Extra Life left to you, is what it says)
   save();   // (every part is saved before the first is claimed: if NUTCADE closes in between, the rest are claimed later)
   let got = 0, last = null, err = null;
   for (const t of lines) {
