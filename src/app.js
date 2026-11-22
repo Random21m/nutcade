@@ -3404,8 +3404,8 @@ function holdIncoming(token, note, opts = {}) {
   if (opts.check) {
     dleq = offlineCheck(token).state; if (dleq === 'bad') throw forgedErr();
     // coins already saved in another token that waits here: the same sats once, never twice
-    const mine = new Set(String(tokSecrets(token) || '').split(' ').filter(Boolean));
-    if (mine.size && S.txs.some(t => t.status === 'pending' && t.incoming && String(tokSecrets(t.incoming) || '').split(' ').some(x => mine.has(x)))) throw new Error('These coins are already saved and waiting, in another token.');
+    const mine = new Set(heldSecrets(token) || []);
+    if (mine.size && S.txs.some(t => t.status === 'pending' && t.incoming && (heldSecrets(t.incoming) || []).some(x => mine.has(x)))) throw new Error('These coins are already saved and waiting, in another token.');
   }
   return addTx(Object.assign({ type: 'in', method: 'ecash', amount: meta.amount, mint: meta.mint, note: note || meta.memo || '', status: 'pending', incoming: cleanToken(token), offline: true }, dleq ? { dleq } : {}));
 }

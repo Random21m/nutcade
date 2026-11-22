@@ -127,6 +127,14 @@ function offlineCheck(token) {
   }
   return { state: unknown ? 'nokeys' : missing ? 'noproof' : 'ok', n: proofs.length };
 }
+// the secrets of a token's coins, read with every keyset id this wallet knows (its own and every saved mint's: a token's
+// short keyset ids can only be read with them); null when it can't be read
+function heldSecrets(token) {
+  try {
+    const ids = new Set(Object.keys(S.counters)); for (const ks of Object.values(S.mintkeys || {})) for (const id of Object.keys(ks)) ids.add(id);
+    const ps = L.getDecodedToken(cleanToken(token), [...ids]).proofs || []; return ps.length ? ps.map(p => String(p.secret)) : null;
+  } catch (e) { return null; }
+}
 const DQ_MAX = 300;   // (about 2 s at most on a slow phone)
 const forgedErr = () => Object.assign(new Error("This token's coins weren't signed by its mint. It may be fake, so NUTCADE didn't save it."), { forged: true });
 // the line shown on a saved token's screen about its check
