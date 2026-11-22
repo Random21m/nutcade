@@ -496,13 +496,19 @@ async def main():
         await section('hostile', hostile)
 
         # ======================= relays that disagree: the newest copy wins, not the fastest relay's =======================
+        pbev = lambda v: [x for x in v['ev'] if ['d', 'nutcade-phone-backup'] in x['tags']]   # (the phone-backup copies only)
         async def newest():
             w, words = await funded(b); cdp, aid = await authn(w)
             fk = {'wss://relay.damus.io': {'ev': [], 'delay': 30}, 'wss://nos.lol': {'ev': [], 'delay': 2500}, 'wss://relay.primal.net': {'ev': [], 'delay': 2500}}
             await w.ev(f"window.__fk.set({J(fk)}); Nutcade.S.prefs.relays=[]")   # (only the three default relays, all stand-ins here)
             txt, e = await phone_backup(w); await w.ev("Nutcade.closeSheet()")
             rec1 = await w.ev("Nutcade.bk.rec()")
-            check('newest: backed up to the three relays', 'BACKED UP' in txt and all(len(v['ev']) == 1 for v in (await w.ev("window.__fk.get()")).values()), e)
+            # (only what is guaranteed: the publish ends 1.5 s after the first OK, the slow relays answer later, so they are waited for below)
+            check('newest: backed up (the fast relay holds the copy)', 'BACKED UP' in txt and len(pbev((await w.ev("window.__fk.get()"))['wss://relay.damus.io'])) == 1, e)
+            for _ in range(50):
+                if all(len(pbev(v)) == 1 for v in (await w.ev("window.__fk.get()")).values()): break
+                await w.wait(300)
+            check('newest: the slow relays hold the copy too (waited for)', all(len(pbev(v)) == 1 for v in (await w.ev("window.__fk.get()")).values()), await w.ev("window.__fk.get()"))
             # the fast relay misses the next copy (new words W2); the slow two get it
             w2 = 'legal winner thank year wave sausage worth useful legal winner thank yellow'
             await w.ev("(()=>{ const f=window.__fk.get(); f['wss://relay.damus.io'].frozen=true; window.__fk.set(f) })()")
