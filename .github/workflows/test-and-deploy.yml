@@ -77,6 +77,8 @@ jobs:
             suites: radar
           - name: dleq
             suites: dleq
+          - name: remind
+            suites: remind
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out
