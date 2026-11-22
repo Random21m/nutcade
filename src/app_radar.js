@@ -18,14 +18,14 @@ function radarParse(j) {
   for (const x of j.mints.slice(0, 2000)) {
     if (!x || typeof x !== 'object' || typeof x.url !== 'string' || x.url.length > 300 || !/^https?:\/\//i.test(x.url)) continue;
     if (!['online', 'offline', 'degraded', 'archived'].includes(x.status)) continue;
-    const url = normUrl(x.url), score = Number.isInteger(x.score) && x.score >= 0 && x.score <= 100 ? x.score : null;
+    const url = normUrl(x.url), score = typeof x.score === 'number' && Number.isFinite(x.score) && x.score >= 0 && x.score <= 100 ? Math.round(x.score) : null;
     const off = x.mintDisabled === true || x.meltDisabled === true;
     const label = x.status !== 'online' ? 'down' : score === null ? null : (score >= 80 && !off ? 'good' : 'shaky');
     if (!label || map.has(url)) continue;
     map.set(url, { label });
     const nut = n => Array.isArray(x.nuts) ? x.nuts.map(String).includes(n) : !!x.nuts && typeof x.nuts === 'object' && !!x.nuts[n] && x.nuts[n].supported !== false;
     if (label === 'good' && x.eligibleForRecommendation === true && x.isTest !== true && /^https:\/\//i.test(url) && Array.isArray(x.units) && x.units.includes('sat') && nut('4') && nut('5')) {
-      const nm = typeof x.name === 'string' ? x.name.replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, 40) : '';
+      const nm = typeof x.name === 'string' ? x.name.replace(/[\u0000-\u001f\u007f<>\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').trim().slice(0, 40) : '';
       sugg.push({ url, name: nm || host(url) });
     }
   }
@@ -35,18 +35,20 @@ async function radarFetch() {
   if (radar.busy) return; radar.busy = true; const gen = radar.gen; const before = radarSig();
   try {
     const h = {}; if (radar.etag && radar.map.size) h['If-None-Match'] = radar.etag;
-    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 10000); let r;
-    try { r = await fetch(MR_API, { headers: h, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctl.signal }); } finally { clearTimeout(tm); }
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 12000);   // (covers the answer and its body)
+    let r; try { r = await fetch(MR_API, { headers: h, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctl.signal });
     if (gen !== radar.gen) return;
     if (r.status === 304 && radar.map.size) { radar.at = Date.now(); radar.next = radar.at + MR_EVERY; return; }
     if (r.status === 429) { const s = parseInt(r.headers.get('Retry-After'), 10); radar.next = Date.now() + Math.min(Math.max((s > 0 ? s : 0) * 1000, MR_EVERY), 3600e3); return; }
     if (!r.ok) throw new Error('status');
+    const cl = parseInt(r.headers.get('Content-Length'), 10); if (cl > MR_MAXBYTES) throw new Error('size');
     const txt = await r.text(); if (gen !== radar.gen) return; if (txt.length > MR_MAXBYTES) throw new Error('size');
     const p = radarParse(JSON.parse(txt)); if (!p) throw new Error('shape');
     radar.map = p.map; radar.sugg = p.sugg; radar.etag = r.headers.get('ETag') || ''; radar.at = Date.now(); radar.next = radar.at + MR_EVERY;
+    } finally { clearTimeout(tm); }
   } catch (e) { if (gen === radar.gen) radar.next = Date.now() + MR_EVERY; }
   finally {
-    radar.busy = false;
+    if (gen === radar.gen) radar.busy = false;
     if (gen === radar.gen && radarOn()) { radarPaint(); if (radarSig() !== before && !$('#layer .sheet') && (tab === 'wallet' || tab === 'mints')) refresh(); }
   }
 }

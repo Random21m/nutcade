@@ -3537,8 +3537,8 @@ function openMintPicker() {
     ${S.mints.length ? `<div class="field"><label>Your mints</label><div class="txs">${S.mints.map(m => `<button class="tx in" data-act="useMint" data-url="${esc(m.url)}"><span class="ico">${m.url === S.active ? '★' : '·'}</span><span class="mid"><div class="note">${esc(m.name)}</div><div class="meta">${esc(host(m.url))}</div></span><span class="amt">${fmt(balanceOf(m.url))}</span></button>`).join('')}</div></div>` : ''}
     <div class="field"><label for="mintUrl">Mint address</label><div class="row inrow"><input id="mintUrl" class="inp" data-noi18n placeholder="https://mint.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn solid gold" data-act="addMintUrl">Add</button></div></div>
     <div id="mintErr"></div>
-    <div id="radarSugg">${radarSuggHTML()}</div>
     <div class="field"><label>Popular mints</label><div class="txs">${CURATED.map(c => card(c.url, c.name, c.blurb, c.test ? '<span class="chip failed">TEST SATS</span>' : '')).join('')}</div></div>
+    <div id="radarSugg">${radarSuggHTML()}</div>
     <div class="field"><label>Discovered on Nostr</label><div id="nostrList" class="txs"><button class="btn block violet" data-act="discover">Find mints people recommend</button></div></div>`,
     body => { probeAll(body); radarEnsure(); return null; });
 }
