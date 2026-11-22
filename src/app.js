@@ -280,9 +280,10 @@ function mergeMintSpellings() {
     S.mintlog[n] = !a ? b : Object.assign(a, { first: Math.min(a.first || Infinity, b.first || Infinity), ms: (a.ms || []).concat(b.ms || []).slice(-50), ops: [(a.ops || [0, 0])[0] + (b.ops || [0, 0])[0], (a.ops || [0, 0])[1] + (b.ops || [0, 0])[1]], keysets: Object.assign({}, b.keysets, a.keysets), changes: (b.changes || []).concat(a.changes || []) });
     delete S.mintlog[u];
   }
+  if (S.mintkeys) for (const u of Object.keys(S.mintkeys)) { const n = fix(u); if (n !== u) { S.mintkeys[n] = Object.assign({}, S.mintkeys[u], S.mintkeys[n]); delete S.mintkeys[u]; changed = true; } }
   if (!changed) return;
   save();
-  for (const k of ['requests', 'extra', 'heirlooms', 'challenges', 'hunts', 'found', 'mintlog']) if (S[k] !== undefined) store.set(k, S[k]);
+  for (const k of ['mintkeys', 'requests', 'extra', 'heirlooms', 'challenges', 'hunts', 'found', 'mintlog']) if (S[k] !== undefined) store.set(k, S[k]);
 }
 let storageOk = store.set('probe', 1);
 // every save stamps a generation number: a tab that sees someone else's stamp re-reads the wallet before working on it
@@ -520,6 +521,7 @@ async function getWallet(url) {
   const p = (async () => {
     const w = new L.Wallet(url, { unit: 'sat', bip39seed: seedFor(), counterSource });
     await w.loadMint();
+    saveMintKeys(url, w);   // (its public keys, for checking tokens taken while offline: app_dleq.js)
     ksBind(w);   // (new coins never on a keyset that expires soon, when the mint has another)
     p.ready = w;   // for the few places that need it without waiting (the cost shown on a pay screen)
     return w;
@@ -2665,7 +2667,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.25.0';
+const APP_VERSION = '1.26.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -3393,10 +3395,19 @@ function sendOffline(amount, note, url = S.active) {
   save();
   return addTx(Object.assign({ type: 'out', method: 'ecash', amount, mint: url, note, status: 'pending', token, sent: plain(pick), offline: true }, hold.id ? { limId: hold.id } : {}));
 }
-function holdIncoming(token, note) {
+// opts.check: a token someone is receiving, checked against its mint's saved keys first (app_dleq.js); one its mint
+// didn't sign is refused, never saved. (Tokens coming back from this wallet's own records are saved as they are.)
+function holdIncoming(token, note, opts = {}) {
   const meta = peekToken(token);
   if (S.txs.some(t => t.incoming === cleanToken(token))) throw new Error('This token is already saved and waiting.');
-  return addTx({ type: 'in', method: 'ecash', amount: meta.amount, mint: meta.mint, note: note || meta.memo || '', status: 'pending', incoming: cleanToken(token), offline: true });
+  let dleq = null;
+  if (opts.check) {
+    dleq = offlineCheck(token).state; if (dleq === 'bad') throw forgedErr();
+    // coins already saved in another token that waits here: the same sats once, never twice
+    const mine = new Set(heldSecrets(token) || []);
+    if (mine.size && S.txs.some(t => t.status === 'pending' && t.incoming && (heldSecrets(t.incoming) || []).some(x => mine.has(x)))) throw new Error('These coins are already saved and waiting, in another token.');
+  }
+  return addTx(Object.assign({ type: 'in', method: 'ecash', amount: meta.amount, mint: meta.mint, note: note || meta.memo || '', status: 'pending', incoming: cleanToken(token), offline: true }, dleq ? { dleq } : {}));
 }
 /* One claim at a time for each saved token. A second claim of the same token (the automatic one and "Claim now" together, or
    a retry after a claim whose answer was lost) would open a second record for the same coins. Together they share one claim;
@@ -3777,7 +3788,7 @@ function openTx(id) {
   else if (t.method === 'fee') extra = `<div class="notice">The mint kept this fee when a payment didn't go through. The rest of the ecash came back to your wallet.</div>`;
   else if (t.status === 'pending' && t.incoming && isBlocked(t.mint)) extra = `${errHTML(blockedErr(t.mint))}<div class="tiny muted">This ecash waits here. Unblock the mint to claim it.</div>`;
   else if (t.status === 'pending' && t.incoming && t.refused) extra = `<div class="notice">This ecash was refused while its mint was blocked. The mint is unblocked now, so you can claim it.</div><button class="btn block lime" data-act="claimIncoming" data-id="${esc(t.id)}">Claim now</button>`;
-  else if (t.status === 'pending' && t.incoming && t.offline) extra = `<div class="notice">Saved while offline. NUTCADE claims it automatically when the mint can be reached.</div><button class="btn block lime" data-act="claimIncoming" data-id="${esc(t.id)}">Claim now</button>`;
+  else if (t.status === 'pending' && t.incoming && t.offline) extra = `${checkLine(t)}<div class="notice">Saved while offline. NUTCADE claims it automatically when the mint can be reached.</div><button class="btn block lime" data-act="claimIncoming" data-id="${esc(t.id)}">Claim now</button>`;
   else if (t.status === 'pending' && t.incoming) extra = `<div class="notice">This ecash came from ${esc(host(t.mint))}, a mint you don't use yet. Claiming adds that mint and trusts it with ${money(t.amount)}.</div><button class="btn block lime" data-act="claimIncoming" data-id="${esc(t.id)}">Trust mint &amp; claim</button>`;
   else if (t.status === 'pending' && t.method === 'ecash' && t.token) extra = `${t.lockUntil ? `<div class="notice cyan">Locked to ${esc(t.giftTo || 'one person')}. ${Date.now() < t.lockUntil ? `If they haven't claimed it by ${fmtDay(t.lockUntil)}, it comes back to you automatically.` : 'The lock has run out, so you can take it back.'}</div>` : ''}${qrBlock(t.token, 'Ecash token QR')}<div class="code">${esc(t.token)}</div>
     <div class="row" style="flex-wrap:wrap"><button class="btn sm pink" data-act="copy" data-text="${esc(t.token)}">Copy token</button>${nfcOK() ? `<button class="btn sm violet" data-act="nfcWrite" data-text="${esc(t.token)}">Write to NFC</button>` : ''}${ctBtn(t.token)}<button class="btn sm" data-act="checkClaim" data-id="${esc(t.id)}">Check claimed</button>${t.lockUntil ? (Date.now() < t.lockUntil ? `<button class="btn sm" disabled>Back on ${fmtDay(t.lockUntil)}</button>` : `<button class="btn sm gold" data-act="giftTake" data-id="${esc(t.id)}">Take it back</button>`) : `<button class="btn sm gold" data-act="reclaim" data-id="${esc(t.id)}">Reclaim</button>`}</div>`;
@@ -3921,6 +3932,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_sendall.js@@*/
 /*@@app_backup.js@@*/
 /*@@app_radar.js@@*/
+/*@@app_dleq.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4143,9 +4155,9 @@ const A = {
     if (!S.mints.find(m => m.url === meta.mint) && !b.dataset.trust) {
       setTrust(meta); return;
     }
-    if (isOffline()) { holdIncoming(tok, val('noteIn').trim()); sfx('blip'); refresh(); setBody(`<div class="notice">You're offline, so this token is saved and will be claimed automatically when you're back online. Until then it isn't yours yet: the sender could still spend it.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
+    if (isOffline()) { const h = holdIncoming(tok, val('noteIn').trim(), { check: true }); sfx('blip'); refresh(); setBody(`${checkLine(h)}<div class="notice">You're offline, so this token is saved and will be claimed automatically when you're back online. Until then it isn't yours yet: the sender could still spend it.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
     let tx; try { tx = await receiveToken(tok, val('noteIn').trim()); }
-    catch (e) { if (!netErr(e) || e.asked) throw e; holdIncoming(tok, val('noteIn').trim()); refresh(); setBody(`<div class="notice">The mint can't be reached right now, so the token is saved and will be claimed automatically when it can. Until then it isn't yours yet.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
+    catch (e) { if (!netErr(e) || e.asked) throw e; const h = holdIncoming(tok, val('noteIn').trim(), { check: true }); refresh(); setBody(`${checkLine(h)}<div class="notice">The mint can't be reached right now, so the token is saved and will be claimed automatically when it can. Until then it isn't yours yet.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
     sfx('coin'); showDone('in', tx.amount, 'Ecash');
   }),
   doSendEcash: b => run(b, 'MINTING TOKEN', async () => { const a = amt(), note = val('noteIn').trim(); let tx;
@@ -4630,6 +4642,7 @@ readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
 window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON }, storage: { health: () => ({ bad: saveBad(), keys: [...saveHealth.failed.keys()], told: saveHealth.told }), pct: () => usePct(), bytes: () => useBytes(), check: () => useCheck(), level: () => useLevel } };
 window.Nutcade.bk = { cap: () => phoneCapCheck(), rec: () => pbRec(), fetch: () => phoneFetch(), lock: (t, p) => lockBackup(t, p), unlock: (d, p) => unlockBackup(d, p), extras: d => importExtras(d) };
+window.Nutcade.dq = { check: t => offlineCheck(t), line: t => checkLine(t), ok: (p, A) => DQ.proofOk(p, A), h2c: m => DQ.unc(DQ.hashToCurve(new TextEncoder().encode(m))), ptText: t => ptText({ token: t }), slim: t => slimToken(t) };
 window.Nutcade.mr = { radar, parse: radarParse, ensure: radarEnsure, bkSent: () => Object.keys(bkSettings()), bkAllowed: () => Object.keys(BK_SET) };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */

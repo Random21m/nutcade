@@ -187,7 +187,7 @@ function openPrint() {
 // each preset as this mint would make it (the receiver's fee coins too): one whose code would be too dense is disabled, saying why
 async function ptPresetInfo(url) {
   const w = await getWallet(url);
-  return PT_PRESETS.map(a => { const { denoms } = ptOuts(w, a), modules = ptModules(url, w, denoms); return { a, coins: denoms.length, modules, fits: modules <= ptMax() }; });
+  return PT_PRESETS.map(a => { const { denoms } = ptOuts(w, a), modules = ptModules(url, w, denoms); return { a, coins: denoms.length, modules, slim: ptModules(url, w, denoms, true), fits: modules <= ptMax() }; });   // (slim: its code without the proofs, the smallest it can print)
 }
 async function ptPresetCheck(url, body) {
   let info; try { info = await ptPresetInfo(url); } catch (e) { return; }
@@ -206,12 +206,15 @@ function ptRead() {
   if (!(count >= 1 && count <= PT_MAX)) throw new Error('Pick how many tokens: 1 to 20.');
   return { amount, count };
 }
-// the size across of a token's code made of exactly these coins (the receiver's fee coins too), as printed (no DLEQ)
-function ptModules(url, w, denoms) {
+// the size across of a token's code made of exactly these coins (the receiver's fee coins too), as printed: with the
+// mint's DLEQ proofs when that code is still small enough for paper (1.26: an offline phone can then check it), else without
+function ptModules(url, w, denoms, slimOnly) {
   const r = k => hex(rnd(k)); let id; try { id = w.getOutputKeyset().id; } catch (e) { id = '00' + r(7); }
-  const text = L.getEncodedToken({ mint: url, unit: 'sat', proofs: denoms.map(a => ({ id, amount: a, secret: r(32), C: '02' + r(32) })) });
-  try { return qrPlan(text, undefined, true).qr.getModuleCount(); } catch (e) { return Infinity; }
+  const text = L.getEncodedToken({ mint: url, unit: 'sat', proofs: denoms.map(a => ({ id, amount: a, secret: r(32), C: '02' + r(32), dleq: { e: r(32), s: r(32), r: r(32) } })) });
+  const full = slimOnly ? Infinity : ptCodeSize(text); if (full <= ptMax()) return full;
+  try { return ptCodeSize(slimToken(text)); } catch (e) { return Infinity; }
 }
+function ptCodeSize(text) { try { return qrPlan(text, undefined, true).qr.getModuleCount(); } catch (e) { return Infinity; } }
 const ptFits = (url, w, denoms) => ptModules(url, w, denoms) <= ptMax();
 async function ptSummary() { const { amount, count } = ptRead(); return ptShowCost(amount, count); }
 async function ptShowCost(amount, count) {
@@ -271,8 +274,12 @@ async function ptMakeBatch(btn) {
   say('CHECKING CODES');
   await ptReady(b, style);
 }
-// the slim token on paper: without the DLEQ proofs, which a wallet doesn't need to claim it (a smaller code)
-function ptText(t) { try { return slimToken(t.token); } catch (e) { return t.token; } }
+// the token on paper: with the mint's DLEQ proofs, so a phone that's offline can check the mint signed it (1.26), unless
+// that makes its code too dense for paper; then the slim one, without them (a wallet doesn't need them to claim it)
+function ptText(t) {
+  if (ptCodeSize(t.token) <= ptMax()) return t.token;
+  try { return slimToken(t.token); } catch (e) { return t.token; }
+}
 // every code of a batch drawn and read back (the acorn if it reads back, else plain); a code that won't read refuses the print
 async function ptImages(txs, style) {
   const ink = style === 'ink', out = [], check = [];

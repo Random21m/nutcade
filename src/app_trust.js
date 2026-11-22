@@ -61,12 +61,13 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.25.0, with the v1.24.0 and v1.23.1 items; rewrite this list at every release)
+const WHATS_NEW = [   // (v1.26.0, with the v1.25.0 and v1.24.0 items; rewrite this list at every release)
+  'Offline token check: a token you receive while offline is checked against its mint\'s signature, and a fake one is refused at once.',
+  'Tokens sent by sound and printed tokens now carry that signature proof. On the sound screen, Faster, no proof leaves it out.',
+  'A check can\'t show the coins are unspent: only the mint can, when you claim them online.',
   'Extra protection: the app now refuses to run any code that is not its own, even if a bad mint or website tried to slip some in.',
   'New, optional and off by default: Show mint reliability (Settings, Privacy) adds a Reliable, Shaky or Mint down label to your mints and suggests mints when you add one, from the public MintRadar list.',
   'It is a health signal only: it never moves your sats or picks a mint for you.',
-  'Very large balances now fit on small screens, down to the last letter of the unit.',
-  'Back up with my phone: a step you cancel no longer leaves an unused passkey behind.'
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);

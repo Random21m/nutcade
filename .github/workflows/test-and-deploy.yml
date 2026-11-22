@@ -75,6 +75,8 @@ jobs:
             suites: backup
           - name: radar
             suites: radar
+          - name: dleq
+            suites: dleq
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out
