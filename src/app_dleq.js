@@ -37,6 +37,9 @@ const DQ = (() => {
   const h64 = n => n.toString(16).padStart(64, '0');
   const big = h => BigInt('0x' + h);
   const isHex = (h, n) => typeof h === 'string' && h.length === n && /^[0-9a-f]+$/i.test(h);
+  // a proof's e, s and r as 64 hex digits: written without leading zeros by some wallets (cashu-ts reads them that way too)
+  const pad = h => typeof h === 'string' && h.length >= 1 && h.length <= 64 && /^[0-9a-f]+$/i.test(h) ? h.padStart(64, '0').toLowerCase() : null;
+  const wellFormed = d => !!(d && pad(d.e) && pad(d.s) && pad(d.r));
   // a compressed point (02/03 + x), or null when it isn't one on the curve
   function lift(xn, odd) {
     if (xn >= P) return null;
@@ -61,8 +64,8 @@ const DQ = (() => {
   const unc = p => { const a = aff(p); return '04' + h64(a[0]) + h64(a[1]); };
   // NUT-12, checked by the receiver: C' = C + r·A, B' = Y + r·G, R1 = s·G − e·A, R2 = s·B' − e·C', and e = hash(R1, R2, A, C')
   function proofOk(p, Ahex) {
-    const d = p && p.dleq;
-    if (!d || !isHex(d.e, 64) || !isHex(d.s, 64) || !isHex(d.r, 64)) return false;
+    const d0 = p && p.dleq; if (!wellFormed(d0)) return false;
+    const d = { e: pad(d0.e), s: pad(d0.s), r: pad(d0.r) };
     const A = point(Ahex), C = point(String(p.C || '')); if (!A || !C) return false;
     const e = big(d.e), s = big(d.s), r = big(d.r);
     if (e >= N || s >= N || r >= N) return false;
@@ -71,16 +74,18 @@ const DQ = (() => {
     const R1 = add(mul(G, s), neg(mul(A, e))), R2 = add(mul(B_, s), neg(mul(C_, e)));
     if (!R1[2] || !R2[2] || !C_[2]) return false;
     const hash = hexOf(L.sha256(new TextEncoder().encode(unc(R1) + unc(R2) + unc(A) + unc(C_))));
-    return hash === d.e.toLowerCase();
+    return hash === d.e;
   }
-  return { proofOk, hashToCurve, point, unc };
+  return { proofOk, wellFormed, hashToCurve, point, unc };
 })();
 
 /* ---------- the mints' public keys, saved for offline use ---------- */
 // url -> { keysetId: { amount: compressed public key } }, the sat keysets the mint served the last time it was loaded.
 // Kept with the wallet (inside the PIN vault when one is set, like the mint list); never in backup files (the mint serves them again).
 S.mintkeys = store.get('mintkeys', {});
+// Not saved in the duress PIN's wallet: its part of the vault must stay the size of the filler an unused one has (app_r8.js).
 function saveMintKeys(url, w) {
+  if (vault.decoy) return;
   try {
     const got = {};
     for (const k of w.keyChain.getKeysets()) if (k.unit === 'sat') {
@@ -89,15 +94,16 @@ function saveMintKeys(url, w) {
       if (Object.keys(keys).length) got[k.id] = keys;
     }
     if (!Object.keys(got).length) return;
-    const was = S.mintkeys[url] || {}, all = Object.assign({}, was, got);   // (a keyset the mint stopped listing keeps its keys: coins on it can still arrive)
-    if (JSON.stringify(all) === JSON.stringify(was)) return;
-    S.mintkeys[url] = all; store.set('mintkeys', S.mintkeys);
+    const was = S.mintkeys[url] || {};   // (the mint's whole list, its retired keysets too; one it no longer lists is dropped: its coins aren't accepted any more)
+    if (JSON.stringify(got) === JSON.stringify(was)) return;
+    S.mintkeys[url] = got; store.set('mintkeys', S.mintkeys);
   } catch (e) {}
 }
 // The check of a token's coins against the saved keys of its mint:
 //   ok      every coin carries a proof and every proof is good (n coins)
-//   bad     a coin's proof is wrong, or names an amount its (saved) keyset has no key for: not signed by this mint (refused)
-//   noproof some coin carries no proof (made by a wallet that leaves them out): can't be checked here
+//   bad     a coin's well-formed proof is wrong, or the same coin is in the token twice: not signed by this mint (refused)
+//   noproof some coin carries no proof, or one that can't be read (made by a wallet that leaves them out): can't be checked here
+//   big     more coins than are checked here without freezing the screen: not checked (no line is shown)
 //   nokeys  NUTCADE hasn't saved the keys of this mint, or of the keyset a coin is on (new since it was last reached): can't be checked here
 function offlineCheck(token) {
   const meta = peekToken(token), ks = S.mintkeys[meta.mint];
@@ -105,18 +111,23 @@ function offlineCheck(token) {
   try { proofs = L.getDecodedToken(cleanToken(token), Object.keys(ks || {}).concat(Object.keys(S.counters))).proofs || []; }
   catch (e) { return { state: 'nokeys', n: 0 }; }   // (a short keyset id none of the saved keys match: a keyset new since)
   if (!proofs.length) return { state: 'bad', n: 0 };
+  // one real coin written into a token many times would add up to many times its value: a token never holds a coin twice
+  const secs = new Set(proofs.map(p => String(p.secret))), sigs = new Set(proofs.map(p => String(p.C).toLowerCase()));
+  if (secs.size !== proofs.length || sigs.size !== proofs.length) return { state: 'bad', n: proofs.length };
+  if (proofs.length > DQ_MAX) return { state: 'big', n: proofs.length };
   if (!ks) return { state: 'nokeys', n: proofs.length };
   let missing = false, unknown = false;
   for (const p of proofs) {
     const keys = ks[p.id];
     if (!keys) { unknown = true; continue; }   // (a keyset the mint made after its keys were saved here: never called fake)
     const A = keys[String(p.amount)];
-    if (!A) return { state: 'bad', n: proofs.length };   // (a keyset's keys never change: no key for this amount, no coin)
-    if (!p.dleq) { missing = true; continue; }
+    if (!A) { unknown = true; continue; }   // (no saved key for this amount: not checked, never called fake; the mint refuses it when claimed)
+    if (!DQ.wellFormed(p.dleq)) { missing = true; continue; }
     if (!DQ.proofOk(p, A)) return { state: 'bad', n: proofs.length };
   }
   return { state: unknown ? 'nokeys' : missing ? 'noproof' : 'ok', n: proofs.length };
 }
+const DQ_MAX = 300;   // (about 2 s at most on a slow phone)
 const forgedErr = () => Object.assign(new Error("This token's coins weren't signed by its mint. It may be fake, so NUTCADE didn't save it."), { forged: true });
 // the line shown on a saved token's screen about its check
 function checkLine(t) {

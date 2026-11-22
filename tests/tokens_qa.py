@@ -630,7 +630,7 @@ async def main():
             for mint in (FEE, NOFEE):
                 info = await w.ev(f"NutTokens.presetInfo({json.dumps(mint)})")
                 check(f'owner presets {mint[-4:]}: every preset fits the 133-module rule here (fee coins counted)', all(x['fits'] == (x['modules'] <= 133) for x in info) and all(x['fits'] for x in info), info)
-                lim = max(x['modules'] for x in info) - 1
+                lim = max(x['slim'] for x in info) - 1   # (below the slim code of the biggest: with or without the mint's proofs, it can't print)
                 await w.ev(f"NutTokens.maxModules={lim}; Nutcade.closeSheet()"); await open_print(w, mint); await w.wait(200)
                 st = await w.ev("[...document.querySelectorAll('[data-act=ptPreset]')].filter(b=>b.dataset.a!=='other').map(b=>[b.dataset.a, b.disabled])")
                 info = {str(x['a']): x for x in await w.ev(f"NutTokens.presetInfo({json.dumps(mint)})")}

@@ -18,6 +18,7 @@ OUT = os.environ.get('QA_OUT', '/tmp/qa-out')
 LANGS = ['en', 'es', 'pt', 'de', 'fr']
 J = json.dumps
 # made with Nutshell 0.16's b_dhke (step1_alice, step2_bob with its DLEQ, step3_alice), each checked there by alice_verify_dleq
+SHORT = {"secret": "25631fb6bc7e756cd9fdf6dccbcc069873d780f905b080c025e1b2de2c896c09", "C": "03b65949d0ef98c6e8124b0b0d6a6e013c83c4e348ea40202b9d4ac9dae321f33d", "A": "033456b30415468961bee93dfd650a3386376b3b70bc742077dc530e612e7927a6", "dleq": {"e": "e11260bcc1721e31f48c8070ecdc56a85decf056172a06e2752793003b4a30bb", "s": "8bb77037c5d4e673216708f426c490d23d50fa6c79be6045a06e344f75206b68", "r": "0000000000000000000000000000000000000000000000000000000000003039"}}   # its r has leading zeros (blinding factor 12345)
 VEC = [{"secret": "5cd4dc50a570b69080850ef62eedaee978ef093ed4723520b3131069a4a817f9", "C": "03c7ee3ae98e4609501688219e82832fe880f864ef12157023f83b1c6fd56f9337", "A": "0332b54311dfafde90b7f39b60b6413d210d015e28bfc931e0f900a311587b1b90", "dleq": {"e": "36b26c1bfe4a2e6e58662f1e5a4e81f636d001262b32c0e45c8ed9919a8f541d", "s": "53bab7216b282de1339458094b60d346b2cc35f9b0fef9a9ad7d59d3b0c4dca2", "r": "380f61ea82db1bfe4c54226d358a8e24ac0175c72e9100b5ae429a0f549a8c27"}}, {"secret": "[\"P2PK\",{\"nonce\":\"443e622147e52cea\",\"data\":\"02aa\"}]", "C": "03f3688d6d8a884f4be15bed11cbd7679c5b94e8f4e9993c8f42e11ee2020de8ec", "A": "03a539b44db2beb7d2398b2877481db37fafbcb552b61af9f4b5a808b2d99b7054", "dleq": {"e": "d2279fcd014da36b55f15a8ced54ffb0e3cdb56e2d9e8e8df62a5f3ad17b5397", "s": "097b9cb14ce92e0c49ba1a8d84f1fec512000009083ba146ab213d0621484188", "r": "14458410517e9a81f24a17cddd3e70e823fc3da18cb69e8a5a154ff3505fc894"}}, {"secret": "84cca0c122d1caafbd7c2a05be10f0ae20bab3d333b6dc4d2726fef39c793785", "C": "03aac5b49a4257adf4949dbbfc19a58440551bc081eee9a23d6fe2ea878899c743", "A": "02118598fd5621e533d0a8ab5d0677bf8253003137ceb010e5ee5e3b63e969741a", "dleq": {"e": "55c5a97edb4349d9cfc8e850aba43c66cb66398168aca23dfcd2642577ad808d", "s": "b09c74669d907e3a5d64aa8b10653566252316a9b282dcd5ca883b93f363506a", "r": "b3ea50668e942cdb280250cd51363db27d838a4a916f57143dd4eb165f23b14e"}}, {"secret": "[\"P2PK\",{\"nonce\":\"f702b2b6874a4f27\",\"data\":\"02aa\"}]", "C": "039bd17d31262954aca1f32f74ea7e8369bd6e3eb12b127c249a1dd59b327f2694", "A": "03b940a8af6cb4fd745b9997334e3dfad882ce6787ef9480c7621bdd36d0a90092", "dleq": {"e": "751a47d35ce17443408dd1d39ba63e920469bcb1eb4884ae92523e23597e22a1", "s": "e8e6398238e0c6b0f412598a646df03965c97ebbc642a3783129edb496f9554c", "r": "2dd3079998e196387b965c08fbb63ba9f34dc0d238093537f2ab3500a670d3f3"}}, {"secret": "dc0fb0a700b32facc88cafa863e8e55b0651a4dc1b03da6623f21fa9bda7b82a", "C": "03bda26dda31bc13f9cef8d6e39f81378969a2691ab05cbaca9dde2510debbbe2a", "A": "036beabbb4e3ad0e1e88f54d5143cd1049baeeeccd032d08bfeedb3186169707ac", "dleq": {"e": "0d653fb6cc5a5463049aa11352a5925aadea1672507205224d9e86818529be00", "s": "579fca53d29a085424d5ca7928a11ab18b24df52eaeb24feed97ef5034a4e4f8", "r": "33ff8ed7d4e25da8e49707fb2b69018d74c689d3f5f4b3f66d205df9bd635c36"}}, {"secret": "[\"P2PK\",{\"nonce\":\"25e8116a02c0ca44\",\"data\":\"02aa\"}]", "C": "027c2d2bca912a3fa096c32be0ce5f9d7710af6b9944c61fb07e8c68b90c9a3b08", "A": "02e01f3577e9c6c10b58947b144b7df88f0312ddfa5666d2b06ccdf2322db4c288", "dleq": {"e": "31e12d956d90382c933ea9b55a58536e2ac4b7483a7cd2b82f84a9bf8fa1ff5f", "s": "f593c7b470e628530c727e5d81df3b091472a875b5fd0e59b09c4d8bb268b530", "r": "6f8dedd6bab1917a1570e50b6c6fc12bedfd8779b06a3c0c0d51124c4481db94"}}]
 async def wallet(b, name, lang='en'):
     ctx = await b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=1, is_mobile=True, has_touch=True)
@@ -60,7 +61,8 @@ async def main():
                 return {{good, all:V.length, bad, n}}}})()""")
             check('unit: every proof Nutshell made is accepted', r['good'] == r['all'], r)
             check('unit: a changed e, s, r, signature or secret, a missing proof, a bad point or another key is refused', r['bad'] == r['n'], r)
-            h = await w.ev("Nutcade.dq.h2c('\\u0000'.repeat(0))")
+            sh = await w.ev(f"(()=>{{const p={J(short)}; const q=JSON.parse(JSON.stringify(p)); q.dleq.r=q.dleq.r.replace(/^0+/,''); return [q.dleq.r.length, Nutcade.dq.ok(p,p.A), Nutcade.dq.ok(q,p.A)]}})()")
+            check('unit: a proof written without leading zeros is read like cashu-ts reads it (accepted)', sh[0] < 64 and sh[1] and sh[2], sh)
             z = await w.ev("(()=>{const u8=new Uint8Array(32); return null})()")
             v0 = await w.ev("(()=>{ return Nutcade.dq.h2c(String.fromCharCode(...new Uint8Array(32))) })()")
             check('unit: hash_to_curve matches the NUT-00 test vector (32 zero bytes)', v0[2:66] == '4cce997d3b518f739663b757deaec95bcd9473c30a14ac2fd04023a739d1a725', v0[:70])
@@ -88,11 +90,18 @@ async def main():
             check('flow: its History screen shows the check too', 'Signature checked offline' in await w.sheet_text()); await w.close()
             # forged: a changed proof, or a changed signature
             tok2, _ = await fr.send_ecash(300, 'to be changed')
-            for name, js in (('a changed proof', "if(i===0) p.dleq.e=p.dleq.e.slice(0,-1)+(p.dleq.e.slice(-1)==='1'?'2':'1')"), ('a changed signature', "if(i===0) p.C=p.C.slice(0,2)+p.C.slice(4)+p.C.slice(2,4)"), ('an amount its keyset has no key for', "if(i===0) p.amount=3")):
+            for name, js in (('a changed proof', "if(i===0) p.dleq.e=p.dleq.e.slice(0,-1)+(p.dleq.e.slice(-1)==='1'?'2':'1')"), ('a changed signature', "if(i===0) p.C=p.C.slice(0,2)+p.C.slice(4)+p.C.slice(2,4)"), ('the same coin twice', "if(i===1) {const q=d.proofs[0]; p.secret=q.secret; p.C=q.C; p.dleq=q.dleq; p.amount=q.amount}")):
                 bad = await edit_tok(w, tok2, js); n0 = len(await held(w))
                 e2, t2 = await receive_off(w, bad)
                 check(f'forged: a token with {name} is refused as possibly fake', e2 and "weren't signed by its mint" in e2, (e2, t2[:120]))
                 check(f'forged: {name}: nothing is saved', len(await held(w)) == n0)
+            st_amt = await w.ev(f"Nutcade.dq.check({J(await edit_tok(w, tok2, 'if(i===0) p.amount=3'))})")
+            check('nokeys: an amount with no saved key is "Not checked", never called fake (the mint refuses it when claimed)', st_amt['state'] == 'nokeys', st_amt)
+            many = await edit_tok(w, tok2, "")
+            rep = await w.ev(f"(()=>{{const d=CashuLib.getDecodedToken({J(tok2)}, Object.keys(Nutcade.S.mintkeys[Nutcade.S.active])); const p=d.proofs[0]; d.proofs=Array.from({{length:50}},()=>Object.assign({{}},p)); return Nutcade.dq.check(CashuLib.getEncodedToken(d))}})()")
+            check('forged: one real coin repeated 50 times is refused, never "checked" at 50 times its value', rep['state'] == 'bad', rep)
+            bad_hex = await w.ev("(t=>{const d=CashuLib.getDecodedToken(t, Object.keys(Nutcade.S.mintkeys[Nutcade.S.active])); d.proofs[0].dleq.e='zz'; return Nutcade.dq.check(CashuLib.getEncodedToken(d))})(" + J(tok2) + ")")
+            check('noproof: a proof that can\'t be read is "Not checked", never called fake', bad_hex['state'] == 'noproof', bad_hex)
             # not checked: no proofs, no saved keys, a keyset newer than the saved keys
             slim = await fr.ev(f"Nutcade.dq.slim({J(tok2)})")
             e3, t3 = await receive_off(w, slim)
@@ -106,6 +115,9 @@ async def main():
             e4, t4 = await receive_off(w, tok3)
             check('nokeys: a mint whose keys aren\'t saved: saved as "Not checked"', not e4 and "doesn't have the keys" in t4, (e4, t4[:160]))
             await w.ev(f"Nutcade.S.mintkeys[{J(A)}]=JSON.parse({J(saved)})")
+            again = await edit_tok(w, tok3, "d.memo='same coins, other text'")
+            e5, _ = await receive_off(w, again)
+            check('flow: the same coins in another token text are refused while they already wait', e5 and 'in another token' in e5, e5)
             hd = await held(w)
             check('flow: three tokens wait, each with its check', sorted(x['dleq'] for x in hd) == ['nokeys', 'noproof', 'ok'], hd)
             bal0 = await w.balance() if hasattr(w, 'balance') else None

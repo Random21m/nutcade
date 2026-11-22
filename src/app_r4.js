@@ -90,11 +90,13 @@ function openSoundSend(text) {
     const bar = body.querySelector('#ctBar'), st = body.querySelector('#ctState'), btn = body.querySelector('#ctToggle'), tape = body.querySelector('.tape');
     const anim = () => { const p = CT().isPlaying() && on; if (!p) return; const t = (performance.now() - started) / 1000; bar.style.width = ((t % dur) / dur * 100).toFixed(1) + '%'; raf = requestAnimationFrame(anim); };
     let started = 0, dur = secs;
-    const start = () => CT().play(bytes, (n, d) => { dur = d; if (n === 1) started = performance.now(); st.textContent = n === 1 ? 'LOADING' : `LOADING · PASS ${n}`; }).then(() => {
+    let starting = null;
+    const start = () => starting = CT().play(bytes, (n, d) => { dur = d; if (n === 1) started = performance.now(); st.textContent = n === 1 ? 'LOADING' : `LOADING · PASS ${n}`; }).then(() => {
       on = true; S.prefs.ctUsed = true; save(); tape.classList.add('on'); btn.textContent = 'Stop'; cancelAnimationFrame(raf); raf = requestAnimationFrame(anim);
     }).catch(() => { st.textContent = 'NO SOUND'; btn.textContent = 'Play'; });
     const fast = body.querySelector('#ctFast');
-    if (fast) fast.onchange = () => { S.prefs.ctNoProof = fast.checked; save(); CT().stop(); on = false; openSoundSend(text); };   // (played again, in the new form)
+    // played again in the new form, once the play that is starting has started (stopping it before then could leave it playing)
+    if (fast) fast.onchange = () => { fast.disabled = true; S.prefs.ctNoProof = fast.checked; save(); Promise.resolve(starting).catch(() => {}).finally(() => { CT().stop(); on = false; openSoundSend(text); }); };
     btn.onclick = () => { if (on) { CT().stop(); on = false; tape.classList.remove('on'); st.textContent = 'STOPPED'; btn.textContent = 'Play'; bar.style.width = '0%'; } else start(); };
     start();
     return () => { cancelAnimationFrame(raf); CT().stop(); };

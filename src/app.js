@@ -280,9 +280,10 @@ function mergeMintSpellings() {
     S.mintlog[n] = !a ? b : Object.assign(a, { first: Math.min(a.first || Infinity, b.first || Infinity), ms: (a.ms || []).concat(b.ms || []).slice(-50), ops: [(a.ops || [0, 0])[0] + (b.ops || [0, 0])[0], (a.ops || [0, 0])[1] + (b.ops || [0, 0])[1]], keysets: Object.assign({}, b.keysets, a.keysets), changes: (b.changes || []).concat(a.changes || []) });
     delete S.mintlog[u];
   }
+  if (S.mintkeys) for (const u of Object.keys(S.mintkeys)) { const n = fix(u); if (n !== u) { S.mintkeys[n] = Object.assign({}, S.mintkeys[u], S.mintkeys[n]); delete S.mintkeys[u]; changed = true; } }
   if (!changed) return;
   save();
-  for (const k of ['requests', 'extra', 'heirlooms', 'challenges', 'hunts', 'found', 'mintlog']) if (S[k] !== undefined) store.set(k, S[k]);
+  for (const k of ['mintkeys', 'requests', 'extra', 'heirlooms', 'challenges', 'hunts', 'found', 'mintlog']) if (S[k] !== undefined) store.set(k, S[k]);
 }
 let storageOk = store.set('probe', 1);
 // every save stamps a generation number: a tab that sees someone else's stamp re-reads the wallet before working on it
@@ -3400,7 +3401,12 @@ function holdIncoming(token, note, opts = {}) {
   const meta = peekToken(token);
   if (S.txs.some(t => t.incoming === cleanToken(token))) throw new Error('This token is already saved and waiting.');
   let dleq = null;
-  if (opts.check) { dleq = offlineCheck(token).state; if (dleq === 'bad') throw forgedErr(); }
+  if (opts.check) {
+    dleq = offlineCheck(token).state; if (dleq === 'bad') throw forgedErr();
+    // coins already saved in another token that waits here: the same sats once, never twice
+    const mine = new Set(String(tokSecrets(token) || '').split(' ').filter(Boolean));
+    if (mine.size && S.txs.some(t => t.status === 'pending' && t.incoming && String(tokSecrets(t.incoming) || '').split(' ').some(x => mine.has(x)))) throw new Error('These coins are already saved and waiting, in another token.');
+  }
   return addTx(Object.assign({ type: 'in', method: 'ecash', amount: meta.amount, mint: meta.mint, note: note || meta.memo || '', status: 'pending', incoming: cleanToken(token), offline: true }, dleq ? { dleq } : {}));
 }
 /* One claim at a time for each saved token. A second claim of the same token (the automatic one and "Claim now" together, or

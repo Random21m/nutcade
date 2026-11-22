@@ -187,7 +187,7 @@ function openPrint() {
 // each preset as this mint would make it (the receiver's fee coins too): one whose code would be too dense is disabled, saying why
 async function ptPresetInfo(url) {
   const w = await getWallet(url);
-  return PT_PRESETS.map(a => { const { denoms } = ptOuts(w, a), modules = ptModules(url, w, denoms); return { a, coins: denoms.length, modules, fits: modules <= ptMax() }; });
+  return PT_PRESETS.map(a => { const { denoms } = ptOuts(w, a), modules = ptModules(url, w, denoms); return { a, coins: denoms.length, modules, slim: ptModules(url, w, denoms, true), fits: modules <= ptMax() }; });   // (slim: its code without the proofs, the smallest it can print)
 }
 async function ptPresetCheck(url, body) {
   let info; try { info = await ptPresetInfo(url); } catch (e) { return; }
@@ -208,10 +208,10 @@ function ptRead() {
 }
 // the size across of a token's code made of exactly these coins (the receiver's fee coins too), as printed: with the
 // mint's DLEQ proofs when that code is still small enough for paper (1.26: an offline phone can then check it), else without
-function ptModules(url, w, denoms) {
+function ptModules(url, w, denoms, slimOnly) {
   const r = k => hex(rnd(k)); let id; try { id = w.getOutputKeyset().id; } catch (e) { id = '00' + r(7); }
   const text = L.getEncodedToken({ mint: url, unit: 'sat', proofs: denoms.map(a => ({ id, amount: a, secret: r(32), C: '02' + r(32), dleq: { e: r(32), s: r(32), r: r(32) } })) });
-  const full = ptCodeSize(text); if (full <= ptMax()) return full;
+  const full = slimOnly ? Infinity : ptCodeSize(text); if (full <= ptMax()) return full;
   try { return ptCodeSize(slimToken(text)); } catch (e) { return Infinity; }
 }
 function ptCodeSize(text) { try { return qrPlan(text, undefined, true).qr.getModuleCount(); } catch (e) { return Infinity; } }
