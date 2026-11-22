@@ -61,7 +61,7 @@ async def main():
                 return {{good, all:V.length, bad, n}}}})()""")
             check('unit: every proof Nutshell made is accepted', r['good'] == r['all'], r)
             check('unit: a changed e, s, r, signature or secret, a missing proof, a bad point or another key is refused', r['bad'] == r['n'], r)
-            sh = await w.ev(f"(()=>{{const p={J(short)}; const q=JSON.parse(JSON.stringify(p)); q.dleq.r=q.dleq.r.replace(/^0+/,''); return [q.dleq.r.length, Nutcade.dq.ok(p,p.A), Nutcade.dq.ok(q,p.A)]}})()")
+            sh = await w.ev(f"(()=>{{const p={J(SHORT)}; const q=JSON.parse(JSON.stringify(p)); q.dleq.r=q.dleq.r.replace(/^0+/,''); return [q.dleq.r.length, Nutcade.dq.ok(p,p.A), Nutcade.dq.ok(q,p.A)]}})()")
             check('unit: a proof written without leading zeros is read like cashu-ts reads it (accepted)', sh[0] < 64 and sh[1] and sh[2], sh)
             z = await w.ev("(()=>{const u8=new Uint8Array(32); return null})()")
             v0 = await w.ev("(()=>{ return Nutcade.dq.h2c(String.fromCharCode(...new Uint8Array(32))) })()")
@@ -100,7 +100,7 @@ async def main():
             many = await edit_tok(w, tok2, "")
             rep = await w.ev(f"(()=>{{const d=CashuLib.getDecodedToken({J(tok2)}, Object.keys(Nutcade.S.mintkeys[Nutcade.S.active])); const p=d.proofs[0]; d.proofs=Array.from({{length:50}},()=>Object.assign({{}},p)); return Nutcade.dq.check(CashuLib.getEncodedToken(d))}})()")
             check('forged: one real coin repeated 50 times is refused, never "checked" at 50 times its value', rep['state'] == 'bad', rep)
-            bad_hex = await w.ev("(t=>{const d=CashuLib.getDecodedToken(t, Object.keys(Nutcade.S.mintkeys[Nutcade.S.active])); d.proofs[0].dleq.e='zz'; return Nutcade.dq.check(CashuLib.getEncodedToken(d))})(" + J(tok2) + ")")
+            bad_hex = await w.ev("(t=>{const d=CashuLib.getDecodedToken(t, Object.keys(Nutcade.S.mintkeys[Nutcade.S.active])); d.proofs[0].dleq.e='00'+d.proofs[0].dleq.e; return Nutcade.dq.check(CashuLib.getEncodedToken(d))})(" + J(tok2) + ")")
             check('noproof: a proof that can\'t be read is "Not checked", never called fake', bad_hex['state'] == 'noproof', bad_hex)
             # not checked: no proofs, no saved keys, a keyset newer than the saved keys
             slim = await fr.ev(f"Nutcade.dq.slim({J(tok2)})")
