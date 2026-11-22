@@ -6,8 +6,9 @@ for a request and incoming tokens never are; a token its mint is retiring the ke
 or no longer listed) is counted at any age and marked; the background check marks a token claimed meanwhile as claimed;
 Later hides the line (7 days, 1 day with retiring keys) and a token whose keys start retiring after that shows it again;
 Take them back uses the usual take-back (balance up, lines marked taken back) and one someone claimed first is said so and
-changes nothing; the setting turns it off; the duress-style separate state is not shared (prefs are per wallet); the new
-texts in five languages with no missing translation.
+changes nothing; the setting turns it off; tokens locked to a key, the duress wallet's sats, a take-back still open in the
+journal, coins already saved to claim in parts and partly claimed tokens are never counted; one failing check doesn't stop
+the rest; the new texts in five languages with no missing translation.
 RM_ONLY=a,b runs some sections (their names start with those letters)."""
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -77,10 +78,17 @@ async def main():
         async def kinds():
             r = await w.ev("""(()=>{const base={type:'out',method:'ecash',status:'pending',token:'cashuBx',ts:1};
                 const o=x=>NutRemind.open(Object.assign({},base,x));
-                return {plain:o({}), gift:o({lockUntil:5}), giftTo:o({giftTo:'Ann'}), hunt:o({hunt:'h'}), bounty:o({bounty:1}), req:o({reqPay:{req:'x'}}), incoming:o({incoming:true}), claimed:o({status:'claimed'}), reclaimed:o({status:'reclaimed'}), ln:o({method:'ln'}), notoken:o({token:''})}})()""")
+                return {plain:o({}), gift:o({lockUntil:5}), giftTo:o({giftTo:'Ann'}), hunt:o({hunt:'h'}), bounty:o({bounty:1}), req:o({reqPay:{req:'x'}}), locked:o({locked:'02'+'a'.repeat(64)}), duress:o({duressFund:true}), duressNote:o({note:'Sats for the duress PIN wallet'}), part:o({rmPart:true}), incoming:o({incoming:true}), claimed:o({status:'claimed'}), reclaimed:o({status:'reclaimed'}), ln:o({method:'ln'}), notoken:o({token:''})}})()""")
             check('kinds: an ordinary sent token counts', r['plain'], r)
-            check('kinds: gifts, treasure hunts, bounties, request payments, incoming, claimed, taken back, Lightning and tokenless lines never count',
+            check('kinds: gifts, treasure hunts, bounties, request payments, locked tokens, the duress wallet\'s sats, partly claimed, incoming, claimed, taken back, Lightning and tokenless lines never count',
                   not any(v for k, v in r.items() if k != 'plain'), r)
+            t4 = J(ids['t4'])
+            r2 = await w.ev(f"""(()=>{{const S=Nutcade.S, t=S.txs.find(t=>t.id==={t4}), was=NutRemind.open(t);
+                S.ops.push({{id:'rmop', kind:'receive', mint:t.mint, own:t.id, inputs:[]}}); const op=NutRemind.open(t); S.ops=S.ops.filter(o=>o.id!=='rmop');
+                const tok=CashuLib.getEncodedToken({{mint:t.mint, proofs:t.sent}}); S.txs.push({{id:'rmheld', type:'in', method:'ecash', status:'pending', incoming:tok, amount:t.amount, mint:t.mint, ts:Date.now()}});
+                const held=NutRemind.open(t); S.txs=S.txs.filter(x=>x.id!=='rmheld'); return {{was, op, held, after:NutRemind.open(t)}}}})()""")
+            check('kinds: a token whose take-back is still open in the journal is not counted', r2['was'] and not r2['op'] and r2['after'], r2)
+            check('kinds: a token whose coins already wait in saved lines (a take-back in parts) is not counted', not r2['held'], r2)
         await section('kinds', kinds)
 
         async def claimed_meanwhile():
@@ -90,7 +98,7 @@ async def main():
             check('claimed: the background check marks it claimed', (await tx(w, ids['t2']))['status'] == 'claimed', await tx(w, ids['t2']))
             pn = await panel(w)
             check('claimed: the reminder now says "1 token you sent is still unclaimed — take it back?"', pn and pn['n'] == 1 and '1 token you sent is still unclaimed — take it back?' in pn['text'], pn)
-            check('claimed: and offers "Take it back"', pn and 'Take it back' in pn['text'], pn)
+            check('claimed: and offers "Take it back"', pn and 'take it back' in pn['text'].lower().split('\n')[-2], pn)
         await section('claimed', claimed_meanwhile)
 
         async def later():
@@ -98,7 +106,7 @@ async def main():
             check('later: Later hides the reminder', await panel(w) is None)
             lt = await w.ev("Nutcade.S.prefs.rmLater")
             check('later: for 7 days', lt and 6.9 * DAY < lt['until'] - await w.ev("Date.now()") <= 7 * DAY, lt)
-            check('later: it comes back after that', await w.ev(f"NutRemind.shown(Date.now()+7*{DAY}+1000).length") == 1)
+            check('later: it comes back after that', ids['t1'] in await w.ev(f"NutRemind.shown(Date.now()+7*{DAY}+1000)") and not await w.ev(f"NutRemind.shown(Date.now()+7*{DAY}-60000).length"))
         await section('later', later)
 
         async def retiring():
@@ -156,6 +164,13 @@ async def main():
             check('setting: turning it off hides the reminder', await w.ev("Nutcade.S.prefs.remind") is False and await panel(w) is None)
             await w.ev("Nutcade.S.prefs.remind=true")
         await section('setting', setting)
+
+        async def resilient():
+            r3 = await w.ev(f"""(async()=>{{const S=Nutcade.S; S.prefs.checkSent=true; S.txs.push({{id:'rmnosent', type:'out', method:'ecash', status:'pending', token:'cashuBbad', amount:5, mint:{J(A)}, ts:1}});
+                let ok=true; try {{ await NutRemind.check({J(A)}) }} catch(e) {{ ok=false }} S.txs=S.txs.filter(x=>x.id!=='rmnosent'); S.prefs.checkSent=false; return ok}})()""")
+            check('resilient: the background check runs past a line it cannot check', r3)
+            check('resilient: the old token it could check is still open', (await tx(w, ids['t4']))['status'] == 'pending')
+        await section('resilient', resilient)
 
         async def langs():
             for lang in ('es', 'pt', 'de', 'fr'):

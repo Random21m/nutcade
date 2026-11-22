@@ -16,8 +16,27 @@
      start retiring after that shows it again at once. "Remind me about unclaimed tokens" in Settings turns it off.
    Each wallet (the duress PIN's too) has its own tokens and its own setting; nothing shows while the PIN screen is up. */
 const RM_AGE = 30 * 86400e3, RM_LATER = 7 * 86400e3, RM_LATER_SOON = 86400e3, RM_RECHECK = 6 * 3600e3, RM_SHOW = 5;
+// Never counted either: a token locked to someone's key (a payment for a locked request: only they can claim it), the
+// duress PIN wallet's sats (a line settled from the journal may lack the flag, so its note counts too), a token being
+// taken back right now (its receive step still open in the journal, its answer lost), a token whose coins already sit
+// in saved lines waiting to be claimed (a take-back in parts that couldn't finish), and one someone claimed part of
+// (rmPart: its coins can't come back as one token)
 const rmOpen = t => !!t && t.type === 'out' && t.method === 'ecash' && t.status === 'pending' && !!t.token && !t.incoming
-  && !t.lockUntil && !t.hunt && !t.bounty && !t.reqPay && !t.giftTo;
+  && !t.lockUntil && !t.hunt && !t.bounty && !t.reqPay && !t.giftTo && !t.locked && !t.duressFund && !t.rmPart
+  && t.note !== 'Sats for the duress PIN wallet' && !S.ops.some(o => o.kind === 'receive' && o.own === t.id) && !rmHeld(t);
+// the coins of saved incoming lines still waiting to be claimed (cached until those lines change)
+let rmHeldCache = { key: null, set: new Set() };
+function rmHeld(t) {
+  const open = S.txs.filter(x => x.status === 'pending' && x.incoming);
+  const key = open.map(x => x.id).join(' ');
+  if (key !== rmHeldCache.key) {
+    const set = new Set();
+    for (const x of open) { try { for (const p of L.getDecodedToken(cleanToken(x.incoming), Object.keys(S.counters)).proofs || []) set.add(String(p.secret)); } catch (e) {} }
+    rmHeldCache = { key, set };
+  }
+  if (!rmHeldCache.set.size) return false;
+  return (Array.isArray(t.sent) ? t.sent : []).some(p => p && rmHeldCache.set.has(String(p.secret)));
+}
 function rmKeysets(t) {
   let ps = Array.isArray(t.sent) ? t.sent : [];
   if (!ps.length) { try { ps = L.getDecodedToken(cleanToken(t.token), Object.keys(S.counters)).proofs || []; } catch (e) { ps = []; } }
@@ -27,7 +46,7 @@ function rmKeysets(t) {
 function rmRetiring(t, now = Date.now()) {
   const p = wallets[t.mint], w = p && p.ready; if (!w) return false;
   const all = ksAll(w); if (!all.length) return false;
-  return rmKeysets(t).some(id => { const k = all.find(k => k.id === id); return !k || !k.isActive || ksSoon(k, now); });
+  return rmKeysets(t).some(id => { const k = all.find(k => k.id === id); return k ? !k.isActive || ksSoon(k, now) : /^[0-9a-f]+$/i.test(id); });   // (an id the mint no longer lists: retiring, unless it is an old base64 id the mint may simply list differently)
 }
 function rmDue(now = Date.now()) {
   const out = [];
@@ -45,9 +64,9 @@ const rmAsked = new Map();
 async function rmCheck(url) {
   if (!S.prefs.checkSent || S.prefs.remind === false) return;
   const now = Date.now();
-  for (const { t } of rmDue(now).filter(x => x.t.mint === url && now - (rmAsked.get(x.t.id) || 0) > RM_RECHECK).slice(0, 20)) {
+  for (const { t } of rmDue(now).filter(x => x.t.mint === url && Array.isArray(x.t.sent) && x.t.sent.length && now - (rmAsked.get(x.t.id) || 0) > RM_RECHECK).slice(0, 20)) {
     rmAsked.set(t.id, now);
-    await inTime(checkClaim(t), 20000);   // (a mint that doesn't answer: throws, nothing changes)
+    try { if (!(await inTime(checkClaim(t), 20000))) await rmPartCheck(t); } catch (e) {}   // (a mint that doesn't answer: nothing changes, the next one is still asked)
   }
 }
 function rmPanel() {
@@ -61,6 +80,12 @@ function rmPanel() {
     <div class="rm-list">${rows}${n > RM_SHOW ? `<span class="tiny muted">${n - RM_SHOW} more in Notes</span>` : ''}</div>
     <div class="row wrap"><button class="btn sm gold" data-act="rmTake">${n === 1 ? 'Take it back' : 'Take them back'}</button><button class="btn sm" data-act="rmLater">Later</button></div></div>`;
 }
+// some of its coins spent, not all: someone claimed part of it, so it can't be taken back as a token: no longer counted
+async function rmPartCheck(t) {
+  const w = await getWallet(t.mint), st = await inTime(w.checkProofsStates(t.sent), 20000), cur = txById(t.id);
+  if (cur && cur.status === 'pending' && st.some(s => s.state === 'SPENT') && !st.every(s => s.state === 'SPENT')) { updTx(t.id, { rmPart: true }); return true; }
+  return false;
+}
 // the usual take-back of one token: 'back', 'claimed' (someone else got it first) or 'gone' (no longer open); throws
 // when the mint can't be reached or refuses
 async function rmTakeOne(t) {
@@ -72,6 +97,8 @@ async function rmTakeOne(t) {
       const now = txById(t.id) || {}; if (now.status === 'reclaimed') return 'back';
       let claimed = false; try { claimed = await checkClaim(now); } catch (x) {}
       if (claimed || (txById(t.id) || {}).status === 'claimed') return 'claimed';
+      let part = false; try { part = await rmPartCheck(now); } catch (x) {}
+      if (part) return 'part';
     }
     throw e;
   } finally { setTimeout(() => reclaiming.delete(t.id), 5000); }
@@ -79,9 +106,9 @@ async function rmTakeOne(t) {
   return 'back';
 }
 async function rmTakeAll() {
-  const r = { back: 0, claimed: 0, bad: [] };
+  const r = { back: 0, claimed: 0, part: 0, bad: [] };
   for (const { t } of rmShown()) {
-    try { const x = await rmTakeOne(t); if (x === 'back') r.back++; else if (x === 'claimed') r.claimed++; }
+    try { const x = await rmTakeOne(t); if (x === 'back') r.back++; else if (x === 'claimed') r.claimed++; else if (x === 'part') r.part++; }
     catch (e) { r.bad.push(`${money(t.amount)}: ${friendly(e, t.mint).message}`); }
   }
   return r;
