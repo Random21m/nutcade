@@ -143,7 +143,7 @@ async def main():
             contacted = found - named_only - {'localhost', '127.0.0.1'}
             claimed = {'mint.minibits.cash', 'mint.cubabitcoin.org', '8333.space', 'testnut.cashu.space', 'nofees.testnut.cashu.space',
                        'relay.damus.io', 'nos.lol', 'relay.primal.net', 'relay.nostr.band', 'relay.cashumints.space',
-                       'api.coinbase.com', 'api.exchange.coinbase.com', 'ws-feed.exchange.coinbase.com', 'npub.cash'}
+                       'api.coinbase.com', 'api.exchange.coinbase.com', 'ws-feed.exchange.coinbase.com', 'npub.cash', 'mintradar.org'}
             check('privacy: every host the code names is in the Privacy section (nothing is contacted that it does not list)', contacted <= claimed, sorted(contacted - claimed))
             check('privacy: every host the Privacy section lists is really in the code', claimed <= contacted, sorted(claimed - contacted))
             readme = open(os.path.join(ROOT, 'README.md'), encoding='utf-8').read()
