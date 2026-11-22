@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Implemented in NUTCADE since v1.8.0. This document describes the code as it is; it adds no new behavior. |
+| **Status** | Implemented in NUTCADE since v1.8.0; flag bit 2 (DLEQ proofs) since v1.26.0. This document describes the code as it is; it adds no new behavior. |
 | **License** | MIT, the same as the repository ([LICENSE](../LICENSE)). |
 | **Code** | Modem: [`src/chiptune.js`](../src/chiptune.js) (SHA-256 `77cb1714…c1c48f9`, the file timestamped in Bitcoin, see the README). Payload layer and screens: [`src/app_r4.js`](../src/app_r4.js) (`packToken`, `unpackToken`, `soundBytes`, `soundText`, `openSoundSend`, `openListen`). Receiving: [`src/app.js`](../src/app.js) (`classify`, `handleScan`). Simulator: [`tools/chiptune_sim.js`](../tools/chiptune_sim.js). Vectors: [`docs/sound-vectors/`](sound-vectors/). |
 
@@ -39,10 +39,11 @@ Packing fails, and the token travels as text instead, when: a keyset id is not e
 ```
 payload   = 0xC1  str(mint)  str(unit)  str(memo)  vint(G)  group × G
 group     = vint(id_len)  id[id_len]  vint(P)  proof × P        ; id_len = keyset id length in bytes
-proof     = vint(amount)  flags  secret  C[33]  [str(witness)]
+proof     = vint(amount)  flags  secret  C[33]  [str(witness)]  [e[32] s[32] r[32]]
 flags     = bit 0: 1 = secret is a str, 0 = secret is 32 raw bytes
             bit 1: 1 = a witness follows
-            other bits 0
+            bit 2: 1 = the coin's DLEQ proof follows (NUT-12: e, s, r, 32 raw bytes each), since v1.26.0
+            other bits 0; a receiver MUST refuse a payload with any other bit set
 secret    = 32 raw bytes        if the secret matches /^[0-9a-f]{64}$/ (lowercase only)
           | str(secret)         otherwise (P2PK/HTLC JSON secrets, uppercase hex, anything else)
 ```
@@ -50,7 +51,8 @@ secret    = 32 raw bytes        if the secret matches /^[0-9a-f]{64}$/ (lowercas
 - `mint` is the token's mint URL as decoded; `unit` defaults to `sat`; `memo` is empty when there is none.
 - Proofs are grouped by keyset id, groups in order of first appearance, proofs in token order within a group.
 - `witness` is sent as a string; an object witness is sent as its `JSON.stringify` form.
-- **Dropped on purpose:** DLEQ proofs, and every proof or token field other than those above. The receiving wallet swaps the ecash with the mint anyway (comment in `src/app_r4.js`).
+- **DLEQ proofs (since v1.26.0):** a coin's DLEQ proof is sent when it has one (flag bit 2), so a receiver that is offline can check the mint's signature (`src/app_dleq.js`). The sound screen's **Faster, no proof** switch leaves them out (about 2 s a coin less). NUTCADE before v1.26.0 refuses a payload with bit 2 set (bytes left over), so it can't read such a token.
+- **Dropped on purpose:** every proof or token field other than those above. The receiving wallet swaps the ecash with the mint anyway (comment in `src/app_r4.js`).
 
 ### 2.3 Receiver: payload to text (`soundText`)
 

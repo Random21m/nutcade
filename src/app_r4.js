@@ -8,9 +8,12 @@ const CT = () => window.Chiptune;
 const b64url = u8 => btoa(String.fromCharCode(...u8)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const unb64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
 // Sound is slow (about 50 bytes a second), so tokens travel in a compact form only NUTCADE reads: hex secrets and
-// signatures as raw bytes, no DLEQ proofs (the receiver swaps the ecash anyway). Anything else is sent as text.
+// signatures as raw bytes. Since 1.26 each coin's DLEQ proof travels too (flag bit 2: 96 raw bytes, about 2 s a coin),
+// so the receiver can check the mint's signature while offline; the sound screen's "Faster, no proof" leaves them out.
+// Anything else is sent as text.
 const CT_MAGIC = 0xC1;
-function packToken(d) {
+const dleqHex = q => !!(q && [q.e, q.s, q.r].every(h => typeof h === 'string' && /^[0-9a-f]{64}$/i.test(h)));
+function packToken(d, proof = true) {
   const out = []; const te = new TextEncoder();
   const vint = n => { n = Math.floor(n); do { let b = n % 128; n = Math.floor(n / 128); if (n) b |= 128; out.push(b); } while (n); };
   const str = s => { const b = te.encode(String(s || '')); vint(b.length); out.push(...b); };
@@ -24,10 +27,12 @@ function packToken(d) {
     for (const p of ps) {
       const hexSecret = /^[0-9a-f]{64}$/.test(p.secret), C = String(p.C);
       if (!/^0[23][0-9a-f]{64}$/i.test(C)) throw new Error('signature');
-      vint(num(p.amount)); out.push((hexSecret ? 0 : 1) | (p.witness ? 2 : 0));
+      const dq = proof && dleqHex(p.dleq);
+      vint(num(p.amount)); out.push((hexSecret ? 0 : 1) | (p.witness ? 2 : 0) | (dq ? 4 : 0));
       if (hexSecret) hexb(p.secret); else str(p.secret);
       hexb(C);
       if (p.witness) str(typeof p.witness === 'string' ? p.witness : JSON.stringify(p.witness));
+      if (dq) { hexb(p.dleq.e); hexb(p.dleq.s); hexb(p.dleq.r); }
     }
   }
   return new Uint8Array(out);
@@ -42,18 +47,20 @@ function unpackToken(b) {
     const id = hexs(vint());
     for (let k = vint(); k > 0; k--) {
       const amount = vint(), f = b[i++];
+      if (f & ~7) throw new Error('flags');   // (a flag this version doesn't know: refused, never read wrong)
       const secret = f & 1 ? str() : hexs(32); const C = hexs(33);
       const p = { id, amount, secret, C }; if (f & 2) p.witness = str();
+      if (f & 4) p.dleq = { e: hexs(32), s: hexs(32), r: hexs(32) };
       proofs.push(p);
     }
   }
-  if (i !== b.length) throw new Error('trailing bytes');
+  if (i !== b.length) throw new Error('trailing bytes');   // (also a cut-short payload: hexs past the end reads short)
   return L.getEncodedToken(Object.assign({ mint, unit, proofs }, memo ? { memo } : {}));
 }
-function soundBytes(text) {
+function soundBytes(text, proof = true) {
   const c = classify(text);
   if (c.kind === 'token') {
-    try { const d = L.getDecodedToken(c.value, Object.keys(S.counters)); return packToken({ mint: d.mint, unit: d.unit, memo: d.memo, proofs: d.proofs }); } catch (e) {}
+    try { const d = L.getDecodedToken(c.value, Object.keys(S.counters)); return packToken({ mint: d.mint, unit: d.unit, memo: d.memo, proofs: d.proofs }, proof); } catch (e) {}
   }
   return new TextEncoder().encode(String(text));
 }
@@ -66,14 +73,17 @@ const ctBtn = (text, label = 'Play as sound', cls = 'btn sm violet') => (CT() &&
 const tapeHTML = (state, sub) => `<div class="tape" aria-hidden="true"><div class="tape-stripes"></div><div class="tape-reel l"></div><div class="tape-reel r"></div><div class="tape-win"><b id="ctState">${esc(state)}</b><span id="ctSub">${esc(sub || '')}</span></div></div>`;
 function openSoundSend(text) {
   if (!CT() || !CT().canPlay()) { toast("This browser can't play sound here.", 'gold'); return; }
-  let bytes; try { bytes = soundBytes(text); } catch (e) { toast(e.message, 'red'); return; }
-  let secs = 0; try { secs = CT().seconds(bytes); } catch (e) { toast(e.message, 'red'); return; }
   const kind = classify(text).kind;
+  // a token whose coins carry the mint's DLEQ proofs: they go along unless "Faster, no proof" is on
+  let proofs = false; if (kind === 'token') { try { proofs = (L.getDecodedToken(classify(text).value, Object.keys(S.counters)).proofs || []).some(p => dleqHex(p.dleq)); } catch (e) {} }
+  let bytes; try { bytes = soundBytes(text, !(proofs && S.prefs.ctNoProof)); } catch (e) { toast(e.message, 'red'); return; }
+  let secs = 0; try { secs = CT().seconds(bytes); } catch (e) { toast(e.message, 'red'); return; }
   openSheet('Play as sound', `
     ${tapeHTML('LOADING', `${CT().frameCount(bytes)} BLOCKS · ${Math.ceil(secs)} S A PASS`)}
     <div class="meter ct-meter"><i id="ctBar" style="width:0%"></i></div>
     <p style="margin:0">Hold this phone near the other phone. On that phone, open NUTCADE and tap Listen. Turn your volume up.</p>
     <div class="tiny muted">It plays on a loop until you stop it, so a block missed on one pass is caught on the next.</div>${kind === 'token' ? '<div class="tiny muted">Anyone close enough to hear it could catch the token, the same as photographing its QR code.</div>' : ''}
+    ${proofs ? `<label class="row tiny" style="gap:8px;align-items:center"><input type="checkbox" id="ctFast"${S.prefs.ctNoProof ? ' checked' : ''}> Faster, no proof</label><div class="tiny muted" id="ctProofNote">${S.prefs.ctNoProof ? "The mint's signature proofs are left out, so it plays faster. A phone that's offline can't check this token until it's back online." : "Carries the mint's signature proofs, so a phone that's offline can check this token is real. Older versions of NUTCADE can't read it."}</div>` : ''}
     <button class="btn solid gold block" id="ctToggle">Stop</button>
     <button class="btn block" data-act="close">Done</button>`, body => {
     let raf = 0, on = false;
@@ -83,6 +93,8 @@ function openSoundSend(text) {
     const start = () => CT().play(bytes, (n, d) => { dur = d; if (n === 1) started = performance.now(); st.textContent = n === 1 ? 'LOADING' : `LOADING · PASS ${n}`; }).then(() => {
       on = true; S.prefs.ctUsed = true; save(); tape.classList.add('on'); btn.textContent = 'Stop'; cancelAnimationFrame(raf); raf = requestAnimationFrame(anim);
     }).catch(() => { st.textContent = 'NO SOUND'; btn.textContent = 'Play'; });
+    const fast = body.querySelector('#ctFast');
+    if (fast) fast.onchange = () => { S.prefs.ctNoProof = fast.checked; save(); CT().stop(); on = false; openSoundSend(text); };   // (played again, in the new form)
     btn.onclick = () => { if (on) { CT().stop(); on = false; tape.classList.remove('on'); st.textContent = 'STOPPED'; btn.textContent = 'Play'; bar.style.width = '0%'; } else start(); };
     start();
     return () => { cancelAnimationFrame(raf); CT().stop(); };

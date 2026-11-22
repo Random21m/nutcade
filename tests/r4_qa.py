@@ -52,10 +52,10 @@ async def main():
             return {ok: !!got && got.length===300 && got.every((v,i)=>v===bytes[i]), secs: Chiptune.seconds(bytes)}})()""")
         check('sound: the modem decodes its own signal in the browser', r['ok'], r)
         tok, e = await w.send_ecash(1500, 'for the sound test')
-        rt = await w.ev(f"""(()=>{{const t={json.dumps(tok)}; const b=Nutcade.soundBytes(t); const back=Nutcade.soundText(b);
+        rt = await w.ev(f"""(()=>{{const t={json.dumps(tok)}; const b=Nutcade.soundBytes(t, false); const back=Nutcade.soundText(b);
             const d1=CashuLib.getDecodedToken(t, Object.keys(Nutcade.S.counters)), d2=CashuLib.getDecodedToken(back, Object.keys(Nutcade.S.counters));
             const key=d=>JSON.stringify([d.mint, d.proofs.map(p=>[p.id, Number(p.amount), p.secret, p.C])]); return {{len:b.length, tlen:t.length, same: key(d1)===key(d2), magic: b[0]}}}})()""")
-        check('sound: tokens travel in a compact form and come back with every proof intact', rt['same'] and rt['magic'] == 0xC1 and rt['len'] * 2.5 < rt['tlen'], rt)
+        check('sound: tokens travel in a compact form (Faster, no proof) and come back with every proof intact', rt['same'] and rt['magic'] == 0xC1 and rt['len'] * 2.5 < rt['tlen'], rt)
         await w.home(); await w.click('[data-act=tx]'); await w.wait(200)
         check('sound: a sent token offers Play as sound', await w.ev("!!document.querySelector('.sheet [data-act=ctPlay]')"))
         await w.click('.sheet [data-act=ctPlay]'); await w.wait(600)

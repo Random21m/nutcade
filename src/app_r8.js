@@ -269,7 +269,7 @@ function loadWalletState() {
   for (const k of WALLET_PREFS) delete S.prefs[k];
   Object.assign(S.prefs, d.prefs || {});
   for (const k of WALLET_PREFS) if (S.prefs[k] === undefined && PREF_DEFAULTS[k] !== undefined) S.prefs[k] = PREF_DEFAULTS[k];   // (as a new wallet has them: the same screens either way)
-  S.piggy = d.piggy || { saved: 0 }; S.mintlog = d.mintlog || {}; S.heirlooms = d.heirlooms || []; S.challenges = d.challenges || []; S.blocked = d.blocked || [];
+  S.piggy = d.piggy || { saved: 0 }; S.mintlog = d.mintlog || {}; S.mintkeys = d.mintkeys || {}; S.heirlooms = d.heirlooms || []; S.challenges = d.challenges || []; S.blocked = d.blocked || [];
   seenWraps.clear(); for (const x of d.dmseen || []) seenWraps.add(x);
   nwcSeen.clear(); for (const x of d.nwcseen || []) nwcSeen.add(x);
   myGen = raw.get('gen', 0);
