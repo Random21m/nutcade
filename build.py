@@ -21,7 +21,7 @@ def build():
 # frame-ancestors cannot be set from a <meta> tag, so it is not listed.
 def add_csp(page):
     hashes = sorted({"'sha256-" + base64.b64encode(hashlib.sha256(s.encode('utf-8')).digest()).decode() + "'"
-                     for s in re.findall(r'<script>(.*?)</script>', page, re.S)})
+                     for s in re.findall(r'<script\b[^>]*>(.*?)</script\s*[^>]*>', page, re.S | re.I)})
     csp = "; ".join([
         "default-src 'none'",
         "script-src " + " ".join(hashes) + " 'wasm-unsafe-eval'",
