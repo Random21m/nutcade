@@ -2204,7 +2204,8 @@ function fitNums(root) {
     if (el.dataset.fs === undefined) el.dataset.fs = el.style.fontSize || '';
     const min = el.classList.contains('cash-charge') ? 9 : el.classList.contains('credit-num') ? 10 : 14;   // the CHARGE label stays one readable line; a huge balance (80M SAT) may go smaller so its unit is not cut off
     let fs = parseFloat(getComputedStyle(el).fontSize), i = 0;
-    while (el.scrollWidth > el.clientWidth + 1 && fs > min && i++ < 40) { fs = Math.max(min, fs - (min < 14 ? 0.5 : 1.5)); el.style.fontSize = fs + 'px'; }
+    const over = () => el.scrollWidth > el.clientWidth + 1 || (el.lastElementChild && el.lastElementChild.getBoundingClientRect().right > el.getBoundingClientRect().right + 0.5);   // (also the last 1 px: the unit's last letter is never clipped)
+    while (over() && fs > min && i++ < 40) { fs = Math.max(min, fs - (min < 14 ? 0.5 : 1.5)); el.style.fontSize = fs + 'px'; }
   });
 }
 function closeSheet() {
@@ -2476,7 +2477,7 @@ function viewWallet() {
     <div class="panel">
       <div class="row between"><span class="h2">Recent</span>${visTxs().length ? '<button class="linkbtn" data-act="tab" data-tab="history">All notes</button>' : ''}</div>
       ${S.txs.filter(unpaidWait).map(t => `<button class="linkbtn waitdep" data-act="tx" data-id="${esc(t.id)}" style="display:block;text-align:left;padding:6px 0">Waiting for an on-chain deposit · Show address</button>`).join('')}
-      ${recent.length ? `<div class="txs">${recent.map(txRow).join('')}</div>` : recentCount() === 0 ? '' : `<div class="empty-state"><b>NO PLAYS YET</b>Receive some sats and every transaction shows up here with room for a note.</div>`}
+      ${recent.length ? `<div class="txs">${recent.map(txRow).join('')}</div>` : recentCount() === 0 || S.txs.some(unpaidWait) ? '' : `<div class="empty-state"><b>NO PLAYS YET</b>Receive some sats and every transaction shows up here with room for a note.</div>`}
     </div>
     <div class="panel"><div class="row between"><span class="h2">Arcade</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Play</button></div><div id="topScore" class="tiny muted"></div></div>
     <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">${HEART}<span>Support NUTCADE</span></button>
@@ -2663,7 +2664,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.23.0';
+const APP_VERSION = '1.23.1';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
