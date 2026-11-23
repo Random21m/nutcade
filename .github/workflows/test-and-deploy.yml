@@ -83,6 +83,8 @@ jobs:
             suites: nutzap
           - name: p2bk
             suites: p2bk
+          - name: sync
+            suites: sync
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out

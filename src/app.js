@@ -78,7 +78,7 @@ function useScan() {
 }
 useScan();
 // the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
-const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'p2bk'];
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'p2bk', 'sync', 'syncSt', 'syncOther'];
 const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const walletPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const inVault = k => vault.on && !devKey(k);
@@ -294,6 +294,7 @@ function save() {
   // (only a stamp that reached storage counts as ours: a failed one must not make this tab think someone else wrote)
   { const g = (raw.get('gen', 0) || 0) + 1; if (raw.set('gen', g)) myGen = g; }
   retrySaves();
+  try { syDirty(); } catch (e) {}   // wallet sync (app_sync.js): the coins may have changed; published a moment later, never in this step
 }
 // the records that failed to save, written again (with what they hold now): by every save(), and by Try again
 function retrySaves() {
@@ -349,7 +350,7 @@ function setSeed(mnemonic, backedUp) {
   const changed = !S.seed || S.seed.mnemonic !== mnemonic;
   S.seed = { mnemonic, backedUp: !!backedUp, created: Date.now() };
   seedBytes = null;
-  if (changed && S.prefs) { S.prefs.npc = false; S.prefs.npcSince = 0; S.prefs.npcName = ''; S.prefs.mintBackupAt = 0; S.prefs.mintBackupList = ''; if (typeof npcSocketStop === 'function') npcSocketStop(); }
+  if (changed && S.prefs) { S.prefs.npc = false; S.prefs.npcSince = 0; S.prefs.npcName = ''; S.prefs.mintBackupAt = 0; S.prefs.mintBackupList = ''; S.prefs.sync = false; delete S.prefs.syncSt; S.prefs.syncOther = []; if (typeof npcSocketStop === 'function') npcSocketStop(); }
   for (const k in wallets) delete wallets[k];
   if (!store.set('seed', S.seed)) throw new Error("This browser won't save data. Open NUTCADE in a normal browser tab.");
   requestPersist();
@@ -391,12 +392,15 @@ async function secureAll(onStep) {
 /* One scan at a time per mint. A caller that joins a scan already running doesn't lose what it asked for: the
    deposits it brings are added to the ones that scan credits (read when it credits, not when it started), and if
    it joined too late for that, it gets a scan of its own. */
-const restoreDeposits = {};
+const restoreDeposits = {}, restoreRepairing = new Set();
 async function restoreFromMint(url, onStep, opts = {}) {
   url = normUrl(url);
   const mine = (opts.deposits || []).map(q => q.quote);
   if (mine.length) { const s = restoreDeposits[url] || (restoreDeposits[url] = new Set()); mine.forEach(id => s.add(id)); }
-  const r = await single('restore:' + url, () => restoreFromMintNow(url, onStep, opts));
+  // (a scan started only to catch the counters up, "repair", may credit nothing (wallet sync on): a scan you asked for never
+  // takes its answer, it waits for it to end and then runs its own)
+  if (!opts.repair) while (restoreRepairing.has(url) && flights.has('restore:' + url)) await flights.get('restore:' + url).catch(() => {});
+  const r = await single('restore:' + url, () => { if (opts.repair) restoreRepairing.add(url); return restoreFromMintNow(url, onStep, opts).finally(() => restoreRepairing.delete(url)); });
   if (mine.some(id => S.quotes.some(q => q.quote === id && !(q.empty >= 3)) && (restoreDeposits[url] || new Set()).has(id))) return single('restore:' + url, () => restoreFromMintNow(url, onStep, opts));
   return r;
 }
@@ -446,12 +450,16 @@ async function restoreFromMintNow(url, onStep, opts) {
   // from here to the write, no wait: not what we hold, nor a token we sent that hasn't been claimed, nor coins of a
   // payment in flight, nor anything an open step owns
   const haveNow = () => new Set((S.proofs[url] || []).map(p => p.secret).concat(S.txs.filter(t => t.status === 'pending').flatMap(t => (t.sent || []).map(p => p.secret)), S.pending.flatMap(p => p.proofs.map(x => x.secret)), S.extra && S.extra.mint === url ? S.extra.proofs.map(p => p.secret) : [], asideOf(url).map(p => p.secret), [...owned]));   // (nor the Extra Life's coins, nor coins set aside by the keyset check-up)
-  let fresh = found.filter(p => !haveNow().has(p.secret));
+  let fresh = found.filter(p => !haveNow().has(p.secret) && !syGone(p.secret));   // (nor coins our other device handed out in a token: wallet sync)
   if (fresh.length) {   // still unspent now (a coin found early may have been spent since), then the last look, with no wait after it
     const st = await inTime(w.checkProofsStates(fresh), 30000); fresh = fresh.filter((p, i) => st[i] && st[i].state === 'UNSPENT');
     if (ranges().some(c => !looked.has(rkey(c)))) throw new Error("The mint didn't answer. Try again in a moment.");
     const have = haveNow(); fresh = fresh.filter(p => !have.has(p.secret));
   }
+  // Wallet sync on: a scan only made to catch the counters up (the mint said "already signed": another device holding
+  // these 12 words used them) credits nothing. What it finds is that device's: its coins come through sync, checked
+  // there, and a token it just made (not claimed yet) is never counted here. The counters moved on above all the same.
+  if (opts.repair && !waiting.length && syRepairOnly()) fresh = [];
   let left = sum(fresh);
   for (const id of [...(restoreDeposits[url] || [])]) if (!S.quotes.some(x => x.quote === id && x.mint === url && !x.ctr)) restoreDeposits[url].delete(id);
   for (const q of waiting) {
@@ -480,7 +488,7 @@ async function withRepair(url, fn, ropts) {
   try { const r = await fn(); opMark(url, true); return r; }
   catch (e) {
     if (!isDupOutputs(e) || flights.has('restore:' + normUrl(url))) { opMark(url, false, e); throw e; }   // (a scan already running here may be waiting on this very step)
-    await restoreFromMint(url, null, ropts);
+    await restoreFromMint(url, null, Object.assign({}, ropts, { repair: 1 }));
     const r = await fn(); opMark(url, true); return r;
   }
 }
@@ -1225,7 +1233,7 @@ async function journaled(url, kind, info, run) {
       for (let i = 0; ; i++) {
         try { const r = await run(onCountersReserved, op); opMark(url, true); return { r, op }; }
         catch (e) {
-          if (i === 0 && isDupOutputs(e) && !flights.has('restore:' + normUrl(url))) { op.ctr = []; op.outs = []; save(); await restoreFromMint(url, null, { except: op.id }); continue; }   // (nothing of this attempt was signed)   // counters behind (same phrase elsewhere): catch up, once
+          if (i === 0 && isDupOutputs(e) && !flights.has('restore:' + normUrl(url))) { op.ctr = []; op.outs = []; save(); await restoreFromMint(url, null, { except: op.id, repair: 1 }); continue; }   // (nothing of this attempt was signed)   // counters behind (same phrase elsewhere): catch up, once
           opMark(url, false, e); e.op = op; throw e;
         }
       }
@@ -1502,6 +1510,7 @@ async function spentRetry(url, fn) {
   try { return await fn(); }
   catch (e) {
     if (!isSpentErr(e)) throw e;
+    try { sySoon(); } catch (x) {}   // (wallet sync: a coin our other device spent; what it has now is read a moment later)
     const dropped = await pruneSpent(url).catch(() => 0);
     try { return await fn(); }
     catch (e2) { if (!isSpentErr(e2)) throw e2; const f = new Error(dropped > 0 ? `Some of this ecash was already spent. NUTCADE removed ${money(dropped)} of spent ecash from your balance (see your notes). Try again with what is left.` : "The mint says some of this ecash was already spent, but it still shows your coins as unspent, so nothing was removed. Try again in a moment."); f.keep = true; throw f; }
@@ -2674,7 +2683,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.29.0';
+const APP_VERSION = '1.30.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -2760,6 +2769,7 @@ function viewSettings() {
       ${toggle('nostrInbox', 'Receive ecash sent over Nostr', 'Listens on Nostr relays for ecash friends send to your ecash address. Requests you made still arrive for 30 days when this is off.')}
       ${nzSettingsHTML()}
       ${p2bkSettingsHTML()}
+      ${sySettingsHTML()}
       ${toggle('mintRadar', 'Show mint reliability', "Asks MintRadar (mintradar.org) for its public list of mint health, so MintRadar sees your phone's internet address. It does not learn which mints you use: NUTCADE downloads the whole list and compares it on this phone. It is an operational health signal, not a statement that a mint holds your sats or is safe to deposit into. Off by default.")}
     </div>
 
@@ -3948,6 +3958,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_remind.js@@*/
 /*@@app_nutzap.js@@*/
 /*@@app_p2bk.js@@*/
+/*@@app_sync.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4203,7 +4214,7 @@ const A = {
   stopWatch: b => { const t = txById(b.dataset.id); S.quotes = S.quotes.filter(q => q.quote !== t.quote); updTx(t.id, { status: 'expired' }); closeSheet(); refresh(); },
   reconcileTx: b => run(b, 'CHECKING', async () => { const t = txById(b.dataset.id); const p = S.pending.find(x => x.txId === t.id); if (!p) { toast('Nothing pending for this one', 'cyan'); return; } const r = await reconcile(p, { force: true }); const cp = (txById(t.id) || {}).changePending; toast(cp ? "Paid. Its change hasn't come back yet; NUTCADE keeps trying." : { paid: 'Payment confirmed', returned: 'Payment failed. Sats returned.', pending: 'Still in flight' }[r], r === 'pending' || cp ? 'gold' : 'lime'); closeSheet(); refresh(); }),
   reconcileAll: b => run(b, '…', async () => { for (const p of [...S.pending]) await reconcile(p, { force: true }).catch(() => {}); refresh(); }),
-  pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'mintRadar') { if (b.checked) { radar.next = 0; radarEnsure(); } else radarOff(); } if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } if (b.dataset.k === 'nutzap') nzToggled(b.checked); refresh(); sfx('blip'); },
+  pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'mintRadar') { if (b.checked) { radar.next = 0; radarEnsure(); } else radarOff(); } if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } if (b.dataset.k === 'nutzap') nzToggled(b.checked); if (b.dataset.k === 'sync') syToggled(b.checked); refresh(); sfx('blip'); },
   backup: () => pinGuard('backup', () => showBackupText(backupData())),
   restore: () => pinGuard('import', () => openSheet('Import backup', `${pbWarn('replace')}<div class="field"><span class="flabel">Backup file</span><div class="row filepick"><label class="btn sm violet"><span>Choose a file</span><input id="restoreFile" type="file" accept=".json,application/json"></label><span id="restoreFileName" class="tiny muted">No file chosen</span></div></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`)),
   doRestore: b => !guardHeld('import') ? closeSheet() : run(b, 'CHECKING', async () => {
@@ -4276,6 +4287,7 @@ const A = {
     if (!same && hadBalance) { line('Moving your current ecash under the restored phrase…'); await secureAll(); }
     else if (!same) { S.seed.secured = true; store.set('seed', S.seed); }
     let total = 0; const fails = [];
+    let syncWas = false; try { syncWas = await syRestoreLook(line); } catch (e) {}   // wallet sync: one read of the sync key's events (nothing written, sync stays off); the scan below leaves out coins they mark as handed out
     for (const u of list) {
       try { total += await restoreFromMint(u, line); } catch (e) { fails.push(host(u)); }
     }
@@ -4287,6 +4299,7 @@ const A = {
       <div class="credit-num" style="font-size:28px">${fmt(total)}<small>${unitTag()}</small></div>
       <p style="margin:0">${total ? 'Recovered and back in your wallet.' : 'No unspent ecash was found on those mints for this phrase.'}</p>
       ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}. Try those again later from Mints → Find lost ecash.</div>` : ''}${lows}
+      ${syncWas ? `<div class="notice cyan">Wallet sync was on for these 12 words on another device. Turn it on here too to keep your coins the same on both.</div><button class="btn block lime" data-act="syncRestoreOn">Turn on wallet sync</button>` : ''}
       <button class="btn solid gold block" data-act="close">Continue</button></div>`);
   }),
   findLost: b => run(b, 'SCANNING', async () => {
@@ -4519,6 +4532,7 @@ const A = {
 /*@@app_backup_actions.js@@*/
 /*@@app_remind_actions.js@@*/
 /*@@app_nutzap_actions.js@@*/
+/*@@app_sync_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;
@@ -4634,6 +4648,7 @@ async function tickBody(startup) {
     retryHunts().catch(() => {}),
     deliverReqPays().catch(() => {}),
     nzTick().catch(() => {}),   // nutzaps waiting to be claimed or delivered (app_nutzap.js)
+    syTick(startup).catch(() => {}),   // wallet sync: read at start and now and then, a failed write tried again (app_sync.js)
     recheckImported().catch(() => {})
   ]);
   if (S.prefs.nostrBackup && S.mints.length && S.prefs.mintBackupList !== S.mints.map(m => m.url).join(' ') && Date.now() - mintBackupTry > 10 * 60e3) scheduleMintBackup(startup ? 4000 : 0);
