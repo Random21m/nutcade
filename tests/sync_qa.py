@@ -374,8 +374,14 @@ async def main():
             for e in ctx.get('old7375', []):
                 c = await A.ev(f"__syDec({J(words)}, {J(e['content'])})"); old_coins += [{'id': q['id'], 'amount': q['amount'], 'secret': q['secret'], 'C': q['C']} for q in c['proofs']]
             ost = await A.ev(f"NutSync.states({J(M)}, {J(old_coins)})")
+            # (a coin in an old event can still be unspent: it was carried into the newer events. Then one of OUR wallets must
+            # hold it or have it in a token it sent: every coin is spent or accounted for, never free for the replay to add)
+            mine = set()
+            for D in (A, B):
+                mine |= set(await D.ev("[].concat(...Object.values(Nutcade.S.proofs||{}), ...(Nutcade.S.txs||[]).map(t=>t.sent||[]), Nutcade.S.pending||[]).map(p=>p&&p.secret)"))
+            accounted = all(x == 'SPENT' or c['secret'] in mine for x, c in zip(ost or [], old_coins))
             rb = await pull(B); ra = await pull(A)
-            check('relay: old, replaced events replayed with their deletion hidden are read as live again, and every coin in them is spent at the mint', old_ids and all(i in (rb.get('ids') or []) for i in old_ids) and ost and all(x == 'SPENT' for x in ost), (old_ids[:1], ost))
+            check('relay: old, replaced events replayed with their deletion hidden are read as live again, and every coin in them is spent at the mint or already ours', old_ids and all(i in (rb.get('ids') or []) for i in old_ids) and ost and len(ost) == len(old_coins) and accounted, (old_ids[:1], ost, len(mine)))
             check('relay: so nothing is added on either device', await B.bal() == bb + 128 == await A.bal() and ra and rb and ra.get('adopted') == 0 and rb.get('adopted') == 0, (await A.bal(), await B.bal(), ra, rb))
             await ledger('after the relay misbehaved', [A, B])
         await section('relay', relay)
