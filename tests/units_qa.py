@@ -27,7 +27,7 @@ NOT proven here: CHF (no test mint offers it; it goes through exactly the same t
 mints' rates and fees, mints that quote a unit for one method only, and any conversion of our own (NUTCADE never
 converts: every amount comes from the mint's own quote). U_ONLY=a,b runs some sections (their names start with those
 letters)."""
-import asyncio, json, os, sys, urllib.request
+import asyncio, hashlib, json, os, sys, time, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from playwright.async_api import async_playwright
 from wallet_qa import W, check, results, URL, outside_net, B as SAT, invoice
@@ -550,6 +550,10 @@ async def main():
             check('new phrase: the USD coins were moved under the new phrase (all new coins, the same 2.00 USD)',
                   await X.ev("Nutcade.S.seed.secured") is True and new and not (set(new) & set(old)) and await bal(X, XU) == 200, (len(old), len(new), await bal(X, XU)))
             await X.gate_step('gateStart', "!!document.querySelector('.tabbar')"); await X.ev("Nutcade.closeSheet()")
+            await act(X, 'sweepOpen'); await X.wait(300)
+            smc = await X.ev("Object.fromEntries([...document.querySelectorAll('[data-rmint]')].map(i=>[i.dataset.rmint,i.checked]))")
+            await X.ev("Nutcade.closeSheet()")
+            check('sweep: the same mint starts ticked in the sweep list too', smc.get(DOLLAR) is True, smc)
             # Restore from other 12 words: the USD here moves into the restored wallet
             other = await wallet(b, 'u-X2'); owords = await other.create(); await other.pg.context.close()
             old = await X.ev(f"(Nutcade.S.proofs[{J(XU)}]||[]).map(p=>p.secret)")
@@ -557,6 +561,8 @@ async def main():
             txt = await X.sheet_text()
             check('restore: the sheet says the 2.00 USD here moves into the restored wallet', '2.00 USD' in txt, txt[:300])
             rm = await X.ev("[...document.querySelectorAll('[data-rmint]')].map(i=>i.dataset.rmint)")
+            rmc = await X.ev("Object.fromEntries([...document.querySelectorAll('[data-rmint]')].map(i=>[i.dataset.rmint,i.checked]))")
+            check('restore: a mint where only its USD account is held starts ticked in the list (read before anything is ticked by hand)', rmc.get(DOLLAR) is True, rmc)
             check('restore: the mints to scan are listed by address, each once', DOLLAR in rm and not any('|' in u for u in rm) and len(rm) == len(set(rm)), rm)
             await X.fill('#phraseIn', owords)
             await X.ev(f"[...document.querySelectorAll('[data-rmint]')].forEach(i=>i.checked=i.dataset.rmint==={J(DOLLAR)})")
@@ -570,6 +576,29 @@ async def main():
             await X.ev("Nutcade.closeSheet()")
             if await X.until("!!document.querySelector('[data-act=gateStart]')", 3000): await X.gate_step('gateStart', "!!document.querySelector('.tabbar')")
             await X.ev("Nutcade.closeSheet()")
+            # Restore again while the USD mint refuses the move: the restore still runs, says what it couldn't move, drops nothing
+            third = await X.ev("CashuLib.generateMnemonic(CashuLib.wordlist,128)")
+            held = await X.ev(f"(Nutcade.S.proofs[{J(XU)}]||[]).map(p=>p.secret)")
+            async def noswap(route):
+                try: await route.abort()
+                except Exception: pass
+            await X.pg.context.route(DOLLAR + '/v1/swap', noswap)
+            await act(X, 'seedRestore'); await X.wait(300)
+            await X.fill('#phraseIn', third)
+            await X.ev(f"[...document.querySelectorAll('[data-rmint]')].forEach(i=>i.checked=i.dataset.rmint==={J(DOLLAR)})")
+            await X.click('[data-act=doRestorePhrase]')
+            done = await X.until("!!document.querySelector('.sheet-body .credit-num')", 120000); await X.wait(400)
+            txt = await X.sheet_text()
+            sec = await X.ev("Nutcade.S.seed.secured"); now = await X.ev(f"(Nutcade.S.proofs[{J(XU)}]||[]).map(p=>p.secret)")
+            await X.pg.context.unroute(DOLLAR + '/v1/swap', noswap)
+            check("restore: with the USD mint refusing the move, the scan still runs and the screen names the account it couldn't move",
+                  done and "Couldn't move the ecash at 127.0.0.1:3346 · USD" in txt and await X.ev("Nutcade.S.seed.mnemonic") == third, txt[:300])
+            check('restore: and nothing is dropped: the same USD coins are still held, and the phrase is not marked as covering them',
+                  sorted(now) == sorted(held) and not sec, (len(held), len(now), sec))
+            await X.ev("Nutcade.closeSheet()")
+            if await X.until("!!document.querySelector('[data-act=gateStart]')", 3000): await X.gate_step('gateStart', "!!document.querySelector('.tabbar')")
+            await X.ev("Nutcade.closeSheet()"); await X.home(); await X.wait(300)
+            check('restore: so the wallet screen still offers Protect it', await X.ev("!!document.querySelector('[data-act=secureAll]')"))
             # importing a backup file with other words does not replace the phrase of a wallet holding USD
             if ctx.get('bk'):
                 mine = await X.ev("Nutcade.S.seed.mnemonic")
@@ -601,7 +630,44 @@ async def main():
             check('sweep: the 300 SAT and 1.25 USD under other words are found and moved, each into its own account',
                   ks == 300 and ku == 125 and await bal(S2, MULTI) == 300 and await bal(S2, USD) == 125, (ks, ku, await bal(S2, MULTI), await bal(S2, USD)))
             check('sweep: the screen shows 300 SAT and +1.25 USD on its own line, never 425', '300' in head and '425' not in head and '1.25 USD' in found, (head, found))
+            await S2.ev("Nutcade.closeSheet()")
+            # a mint that can't say which units it issues (its keyset list refused twice): named on the screen, not skipped silently
+            n = {'k': 0}
+            async def nokeys(route):
+                try:
+                    if n['k'] < 2: n['k'] += 1; return await route.abort()
+                    await route.continue_()
+                except Exception: pass
+            await S2.pg.context.route(MULTI + '/v1/keysets', nokeys)
+            await act(S2, 'sweepOpen'); await S2.wait(300); await S2.fill('#phraseIn', kw)
+            await S2.ev(f"[...document.querySelectorAll('[data-rmint]')].forEach(i=>i.checked=i.dataset.rmint==={J(MULTI)})")
+            await S2.click('[data-act=doSweep]')
+            await S2.until("!!document.querySelector('.sheet-body .credit-num')", 120000); await S2.wait(400)
+            txt = await S2.sheet_text()
+            await S2.pg.context.unroute(MULTI + '/v1/keysets', nokeys)
+            check("sweep: a mint that couldn't say which units it issues (asked twice) is named: only its SAT and the accounts held there were scanned",
+                  n['k'] == 2 and "Couldn't ask 127.0.0.1:3345 which units it issues" in txt, (n['k'], txt[:300]))
             await S2.pg.context.close()
+            # a USD or EUR account added only for the scan is not left behind when the scan fails
+            S3 = await wallet(b, 'u-S3'); await S3.create(); await add_account(S3, MULTI, 'sat')
+            ks = json.loads(urllib.request.urlopen(MULTI + '/v1/keysets', timeout=10).read())['keysets']
+            other_ids = [k['id'] for k in ks if k.get('unit', 'sat') != 'sat']
+            async def norestore(route):
+                try:
+                    if any(i in (route.request.post_data or '') for i in other_ids): return await route.abort()
+                    await route.continue_()
+                except Exception: pass
+            await S3.pg.context.route(MULTI + '/v1/restore', norestore)
+            await act(S3, 'sweepOpen'); await S3.wait(300); await S3.fill('#phraseIn', kw)
+            await S3.ev(f"[...document.querySelectorAll('[data-rmint]')].forEach(i=>i.checked=i.dataset.rmint==={J(MULTI)})")
+            await S3.click('[data-act=doSweep]')
+            await S3.until("!!document.querySelector('.sheet-body .credit-num')", 120000); await S3.wait(400)
+            txt = await S3.sheet_text()
+            await S3.pg.context.unroute(MULTI + '/v1/restore', norestore)
+            accs = [x['url'] for x in await accounts(S3)]
+            check('sweep: USD and EUR accounts added only for a scan that failed are not left behind (the failure is named)',
+                  accs == [MULTI] and '127.0.0.1:3345 · USD' in txt, (accs, txt[:300]))
+            await S3.pg.context.close()
         await section('sweep', sweep)
 
         # =================== tokens from outside: bad mint fields, unknown units, saved offline, back online ===================
@@ -650,8 +716,48 @@ async def main():
             listed = {x['invoice'] for x in r['list']}
             check('Wallet Connect: its history lists the SAT Lightning lines only, never a USD or EUR one (whose amounts are cents, not millisats)',
                   bool(usd_inv) and not (listed & usd_inv) and listed <= sat_inv and bool(listed), (len(listed), len(usd_inv), len(listed & usd_inv)))
-            check('Wallet Connect: its balance is the SAT balance in millisats', r['balance'] == await A.ev("NutUnits.satTotal()") * 1000, (r['balance'], await A.ev("NutUnits.satTotal()")))
+            satsum = await A.ev("Object.keys(Nutcade.S.proofs).filter(k=>!k.includes('|')).reduce((t,k)=>t+Nutcade.S.proofs[k].reduce((s,p)=>s+p.amount,0),0)")
+            check('Wallet Connect: its balance is the SAT coins only, in millisats, with USD and EUR held beside them',
+                  await bal(A, USD) > 0 and r['balance'] == satsum * 1000, (r['balance'], satsum, await bal(A, USD)))
+            # an invoice paid from the USD account: Wallet Connect neither sees it nor pays it again
+            inv = await A.ev("(Nutcade.S.txs.find(t=>t.type==='out'&&t.method==='ln'&&t.unit==='usd'&&t.status==='done')||{}).request||''")
+            if inv:
+                n0, s0 = await A.ev("Nutcade.S.txs.length"), satsum
+                pay = await A.ev(f"NutUnits.nwcPay({J(inv)})"); look = await A.ev(f"NutUnits.nwcLookup({J(inv)})")
+                s1 = await A.ev("Object.keys(Nutcade.S.proofs).filter(k=>!k.includes('|')).reduce((t,k)=>t+Nutcade.S.proofs[k].reduce((s,p)=>s+p.amount,0),0)")
+                check('Wallet Connect: an invoice paid from the USD account is "not found" by lookup and refused by pay (no preimage, nothing paid again)',
+                      look.get('code') == 'NOT_FOUND' and pay.get('code') == 'PAYMENT_FAILED' and not pay.get('ok') and await A.ev("Nutcade.S.txs.length") == n0 and s1 == s0, (pay, look))
+            else:
+                check('Wallet Connect: a USD-paid invoice to test with', False)
         await section('nwc', nwc)
+
+        # =================== outside data: a scanned "|usd" address, a request with no usable mint, USD bounty and Extra Life ===================
+        async def ext():
+            await use(A, MULTI); await A.home()
+            await A.ev("(document.querySelector('#toast')||{}).innerText=''")
+            await A.ev(f"Nutcade.handleScan({J(USD)})"); await A.wait(500)
+            t = await A.toast(); mu = await A.ev("(document.querySelector('#mintUrl')||{}).value||''")
+            await A.ev("Nutcade.closeSheet()")
+            check("outside: a scanned mint address with '|usd' in it is not offered as a mint to add", '|' not in mu and "isn't something NUTCADE can use" in t, (t, mu))
+            enc = await A.ev(f"""(()=>{{const pr=new CashuLib.PaymentRequest([], 'tst3', 100, 'sat', [{J(USD)}], 'odd'); return pr.toEncodedRequest()}})()""")
+            await A.ev(f"Nutcade.handleScan({J(enc)})"); await A.wait(800)
+            txt = await A.sheet_text()
+            check("request: one whose only mint address has '|' in it says it names no mint NUTCADE can use (no empty list, no Pay button)",
+                  'names no mint address' in txt and ' from , ' not in txt and not await A.ev("!!document.querySelector('[data-act=payReq]')"), txt[:220])
+            await A.ev("Nutcade.closeSheet()")
+            sid = await A.ev(f"Nutcade.S.proofs[{J(MULTI)}][0].id"); uid = await A.ev(f"Nutcade.S.proofs[{J(USD)}][0].id")
+            lp = await A.ev("NutUnits.lockPub()")
+            htlc = J(['HTLC', {'nonce': '00' * 16, 'data': 'ab' * 32, 'tags': [['pubkeys', lp]]}])
+            p2pk = J(['P2PK', {'nonce': '11' * 16, 'data': '02' + '2' * 64, 'tags': [['locktime', str(int(time.time()) + 86400)], ['refund', lp]]}])
+            def tok(unit, kid, secret): return f"CashuLib.getEncodedToken({{mint:{J(MULTI)}, unit:{J(unit)}, proofs:[{{id:{J(kid)}, amount:8, secret:{J(secret)}, C:'02'+'1'.repeat(64)}}]}})"
+            bs = await A.ev(f"NutUnits.bounty({tok('sat', sid, htlc)}, 8)"); bu = await A.ev(f"NutUnits.bounty({tok('usd', uid, htlc)}, 8)")
+            check('bounty: one locked to us in SAT is read as a bounty of 8 SAT; the same in USD is not for us (never shown as SAT)', bs and bs['amount'] == 8 and bu is None, (bs, bu))
+            hs = await A.ev(f"NutUnits.heir({tok('sat', sid, p2pk)})"); hu = await A.ev(f"NutUnits.heir({tok('usd', uid, p2pk)})")
+            check('Extra Life: a copy left to us in SAT is kept; one in USD is not for us', hs and hs['amount'] == 8 and hu is None, (hs, hu))
+            bad = await A.ev(f"CashuLib.getEncodedToken({{mint:{J(USD)}, unit:'sat', proofs:[{{id:{J(sid)}, amount:8, secret:{J(htlc)}, C:'02'+'1'.repeat(64)}}]}})")
+            bb = await A.ev(f"NutUnits.bounty({J(bad)}, 8)")
+            check("bounty: one whose mint field has '|usd' in it is refused", bb is None, bb)
+        await section('ext', ext)
 
         # =================== the report card of a SAT-only wallet at a multi-unit mint ===================
         async def card():
@@ -720,6 +826,7 @@ async def main():
             await add_account(w, MULTI, 'sat')
             ok, _, _ = await deposit(w, MULTI, '400')
             ok2, _, _ = await deposit(w, USD, '1.00')
+            await send_token(w, USD, 10, 'a USD token out')   # (its coins must never show up as gone marks)
             pk = await w.ev("NutSync.pk()")
             await w.click('[data-act=tab][data-tab=settings]'); await w.wait(400)
             t = await w.ev("document.querySelector('#set-privacy').innerText")
@@ -745,10 +852,22 @@ async def main():
                     try{{const c=JSON.parse(CashuLib.nip44.v2.decrypt({J(e['content'])}, ck)); return c.filter(t=>t[0]==='mint').map(t=>t[1])}}catch(e){{return []}}}})()"""))
             check('sync: the wallet event lists the mint once, by its own address (never an account key)',
                   MULTI in mints and not any('|' in m for m in mints), mints)
-            sw = await w.ev("NutUnits.syncWant()")
-            check('sync: the wallet event it writes carries no counter of a USD keyset and no gone mark of a USD token',
-                  sw['unitKs'] and not (set(sw['counters']) & set(sw['unitKs'])) and sw['gone'] == await w.ev("Nutcade.S.txs.filter(t=>t.type==='out'&&t.status==='pending'&&Array.isArray(t.sent)&&NutUnits.unit(t.mint)==='sat').reduce((n,t)=>n+t.sent.length,0)"),
-                  sw)
+            DEC = """(()=>{{const s=CashuLib.sha256(new Uint8Array([...CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic), ...new TextEncoder().encode('nutcade-nip60')]));
+                const ck=CashuLib.nip44.v2.utils.getConversationKey(s, CashuLib.nostrPub(s)); try{{return JSON.parse(CashuLib.nip44.v2.decrypt({c}, ck))}}catch(e){{return null}}}})()"""
+            usd_ids = {k['id'] for k in json.loads(urllib.request.urlopen(MULTI + '/v1/keysets', timeout=10).read())['keysets'] if k.get('unit') == 'usd'}
+            held_usd_ctr = usd_ids & set(await w.ev("Object.keys(Nutcade.S.counters)"))
+            pub_ctr, pub_gone = set(), set()
+            for e in evs(17375, pk):
+                c = await w.ev(DEC.format(c=J(e['content']))) or []
+                pub_ctr |= {t[1] for t in c if t[0] == 'counter'}; pub_gone |= {t[1] for t in c if t[0] == 'gone'}
+            for e in evs(7375, pk):
+                c = await w.ev(DEC.format(c=J(e['content']))) or {}
+                pub_gone |= {g[0] for g in (c.get('gone') or []) if isinstance(g, list) and g}
+            check("sync: the published wallet events carry no counter of the mint's USD keysets (the wallet holds such counters)",
+                  held_usd_ctr and not (pub_ctr & usd_ids), (held_usd_ctr, pub_ctr & usd_ids))
+            usd_secrets_out = await w.ev(f"Nutcade.S.txs.filter(t=>t.type==='out'&&Array.isArray(t.sent)&&NutUnits.unit(t.mint)!=='sat').flatMap(t=>t.sent.map(p=>p.secret))")
+            usd_h = {hashlib.sha256(x.encode()).hexdigest()[:32] for x in usd_secrets_out}
+            check('sync: no gone mark in any published event names a coin of a USD token (there is one out)', usd_h and not (usd_h & pub_gone), (len(usd_h), len(usd_h & pub_gone)))
             # the mint-list backup (NUT-27) publishes mint addresses only
             await w.until("!!Nutcade.S.prefs.mintBackupList", 20000)
             check('mint-list backup: what was published to the relays is the mint address, never "…|usd"', await w.ev("Nutcade.S.prefs.mintBackupList") == MULTI, await w.ev("Nutcade.S.prefs.mintBackupList"))

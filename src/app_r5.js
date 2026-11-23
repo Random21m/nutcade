@@ -76,8 +76,9 @@ async function retryBounties() {
 // Decoding a token needs its mint's keyset ids. A wallet that never held sats at that mint doesn't have them yet, so ask the mint.
 async function decodeTok(t) {
   t = cleanToken(String(t || ''));
-  try { return L.getDecodedToken(t, Object.keys(S.counters)); } catch (e) {}
   const md = L.getTokenMetadata(t), u = String(md.unit || 'sat').toLowerCase();
+  extUrl(md.mint);   // (the token's mint field is an address only: one with '|' in it is refused here, before anything reads it)
+  try { return L.getDecodedToken(t, Object.keys(S.counters)); } catch (e) {}
   const w = await getWallet(acctKey(extUrl(md.mint), unitOk(u) ? u : 'sat'));   // (the token's mint is an address; its unit picks the account's keysets)
   return w.decodeToken(t);
 }
@@ -85,6 +86,7 @@ async function decodeTok(t) {
 async function readBounty(bo, rec) {
   try {
     const tok = cleanToken(String(bo.token || '')); const d = await decodeTok(tok);
+    if (String(d.unit || 'sat').toLowerCase() !== 'sat') return null;   // (bounties are SAT only: one in another unit is not for us)
     let H = null;
     // (E is the sender's: no point math on more coins or keys than a bounty of ours ever has, app_p2bk.js)
     if (!d.proofs.length || d.proofs.length > P2BK_MAX_COINS) return null;
@@ -256,6 +258,7 @@ async function extraTick() {
 async function onExtraLife(p, from) {
   if (p.t === 'nutcade-extralife-end') { S.heirlooms.filter(h => h.from === from && h.state === 'waiting').forEach(h => { h.state = 'ended'; }); saveHeir(); if (tab === 'wallet' && !$('#layer .sheet')) refresh(); return; }
   let d; try { d = await decodeTok(p.token); } catch (e) { return; }
+  if (String(d.unit || 'sat').toLowerCase() !== 'sat') return;   // (Extra Life is SAT only: a copy in another unit is not for us)
   let until = 0;
   for (const pr of d.proofs) {
     let sec; try { sec = JSON.parse(pr.secret); } catch (e) { return; }

@@ -114,13 +114,29 @@ async function mintUnits(url) {
 }
 // a list of mints to scan (restore, sweep): each address also stands for every other unit account it offers, added to the
 // list in place; its SAT account is left out when the mint issues no SAT and none is held here (a scan of it can't load)
-async function unitAccounts(list) {
+// A mint that can't say which units it issues (asked twice) is named in `miss`: its accounts already held here are still
+// scanned, its other units are not, and the screen says so.
+async function unitAccounts(list, miss) {
   for (const u of [...list]) if (isSatAcct(u)) {
-    let us; try { us = await mintUnits(u); } catch (e) { continue; }
+    let us = null;
+    for (let i = 0; i < 2 && !us; i++) { try { us = await mintUnits(u); } catch (e) { if (!i) await sleep(800); } }
+    if (!us) { for (const m of S.mints) if (acctUrl(m.url) === u && !isSatAcct(m.url) && !list.includes(m.url)) list.push(m.url); if (miss) miss.push(host(u)); continue; }
     for (const x of us) { const k = acctKey(u, x); if (x !== 'sat' && !list.includes(k)) list.push(k); }
     if (us.length && !us.includes('sat') && !S.mints.find(m => m.url === u)) list.splice(list.indexOf(u), 1);
   }
   return list;
+}
+// the screen's line for mints that couldn't say which units they issue (restore, sweep)
+const unitMissHTML = miss => miss.length ? miss.map(h => `<div class="notice red">Couldn't ask ${esc(h)} which units it issues, so only its SAT ecash and the accounts you already hold there were scanned. Try again later.</div>`).join('') : '';
+// an account's name in a list: the mint's address, and its unit when it isn't SAT
+const acctHost = k => host(k) + (isSatAcct(k) ? '' : ' · ' + unitCode(acctUnit(k)));
+// an account a scan added only to look in it (USD, EUR or CHF), with nothing of it held, recorded or in flight: it goes
+// again, whether the scan found nothing or failed. (A SAT account a restore adds stays, as before 1.31: Find lost ecash
+// scans it again later.)
+function dropScanned(url) {
+  if (isSatAcct(url) || !S.mints.find(m => m.url === url) || balanceOf(url) || S.txs.some(t => t.mint === url) || S.pending.some(p => p.mint === url) || S.ops.some(o => o.mint === url) || S.quotes.some(q => q.mint === url)) return false;
+  S.mints = S.mints.filter(m => m.url !== url); delete S.proofs[url]; if (S.active === url) S.active = S.mints[0] ? S.mints[0].url : null; save();
+  return true;
 }
 // the accounts at one mint, SAT first
 const acctsAt = url => { const u = acctUrl(url); return S.mints.filter(m => acctUrl(m.url) === u).sort((a, b) => UNIT_LIST.indexOf(acctUnit(a.url)) - UNIT_LIST.indexOf(acctUnit(b.url))); };
@@ -195,6 +211,11 @@ window.NutUnits = {
   satTotal: () => totalBalance(), any: () => anyBalance(), held: () => heldMoney(), addrs: () => mintAddrs(),
   payload: (p, from) => receivePayload(p, from),   // (a NUT-18 payment as it arrives over Nostr)
   nwc: async () => { const c = { id: 'units-test', seeAll: true }; return { list: (await NWC.list_transactions(c, { unpaid: true })).transactions, balance: (await NWC.get_balance(c)).balance }; },
+  nwcPay: async inv => { const c = { id: 'units-test', seeAll: true }; try { return { ok: await NWC.pay_invoice(c, { invoice: inv }) }; } catch (e) { return { code: e.nwc || null, msg: e.message }; } },
+  nwcLookup: async inv => { const c = { id: 'units-test', seeAll: true }; try { return { ok: await NWC.lookup_invoice(c, { invoice: inv }) }; } catch (e) { return { code: e.nwc || null, msg: e.message }; } },
+  lockPub: () => myLockPub(),
+  bounty: async (tok, amount) => { const r = await readBounty({ token: tok, amount }, { game: 'units-test' }); return r ? { amount: r.amount, mint: r.mint } : null; },
+  heir: async tok => { const was = S.heirlooms.slice(), f = 'f'.repeat(64); await onExtraLife({ t: 'nutcade-extralife', token: tok }, f); const h = S.heirlooms.find(x => x.from === f); S.heirlooms = was; saveHeir(); return h ? { amount: h.amount, mint: h.mint } : null; },
   inspect: async u => { const l = await inspectMint(u); return { ksTotal: l.ksTotal, noted: Object.keys(l.keysets).length, news: (l.changes || []).filter(c => c.kind === 'new').length, keys: (reportCard(u).rows.find(r => r.k === 'Keys') || {}).g }; },
   syncWant: () => { const w = syWalletWant(null); return { counters: w.cs.map(([id]) => id), gone: w.gone.length, mints: w.mints, unitKs: [...unitKsIds()] }; }
 };

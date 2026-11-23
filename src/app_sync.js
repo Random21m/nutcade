@@ -138,7 +138,7 @@ function syWalletOf(e, c) {
   const w = { at: num(e.created_at), id: e.id, counters: {}, gone: new Map(), mints: [] };
   for (const t of c) {
     if (!Array.isArray(t) || typeof t[0] !== 'string') continue;
-    if (t[0] === 'mint' && typeof t[1] === 'string' && t[1].length <= 300 && /^https?:\/\/[^\s]+$/i.test(t[1]) && w.mints.length < SY_MINTS) { const u = normUrl(t[1]); if (!w.mints.includes(u)) w.mints.push(u); }
+    if (t[0] === 'mint' && typeof t[1] === 'string' && t[1].length <= 300 && /^https?:\/\/[^\s]+$/i.test(t[1]) && w.mints.length < SY_MINTS) { const u = extUrlOr(t[1]); if (u && !w.mints.includes(u)) w.mints.push(u); }
     else if (t[0] === 'counter' && typeof t[1] === 'string' && /^[0-9a-f]{16,66}$/i.test(t[1]) && Object.keys(w.counters).length < SY_CTRS) { const n = Number(t[2]); if (Number.isSafeInteger(n) && n >= 0 && n < 2 ** 31) w.counters[t[1]] = Math.max(w.counters[t[1]] || 0, n); }
     else if (t[0] === 'gone' && typeof t[1] === 'string' && /^[0-9a-f]{32}$/.test(t[1]) && w.gone.size < SY_GONE) { const ts = Number(t[2]); if (Number.isSafeInteger(ts) && ts > 0) w.gone.set(t[1], Math.max(w.gone.get(t[1]) || 0, ts)); }
   }
@@ -218,7 +218,7 @@ async function syPullNow(why) {
   const own = new Set(syOwnGone().map(g => g[0]));
   for (const h of own) if (!goneAll.has(h)) goneAll.set(h, 1);
   const other = new Set();
-  for (const t of live) if (!t.url && /^https?:\/\/[^\s]+$/i.test(t.mint.trim()) && t.mint.length <= 300) other.add(normUrl(t.mint));
+  for (const t of live) if (!t.url && /^https?:\/\/[^\s]+$/i.test(t.mint.trim()) && t.mint.length <= 300 && extUrlOr(t.mint)) other.add(extUrl(t.mint));   // (an address only: '|' in it is dropped)
   r.other = [...other].filter(u => !isBlocked(u)).slice(0, SY_OTHER);
   // 1. coins our other device handed out in a token: never counted here
   for (const m of satMints()) {

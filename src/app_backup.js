@@ -299,7 +299,7 @@ async function phoneFetch() {
   } catch (e) { throw bad(); }
   const words = cleanPhrase(body && body.words);
   if (!validPhrase(words)) throw bad();
-  return { words, mints: (Array.isArray(body.mints) ? body.mints : []).filter(u => typeof u === 'string' && /^https?:\/\/\S+$/i.test(u)).map(normUrl),
+  return { words, mints: (Array.isArray(body.mints) ? body.mints : []).filter(u => typeof u === 'string' && /^https?:\/\/\S+$/i.test(u)).map(extUrlOr).filter(Boolean),
     rec: { pk: k.pk, credId: b64e(new Uint8Array(a.rawId)), at: ev.created_at, n: 0, erase: pbTombs(k.sk, k.pk, ev.created_at) } };
 }
 // the Restore wallet sheet, filled from a phone backup: the words are kept in a hidden field (never shown), the mints ticked

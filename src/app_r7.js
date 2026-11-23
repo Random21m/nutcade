@@ -494,11 +494,15 @@ const NWC = {
     if (d.timestamp + d.expiry < Date.now() / 1000) throw nwcErr('OTHER', 'The invoice has expired.');
     const sats = d.sats;
     // the same invoice is never paid twice: a paid one answers with its proof, one in flight is refused
-    const prev = S.txs.find(t => t.type === 'out' && t.method === 'ln' && (t.request === inv || t.invoice === inv) && t.status !== 'failed' && t.status !== 'expired');
+    const prevAny = S.txs.find(t => t.type === 'out' && t.method === 'ln' && (t.request === inv || t.invoice === inv) && t.status !== 'failed' && t.status !== 'expired');
+    // (Wallet Connect sees SAT lines only, as lookup_invoice and list_transactions do: an invoice this wallet paid, or is
+    // paying, from a USD, EUR or CHF account answers like one an app may not see, after a moment, and is never paid again)
+    if (prevAny && txUnit(prevAny) !== 'sat') { await sleep(1500 + Math.random() * 2500); throw nwcErr('PAYMENT_FAILED', 'The payment failed. Nothing left the wallet.'); }
+    const prev = prevAny;
     // (an app that may only see its own payments gets the very answer an invoice that can't be paid gets, after a
     // moment, so it can't tell this wallet paid it; nothing is paid again)
     if (prev && !c.seeAll && prev.nwc !== c.id) { await sleep(1500 + Math.random() * 2500); throw nwcErr('PAYMENT_FAILED', 'The payment failed. Nothing left the wallet.'); }
-    if (prev && prev.status === 'done') return Object.assign({ preimage: prev.preimage || '' }, txUnit(prev) === 'sat' ? { fees_paid: num(prev.fee) * 1000 } : {});   // (paid from a USD account: its fee is in cents, so none is stated)
+    if (prev && prev.status === 'done') return { preimage: prev.preimage || '', fees_paid: num(prev.fee) * 1000 };
     if (prev) throw nwcErr('OTHER', 'This invoice is already being paid.');
     const cands = satMints().filter(m => supports(m, 'melt', 'bolt11') && balanceOf(m.url) >= sats).sort((a, b) => (b.url === S.active) - (a.url === S.active) || balanceOf(b.url) - balanceOf(a.url));
     if (!cands.length) throw nwcErr('INSUFFICIENT_BALANCE', `Not enough sats: no mint in this wallet holds ${sats} sat.`);

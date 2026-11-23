@@ -387,10 +387,15 @@ async function securePart(url, w, ps) {
 }
 // every account, every unit (USD coins move under the new phrase too); the fees come back as text, one per unit ('' for none)
 async function secureAll(onStep) {
-  const fees = {};
-  for (const m of S.mints) { if (!(S.proofs[m.url] || []).length) continue; onStep && onStep(m); addUnit(fees, acctUnit(m.url), await secureMint(m.url)); }
+  // one account that can't be moved (its mint down) doesn't stop the others; it stays as it is (nothing is dropped) and
+  // the phrase stays "not covering everything", so Protect it is still offered. The first such error is thrown at the end,
+  // with every account that failed on it (e.failed) and the fees of the ones that moved (e.fee).
+  const fees = {}, failed = [];
+  for (const m of S.mints) { if (!(S.proofs[m.url] || []).length) continue; onStep && onStep(m); try { addUnit(fees, acctUnit(m.url), await secureMint(m.url)); } catch (e) { failed.push({ url: m.url, e }); } }
+  const fee = listEmpty(fees) ? '' : moneyList(fees);
+  if (failed.length) { const e = failed[0].e; e.failed = failed; e.fee = fee; throw e; }
   S.seed.secured = true; store.set('seed', S.seed);
-  return listEmpty(fees) ? '' : moneyList(fees);
+  return fee;
 }
 /* One scan at a time per mint. A caller that joins a scan already running doesn't lose what it asked for: the
    deposits it brings are added to the ones that scan credits (read when it credits, not when it started), and if
@@ -407,9 +412,15 @@ async function restoreFromMint(url, onStep, opts = {}) {
   if (mine.some(id => S.quotes.some(q => q.quote === id && !(q.empty >= 3)) && (restoreDeposits[url] || new Set()).has(id))) return single('restore:' + url, () => restoreFromMintNow(url, onStep, opts));
   return r;
 }
+// (a USD, EUR or CHF account added only for this scan goes again if the scan fails: dropScanned, app_units.js)
 async function restoreFromMintNow(url, onStep, opts) {
+  const st = { isNew: false };
+  try { return await restoreFromMintScan(url, onStep, opts, st); }
+  catch (e) { if (st.isNew) dropScanned(url); throw e; }
+}
+async function restoreFromMintScan(url, onStep, opts, st) {
   await syncIfStale();
-  const isNew = !S.mints.find(m => m.url === url);
+  const isNew = st.isNew = !S.mints.find(m => m.url === url);
   if (isNew) await addMint(url, { dropped: true, sat: true });   // (your sats there are found even if the mint now takes fewer coins per request than NUTCADE needs)
   const w = await getWallet(url);
   // Coins of a step still open at this mint belong to that step, never to "Recovered": payments (in flight here are
@@ -474,9 +485,10 @@ async function restoreFromMintNow(url, onStep, opts) {
   }
   if (fresh.length) { addProofs(url, fresh); if (left) addTx({ type: 'in', method: 'ecash', amount: left, mint: url, note: 'Recovered with recovery phrase', self: true }); }
   // a mint below the minimum that this scan added and where nothing of yours is: not kept (the restore says so)
-  if (isNew && (belowMin(url) || (!isSatAcct(url) && opts.unitScan)) && !balanceOf(url) && !S.txs.some(t => t.mint === url) && !S.pending.some(p => p.mint === url) && !S.ops.some(o => o.mint === url) && !S.quotes.some(q => q.mint === url)) {
+  if (isNew && belowMin(url) && !balanceOf(url) && !S.txs.some(t => t.mint === url) && !S.pending.some(p => p.mint === url) && !S.ops.some(o => o.mint === url) && !S.quotes.some(q => q.mint === url)) {
     S.mints = S.mints.filter(m => m.url !== url); delete S.proofs[url]; if (S.active === url) S.active = S.mints[0] ? S.mints[0].url : null;
   }
+  if (isNew) dropScanned(url);   // (a USD, EUR or CHF account where nothing was found)
   save();
   return sum(fresh);
 }
@@ -1902,7 +1914,7 @@ function classify(raw) {
   if (/^https?:\/\/[^\s]+[?&]lightning=lnurl1[0-9a-z]+/i.test(t)) return { kind: 'lnurl', value: t };
   if (/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(t)) return { kind: 'lnaddress', value: t.toLowerCase() };
   if (btcAddr(t)) return { kind: 'btc', value: /^(bc|tb|bcrt)1/i.test(t) ? t.toLowerCase() : t, amount: null };
-  if (/^https?:\/\/[^\s]+$/i.test(t)) return { kind: 'mint', value: normUrl(t) };
+  if (/^https?:\/\/[^\s]+$/i.test(t) && extUrlOr(t)) return { kind: 'mint', value: extUrl(t) };   // (a scanned or pasted address: '|' in it is no mint address)
   return { kind: 'unknown' };
 }
 // a NUTCADE link: a challenge, or a treasure-hunt clue card
@@ -2500,7 +2512,7 @@ function openRestore() {
     ${S.seed ? `<div class="notice">This replaces your current wallet with the one from these 12 words.${anyBalance() ? ` The ${heldMoney()} here moves into the restored wallet, so nothing is lost.` : ''} Write down your current words first if you might want this wallet back.</div>` : '<div class="th">Use the 12 words from a previous NUTCADE or another Cashu wallet like cashu.me.</div>'}
     <button class="btn block violet" data-act="phoneRestore" data-phonecap ${phoneCap ? '' : 'hidden'}>Restore with my phone</button>
     <div class="field" id="phraseField"><label for="phraseIn">Your 12 words</label><textarea id="phraseIn" class="inp" placeholder="word1 word2 word3 …" autocomplete="off" autocapitalize="off" spellcheck="false" data-input="phrase"></textarea><div id="phraseOk" class="tiny muted">Separate words with spaces.</div></div>
-    <div class="field"><div class="row between"><label>Mints to scan</label><button class="btn sm violet" data-act="findMints">Find my mints on Nostr</button></div><div id="nostrMints" class="tiny muted"></div><div class="txs" id="rmList">${urls.map((u, i) => `<label class="toggle" for="rm${i}" style="font-size:19px"><span style="overflow-wrap:anywhere;min-width:0" data-noi18n>${esc(host(u))}</span><input id="rm${i}" type="checkbox" data-rmint="${esc(u)}" ${S.mints.find(m => m.url === u) ? 'checked' : ''}></label>`).join('')}</div></div>
+    <div class="field"><div class="row between"><label>Mints to scan</label><button class="btn sm violet" data-act="findMints">Find my mints on Nostr</button></div><div id="nostrMints" class="tiny muted"></div><div class="txs" id="rmList">${urls.map((u, i) => `<label class="toggle" for="rm${i}" style="font-size:19px"><span style="overflow-wrap:anywhere;min-width:0" data-noi18n>${esc(host(u))}</span><input id="rm${i}" type="checkbox" data-rmint="${esc(u)}" ${S.mints.some(m => acctUrl(m.url) === u) ? 'checked' : ''}></label>`).join('')}</div></div>
     <div class="field"><label for="rmExtra">Other mint addresses (one per line)</label><textarea id="rmExtra" class="inp" data-noi18n placeholder="https://mint.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea></div>
     <button class="btn solid gold block" data-act="doRestorePhrase">Restore</button>
     <div id="restoreLog" class="tiny muted"></div><div id="sheetErr"></div>`);
@@ -2945,7 +2957,7 @@ async function findMintBackups(mnemonic) {
     if (e.pubkey !== pk || !L.verifyEvent(e)) continue;
     try {
       const d = JSON.parse(L.nip44.v2.decrypt(e.content, ck));
-      for (const u of d.mints || []) if (typeof u === 'string' && /^https?:\/\/[^\s]+$/i.test(u)) { const k = normUrl(u); found.set(k, Math.max(found.get(k) || 0, d.timestamp || e.created_at)); }
+      for (const u of d.mints || []) if (typeof u === 'string' && /^https?:\/\/[^\s]+$/i.test(u)) { const k = extUrlOr(u); if (k) found.set(k, Math.max(found.get(k) || 0, d.timestamp || e.created_at)); }
     } catch (x) {}
   }
   return [...found.entries()].sort((a, b) => b[1] - a[1]).map(([u]) => u);
@@ -2976,14 +2988,14 @@ function npcPrivFor(pub) {
 }
 async function npcConnect(wantMint) {
   const u = (await npc('/api/v2/user/info')).data.user;
-  let mint = u.mintUrl ? normUrl(u.mintUrl) : '';
+  let mint = (u.mintUrl && extUrlOr(u.mintUrl)) || '';   // (npub.cash's mint field is an address only)
   // npub.cash pays in sats, so the mint it pays into is a SAT account (never a USD, EUR or CHF one)
   const want = acctUrl(wantMint ? normUrl(wantMint) : (S.mints.find(m => m.url === mint) ? mint : (activeMint() && isSatAcct(S.active) && supports(activeMint(), 'mint', 'bolt11') ? S.active : mint)));
   if (want) { await getWallet(want).catch(() => {}); if (belowMin(want)) throw minErr(want); }   // (the Lightning address's payments are deposits there)
   if (want && want !== mint) {
     if (!S.mints.find(m => m.url === want)) await addMint(want);
     const d = await npc('/api/v2/user/mint', { method: 'PATCH', body: { mint_url: want } });
-    mint = normUrl(d.data.user.mintUrl || want);
+    mint = extUrlOr(d.data.user.mintUrl || want) || want;
   }
   if (mint && !S.mints.find(m => m.url === mint)) await addMint(mint);
   S.prefs.npc = true; S.prefs.npcName = u.name || ''; S.prefs.npcMint = mint; save();
@@ -3537,8 +3549,8 @@ async function sweepPhrase(phrase, urls, onStep) {
   const otherSeed = L.mnemonicToSeedSync(phrase);
   const total = {}, fails = [];   // (found per unit: never one number across units)
   for (const url of urls) {
+    const isNew = !S.mints.find(m => m.url === url);
     try {
-      const isNew = !S.mints.find(m => m.url === url);
       if (isNew) await addMint(url, { dropped: true, sat: isSatAcct(url) });   // (sats of yours, found under another phrase: they come in even at a mint below the minimum)
       const other = new L.Wallet(acctUrl(url), { unit: acctUnit(url), bip39seed: otherSeed });
       await other.loadMint();
@@ -3566,8 +3578,9 @@ async function sweepPhrase(phrase, urls, onStep) {
         return got;
       }));
       // (an account added only to be scanned, with nothing found, goes again)
-      else if (isNew && (belowMin(url) || !isSatAcct(url)) && !balanceOf(url) && !S.txs.some(t => t.mint === url)) { S.mints = S.mints.filter(m => m.url !== url); delete S.proofs[url]; if (S.active === url) S.active = S.mints[0] ? S.mints[0].url : null; save(); }
-    } catch (e) { fails.push(host(url) + (isSatAcct(url) ? '' : ' · ' + unitCode(acctUnit(url)))); }
+      else if (isNew && belowMin(url) && !balanceOf(url) && !S.txs.some(t => t.mint === url)) { S.mints = S.mints.filter(m => m.url !== url); delete S.proofs[url]; if (S.active === url) S.active = S.mints[0] ? S.mints[0].url : null; save(); }
+      if (isNew) dropScanned(url);
+    } catch (e) { if (isNew) dropScanned(url); fails.push(acctHost(url)); }
   }
   return { total, fails };
 }
@@ -3939,7 +3952,7 @@ function openPayRequest(enc) {
     ${amount ? `<div class="credit-num" style="font-size:26px">${fmtU(amount, unitOk(pu) ? pu : 'sat')}<small>${unitTagU(unitOk(pu) ? pu : 'sat')}</small></div>` : `<div class="field">${amtField('amtIn', 'Amount ({U})', '1000', unitOk(pu) ? pu : 'sat')}</div>`}`;
   if (!unitOk(pu)) body += `<div class="notice red">This request asks for ${esc(unitCode(pu))}. NUTCADE holds SAT, USD, EUR and CHF.</div>`;
   else if (allowed && allowed.length && allowed.every(isBlocked)) body += errHTML(blockedErr(allowed[0], 'request'));
-  else if (!usable.length) body += `<div class="notice red">${pu === 'sat' ? (allowed ? `This request only accepts ecash from ${allowed.map(u => esc(host(u))).join(', ')}, and you don't hold any there.` : "You don't have any sats to pay with yet.") : allowed ? `This request only accepts ${esc(unitCode(pu))} ecash from ${allowed.map(u => esc(host(u))).join(', ')}, and you don't hold any there.` : `You don't hold any ${esc(unitCode(pu))} ecash to pay with yet.`}</div>${allowed && allowed[0] ? `<button class="btn block gold" data-act="addMint" data-url="${esc(allowed[0])}">Add ${esc(host(allowed[0]))}${pu === 'sat' ? '' : ' · ' + esc(unitCode(pu))}</button>` : ''}`;
+  else if (!usable.length) body += `<div class="notice red">${allowed && !allowed.length ? "This request names no mint address NUTCADE can use, so it can't be paid from here." : pu === 'sat' ? (allowed ? `This request only accepts ecash from ${allowed.map(u => esc(host(u))).join(', ')}, and you don't hold any there.` : "You don't have any sats to pay with yet.") : allowed ? `This request only accepts ${esc(unitCode(pu))} ecash from ${allowed.map(u => esc(host(u))).join(', ')}, and you don't hold any there.` : `You don't hold any ${esc(unitCode(pu))} ecash to pay with yet.`}</div>${allowed && allowed[0] ? `<button class="btn block gold" data-act="addMint" data-url="${esc(allowed[0])}">Add ${esc(host(allowed[0]))}${pu === 'sat' ? '' : ' · ' + esc(unitCode(pu))}</button>` : ''}`;
   else body += `<div class="field"><label for="reqMint">Pay from</label><select id="reqMint" class="inp">${usable.map(m => `<option value="${esc(m.url)}" ${m === pick ? 'selected' : ''}>${esc(acctName(m))} · ${fmtU(balanceOf(m.url), acctUnit(m.url))}</option>`).join('')}</select></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" value="${esc(pr.description || '')}"></div>
     ${tr ? `<div class="tiny muted">Sent ${tr.type === 'nostr' ? 'privately over Nostr' : 'to ' + esc(host(tr.target))}${pr.nut10 && pr.nut10.kind === 'P2PK' ? ', locked to the requester\'s key' : ''}.</div>` : '<div class="notice">This request has no delivery address, so NUTCADE will make a token for you to send yourself.</div>'}
@@ -4358,10 +4371,11 @@ const A = {
     const hadBalance = anyBalance();
     if (!same) setSeed(phrase, true); else { S.seed.backedUp = true; store.set('seed', S.seed); }
     await pbKeep(phrase).catch(() => {});   // (restored with the phone: that phone backup is this wallet's now)
-    if (!same && hadBalance) { line('Moving your current ecash under the restored phrase…'); await secureAll(); }
+    let unmoved = [];   // (accounts whose ecash couldn't be moved under the restored phrase now: still here, named on the screen)
+    if (!same && hadBalance) { line('Moving your current ecash under the restored phrase…'); try { await secureAll(); } catch (e) { unmoved = (e.failed || []).map(f => acctHost(f.url)); if (!unmoved.length) unmoved = ['']; } }
     else if (!same) { S.seed.secured = true; store.set('seed', S.seed); }
     // every unit a listed mint offers is scanned as its own account (USD coins of these 12 words are found too)
-    await unitAccounts(list);
+    const miss = []; await unitAccounts(list, miss);
     let total = 0; const fails = [];
     let syncWas = false; try { syncWas = await syRestoreLook(line); } catch (e) {}   // wallet sync: one read of the sync key's events (nothing written, sync stays off); the scan below leaves out coins they mark as handed out
     for (const u of list) {
@@ -4375,7 +4389,7 @@ const A = {
       <div class="credit-num" style="font-size:28px">${fmt(total)}<small>${unitTag()}</small></div>
       ${found.length ? `<div class="tiny" style="color:var(--lime)" data-unitfound data-noi18n>${found.map(([u, n]) => '+' + moneyU(n, u)).join(' · ')}</div>` : ''}
       <p style="margin:0">${total || found.length ? 'Recovered and back in your wallet.' : 'No unspent ecash was found on those mints for this phrase.'}</p>
-      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}. Try those again later from Mints → Find lost ecash.</div>` : ''}${lows}
+      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}. Try those again later from Mints → Find lost ecash.</div>` : ''}${unitMissHTML(miss)}${unmoved.filter(Boolean).map(h => `<div class="notice red">Couldn't move the ecash at ${esc(h)} under the restored phrase. It is still in this wallet: tap Protect it on the wallet screen to try again.</div>`).join('')}${unmoved.length && !unmoved.some(Boolean) ? `<div class="notice red">Some ecash couldn't be moved under the restored phrase. It is still in this wallet: tap Protect it on the wallet screen to try again.</div>` : ''}${lows}
       ${syncWas ? `<div class="notice cyan">Wallet sync was on for these 12 words on another device. Turn it on here too to keep your coins the same on both.</div><button class="btn block lime" data-act="syncRestoreOn">Turn on wallet sync</button>` : ''}
       <button class="btn solid gold block" data-act="close">Continue</button></div>`);
   }),
@@ -4439,7 +4453,7 @@ const A = {
     const urls = [...new Set(mintAddrs().concat(CURATED.filter(c => !c.test).map(c => c.url)))];
     openSheet('Restore ecash', `<p style="margin:0">Enter the other phrase. NUTCADE scans the mints you pick and moves any ecash it finds into this wallet, under your current phrase.</p>
       <div class="field"><label for="phraseIn">Other 12 words</label><textarea id="phraseIn" class="inp" autocomplete="off" autocapitalize="off" spellcheck="false" data-input="phrase"></textarea><div id="phraseOk" class="tiny muted">Separate words with spaces.</div></div>
-      <div class="field"><label>Mints to scan</label><div class="txs">${urls.map((u, i) => `<label class="toggle" for="sm${i}" style="font-size:19px"><span style="overflow-wrap:anywhere;min-width:0">${esc(host(u))}</span><input id="sm${i}" type="checkbox" data-rmint="${esc(u)}" ${S.mints.find(m => m.url === u) ? 'checked' : ''}></label>`).join('')}</div></div>
+      <div class="field"><label>Mints to scan</label><div class="txs">${urls.map((u, i) => `<label class="toggle" for="sm${i}" style="font-size:19px"><span style="overflow-wrap:anywhere;min-width:0">${esc(host(u))}</span><input id="sm${i}" type="checkbox" data-rmint="${esc(u)}" ${S.mints.some(m => acctUrl(m.url) === u) ? 'checked' : ''}></label>`).join('')}</div></div>
       <div class="field"><label for="rmExtra">Other mint addresses (one per line)</label><textarea id="rmExtra" class="inp" data-noi18n autocomplete="off" autocapitalize="off" spellcheck="false"></textarea></div>
       <button class="btn solid gold block" data-act="doSweep">Scan and restore</button><div id="restoreLog" class="tiny muted"></div><div id="sheetErr"></div>`);
   },
@@ -4450,13 +4464,13 @@ const A = {
     const urls = [...new Set([...document.querySelectorAll('[data-rmint]')].filter(i => i.checked).map(i => i.dataset.rmint).concat(val('rmExtra').split(/\s+/).filter(Boolean).map(normUrl)))];
     if (!urls.length) throw new Error('Pick at least one mint to scan.');
     const log = $('#restoreLog');
-    await unitAccounts(urls);   // (every unit each mint offers: USD coins under that phrase are found too)
+    const miss = []; await unitAccounts(urls, miss);   // (every unit each mint offers: USD coins under that phrase are found too)
     const { total: got, fails } = await sweepPhrase(phrase, urls, t => { if (log) log.textContent = t; });
     const lows = lowRestored(urls), total = got.sat || 0, found = UNIT_LIST.filter(u => u !== 'sat' && got[u]).map(u => [u, got[u]]);
     sfx(total || found.length ? 'levelup' : 'blip'); refresh();
     setBody(`<div style="text-align:center;display:grid;gap:12px"><div style="font-family:var(--f-display);font-size:16px;color:${total || found.length ? 'var(--lime)' : 'var(--gold)'}">${total || found.length ? 'BONUS ROUND!' : 'SCAN COMPLETE'}</div>
       <div class="credit-num" style="font-size:28px">${fmt(total)}<small>${unitTag()}</small></div>${found.length ? `<div class="tiny" style="color:var(--lime)" data-unitfound data-noi18n>${found.map(([u, n]) => '+' + moneyU(n, u)).join(' · ')}</div>` : ''}<p style="margin:0">${total || found.length ? 'Moved into this wallet.' : 'No unspent ecash was found for that phrase.'}</p>
-      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}.</div>` : ''}${lows}<button class="btn solid gold block" data-act="close">Continue</button></div>`);
+      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}.</div>` : ''}${unitMissHTML(miss)}${lows}<button class="btn solid gold block" data-act="close">Continue</button></div>`);
   }),
   p2pkNew: b => run(b, '…', async () => { newP2PK(); sfx('coin'); refresh(); toast('New P2PK key created', 'lime'); }),
   p2pkShow: b => { const k = S.p2pk[+b.dataset.i]; openSheet('Your P2PK key', `<p style="margin:0">Share this public key. Ecash locked to it can only be claimed by this wallet.</p>${qrBlock(k.pub, 'P2PK public key QR')}<div class="code">${esc(k.pub)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(k.pub)}">Copy key</button>`); },
