@@ -64,7 +64,7 @@ function backupFileRow() {
 const WHATS_NEW = [   // (v1.30.0, with the v1.29.0 items; rewrite this list at every release)
   'New, optional and off by default: Sync this wallet across devices (Settings, Privacy) keeps your coins the same on every device with your 12 words and the switch on, through your Nostr relays, encrypted. Each mint checks every coin before it counts.',
   'Relays can see how many sync events you publish, how big they are and when: use your own relays if you can. It doesn\'t work with other wallets\' sync.',
-  'Restoring from your 12 words with sync on brings back your coins from your relays, checked with each mint.',
+  'Restoring from your 12 words tells you when wallet sync was on for them, and asks before turning it on here.',
   'New, optional and off by default: Hide who gets it (P2BK, Settings, Privacy) hides the receiver\'s key in the gifts and bounties you send. Turn it on only if their wallet supports it (NUTCADE 1.29 or newer does). Nutzaps are never hidden.',
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;

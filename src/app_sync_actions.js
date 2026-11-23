@@ -11,6 +11,11 @@ Object.assign(A, {
     const n = await syDeleteAll();
     closeSheet(); refresh(); toast(n ? 'Synced coins deleted from your relays' : 'Nothing of yours was on your relays', 'cyan');
   }),
+  syncRestoreOn: () => {
+    if (!syAllowed()) return;
+    S.prefs.sync = true; save(); syToggled(true);
+    closeSheet(); refresh(); toast('Wallet sync is on', 'lime');
+  },
   syncAddMint: b => run(b, 'ADDING', async () => {
     const u = String(b.dataset.u || '');
     if (!(S.prefs.syncOther || []).includes(u)) return;

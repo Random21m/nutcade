@@ -6,6 +6,11 @@ Run: python mock_nostr.py [port]   (default 3350)
   POST /test/relay_mode {drop, reorder, dup, kinds}  a misbehaving relay (sync_qa.py): drop = say OK but keep nothing; reorder =
                                             answer a REQ in a shuffled order; dup = send every stored event twice. kinds: only these kinds
                                             (default: all). POST /test/relay_mode {} puts it back to normal.
+                                            refuse = answer OK false (kinds as above). With "relay": NAME the switches
+                                            are for ws://...:PORT/relay?r=NAME instead: r=liar answers every REQ at
+                                            once with forged copies (same id and signature, other content) and keeps
+                                            nothing; r=empty answers EOSE at once with nothing and keeps nothing;
+                                            "delay": seconds before any relay answers a REQ (main included)
   POST /test/inject {event, raw}            store an event as a relay would serve it (raw: without checking its signature, as a lying relay)
   POST /test/forget {ids}                   the relay loses these events
   http://127.0.0.1:PORT/api/v2/...          npub.cash v2: user/info, user/mint, wallet/quotes (NIP-98 auth)
@@ -38,7 +43,10 @@ sockets = {}       # pubkey -> set(WebSocket)
 log = []
 subs = {}        # WebSocket -> {sub_id: [filters]}  (live subscriptions, like a real relay)
 reqs = []        # the last REQ filters received (sync_qa.py: the duress wallet never reads)
-mode = {}        # a misbehaving relay (POST /test/relay_mode): drop, reorder, dup, kinds
+mode = {}        # a misbehaving relay (POST /test/relay_mode): drop, reorder, dup, refuse, kinds, delay
+rmodes = {}      # the same for the named relays (?r=liar, ?r=empty, ...)
+req_count = {}   # author -> REQs naming it (never cut)
+pub_count = {}   # "pubkey:kind" -> EVENT messages received
 import random
 
 
@@ -81,12 +89,19 @@ async def fanout(e):
 async def relay(ws: WebSocket):
     await ws.accept()
     subs[ws] = {}
+    name = ws.query_params.get('r', 'main')
+    rm = mode if name == 'main' else rmodes.setdefault(name, {})
     try:
         while True:
             m = json.loads(await ws.receive_text())
             if m[0] == 'EVENT':
                 e = m[1]
+                ck = f"{e.get('pubkey')}:{e.get('kind')}"; pub_count[ck] = pub_count.get(ck, 0) + 1
+                if name in ('liar', 'empty'):   # (keeps nothing)
+                    await ws.send_text(json.dumps(['OK', e.get('id'), True, ''])); continue
                 ok = verify(e)
+                if ok and misbehaves('refuse', e['kind']):
+                    await ws.send_text(json.dumps(['OK', e.get('id'), False, 'blocked: refused'])); continue
                 if ok and misbehaves('drop', e['kind']):   # (a relay that says OK and keeps nothing)
                     log.append(('dropped', e['kind'], True))
                     await ws.send_text(json.dumps(['OK', e.get('id'), True, '']))
@@ -111,6 +126,16 @@ async def relay(ws: WebSocket):
             elif m[0] == 'REQ':
                 sub, fs = m[1], m[2:]
                 reqs.append(fs); del reqs[:-300]
+                for f in fs:
+                    for a in f.get('authors') or []: req_count[a] = req_count.get(a, 0) + 1
+                if rm.get('delay'): await asyncio.sleep(float(rm['delay']))
+                if name == 'empty':
+                    await ws.send_text(json.dumps(['EOSE', sub])); continue
+                if name == 'liar':
+                    for e in [e for e in events.values() if any(matches(e, f) for f in fs)]:
+                        x = dict(e); x['content'] = base64.b64encode(os.urandom(120)).decode()
+                        await ws.send_text(json.dumps(['EVENT', sub, x]))
+                    await ws.send_text(json.dumps(['EOSE', sub])); continue
                 hits = sorted([e for e in events.values() if any(matches(e, f) for f in fs)], key=lambda x: -x['created_at'])
                 lim = min([f['limit'] for f in fs if isinstance(f.get('limit'), int)] or [len(hits)])
                 hits = hits[:max(0, lim)]
@@ -227,8 +252,9 @@ posted = []
 
 @app.post('/test/relay_mode')
 async def relay_mode(request: Request):
-    b = await request.json(); mode.clear(); mode.update({k: b[k] for k in ('drop', 'reorder', 'dup', 'kinds') if k in b})
-    return {'mode': mode}
+    b = await request.json(); md = mode if b.get('relay', 'main') == 'main' else rmodes.setdefault(b['relay'], {})
+    md.clear(); md.update({k: b[k] for k in ('drop', 'reorder', 'dup', 'refuse', 'kinds', 'delay') if k in b})
+    return {'mode': md}
 
 
 @app.post('/test/inject')
@@ -256,7 +282,7 @@ async def post_payment(request: Request):
 
 @app.get('/test/state')
 async def state():
-    return {'events': list(events.values()), 'posted': posted, 'users': users, 'quotes': quotes, 'sockets': {k: len(v) for k, v in sockets.items()}, 'log': log[-50:], 'reqs': reqs, 'mode': mode,
+    return {'events': list(events.values()), 'posted': posted, 'users': users, 'quotes': quotes, 'sockets': {k: len(v) for k, v in sockets.items()}, 'log': log[-50:], 'reqs': reqs, 'mode': mode, 'req_count': req_count, 'pub_count': pub_count,
             'vouchers': vouchers, 'payees': payees, 'zaps': zaps}
 
 

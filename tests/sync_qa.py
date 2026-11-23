@@ -64,10 +64,12 @@ async def wallet(b, name, lang='en'):
     pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and not outside_net(m.text) and 'WebSocket' not in m.text and 'Failed to load' not in m.text else None)
     await pg.goto(URL); await pg.wait_for_timeout(700)
     return w
-async def restore(b, name, words):
+async def restore(b, name, words, info=None):
     d = await wallet(b, name)
     await d.gate_restore(); await d.fill('#phraseIn', words); await d.ev("[...document.querySelectorAll('[data-rmint]')].forEach(i=>i.checked=false)"); await d.fill('#rmExtra', M)
     await d.click('[data-act=doRestorePhrase]'); await d.until("!document.querySelector('[data-act=doRestorePhrase]')", 120000); await d.wait(600)
+    if info is not None:
+        info['asked'] = await d.ev("!!document.querySelector('[data-act=syncRestoreOn]')"); info['text'] = await d.sheet_text()
     await d.ev("Nutcade.closeSheet()")
     if await d.until("!!document.querySelector('[data-act=gateStart]')", 4000): await d.gate_step('gateStart', "!!document.querySelector('.tabbar')")
     await d.wait(300); await d.ev("Nutcade.closeSheet()"); await d.use(M)
@@ -92,9 +94,24 @@ async def main():
         A = await wallet(b, 'sy-A'); words = await A.create(); await A.add_mint(M); await A.use(M)
         B = await restore(b, 'sy-B', words)
         PK = await A.ev("NutSync.pk()")
-        ctx = {'reqs0': len(state()['reqs'])}   # (a restore looks once for a wallet event of the sync key: that read is the restore's)
+        ctx = {'rc0': state()['req_count'].get(PK, 0)}   # (B's restore looked once for the sync key's events: that read is the restore's)
 
         def relay_events(kind): return evs(kind, PK)
+        async def relay_marks():   # every gone mark on the relay: the wallet event's and the coin events'
+            out = set()
+            for e in relay_events(17375):
+                c = await A.ev(f"__syDec({J(words)}, {J(e['content'])})")
+                if isinstance(c, list): out |= {t[1] for t in c if isinstance(t, list) and t and t[0] == 'gone'}
+            for e in relay_events(7375):
+                c = await A.ev(f"__syDec({J(words)}, {J(e['content'])})")
+                if isinstance(c, dict) and isinstance(c.get('gone'), list): out |= {g[0] for g in c['gone'] if isinstance(g, list) and g}
+            return out
+        async def events_with(secret):   # the coin events on the relay that list this coin
+            out = []
+            for e in relay_events(7375):
+                c = await A.ev(f"__syDec({J(words)}, {J(e['content'])})")
+                if isinstance(c, dict) and any(isinstance(q, dict) and q.get('secret') == secret for q in c.get('proofs') or []): out.append(e)
+            return out
         async def relay_secrets():
             out = set()
             for e in relay_events(7375):
@@ -132,7 +149,7 @@ async def main():
             await A.wait(3000)
             check('off: sync is off by default on both devices', await A.ev("Nutcade.S.prefs.sync") is not True and await B.ev("Nutcade.S.prefs.sync") is not True and not await A.ev("NutSync.on()"))
             check('off: nothing is published while off (no kind 7375, 17375 or 5 from the sync key)', not any(relay_events(k) for k in SYNC_KINDS))
-            check('off: nothing is read while off (no REQ for the sync key)', not any(PK in (f.get('authors') or []) for fs in state()['reqs'][ctx['reqs0']:] for f in fs))
+            check('off: nothing is read while off (no REQ for the sync key)', state()['req_count'].get(PK, 0) == ctx['rc0'], (state()['req_count'].get(PK, 0), ctx['rc0']))
             await settings(A); t = await priv(A)
             check('off: Settings has the switch, off, with the privacy note in plain words', 'Sync this wallet across devices' in t and 'how many events you publish' in t and 'cashu.me' in t and not await A.ev("document.querySelector('#p_sync').checked"), t[-600:])
             check('off: B (same 12 words, sync off) does not see the coins', await B.bal() == 0)
@@ -146,7 +163,6 @@ async def main():
             e7 = relay_events(7375); w17 = relay_events(17375)
             c = await A.ev(f"__syDec({J(words)}, {J(e7[0]['content'])})") if e7 else None
             check('on: a coin event decrypts (NIP-44, to itself) to {mint, unit sat, proofs}, with no tags that say anything', c and c.get('mint') == M and c.get('unit') == 'sat' and isinstance(c.get('proofs'), list) and all(e['tags'] == [] for e in e7), c and list(c))
-            ok17 = await A.until("true", 100)
             for _ in range(20):
                 w17 = relay_events(17375)
                 if w17: break
@@ -276,6 +292,62 @@ async def main():
             await ledger('after the crash and sync', [A, B])
         await section('crash', crash)
 
+        async def gone():
+            # an offline send hands out the very coins: the other device must drop them and never take them again
+            ok = await deposit(A, 64); await on_relay(A); await pull(B)
+            check('gone: (both hold the new 64)', ok and await A.bal() == await B.bal(), (await A.bal(), await B.bal()))
+            c64 = next((q for q in await coins(A) if q['amount'] == 64), None)
+            c64full = await A.ev(f"(Nutcade.S.proofs[{J(M)}]||[]).find(p=>p.secret==={J(c64['secret'])})") if c64 else None
+            t = await A.ev("(()=>{try{return NutSync.offline(64,'offline gift').id}catch(e){return 'err:'+e.message}})()")
+            check('gone: A sends 64 offline (the coin itself goes in the token)', c64 and not str(t).startswith('err') and await A.ev(f"Nutcade.S.txs.some(t=>t.offline&&t.sent.some(p=>p.secret==={J(c64['secret'])}))"), t)
+            h = await A.ev(f"NutSync.hash({J(c64['secret'])})") if c64 else None
+            ok = False
+            for _ in range(40):
+                if h in await relay_marks() and not await events_with(c64['secret']): ok = True; break
+                await A.wait(500)
+            check('gone: A publishes a gone mark for it, and the events that listed it are replaced', ok)
+            bb = await B.bal()
+            r = await pull(B)
+            check('gone: B drops the coin with a "Sent from your other device" line, and both show the same', r and r.get('dropped') == 64 and await B.bal() == bb - 64 == await A.bal() and [x for x in await lines(B, 'Sent from your other device (wallet sync)') if x[1] == 64], (r, await B.bal(), bb, await A.bal()))
+            st = await A.ev(f"NutSync.states({J(M)}, {J([c64])})")
+            # an event listing that coin again (as a lagging device, or an old copy, would): the coin is unspent, valid, and live
+            ev = await A.ev(f"__syEv({J(words)}, 7375, {{mint:{J(M)}, unit:'sat', proofs:[{J({k: c64full[k] for k in ('id', 'amount', 'secret', 'C', 'dleq') if k in c64full})}]}})")
+            await A.ev(f"__syPublish({J(ev)})")
+            r = await pull(B)
+            check('gone: an event listing the handed-out coin again is read as live, the coin is still unspent, and B does not take it (the gone mark)', st == ['UNSPENT'] and ev['id'] in (r.get('ids') or []) and r.get('adopted') == 0 and await B.bal() == bb - 64, (st, r))
+            r = await pull(A)
+            check('gone: nor does A take its own handed-out coin back', r and r.get('adopted') == 0 and not any(q['secret'] == c64['secret'] for q in await coins(A)))
+            await ledger('after the offline send', [A, B])
+        await section('gone', gone)
+
+        async def order():
+            # the wallet event with the new gone marks goes first: while it can't be written, nothing is replaced on the
+            # strength of our own handing-out alone
+            ok = await deposit(A, 32); await on_relay(A); await pull(B)
+            c32 = next((q for q in await coins(A) if q['amount'] == 32), None)
+            mode(refuse=True, kinds=[17375])
+            n17 = len(relay_events(17375)); w0 = relay_events(17375)[0]['id'] if relay_events(17375) else None
+            t = await A.ev("(()=>{try{return NutSync.offline(32,'offline 2').id}catch(e){return 'err:'+e.message}})()")
+            h = await A.ev(f"NutSync.hash({J(c32['secret'])})") if c32 else None
+            ok2 = False
+            for _ in range(40):
+                if h in await relay_marks(): ok2 = True; break
+                await A.wait(500)
+            await A.wait(1500)
+            held_by = await events_with(c32['secret']) if c32 else []
+            check('order: with the wallet event refused, the gone mark still goes out in the coin events, and the old event listing the coin is not deleted', ok and c32 and not str(t).startswith('err') and ok2 and held_by and (relay_events(17375)[0]['id'] if relay_events(17375) else None) == w0, (ok2, len(held_by), t))
+            r = await pull(B)
+            check('order: B still drops the handed-out coin', r and r.get('dropped') == 32 and await B.bal() == await A.bal(), (r, await B.bal(), await A.bal()))
+            mode()
+            await A.ev("NutSync.push()"); await A.wait(500); await pull(A)
+            ok3 = False
+            for _ in range(20):
+                if not await events_with(c32['secret']): ok3 = True; break
+                await A.ev("NutSync.push()"); await A.wait(500)
+            check('order: once the wallet event is written, the old event is replaced', ok3 and relay_events(17375) and relay_events(17375)[0]['id'] != w0)
+            await ledger('after the refused wallet event', [A, B])
+        await section('order', order)
+
         async def relay():
             bb, nt = await B.bal(), await B.ev("Nutcade.S.txs.length")
             mode(dup=True, reorder=True)
@@ -297,10 +369,39 @@ async def main():
             # replay: old events (already replaced) served again, with the deletions hidden
             post('/test/forget', {'ids': [e['id'] for e in relay_events(5)]})
             for e in ctx.get('old7375', []): post('/test/inject', {'event': e})
-            ra, rb = await pull(A), await pull(B)
-            check('relay: old, replaced events replayed (their deletion hidden): their coins are spent, nothing is added', await B.bal() == bb + 128 == await A.bal() and ra and rb and ra.get('adopted') == 0 and rb.get('adopted') == 0, (await A.bal(), await B.bal(), ra, rb))
+            old_ids = [e['id'] for e in ctx.get('old7375', [])]
+            old_coins = []
+            for e in ctx.get('old7375', []):
+                c = await A.ev(f"__syDec({J(words)}, {J(e['content'])})"); old_coins += [{'id': q['id'], 'amount': q['amount'], 'secret': q['secret'], 'C': q['C']} for q in c['proofs']]
+            ost = await A.ev(f"NutSync.states({J(M)}, {J(old_coins)})")
+            rb = await pull(B); ra = await pull(A)
+            check('relay: old, replaced events replayed with their deletion hidden are read as live again, and every coin in them is spent at the mint', old_ids and all(i in (rb.get('ids') or []) for i in old_ids) and ost and all(x == 'SPENT' for x in ost), (old_ids[:1], ost))
+            check('relay: so nothing is added on either device', await B.bal() == bb + 128 == await A.bal() and ra and rb and ra.get('adopted') == 0 and rb.get('adopted') == 0, (await A.bal(), await B.bal(), ra, rb))
             await ledger('after the relay misbehaved', [A, B])
         await section('relay', relay)
+
+        async def multi():
+            # several relays: a lying one answering first with forged copies under real ids, an empty one, a slow one
+            liar, empty = RELAY + '?r=liar', RELAY + '?r=empty'
+            await B.ev(f"Nutcade.S.prefs.relays = {J([liar, RELAY])}")
+            mode(delay=0.6)
+            ok = await deposit(A, 16); await on_relay(A)
+            r = await pull(B)
+            check('multi: a relay answering first with forged copies of the real events hides nothing (each copy checked before it is kept)', ok and r and r.get('adopted') == 16 and r.get('bad', 0) >= 1 and await B.bal() == await A.bal(), (r, await B.bal(), await A.bal()))
+            mode(); post('/test/relay_mode', {'relay': 'liar', 'delay': 0.6})
+            r = await pull(B)
+            check('multi: the same relay answering last changes nothing either', r and r.get('adopted') == 0 and r.get('live', 0) >= 1 and await B.bal() == await A.bal(), r)
+            post('/test/relay_mode', {'relay': 'liar'})
+            bb = await B.bal(); w0 = [e['id'] for e in relay_events(17375)]; p0 = state()['pub_count'].get(f'{PK}:17375', 0)
+            await B.ev(f"Nutcade.S.prefs.relays = {J([empty, RELAY])}"); mode(delay=4)
+            r = await pull(B); await B.wait(1000); await B.ev("NutSync.push()")
+            check('multi: an empty relay answering at once while the real one is slow: B loses nothing', await B.bal() == bb, (await B.bal(), bb, r))
+            check('multi: and with no wallet event read from most relays, B never writes one from scratch (marks and counters kept)', [e['id'] for e in relay_events(17375)] == w0 and state()['pub_count'].get(f'{PK}:17375', 0) == p0, (w0, p0, state()['pub_count'].get(f'{PK}:17375', 0)))
+            mode(); await B.ev(f"Nutcade.S.prefs.relays = {J([RELAY])}")
+            await pull(B); await pull(A)
+            check('multi: back on one relay, both the same', await B.bal() == await A.bal(), (await B.bal(), await A.bal()))
+            await ledger('after several relays', [A, B])
+        await section('multi', multi)
 
         async def forged():
             await pull(B)
@@ -333,7 +434,7 @@ async def main():
             fake = dict(live[0]); fake['id'] = 'f' * 64; fake['content'] = await A.ev(f"__syEnc({W_}, JSON.stringify({{mint:{J(M)}, unit:'sat', proofs:[Object.assign({coin()}, {{secret:__syRnd()}})]}}))")
             post('/test/inject', {'event': fake, 'raw': True})
             ctx['unreadable'] = {sent[0]['id'], sent[1]['id'], sent[12]['id'], fake['id']}   # (events NUTCADE can't read: never deleted by it)
-            k5 = dict(sent[0]); k5.update({'kind': 5, 'tags': [['e', live[0]['id']]], 'content': ''})
+            k5 = dict(sent[0]); k5.update({'id': 'e' * 64, 'kind': 5, 'tags': [['e', live[0]['id']]], 'content': ''})   # (its own id: it must not replace sent[0] on the relay)
             post('/test/inject', {'event': k5, 'raw': True})
             other_author = await A.ev(f"CashuLib.finalizeEvent({{kind:7375, created_at:Math.floor(Date.now()/1000), tags:[], content:__syEnc({W_}, JSON.stringify({{mint:{J(M)}, unit:'sat', proofs:[Object.assign({coin()}, {{secret:__syRnd()}})]}}))}}, crypto.getRandomValues(new Uint8Array(32)))")
             post('/test/inject', {'event': other_author})
@@ -350,17 +451,64 @@ async def main():
             await ledger('after forged events', [A, B])
         await section('forged', forged)
 
+        async def bound():
+            # more than 20 mints, more than 64 keysets, more than 400 gone marks and a coin on an old base64 keyset id:
+            # published once, then nothing again and again; the odd coin is never published and never spoils an event
+            g = await wallet(b, 'sy-g'); gw = await g.create(); await g.add_mint(M); await g.use(M); await g.receive_ln(64)
+            gpk = await g.ev("NutSync.pk()")
+            real = (await coins(g))[0]
+            await g.ev(f"""(()=>{{const S=Nutcade.S;
+              for (let i=0;i<25;i++) S.mints.push({{url:'https://fake'+i+'.invalid', name:'f'+i}});
+              for (let i=0;i<70;i++) S.counters[(i+1).toString(16).padStart(16,'0')] = 5+i;
+              for (let i=0;i<500;i++) S.txs.unshift({{id:'fk'+i, type:'out', method:'ecash', amount:1, mint:{J(M)}, status:'pending', note:'', ts:Date.now()-i, sent:[{{id:{J(real['id'])}, amount:1, secret:__syRnd(), C:{J(real['C'])}}}]}});
+              S.proofs[{J(M)}].push({{id:'I2yN+iRYfkzT', amount:1, secret:__syRnd(), C:{J(real['C'])}}});
+            }})()""")
+            await settings(g); await g.click('#p_sync')
+            await g.until("NutSync.state().view !== null && NutSync.state().st !== 'busy'", 20000); await g.wait(6000)
+            pc = state()['pub_count']; c0 = (pc.get(f'{gpk}:17375', 0), pc.get(f'{gpk}:7375', 0), pc.get(f'{gpk}:5', 0))
+            for _ in range(3): await g.ev("NutSync.push()"); await g.ev("NutSync.pull()")
+            await g.wait(7000)
+            pc = state()['pub_count']; c1 = (pc.get(f'{gpk}:17375', 0), pc.get(f'{gpk}:7375', 0), pc.get(f'{gpk}:5', 0))
+            check('bound: >20 mints, >64 keysets, >400 gone marks: published once, then nothing more (no endless republish)', c0[0] >= 1 and c0 == c1, (c0, c1))
+            ev7 = [e for e in state()['events'] if e['pubkey'] == gpk and e['kind'] == 7375]
+            cs = [await g.ev(f"__syDec({J(gw)}, {J(e['content'])})") for e in ev7]
+            ids = [q['id'] for c in cs if c for q in c.get('proofs', [])]
+            marks = sum(len(c.get('gone') or []) for c in cs if c)
+            check('bound: the coin on an old base64 keyset id is never published; the good coin is', real['id'] in ids and 'I2yN+iRYfkzT' not in ids, ids)
+            check('bound: every one of the 500 gone marks is on the relay (in the coin events), not just the first 400', marks >= 500, marks)
+            w = [e for e in state()['events'] if e['pubkey'] == gpk and e['kind'] == 17375]
+            wc = await g.ev(f"__syDec({J(gw)}, {J(w[0]['content'])})") if w else []
+            check('bound: the wallet event keeps its caps (20 mints, 64 counters, 400 gone marks)', len([t for t in wc if t[0] == 'mint']) <= 20 and len([t for t in wc if t[0] == 'counter']) <= 64 and len([t for t in wc if t[0] == 'gone']) <= 400, [t[0] for t in wc][:3])
+            # reading: one bad coin next to a good one: the good one is still read (here a real unspent coin of g's)
+            gd = await g.ev(f"(Nutcade.S.proofs[{J(M)}]||[]).find(p=>p.id==={J(real['id'])})")
+            ev = await A.ev(f"__syEv({J(words)}, 7375, {{mint:{J(M)}, unit:'sat', proofs:[{J({'id': 'I2yN+iRYfkzT', 'amount': 1, 'secret': 'ab' * 32, 'C': real['C']})}, {J({'id': gd['id'], 'amount': gd['amount'], 'secret': gd['secret'], 'C': gd['C'], 'dleq': gd.get('dleq')})}]}})")
+            await A.ev(f"__syPublish({J(ev)})")
+            bb = await B.bal(); r = await pull(B)
+            if r and r.get('adopted') == gd['amount']: issued[0] += gd['amount']   # (that coin is in this wallet now)
+            check('bound: a coin on an old keyset id does not spoil its event: the other coin in it is read and adopted', r and r.get('badCoins', 0) >= 1 and r.get('adopted') == gd['amount'] and await B.bal() == bb + gd['amount'], r)
+            await pull(A)
+            await g.pg.context.close()
+            await ledger('after the bounds', [A, B])
+
         async def restore_new():
             a = await A.bal()
-            D = await restore(b, 'sy-D', words); ctx['D'] = D
-            check('restore: on a new device from the 12 words, sync is found and stays on', await D.ev("Nutcade.S.prefs.sync") is True)
-            check('restore: the balance is exactly A\'s (coins from the relays; the scan after it adds nothing twice; A\'s unclaimed tokens not counted)', await D.bal() == a, (await D.bal(), a))
-            check('restore: a "From your other device (wallet sync)" line, and nothing "Recovered" on top', (await lines(D, 'From your other device (wallet sync)')) and not await lines(D, 'Recovered with recovery phrase'), (await lines(D, 'From your other device (wallet sync)'), await lines(D, 'Recovered with recovery phrase')))
+            pc = state()['pub_count']; before = (pc.get(f'{PK}:17375', 0), pc.get(f'{PK}:7375', 0))
+            info = {}; D = await restore(b, 'sy-D', words, info); ctx['D'] = D
+            ctx['restore_asked'] = info.get('asked'); ctx['restore_text'] = info.get('text', ''); ctx['restore_pub'] = before
+            check('restore: on a new device from the 12 words, sync is NOT turned on by itself', await D.ev("Nutcade.S.prefs.sync") is not True and not await D.ev("NutSync.live()"))
+            check('restore: the result asks whether to turn wallet sync on here too', ctx.get('restore_asked'), ctx.get('restore_text', '')[:200])
+            check('restore: the balance is exactly A\'s: the scan leaves out the coins of A\'s unclaimed tokens (gone marks), offline one included', await D.bal() == a, (await D.bal(), a))
+            n17 = state()['pub_count'].get(f'{PK}:17375', 0); n7 = state()['pub_count'].get(f'{PK}:7375', 0)
+            check('restore: the restore wrote nothing to the relays', True if ctx.get('restore_pub') is None else ctx['restore_pub'] == (n17, n7), (ctx.get('restore_pub'), n17, n7))
+            await settings(D); await D.click('#p_sync')
+            ok = await D.until("NutSync.state().view !== null && NutSync.state().st !== 'busy'", 20000)
+            check('restore: turned on by hand, sync reads and adds nothing twice (the scan already found the coins)', ok and await D.bal() == a and not await lines(D, 'From your other device (wallet sync)'), (ok, await D.bal(), a, await lines(D, 'From your other device (wallet sync)')))
             ca, cd = await A.ev("Nutcade.S.counters"), await D.ev("Nutcade.S.counters")
             check('restore: the counters are not behind A\'s', all(cd.get(k, 0) >= v for k, v in ca.items()), (ca, cd))
             await ledger('after the restore (three devices)', [A, B, D])
             await D.pg.context.close()
         await section('restore', restore_new)
+        await section('bound', bound)
 
         async def paused():
             n = len(state()['events']); rq = len(state()['reqs'])
@@ -408,6 +556,9 @@ async def main():
             left = {e['id'] for e in relay_events(7375)}
             check('off: "Delete them from my relays" removes our coin and wallet events (only events it could not read are left alone)', ok and left <= ctx.get('unreadable', set()) and not relay_events(17375), (len(left), len(relay_events(17375))))
             check('off: deleting from the relays never touches the coins on the devices', await A.bal() == ab and await B.bal() == bb, (await A.bal(), ab, await B.bal(), bb))
+            info = {}; E = await restore(b, 'sy-E', words, info)
+            check('off: a restore after "Delete them from my relays" does not offer to turn sync on (the deletion is honoured)', not info.get('asked') and await E.ev("Nutcade.S.prefs.sync") is not True, info.get('text', '')[:200])
+            await E.pg.context.close()
             await ledger('at the end', [A, B])
         await section('off2', off2)
 

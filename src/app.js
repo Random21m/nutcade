@@ -392,12 +392,15 @@ async function secureAll(onStep) {
 /* One scan at a time per mint. A caller that joins a scan already running doesn't lose what it asked for: the
    deposits it brings are added to the ones that scan credits (read when it credits, not when it started), and if
    it joined too late for that, it gets a scan of its own. */
-const restoreDeposits = {};
+const restoreDeposits = {}, restoreRepairing = new Set();
 async function restoreFromMint(url, onStep, opts = {}) {
   url = normUrl(url);
   const mine = (opts.deposits || []).map(q => q.quote);
   if (mine.length) { const s = restoreDeposits[url] || (restoreDeposits[url] = new Set()); mine.forEach(id => s.add(id)); }
-  const r = await single('restore:' + url, () => restoreFromMintNow(url, onStep, opts));
+  // (a scan started only to catch the counters up, "repair", may credit nothing (wallet sync on): a scan you asked for never
+  // takes its answer, it waits for it to end and then runs its own)
+  if (!opts.repair) while (restoreRepairing.has(url) && flights.has('restore:' + url)) await flights.get('restore:' + url).catch(() => {});
+  const r = await single('restore:' + url, () => { if (opts.repair) restoreRepairing.add(url); return restoreFromMintNow(url, onStep, opts).finally(() => restoreRepairing.delete(url)); });
   if (mine.some(id => S.quotes.some(q => q.quote === id && !(q.empty >= 3)) && (restoreDeposits[url] || new Set()).has(id))) return single('restore:' + url, () => restoreFromMintNow(url, onStep, opts));
   return r;
 }
@@ -4284,7 +4287,7 @@ const A = {
     if (!same && hadBalance) { line('Moving your current ecash under the restored phrase…'); await secureAll(); }
     else if (!same) { S.seed.secured = true; store.set('seed', S.seed); }
     let total = 0; const fails = [];
-    try { total += await syRestore(list, line); } catch (e) {}   // wallet sync: the coins on your relays, checked with each mint, first; the scan below still runs
+    let syncWas = false; try { syncWas = await syRestoreLook(line); } catch (e) {}   // wallet sync: one read of the sync key's events (nothing written, sync stays off); the scan below leaves out coins they mark as handed out
     for (const u of list) {
       try { total += await restoreFromMint(u, line); } catch (e) { fails.push(host(u)); }
     }
@@ -4296,6 +4299,7 @@ const A = {
       <div class="credit-num" style="font-size:28px">${fmt(total)}<small>${unitTag()}</small></div>
       <p style="margin:0">${total ? 'Recovered and back in your wallet.' : 'No unspent ecash was found on those mints for this phrase.'}</p>
       ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}. Try those again later from Mints → Find lost ecash.</div>` : ''}${lows}
+      ${syncWas ? `<div class="notice cyan">Wallet sync was on for these 12 words on another device. Turn it on here too to keep your coins the same on both.</div><button class="btn block lime" data-act="syncRestoreOn">Turn on wallet sync</button>` : ''}
       <button class="btn solid gold block" data-act="close">Continue</button></div>`);
   }),
   findLost: b => run(b, 'SCANNING', async () => {

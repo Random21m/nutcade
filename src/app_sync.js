@@ -5,31 +5,41 @@
      identity. Every event is signed with it and its content NIP-44 encrypted to itself, so relays see only that some key
      publishes some events (how many, how big, when).
    - Events (NIP-60 shapes): kind 7375 holds your coins at one mint, {mint, unit: "sat", proofs, del: [ids it replaces]}, at
-     most SY_PER_EV coins an event; kind 17375 (replaceable) holds the wallet: ["privkey", the nutzap receiving key (NIP-61,
-     as NIP-60 says)], ["mint", url] for each mint, and NUTCADE's own tags (not NIP-60): ["counter", keyset, n] (NUT-13
-     counters, merged highest-wins, so devices rarely reuse each other's counters), ["gone", h, time] (h: sha256 of a coin's
-     secret, cut to 32 hex) for coins this wallet handed out in a token nobody has claimed yet (an offline send keeps the
-     very coins: the other device must not count or spend them). Kind 5 deletes only our own events (the sync key's), and
-     only ones NUTCADE read and accounted for. Events we cannot decrypt or read are never touched. No kind 7376 history.
-     Interop with cashu.me or Minibits is NOT a goal (they use another key) and nothing here reads their events.
-   - Reading (pulling): at start, when the tab comes back (at most once a minute), every SY_PERIOD, after an "already
-     spent" error and on "Sync now". Every event is checked: the sync key's signature, its size, its content decrypts and
-     has the right shape (mint, at most SY_MAX_PROOFS coins, each with an id, an amount that is a power of two, a secret of
-     at most SY_SECRET characters that is not a locked (NUT-10) secret, a C point and a DLEQ proof). A coin is never
-     counted until (1) it is at a mint already in your list (another mint is only shown, with a question; never added by
-     itself), (2) its keyset and amount are that mint's, (3) its DLEQ proof (NUT-12) checks against the mint's saved key,
-     so a made-up coin is never adopted, and (4) the mint (checkstate, NUT-07) says it is UNSPENT. SPENT ones are left out
-     for good; PENDING ones and ones the mint can't answer for are looked at again next time. Coins this wallet holds,
-     handed out, has in a step still open, set aside or in Extra Life are never added again. At most SY_ADOPT coins a run.
-     The merge is a set keyed by the secret: the same event twice, events in any order or an old event replayed change
-     nothing. A coin we hold that no event lists any more makes us ask the mint (pruneSpent: spent coins dropped with a
-     line, as always); a "gone" mark from our other device drops the coin with a line ("Sent from your other device").
+     most SY_PER_EV coins an event, and NUTCADE's own field "gone": [[h, time]] (at most SY_GONE_EV an event; h is sha256
+     of a coin's secret cut to 32 hex) for coins of that mint this wallet handed out in a token nobody has claimed yet (an
+     offline send keeps the very coins: the other device must never count or spend them), carried forward by every device
+     that replaces the event, for SY_GONE_AGE. Kind 17375 (replaceable) holds the wallet: ["privkey", the nutzap receiving
+     key (NIP-61), as NIP-60 says], ["mint", url], and NUTCADE's own tags ["counter", keyset, n] (NUT-13 counters, merged
+     highest-wins, never lowered) and ["gone", h, time] (the newest SY_GONE marks, our own first: a quick copy). Kind 5
+     deletes only our own events (the sync key's), and only ones NUTCADE read and accounted for. Events we cannot read are
+     never touched. No kind 7376 history. Interop with cashu.me or Minibits is NOT a goal (they use another key).
+   - Every event read is checked as it arrives (syQuery): the sync key, the kind, the size and the signature, before it is
+     kept; the first good copy of an id wins and copies from all relays are put together, so a relay that answers first
+     with a forged copy of a real id can't hide the real one. The wallet event is only ever written from scratch (none
+     read) when most relays answered: a relay that answers "nothing" can't make us drop the marks and counters.
+   - Reading (pulling): at start, when the tab comes back (at most once a minute), every SY_PERIOD, after an "already spent"
+     error and on "Sync now". A coin (each one on its own: a bad one is skipped, the rest of its event is still read) must
+     have an id, an amount that is a power of two, a plain secret of at most SY_SECRET characters (never a locked NUT-10
+     one), a C point and a DLEQ proof. It is never counted until (1) it is at a mint already in your list (another mint is
+     only shown, with a question; never added by itself), (2) its keyset and amount are that mint's, (3) its DLEQ proof
+     (NUT-12) checks against the mint's saved key, so a made-up coin is never adopted, (4) no "gone" mark names it, and
+     (5) the mint (checkstate, NUT-07) says it is UNSPENT. SPENT ones are left out for good; PENDING ones and ones the mint
+     can't answer for are looked at again next time. Coins this wallet holds, handed out, has in a step still open, set
+     aside or in Extra Life are never added again. At most SY_ADOPT coins a run. The merge is a set keyed by the secret:
+     the same event twice, events in any order or an old event replayed change nothing. A coin we hold that no event lists
+     any more makes us ask the mint (pruneSpent: spent coins dropped with a line, as always); a "gone" mark from our other
+     device drops the coin with a line ("Sent from your other device").
    - Writing (pushing): after the money step that changed your coins at a mint has settled (no journal record open there),
-     debounced: never inside a payment, and a failure never blocks or breaks one (retried with backoff). A mint's coins are
-     published again when the relays don't list them all, or when an event lists coins this wallet no longer has (spent,
-     handed out); the new events come first, then the kind 5 deletion of the events they replace (ours, and any other
-     device's whose every coin we hold or know to be spent or handed out). Nothing is published before a successful read
-     in this session, so a wallet event is always merged with the one on the relays first.
+     debounced: never inside a payment, and a failure never blocks or breaks one (retried with backoff). The wallet event
+     (with the new gone marks) goes first; then a mint's coins are published again when the relays don't list them all
+     or our gone marks, or when an event lists coins this wallet no longer has (spent, handed out): the new events come
+     first, then the kind 5 deletion of the events they replace. While the wallet event could not be written, an event
+     is not replaced on the strength of our own handing-out alone. Only coins that pass the reader's checks are published.
+     What is compared is exactly what would be written (capped), so nothing is published again and again. Nothing is
+     published before a successful read in this session.
+   - Restore from the 12 words: one read of the sync key's events (nothing written, sync stays off): the scan leaves out
+     the coins their gone marks name, and if a wallet event is there (not deleted by "Delete them from my relays"), the
+     result asks whether to turn sync on here too.
    - Two devices spending the same coin at once: the mint takes one; the other gets "already spent", and spentRetry /
      pruneSpent drop the spent coins there (nothing new here). A coin handed out offline by one device and spent by the
      other before it heard about it: the mint lets only one through (the token's receiver may find it already spent).
@@ -37,7 +47,8 @@
    tab (open elsewhere) does nothing. */
 const SY_TAG = 'nutcade-nip60';
 const SY_PER_EV = 60, SY_MAX_PROOFS = 100, SY_MAX_EVENTS = 300, SY_MAX_BYTES = 120000, SY_ADOPT = 200, SY_SECRET = 512;
-const SY_GONE = 400, SY_GONE_AGE = 30 * 86400, SY_FOCUS = 60e3, SY_PERIOD = 10 * 60e3, SY_OTHER = 5, SY_DEL = 100, SY_CTRS = 64, SY_MINTS = 20;
+const SY_GONE = 400, SY_GONE_EV = 400, SY_GONE_MINT = 4000, SY_GONE_AGE = 30 * 86400, SY_FOCUS = 60e3, SY_PERIOD = 10 * 60e3, SY_OTHER = 5, SY_DEL = 100, SY_CTRS = 64, SY_MINTS = 20;
+const SY_KINDS = [7375, 17375, 5];
 let syKeyC = null;
 function syKeys() {
   const s = seedFor();
@@ -64,7 +75,7 @@ function syMint(u) {
   const n = normUrl(u); return S.mints.some(m => m.url === n) ? n : null;
 }
 const syPow2 = a => Number.isSafeInteger(a) && a > 0 && a <= 2 ** 40 && Number.isInteger(Math.log2(a));
-// a coin as an event wrote it, checked for shape only (null: the whole event is ignored)
+// a coin as an event wrote it, checked for shape only (null: this coin is skipped)
 function syProof(p) {
   if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
   const a = p.amount;
@@ -79,6 +90,14 @@ function syProof(p) {
   return q;
 }
 const syOut = p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq && p.dleq.e && p.dleq.s && p.dleq.r ? { dleq: { e: String(p.dleq.e), s: String(p.dleq.s), r: String(p.dleq.r) } } : {});
+// the coins at a mint that can be published: exactly those a reader would take (an old base64 keyset id, say, never is)
+const syPub = url => (S.proofs[url] || []).map(syOut).filter(p => syProof(p));
+// a "gone" list as an event wrote it: [[h, time]], at most `max`; anything else in it is skipped
+function syMarks(list, max) {
+  const out = new Map(); if (!Array.isArray(list)) return out;
+  for (const g of list.slice(0, max)) if (Array.isArray(g) && typeof g[0] === 'string' && /^[0-9a-f]{32}$/.test(g[0]) && Number.isSafeInteger(g[1]) && g[1] > 0) out.set(g[0], Math.max(out.get(g[0]) || 0, g[1]));
+  return out;
+}
 // every secret this wallet already accounts for: coins held (any mint), tokens sent, waiting incoming tokens, payments in
 // flight, steps still open, Extra Life, coins the keyset check-up set aside
 function syHeld(url) {
@@ -94,16 +113,17 @@ function syHeld(url) {
   if (url) for (const p of asideOf(url)) out.add(p.secret);
   return out;
 }
-// coins this wallet handed out in a token nobody has claimed yet (hashed): the "gone" marks it publishes
+// our own gone marks: the coins of every token this wallet sent that nobody has claimed yet, newest first, [h, mint]
+const syOwnGone = () => S.txs.filter(t => t.type === 'out' && t.status === 'pending' && Array.isArray(t.sent)).sort((a, b) => num(b.ts) - num(a.ts)).flatMap(t => t.sent.filter(p => p && p.secret).map(p => [syHash(p.secret), t.mint]));
 // a counters-only repair scan (app.js restoreFromMintNow): with sync on, what it finds is the other device's
 function syRepairOnly() { try { if (syOn()) { sySoon(); return true; } } catch (e) {} return false; }
-// a coin our other device handed out in a token (its "gone" mark, from the last read)
-function syGone(s) { try { return !!(syView && syView.wallet && syView.wallet.gone.has(syHash(s))); } catch (e) { return false; } }
-const syOwnGone = () => S.txs.filter(t => t.type === 'out' && t.status === 'pending' && Array.isArray(t.sent)).flatMap(t => t.sent.map(p => p && p.secret ? syHash(p.secret) : null)).filter(Boolean).slice(0, SY_GONE);
+// a coin our other device handed out in a token (a gone mark from the last read, or from a restore's read)
+let syRestoreMarks = new Set();
+function syGone(s) { try { const h = syHash(s); return syRestoreMarks.has(h) || !!(syView && syView.gone.has(h)); } catch (e) { return false; } }
 
 /* ---------- what the last read found (memory only: every session reads before it writes) ---------- */
-let syView = null;   // { live: [{ id, url, at, secrets: Set }], wallet: { at, id, counters, gone: Map, mints: [] } | null }
-let syState = null, syPullAt = 0, syLastRes = null, syNext = 0, syTries = 0, syDecoyT = 0, syTimer = 0;
+let syView = null;   // { live: [{ id, url, at, secrets: Set, gone: Map }], wallet: {...} | null, gone: Map (every mark read), sure }
+let syState = null, syPullAt = 0, syLastRes = null, syNext = 0, syTries = 0, syDecoyT = 0, syTimer = 0, syPushing = false, syAgain = false;
 const sySpent = new Set();   // secrets a mint said were spent (never asked about again in this session)
 const syLeft = new Set();    // secrets this wallet held and no longer holds (spent or handed out here), since the session started
 let syLocal = null;          // url -> Set of secrets held, at the last look (to notice what left)
@@ -114,7 +134,7 @@ function syNoteLeft() {
   syLocal = now;
 }
 function syWalletOf(e, c) {
-  if (!Array.isArray(c) || c.length > 1000) return null;
+  if (!Array.isArray(c) || c.length > 2000) return null;
   const w = { at: num(e.created_at), id: e.id, counters: {}, gone: new Map(), mints: [] };
   for (const t of c) {
     if (!Array.isArray(t) || typeof t[0] !== 'string') continue;
@@ -124,71 +144,89 @@ function syWalletOf(e, c) {
   }
   return w;
 }
-
-// the newest wallet event on the relays that we can read (null: none, or the relays didn't answer)
-async function syWalletLatest(k, rl) {
-  const got = await relayQuery({ kinds: [17375], authors: [k.pk], limit: 5 }, 6000, rl, 1000);
-  for (const e of got.filter(e => e && e.pubkey === k.pk && e.kind === 17375 && Number.isSafeInteger(e.created_at) && typeof e.content === 'string' && e.content.length <= SY_MAX_BYTES).sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1))) {
-    if (!L.verifyEvent(e)) continue;
-    const w = syWalletOf(e, syDec(e.content)); if (w) return w;
-  }
-  return null;
+// an event of the sync key, checked as it arrives: kind, size, shape and signature
+const syValidEv = (e, pk, kinds) => !!e && typeof e === 'object' && typeof e.id === 'string' && /^[0-9a-f]{64}$/.test(e.id) && e.pubkey === pk && kinds.includes(e.kind) && typeof e.content === 'string' && e.content.length <= SY_MAX_BYTES && Array.isArray(e.tags) && e.tags.length <= 300 && Number.isSafeInteger(e.created_at) && L.verifyEvent(e);
+// a read from every relay: each event is checked BEFORE it is kept, the first good copy of an id wins, and the copies from
+// all relays are put together (a relay answering first with a forged copy of a real id hides nothing). answered: relays
+// that finished (EOSE); total: relays asked
+function syQuery(filter, kinds, timeout = 8000, list = syRelays(), early = 1500) {
+  const pk = syKeys().pk;
+  return new Promise(res => {
+    const out = new Map(); let left = 0, answered = 0, bad = 0, soon = false, fin = false; const socks = [];
+    const end = () => { if (fin) return; fin = true; socks.forEach(s => { try { s.close(); } catch (e) {} }); res({ evs: [...out.values()], answered, total: list.length, bad }); };
+    for (const r of list) {
+      let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
+      socks.push(ws); left++;
+      const drop = () => { if (ws._done) return; ws._done = true; if (--left <= 0) end(); };
+      ws.onopen = () => ws.send(JSON.stringify(['REQ', 'ncsy', filter]));
+      ws.onmessage = m => {
+        let d; try { d = JSON.parse(m.data); } catch (e) { return; }
+        if (d[0] === 'EVENT' && d[2]) { const e = d[2]; if (e && typeof e.id === 'string' && out.has(e.id)) return; if (syValidEv(e, pk, kinds)) out.set(e.id, e); else bad++; }
+        else if (d[0] === 'EOSE' || d[0] === 'CLOSED') { if (d[0] === 'EOSE') { answered++; if (early && !soon) { soon = true; setTimeout(end, early); } } try { ws.close(); } catch (e) {} drop(); }
+      };
+      ws.onerror = drop; ws.onclose = drop;
+    }
+    if (!left) end();
+    setTimeout(end, timeout);
+  });
 }
-
-/* ---------- reading ---------- */
-async function syPullNow(why) {
-  if (!syLive()) return null;
-  const k = syKeys(), rl = syRelays(); if (!rl.length) return null;
-  syState = 'busy';
-  const got = await relayQuery({ kinds: [7375, 17375, 5], authors: [k.pk], limit: SY_MAX_EVENTS }, 8000, rl, 1500);
-  if (!syLive()) { syState = null; return null; }
-  if (!got.answered) { syState = 'failed'; return null; }
-  const r = { why, adopted: 0, coins: 0, dropped: 0, spent: 0, pending: 0, unchecked: 0, bad: 0, other: [], live: 0, ids: [] };
-  const seen = new Set(), evs = [];
-  for (const e of got) {
-    if (!e || typeof e !== 'object' || typeof e.id !== 'string' || seen.has(e.id)) continue;
-    if (e.pubkey !== k.pk || ![7375, 17375, 5].includes(e.kind) || typeof e.content !== 'string' || e.content.length > SY_MAX_BYTES || !Array.isArray(e.tags) || e.tags.length > 300 || !Number.isSafeInteger(e.created_at) || !L.verifyEvent(e)) { r.bad++; continue; }
-    seen.add(e.id); evs.push(e);
-  }
-  // deletions: kind 5 (e tags; an "a" tag for the wallet event) and the "del" lists of token events, all signed by the sync key
+const syMost = q => q.total > 0 && q.answered * 2 > q.total;
+// everything the sync key has on the relays, read and checked: live coin events, the wallet event, every gone mark
+function syRead(q) {
+  const k = syKeys(), r = { bad: q.bad, badCoins: 0 };
   const deleted = new Set(); let walletDelAt = 0;
-  for (const e of evs) if (e.kind === 5) for (const t of e.tags.slice(0, 300)) {
+  for (const e of q.evs) if (e.kind === 5) for (const t of e.tags.slice(0, 300)) {
     if (!Array.isArray(t)) continue;
     if (t[0] === 'e' && /^[0-9a-f]{64}$/.test(t[1])) deleted.add(t[1]);
     else if (t[0] === 'a' && t[1] === `17375:${k.pk}:`) walletDelAt = Math.max(walletDelAt, e.created_at);
   }
   const toks = [];
-  for (const e of evs.filter(e => e.kind === 7375).sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1)).slice(0, SY_MAX_EVENTS)) {
+  for (const e of q.evs.filter(e => e.kind === 7375).sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1)).slice(0, SY_MAX_EVENTS)) {
     const c = syDec(e.content);
-    if (!c || typeof c !== 'object' || Array.isArray(c) || typeof c.mint !== 'string' || (c.unit != null && c.unit !== 'sat') || !Array.isArray(c.proofs) || !c.proofs.length || c.proofs.length > SY_MAX_PROOFS) { r.bad++; continue; }
-    if (c.del != null && (!Array.isArray(c.del) || c.del.length > SY_DEL || !c.del.every(x => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x)))) { r.bad++; continue; }
-    const ps = c.proofs.map(syProof);
-    if (ps.some(p => !p) || new Set(ps.map(p => p.secret)).size !== ps.length) { r.bad++; continue; }
-    for (const d of c.del || []) deleted.add(d);
-    toks.push({ id: e.id, at: e.created_at, mint: c.mint, url: syMint(c.mint), proofs: ps });
+    if (!c || typeof c !== 'object' || Array.isArray(c) || typeof c.mint !== 'string' || (c.unit != null && c.unit !== 'sat') || !Array.isArray(c.proofs) || c.proofs.length > SY_MAX_PROOFS) { r.bad++; continue; }
+    const ps = [], seen = new Set();
+    for (const x of c.proofs) { const p = syProof(x); if (!p || seen.has(p.secret)) { r.badCoins++; continue; } seen.add(p.secret); ps.push(p); }   // (a bad coin is skipped on its own)
+    const gone = syMarks(c.gone, SY_GONE_EV);
+    if (!ps.length && !gone.size) { r.bad++; continue; }
+    if (Array.isArray(c.del) && c.del.length <= SY_DEL) for (const d of c.del) if (typeof d === 'string' && /^[0-9a-f]{64}$/.test(d)) deleted.add(d);
+    toks.push({ id: e.id, at: e.created_at, mint: c.mint, url: syMint(c.mint), proofs: ps, gone });
   }
-  let wallet = null;
-  for (const e of evs.filter(e => e.kind === 17375 && e.created_at > walletDelAt).sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1))) {
+  let wallet = null, walletSeen = false;
+  for (const e of q.evs.filter(e => e.kind === 17375).sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1))) {
+    if (e.created_at <= walletDelAt) { walletSeen = true; continue; }   // (deleted with "Delete them from my relays")
     const w = syWalletOf(e, syDec(e.content)); if (w) { wallet = w; break; }
     r.bad++;
   }
   const live = toks.filter(t => !deleted.has(t.id));
-  r.live = live.length; r.ids = live.map(t => t.id);
+  const gone = new Map(wallet ? wallet.gone : []);
+  for (const t of live) for (const [h, ts] of t.gone) gone.set(h, Math.max(gone.get(h) || 0, ts));
+  return Object.assign(r, { live, wallet, gone, walletDeleted: !wallet && (walletSeen || walletDelAt > 0) });
+}
+
+/* ---------- reading ---------- */
+async function syPullNow(why) {
+  if (!syLive()) return null;
+  const rl = syRelays(); if (!rl.length) return null;
+  syState = 'busy';
+  const q = await syQuery({ kinds: SY_KINDS, authors: [syKeys().pk], limit: SY_MAX_EVENTS }, SY_KINDS, 8000, rl, 1500);
+  if (!syLive()) { syState = null; return null; }
+  if (!q.answered) { syState = 'failed'; return null; }
+  const rd = syRead(q), live = rd.live, wallet = rd.wallet, goneAll = new Map(rd.gone);
+  const r = { why, adopted: 0, coins: 0, dropped: 0, spent: 0, pending: 0, unchecked: 0, bad: rd.bad, badCoins: rd.badCoins, other: [], live: live.length, ids: live.map(t => t.id), answered: q.answered, total: q.total };
   // NUT-13 counters: the highest wins, never lowered
   if (wallet) for (const [id, n] of Object.entries(wallet.counters)) if (n > (S.counters[id] || 0)) { try { await counterSource.advanceToAtLeast(id, n); } catch (e) {} }
-  const goneAll = new Map(wallet ? wallet.gone : []);
-  for (const h of syOwnGone()) goneAll.set(h, goneAll.get(h) || Math.floor(Date.now() / 1000));
+  const own = new Set(syOwnGone().map(g => g[0]));
+  for (const h of own) if (!goneAll.has(h)) goneAll.set(h, 1);
   const other = new Set();
   for (const t of live) if (!t.url && /^https?:\/\/[^\s]+$/i.test(t.mint.trim()) && t.mint.length <= 300) other.add(normUrl(t.mint));
   r.other = [...other].filter(u => !isBlocked(u)).slice(0, SY_OTHER);
   // 1. coins our other device handed out in a token: never counted here
-  const own = new Set(syOwnGone());
   for (const m of S.mints) {
-    const url = m.url, marks = wallet ? wallet.gone : new Map();
-    if (!(S.proofs[url] || []).some(p => marks.has(syHash(p.secret)) && !own.has(syHash(p.secret)))) continue;
+    const url = m.url, marked = p => { const h = syHash(p.secret); return rd.gone.has(h) && !own.has(h); };
+    if (!(S.proofs[url] || []).some(marked)) continue;
     await mintLock(url, async () => {
       const busy = new Set(S.ops.filter(o => o.mint === url).flatMap(o => o.inputs || []));
-      const out = (S.proofs[url] || []).filter(p => marks.has(syHash(p.secret)) && !busy.has(p.secret)); if (!out.length) return;
+      const out = (S.proofs[url] || []).filter(p => marked(p) && !busy.has(p.secret)); if (!out.length) return;
       const ids = new Set(out.map(p => p.secret));
       S.proofs[url] = (S.proofs[url] || []).filter(p => !ids.has(p.secret));
       addTx({ type: 'out', method: 'ecash', amount: sum(out), mint: url, note: 'Sent from your other device (wallet sync)', status: 'done', upkeep: true, sync: 1 });
@@ -198,14 +236,13 @@ async function syPullNow(why) {
   // 2. coins we hold that no event lists any more: the mint says which are spent (dropped with a line, as always)
   const liveAt = url => new Set(live.filter(t => t.url === url).flatMap(t => t.proofs.map(p => p.secret)));
   for (const m of S.mints) {
-    const url = m.url, mine = S.proofs[url] || []; if (!mine.length || isBlocked(url)) continue;
+    const url = m.url, mine = syPub(url); if (!mine.length || isBlocked(url)) continue;
     const ls = liveAt(url); if (mine.every(p => ls.has(p.secret))) continue;
     try { r.spent += num(await mintLock(url, () => pruneSpent(url))); } catch (e) {}
   }
   // 3. coins we don't have yet: checked, then only those the mint says are unspent
-  const cand = new Map();   // url -> Map(secret -> proof)
+  const cand = new Map(), heldAt = new Map();   // url -> Map(secret -> proof)
   let n = 0;
-  const heldAt = new Map();
   for (const t of live) {
     if (!t.url || isBlocked(t.url)) continue;
     if (!heldAt.has(t.url)) heldAt.set(t.url, syHeld(t.url));
@@ -240,7 +277,8 @@ async function syPullNow(why) {
     }
     if (!fresh.length) continue;
     await mintLock(url, async () => {
-      const held = syHeld(url), add = fresh.filter(p => !held.has(p.secret));   // (from the last look to the write, no wait)
+      const held = syHeld(url), mine = new Set(syOwnGone().map(g => g[0]));
+      const add = fresh.filter(p => !held.has(p.secret) && !mine.has(syHash(p.secret)));   // (from the last look to the write, no wait)
       if (!add.length) return;
       S.proofs[url] = (S.proofs[url] || []).concat(plain(add.map(syOut)));
       addTx({ type: 'in', method: 'ecash', amount: sum(add), mint: url, note: 'From your other device (wallet sync)', status: 'done', upkeep: true, sync: 1 });
@@ -248,7 +286,7 @@ async function syPullNow(why) {
     }).catch(() => {});
   }
   if (sySpent.size > 20000) sySpent.clear();
-  syView = { at: Date.now(), live: live.filter(t => t.url).map(t => ({ id: t.id, url: t.url, at: t.at, secrets: new Set(t.proofs.map(p => p.secret)) })), wallet };
+  syView = { at: Date.now(), live: live.filter(t => t.url).map(t => ({ id: t.id, url: t.url, at: t.at, secrets: new Set(t.proofs.map(p => p.secret)), gone: t.gone })), wallet, gone: rd.gone, sure: syMost(q) };
   syNoteLeft();
   syPullAt = Date.now(); syState = 'ok'; syLastRes = r;
   sySt().at = Math.floor(Date.now() / 1000);
@@ -258,63 +296,97 @@ async function syPullNow(why) {
 }
 
 /* ---------- writing ---------- */
-const syAcc = (url, lset, goneAll) => s => lset.has(s) || sySpent.has(s) || syLeft.has(s) || goneAll.has(syHash(s));
+// the wallet event we would write now: capped exactly as a reader caps it, so comparing it with what was read is exact
+function syWalletWant(rw) {
+  const now = Math.floor(Date.now() / 1000), okId = id => /^[0-9a-f]{16,66}$/i.test(id);
+  const ctr = new Map();
+  for (const [id, n] of Object.entries(S.counters).filter(([id, n]) => okId(id) && Number.isSafeInteger(n) && n > 0 && n < 2 ** 31).sort((a, b) => b[1] - a[1])) ctr.set(id, Math.max(n, rw ? rw.counters[id] || 0 : 0));
+  if (rw) for (const [id, n] of Object.entries(rw.counters)) if (!ctr.has(id)) ctr.set(id, n);
+  const cs = [...ctr].slice(0, SY_CTRS);
+  const g = new Map();
+  for (const [h] of syOwnGone()) if (!g.has(h)) g.set(h, now);   // (ours first, newest first: re-dated when written)
+  if (rw) for (const [h, t] of [...rw.gone].sort((a, b) => b[1] - a[1])) if (!g.has(h) && now - t < SY_GONE_AGE) g.set(h, t);
+  const gone = [...g].slice(0, SY_GONE);
+  const mints = [...new Set(S.mints.map(m => m.url).concat(rw ? rw.mints : []))].slice(0, SY_MINTS);
+  return { cs, gone, mints };
+}
+const syWalletNeed = (rw, w) => !rw || w.cs.some(([id, n]) => n > (rw.counters[id] || 0)) || w.gone.some(([h]) => !rw.gone.has(h)) || w.mints.some(u => !rw.mints.includes(u));
+// the newest wallet event on the relays that we can read, and whether most relays answered
+async function syWalletLatest(rl) {
+  const q = await syQuery({ kinds: [17375, 5], authors: [syKeys().pk], limit: 50 }, [17375, 5], 6000, rl, 1000);
+  const rd = syRead(q);
+  return { wallet: rd.wallet, sure: syMost(q) || !!rd.wallet, answered: q.answered };
+}
+// a mint's gone marks to publish with its coins: ours for tokens from that mint, and every mark read from its live events
+function syMintMarks(url, evs) {
+  const now = Math.floor(Date.now() / 1000), g = new Map();
+  for (const [h, m] of syOwnGone()) if (m === url && !g.has(h)) g.set(h, now);
+  for (const e of evs) for (const [h, t] of [...e.gone].sort((a, b) => b[1] - a[1])) if (!g.has(h) && now - t < SY_GONE_AGE) g.set(h, t);
+  return [...g].slice(0, SY_GONE_MINT);
+}
 async function syPushNow() {
   if (!syLive() || !syView) return 0;
   const k = syKeys(), rl = syRelays(); if (!rl.length) return 0;
   syNoteLeft();
-  const st = sySt(); let sent = 0, failed = false;
-  const goneAll = new Map(syView.wallet ? syView.wallet.gone : []); for (const h of syOwnGone()) goneAll.set(h, 1);
+  const st = sySt(); let sent = 0, failed = false, wrote = false;
   // deletions still owed from an earlier round
   if (Array.isArray(st.del) && st.del.length) {
     const d = L.finalizeEvent({ kind: 5, created_at: syNextTs(st.delAt), tags: st.del.slice(0, SY_DEL).map(i => ['e', i]).concat([['k', '7375']]), content: '' }, k.sk);
-    if (await relayPublish(d, 7000, rl, 1500)) { st.del = st.del.slice(SY_DEL); save(); } else failed = true;
+    if (await relayPublish(d, 7000, rl, 1500)) { st.del = st.del.slice(SY_DEL); wrote = true; } else failed = true;
   }
+  // 1. the wallet event first (the new gone marks are out before any event that held those coins is replaced); compared
+  //    capped, as it would be written; read again just before it is written; never written from scratch on a thin answer
+  let walletOk = true;
+  if (syWalletNeed(syView.wallet, syWalletWant(syView.wallet))) {
+    const lt = await syWalletLatest(rl);
+    if (lt.wallet && (!syView.wallet || lt.wallet.at > syView.wallet.at || (lt.wallet.at === syView.wallet.at && lt.wallet.id !== syView.wallet.id))) syView.wallet = lt.wallet;
+    const rw = syView.wallet, want = syWalletWant(rw);
+    if (!rw && !(lt.sure && syView.sure)) { walletOk = false; failed = true; }   // (most relays didn't answer: what is there may just not have arrived)
+    else if (syWalletNeed(rw, want)) {
+      const content = [['privkey', nzPriv()]].concat(want.mints.map(u => ['mint', u]), want.cs.map(([id, n]) => ['counter', id, String(n)]), want.gone.map(([h, t]) => ['gone', h, String(t)]));
+      const ev = L.finalizeEvent({ kind: 17375, created_at: syNextTs(rw ? rw.at + 1 : 0), tags: [], content: syEnc(content) }, k.sk);
+      if (await relayPublish(ev, 7000, rl, 1500)) { syView.wallet = syWalletOf(ev, content); sent++; wrote = true; } else { walletOk = false; failed = true; }
+    }
+  }
+  // 2. each mint's coins and gone marks
+  const remote = syView.gone;
   for (const m of S.mints) {
     const url = m.url;
     if (S.ops.some(o => o.mint === url)) continue;   // (a step still open here: published once it has settled)
-    const local = (S.proofs[url] || []).map(syOut), lset = new Set(local.map(p => p.secret)), acc = syAcc(url, lset, goneAll);
-    const evs = syView.live.filter(e => e.url === url), ls = new Set(evs.flatMap(e => [...e.secrets]));
-    const covered = local.every(p => ls.has(p.secret));
+    const local = syPub(url), lset = new Set(local.map(p => p.secret));
+    const evs = syView.live.filter(e => e.url === url), ls = new Set(evs.flatMap(e => [...e.secrets])), lm = new Set(evs.flatMap(e => [...e.gone.keys()]));
+    const ownM = syOwnGone().filter(g => g[1] === url).map(g => g[0]).slice(0, SY_GONE_MINT);
+    // a coin we no longer hold is accounted for when the mint said it is spent, or it left here (spent or handed out) and
+    // the wallet event with our marks is out; a mark another device wrote counts in any case
+    const acc = s => lset.has(s) || sySpent.has(s) || remote.has(syHash(s)) || (walletOk && (syLeft.has(s) || ownM.includes(syHash(s))));
+    const covered = local.every(p => ls.has(p.secret)) && ownM.every(h => lm.has(h));
     const stale = evs.some(e => [...e.secrets].some(s => !lset.has(s)) && [...e.secrets].every(acc));
     if (covered && !stale) continue;
     const retire = evs.filter(e => [...e.secrets].every(acc));
     const del = retire.map(e => e.id).slice(0, SY_DEL);
     const ts = syNextTs(Math.max(0, ...retire.map(e => e.at)));
-    const chunks = [];
-    for (let i = 0; i < local.length; i += SY_PER_EV) chunks.push(local.slice(i, i + SY_PER_EV));
-    const made = chunks.map(ch => L.finalizeEvent({ kind: 7375, created_at: ts, tags: [], content: syEnc({ mint: url, unit: 'sat', proofs: ch, del }) }, k.sk));
+    const marks = syMintMarks(url, evs);
+    const coinCh = [], markCh = [];
+    for (let i = 0; i < local.length; i += SY_PER_EV) coinCh.push(local.slice(i, i + SY_PER_EV));
+    for (let i = 0; i < marks.length; i += SY_GONE_EV) markCh.push(marks.slice(i, i + SY_GONE_EV));
+    const made = [], parts = [];
+    for (let i = 0; i < Math.max(coinCh.length, markCh.length); i++) {
+      const c = { mint: url, unit: 'sat', proofs: coinCh[i] || [], del };
+      if (markCh[i]) c.gone = markCh[i];
+      parts.push(c); made.push(L.finalizeEvent({ kind: 7375, created_at: ts, tags: [], content: syEnc(c) }, k.sk));
+    }
     const oks = await Promise.all(made.map(e => relayPublish(e, 7000, rl, 1500)));
-    made.forEach((e, i) => { if (oks[i]) syView.live.push({ id: e.id, url, at: ts, secrets: new Set(chunks[i].map(p => p.secret)) }); });
-    sent += oks.filter(Boolean).length;
-    if (oks.some(x => !x)) { failed = true; continue; }   // (nothing replaced: the old events still list every coin)
+    made.forEach((e, i) => { if (oks[i]) syView.live.push({ id: e.id, url, at: ts, secrets: new Set(parts[i].proofs.map(p => p.secret)), gone: new Map(parts[i].gone || []) }); });
+    sent += oks.filter(Boolean).length; if (oks.some(Boolean)) wrote = true;
+    if (oks.some(x => !x)) { failed = true; continue; }   // (nothing replaced: the old events still list every coin and mark)
     if (del.length) {
       syView.live = syView.live.filter(e => !del.includes(e.id));
       st.del = [...new Set((st.del || []).concat(del))].slice(-500); st.delAt = ts;
       const d = L.finalizeEvent({ kind: 5, created_at: ts, tags: del.map(i => ['e', i]).concat([['k', '7375']]), content: '' }, k.sk);
       if (await relayPublish(d, 7000, rl, 1500)) st.del = st.del.filter(i => !del.includes(i)); else failed = true;
     }
-    save();
   }
-  // the wallet event, merged with the one on the relays (counters highest-wins, gone marks kept for 30 days, mints added).
-  // Read again just before it is written, so another device's marks written since our last read are kept
-  const wNeed = rw => !rw || Object.entries(S.counters).some(([id, n]) => /^[0-9a-f]{16,66}$/i.test(id) && n > (rw.counters[id] || 0)) || syOwnGone().some(h => !rw.gone.has(h)) || S.mints.some(m => !rw.mints.includes(m.url));
-  if (wNeed(syView.wallet)) {   // (only then: a write is coming)
-    const latest = await syWalletLatest(k, rl);
-    if (latest && (!syView.wallet || latest.at > syView.wallet.at || (latest.at === syView.wallet.at && latest.id !== syView.wallet.id))) syView.wallet = latest;
-  }
-  const rw = syView.wallet, now = Math.floor(Date.now() / 1000);
-  const ctr = Object.assign({}, rw ? rw.counters : {}); for (const [id, n] of Object.entries(S.counters)) if (/^[0-9a-f]{16,66}$/i.test(id) && Number.isSafeInteger(n) && n > 0) ctr[id] = Math.max(ctr[id] || 0, n);
-  const gone = new Map([...(rw ? rw.gone : new Map())].filter(([, t]) => now - t < SY_GONE_AGE)); for (const h of syOwnGone()) if (!gone.has(h)) gone.set(h, now);
-  const mints = [...new Set(S.mints.map(m => m.url).concat(rw ? rw.mints : []))].slice(0, SY_MINTS);
-  if (wNeed(rw)) {
-    const g = [...gone].sort((a, b) => b[1] - a[1]).slice(0, SY_GONE), cs = Object.entries(ctr).slice(0, SY_CTRS);
-    const content = [['privkey', nzPriv()]].concat(mints.map(u => ['mint', u]), cs.map(([id, n]) => ['counter', id, String(n)]), g.map(([h, t]) => ['gone', h, String(t)]));
-    const ts = syNextTs(rw ? rw.at + 1 : 0);
-    const ev = L.finalizeEvent({ kind: 17375, created_at: ts, tags: [], content: syEnc(content) }, k.sk);
-    if (await relayPublish(ev, 7000, rl, 1500)) { syView.wallet = syWalletOf(ev, content); sent++; } else failed = true;
-    save();
-  }
+  if (wrote) save();
   if (failed) { syTries++; syNext = Date.now() + Math.min(30 * 60e3, 30e3 * 2 ** Math.min(syTries - 1, 6)); syState = 'failed'; }
   else { syTries = 0; syNext = 0; if (syState !== 'busy') syState = 'ok'; }
   return sent;
@@ -322,15 +394,23 @@ async function syPushNow() {
 // one sync step at a time (reads and writes never overlap)
 let syChain = Promise.resolve();
 function syQueue(fn) { const r = syChain.catch(() => {}).then(fn); syChain = r.catch(() => {}); return r; }
+async function syPushGuarded() { syPushing = true; try { return await syPushNow(); } finally { syPushing = false; } }
 // read, then write what changed; a write alone needs a read in this session first
 function syRun(why) {
-  return syQueue(async () => { const r = await syPullNow(why); if (r) { await syPushNow().catch(() => {}); if (syState === 'busy') syState = 'ok'; } return r; });
+  return syQueue(async () => { const r = await syPullNow(why); if (r) { await syPushGuarded().catch(() => {}); if (syState === 'busy') syState = 'ok'; } return r; });
 }
-function syPush() { return syQueue(async () => { if (!syView) { const r = await syPullNow('push'); if (!r) return 0; } return syPushNow(); }); }
-// called by save(): the coins may have changed; written a moment later (after the money step has settled)
+function syPush() { return syQueue(async () => { if (!syView) { const r = await syPullNow('push'); if (!r) return 0; } return syPushGuarded(); }); }
+// called by save(): the coins may have changed; written a moment later (after the money step has settled). A save made
+// while a write is running (its own, or a payment's) is looked at once that write has ended, never in a loop
 function syDirty() {
-  if (!syLive() || syTimer) return;
-  syTimer = setTimeout(() => { syTimer = 0; if (syLive() && Date.now() >= syNext) syPush().catch(() => {}); }, 2000);
+  if (!syLive()) return;
+  if (syPushing) { syAgain = true; return; }
+  if (syTimer) return;
+  syTimer = setTimeout(() => {
+    syTimer = 0; if (!syLive() || Date.now() < syNext) return;
+    syAgain = false;
+    syPush().then(() => { if (syAgain) { syAgain = false; syDirty(); } }).catch(() => {});
+  }, 2000);
 }
 function sySoon(ms) { if (!syLive()) return; setTimeout(() => { if (syLive()) syRun('soon').catch(() => {}); }, ms || 3000); }
 // every background round: a read at start and every SY_PERIOD, a write retried after a failure
@@ -341,17 +421,19 @@ async function syTick(startup) {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && syLive() && Date.now() - syPullAt > SY_FOCUS) sySoon(500); });
 
-/* ---------- restore from the 12 words: the coins on your relays first (the NUT-13 scan still runs after it) ---------- */
-async function syRestore(urls, line) {
-  if (!syAllowed()) return 0;
-  const k = syKeys();
-  const evs = await relayQuery({ kinds: [17375], authors: [k.pk], limit: 5 }, 8000, syRelays(), 1500);
-  if (!evs.some(e => e && e.pubkey === k.pk && e.kind === 17375 && L.verifyEvent(e) && syWalletOf(e, syDec(e.content)))) return 0;
-  S.prefs.sync = true; save();   // (this wallet had sync on: it stays on, and the switch in Settings turns it off)
-  line && line('Looking for your coins on your relays…');
-  for (const u of urls) if (!S.mints.some(m => m.url === normUrl(u))) { try { await addMint(u, { dropped: true }); } catch (e) {} }
-  const r = await syRun('restore').catch(() => null);
-  return r ? r.adopted : 0;
+/* ---------- restore from the 12 words: one read, nothing written, sync stays off until you say ---------- */
+// Reads the sync key's coin, wallet and deletion events once: their gone marks keep the restore's scan from counting
+// coins another device holding these words handed out in a token; true when a wallet event is there (and wasn't deleted
+// with "Delete them from my relays"), so the result can ask whether to turn sync on here too
+async function syRestoreLook(line) {
+  syRestoreMarks = new Set();
+  if (!syAllowed()) return false;
+  line && line('Looking for wallet sync on your relays…');
+  const q = await syQuery({ kinds: SY_KINDS, authors: [syKeys().pk], limit: SY_MAX_EVENTS }, SY_KINDS, 8000, syRelays(), 1500);
+  if (!q.answered) return false;
+  const rd = syRead(q);
+  syRestoreMarks = new Set(rd.gone.keys());
+  return !!rd.wallet;
 }
 
 /* ---------- on, off, and deleting what was published ---------- */
@@ -376,9 +458,9 @@ function openSyncOff() {
 async function syDeleteAll() {
   if (!syAllowed() || writeGuard.paused) return 0;
   const k = syKeys(), rl = syRelays();
-  const got = await relayQuery({ kinds: [7375, 17375, 7376], authors: [k.pk], limit: SY_MAX_EVENTS }, 8000, rl, 1500);
-  if (!got.answered) throw new Error("Couldn't reach your relays. Nothing was deleted. Try again in a moment.");
-  const mine = got.filter(e => e && e.pubkey === k.pk && Number.isSafeInteger(e.created_at) && L.verifyEvent(e) && syDec(e.content) != null);
+  const q = await syQuery({ kinds: [7375, 17375, 7376], authors: [k.pk], limit: SY_MAX_EVENTS }, [7375, 17375, 7376], 8000, rl, 1500);
+  if (!q.answered) throw new Error("Couldn't reach your relays. Nothing was deleted. Try again in a moment.");
+  const mine = q.evs.filter(e => syDec(e.content) != null);
   const ts = syNextTs(Math.max(0, ...mine.map(e => e.created_at)));
   const ids = mine.filter(e => e.kind !== 17375).map(e => e.id);
   let ok = true;
@@ -404,6 +486,7 @@ function sySettingsHTML() {
 }
 window.NutSync = {
   pk: () => syKeys().pk, on: () => syOn(), live: () => syLive(), pull: () => syRun('manual'), push: () => syPush(), last: () => syLastRes,
-  state: () => ({ st: syState, at: syPullAt, view: syView ? { live: syView.live.map(e => e.id), wallet: !!syView.wallet } : null, other: S.prefs.syncOther || [], next: syNext }),
-  states: (url, ps) => getWallet(url).then(w => w.checkProofsStates(ps)).then(s => s.map(x => x && x.state)), del: () => syDeleteAll(), hash: s => syHash(s)
+  state: () => ({ st: syState, at: syPullAt, view: syView ? { live: syView.live.map(e => e.id), wallet: !!syView.wallet, sure: syView.sure, gone: syView.gone.size } : null, other: S.prefs.syncOther || [], next: syNext }),
+  states: (url, ps) => getWallet(url).then(w => w.checkProofsStates(ps)).then(s => s.map(x => x && x.state)), del: () => syDeleteAll(), hash: s => syHash(s),
+  offline: (amount, note) => sendOffline(amount, note || '')   // (tests: the offline send, which hands out the very coins)
 };
