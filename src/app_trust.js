@@ -61,7 +61,8 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.31.0, with the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+const WHATS_NEW = [   // (v1.31.1, with the v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+  'Clearer wording on a token received offline and on a waiting nutzap: a mint signature checked offline doesn\'t show the coins are unspent or the payment final. Once claimed, the line says Claimed at the mint.',
   'New: NUTCADE now holds dollars, euros and francs as ecash too, where a mint issues them. Each unit at a mint is its own account with its own balance: amounts are never added together or converted.',
   'Add one in Mints: a mint that offers USD or EUR shows a line of its own for each, and you add only the one you want. Sending, receiving, payment requests and Lightning in and out work in that unit, as the mint quotes it.',
   'Everything else stays SAT only and says so: gifts, bounties, nutzaps, printed tokens, wallet sync, the arcade, the spending limit, the piggy bank and the Bitcoin price never mix units.',
