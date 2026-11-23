@@ -84,5 +84,5 @@ function radarPaint() {
 // a mint that holds your sats and is reported down: a notice only. Nothing is moved, blocked or switched.
 function radarWarn() {
   if (!radarOn() || !radarFresh()) return '';
-  return S.mints.filter(m => balanceOf(m.url) > 0 && (radarGet(m.url) || {}).label === 'down').map(m => `<div class="notice red" role="status"><div class="uname" data-noi18n>${esc(m.name)}</div><div>MintRadar reports this mint as down. You hold ${money(balanceOf(m.url))} there. This is a health signal, not a statement about your sats, and NUTCADE moves nothing by itself.</div></div>`).join('');
+  return S.mints.filter(m => balanceOf(m.url) > 0 && (radarGet(m.url) || {}).label === 'down').map(m => `<div class="notice red" role="status"><div class="uname" data-noi18n>${esc(m.name)}</div><div>MintRadar reports this mint as down. You hold ${moneyAt(m.url, balanceOf(m.url))} there. This is a health signal, not a statement about your sats, and NUTCADE moves nothing by itself.</div></div>`).join('');
 }

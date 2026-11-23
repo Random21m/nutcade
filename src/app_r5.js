@@ -77,7 +77,8 @@ async function retryBounties() {
 async function decodeTok(t) {
   t = cleanToken(String(t || ''));
   try { return L.getDecodedToken(t, Object.keys(S.counters)); } catch (e) {}
-  const w = await getWallet(normUrl(L.getTokenMetadata(t).mint));
+  const md = L.getTokenMetadata(t), u = String(md.unit || 'sat').toLowerCase();
+  const w = await getWallet(acctKey(extUrl(md.mint), unitOk(u) ? u : 'sat'));   // (the token's mint is an address; its unit picks the account's keysets)
   return w.decodeToken(t);
 }
 // an incoming bounty: check the ecash really is locked to us and to the hash before showing it
@@ -105,7 +106,7 @@ async function readBounty(bo, rec) {
     }
     // the proofs carry a little extra for the mint's fee; show the amount the challenger put up when it's covered
     const amount = num(bo.amount) > 0 && num(bo.amount) <= sum(d.proofs) ? Math.floor(num(bo.amount)) : sum(d.proofs);
-    return { token: tok, amount, mint: normUrl(d.mint), H, until: num(bo.until) || Date.now() + BOUNTY_DAYS * 86400e3, state: 'open', game: rec.game };
+    return { token: tok, amount, mint: extUrl(d.mint), H, until: num(bo.until) || Date.now() + BOUNTY_DAYS * 86400e3, state: 'open', game: rec.game };
   } catch (e) { return null; }
 }
 async function attachBounty(rec, bounty, signer, from) {
@@ -264,7 +265,7 @@ async function onExtraLife(p, from) {
     until = Math.max(until, lt * 1000);
   }
   const who = nameFor(from);
-  const h = { from, name: who || 'A friend', token: cleanToken(String(p.token)), amount: sum(d.proofs), mint: normUrl(d.mint), until, state: 'waiting', at: Date.now() };
+  const h = { from, name: who || 'A friend', token: cleanToken(String(p.token)), amount: sum(d.proofs), mint: extUrl(d.mint), until, state: 'waiting', at: Date.now() };
   // a renewal always replaces the copy we hold: the old one is dead at the mint once our friend continued,
   // even when two renewals land in the same second and carry the same date
   const old = S.heirlooms.find(x => x.from === from && x.state === 'waiting');
@@ -367,14 +368,17 @@ async function inspectMint(url0) {
     l.info = mintInfoOf(info);   // (what the report card used, plus the contact, terms and description Mints → Details shows: see app_trust.js)
   }
   if (ks && Array.isArray(ks.keysets)) {
-    const had = Object.keys(l.keysets).length;
-    for (const k of ks.keysets.filter(k => unitOk(k.unit || 'sat'))) {
-      const old = l.keysets[k.id];
-      if (!old) { l.keysets[k.id] = { first: now, active: !!k.active }; if (had) l.changes.push({ at: now, kind: 'new', id: k.id }); }
+    // only the units this wallet holds at the mint are watched (SAT as in 1.30 when none is held yet); a unit watched for the
+    // first time has its keysets noted without a change, so adding USD at a mint never reads as "new keys"
+    const held = new Set(S.mints.filter(m => acctUrl(m.url) === url).map(m => acctUnit(m.url))); if (!held.size) held.add('sat');
+    const uOf = v => (v && v.unit) || 'sat', had = new Set(Object.values(l.keysets).map(uOf));
+    for (const k of ks.keysets.filter(k => held.has(k.unit || 'sat'))) {
+      const old = l.keysets[k.id], ku = k.unit || 'sat';
+      if (!old) { l.keysets[k.id] = Object.assign({ first: now, active: !!k.active }, ku === 'sat' ? {} : { unit: ku }); if (had.has(ku)) l.changes.push({ at: now, kind: 'new', id: k.id }); }
       else if (old.active && !k.active) { old.active = false; l.changes.push({ at: now, kind: 'retired', id: k.id }); }
       else old.active = !!k.active;
     }
-    l.ksTotal = ks.keysets.filter(k => unitOk(k.unit || 'sat')).length;
+    l.ksTotal = ks.keysets.filter(k => held.has(k.unit || 'sat')).length;
     l.changes = l.changes.slice(-20);
   }
   l.checked = now; saveMlog();

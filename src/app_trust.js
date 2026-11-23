@@ -61,11 +61,15 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.31.0, with the v1.30.0 items; rewrite this list at every release)
+const WHATS_NEW = [   // (v1.31.0, with the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
   'New: NUTCADE now holds dollars, euros and francs as ecash too, where a mint issues them. Each unit at a mint is its own account with its own balance: amounts are never added together or converted.',
   'Add one in Mints: a mint that offers USD or EUR shows a line of its own for each, and you add only the one you want. Sending, receiving, payment requests and Lightning in and out work in that unit, as the mint quotes it.',
   'Everything else stays SAT only and says so: gifts, bounties, nutzaps, printed tokens, wallet sync, the arcade, the spending limit, the piggy bank and the Bitcoin price never mix units.',
-  'Sync this wallet across devices (Settings, Privacy, off by default) keeps your SAT coins the same on every device with your 12 words and the switch on. USD, EUR and CHF ecash is never published to your relays.',
+  'Only SAT coins are synced. USD, EUR and CHF ecash is never published to your relays and never taken from them: it stays on the device that holds it.',
+  'New, optional and off by default: Sync this wallet across devices (Settings, Privacy) keeps your coins the same on every device with your 12 words and the switch on, through your Nostr relays, encrypted. Each mint checks every coin before it counts.',
+  'Relays can see how many sync events you publish, how big they are and when: use your own relays if you can. It doesn\'t work with other wallets\' sync.',
+  'Restoring from your 12 words tells you when wallet sync was on for them, and asks before turning it on here.',
+  'New, optional and off by default: Hide who gets it (P2BK, Settings, Privacy) hides the receiver\'s key in the gifts and bounties you send. Turn it on only if their wallet supports it (NUTCADE 1.29 or newer does). Nutzaps are never hidden.',
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);
@@ -171,7 +175,7 @@ const isInstalled = () => { try { return navigator.standalone === true || matchM
 const homeHintDue = () => isIOS() && !isInstalled();
 const homeHintHTML = () => `<div class="notice row between" role="status" data-home-hint style="flex-wrap:wrap"><span>Add NUTCADE to your Home Screen, or Safari may delete this wallet.</span><span class="row" style="gap:8px"><button class="btn sm gold" data-act="homeSteps">Show me how</button>${S.seed ? '<button class="btn sm" data-act="homeLater">Not today</button>' : ''}</span></div>`;
 function homeBanner() {
-  if (!homeHintDue() || !(totalBalance() > 0) || S.prefs.homeLater === new Date().toDateString()) return '';
+  if (!homeHintDue() || !anyBalance() || S.prefs.homeLater === new Date().toDateString()) return '';
   return homeHintHTML();
 }
 function openHomeSteps() {

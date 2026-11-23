@@ -114,7 +114,7 @@ function syHeld(url) {
   return out;
 }
 // our own gone marks: the coins of every token this wallet sent that nobody has claimed yet, newest first, [h, mint]
-const syOwnGone = () => S.txs.filter(t => t.type === 'out' && t.status === 'pending' && Array.isArray(t.sent)).sort((a, b) => num(b.ts) - num(a.ts)).flatMap(t => t.sent.filter(p => p && p.secret).map(p => [syHash(p.secret), t.mint]));
+const syOwnGone = () => S.txs.filter(t => t.type === 'out' && t.status === 'pending' && Array.isArray(t.sent) && isSatAcct(t.mint)).sort((a, b) => num(b.ts) - num(a.ts)).flatMap(t => t.sent.filter(p => p && p.secret).map(p => [syHash(p.secret), t.mint]));
 // a counters-only repair scan (app.js restoreFromMintNow): with sync on, what it finds is the other device's
 function syRepairOnly() { try { if (syOn()) { sySoon(); return true; } } catch (e) {} return false; }
 // a coin our other device handed out in a token (a gone mark from the last read, or from a restore's read)
@@ -300,7 +300,8 @@ async function syPullNow(why) {
 function syWalletWant(rw) {
   const now = Math.floor(Date.now() / 1000), okId = id => /^[0-9a-f]{16,66}$/i.test(id);
   const ctr = new Map();
-  for (const [id, n] of Object.entries(S.counters).filter(([id, n]) => okId(id) && Number.isSafeInteger(n) && n > 0 && n < 2 ** 31).sort((a, b) => b[1] - a[1])) ctr.set(id, Math.max(n, rw ? rw.counters[id] || 0 : 0));
+  const notSat = unitKsIds();   // (the counters of USD, EUR and CHF keysets are never published)
+  for (const [id, n] of Object.entries(S.counters).filter(([id, n]) => okId(id) && !notSat.has(id) && Number.isSafeInteger(n) && n > 0 && n < 2 ** 31).sort((a, b) => b[1] - a[1])) ctr.set(id, Math.max(n, rw ? rw.counters[id] || 0 : 0));
   if (rw) for (const [id, n] of Object.entries(rw.counters)) if (!ctr.has(id)) ctr.set(id, n);
   const cs = [...ctr].slice(0, SY_CTRS);
   const g = new Map();

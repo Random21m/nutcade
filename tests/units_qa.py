@@ -12,11 +12,16 @@ before; the mint list shows each unit of one mint as its own line and adds one w
 keyset can be added; deposit by Lightning into a USD account (the invoice in SAT, the credit in USD as the mint quotes
 it); pay-out by Lightning from a USD account (the invoice's SAT, the mint's USD quote and USD fee, the fee booked in
 USD); send and receive USD and EUR tokens between two wallets (the token carries the unit); payment requests in each
-unit, and one in a unit we don't hold refused; two units at one mint are never added together (balance lines, history,
-the spending limit, the report card); a send whose answer is lost is settled from the journal in the right unit; backup
-and restore with units, including an old (1.30.0) backup loading as sat; a 12-word restore finding USD coins; wallet sync
-publishing sat coins and leaving USD out; nutzaps, gifts and bounties refusing while a USD account is active; the new
-texts in five languages.
+unit, one in a unit we don't hold refused, and a payment in another unit than the request's kept but never counted as
+paying it; two units at one mint are never added together (balance lines, history, the SAT spending limit, Wallet
+Connect's history and balance, the unclaimed-token reminder, saved tokens claimed back online, a sweep of another
+phrase, the duress PIN's wallet coming back); a send whose answer is lost is settled from the journal in the right unit;
+backup and restore with units, including an old (1.30.0) backup loading as sat; a 12-word restore finding USD coins; a
+wallet holding only USD is treated as holding money by New phrase, Restore, backup import and Reset (its USD moves
+under the new phrase); a SAT-only wallet's report card at a multi-unit mint grades as before; wallet sync and the
+mint-list backup publishing only SAT coins and counters and mint addresses (never an account key); the SAT-only
+features refusing while a USD account is active, while steps on SAT records still work; external mint fields with '|'
+and tokens in units NUTCADE doesn't hold refused, nothing saved; the new texts in five languages.
 
 NOT proven here: CHF (no test mint offers it; it goes through exactly the same table and code as USD and EUR), real
 mints' rates and fees, mints that quote a unit for one method only, and any conversion of our own (NUTCADE never
@@ -26,6 +31,8 @@ import asyncio, json, os, sys, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from playwright.async_api import async_playwright
 from wallet_qa import W, check, results, URL, outside_net, B as SAT, invoice
+
+PIN, DPIN = '135791', '246802'
 
 OUT = os.environ.get('QA_OUT', '/tmp/qa-out')
 J = json.dumps
@@ -127,6 +134,20 @@ async def claim(w, tok, note=''):
     if await w.ev("!!document.querySelector('[data-act=doReceiveToken][data-trust]')"): await w.click('[data-act=doReceiveToken]'); await w.wait(2500)
     e = await w.err(); txt = await w.sheet_text(); await w.close()
     return e, txt, peek
+async def pad(w, pin, root='[data-pinpad]'):
+    for k in pin: await w.click(f'{root} [data-k="{k}"]')
+    await w.click(f'{root} [data-k=ok]')
+async def unlock(w, pin):
+    await w.until("!!document.querySelector('[data-pinpad]')", 8000); await pad(w, pin); await w.until("Nutcade.vault.open", 20000); await w.wait(800)
+def melt_quote(inv, unit, mint=MULTI):
+    return json.loads(urllib.request.urlopen(urllib.request.Request(mint + '/v1/melt/quote/bolt11',
+        data=J({'request': inv, 'unit': unit}).encode(), headers={'Content-Type': 'application/json'})).read())
+async def act(w, a, **data):
+    """Clicks a button for action `a` (with data-* attributes), as one on screen would be; returns the toast it left."""
+    await w.ev("(document.querySelector('#toast')||{}).innerText=''")
+    await w.ev(f"""(()=>{{const b=document.createElement('button'); b.dataset.act={J(a)}; Object.assign(b.dataset, {J(data)}); document.querySelector('#app').appendChild(b); b.click(); b.remove()}})()""")
+    await w.wait(400); return await w.toast()
+SAT_ONLY = 'works with SAT only'
 async def toast_of(w, act):
     await w.ev("(document.querySelector('#toast')||{}).innerText=''")
     await w.click(act); await w.wait(600)
@@ -222,18 +243,21 @@ async def main():
             tot = await A.ev("(document.querySelector('[data-totals]')||{}).innerText||''")
             check('apart: the home screen shows every unit on its own line ("All mints 1,000 SAT · 5.00 USD · 2.50 EUR")',
                   '1,000 SAT' in tot and '5.00 USD' in tot and '2.50 EUR' in tot and '1,750' not in home, (tot, '1,750' in home))
-            check('apart: totalBalance (what the SAT features use) counts SAT only',
-                  await A.ev("Nutcade.S.mints.filter(m=>NutUnits.unit(m.url)!=='sat').length") == 2 and dict(t)['sat'] == 1000, t)
+            check('apart: totalBalance (what the SAT features use) counts SAT only, while "any balance" sees every unit',
+                  await A.ev("NutUnits.satTotal()") == 1000 and await A.ev("NutUnits.any()") is True, (await A.ev("NutUnits.satTotal()"), t))
             await use(A, USD); await A.home(); await A.wait(400)
             head = await A.ev("(document.querySelector('.credit-num')||{}).innerText||''")
             check('apart: with the USD account in use the balance reads 5.00 USD, and no SAT price line is shown',
                   '5.00' in head and 'USD' in head and not await A.ev("!!document.querySelector('.credits .fiat')"), head)
             # the spending limit counts SAT only
-            await A.ev("Nutcade.S.limits={per:0,day:1000}; window.NutStore.set('limits',Nutcade.S.limits)")
+            # (a day limit of 50 SAT: 100 cents read as SAT would be over it and stopped)
+            await A.ev("Nutcade.S.limits={per:0,day:50}; window.NutStore.set('limits',Nutcade.S.limits)")
             tok, e, txt = await send_token(A, USD, 100, 'a dollar out')
             lim = await A.ev("Nutcade.S.txs.filter(t=>t.type==='out').map(t=>[t.unit||'sat',t.amount])")
-            check('apart: a USD payment is outside the SAT spending limit (it goes through, nothing of it counts toward the day)',
-                  bool(tok) and not e and ['usd', 100] in lim, (bool(tok), e, lim))
+            limtxt = await A.ev("document.body.innerText")
+            check('apart: a USD payment is outside the SAT spending limit (1.00 USD goes through a 50 SAT day limit, no limit question)',
+                  bool(tok) and not e and ['usd', 100] in lim and 'over your' not in limtxt.lower(), (bool(tok), e, lim))
+            await A.ev("Nutcade.S.limits={per:0,day:0}; window.NutStore.set('limits',Nutcade.S.limits)")
             await use(A, MULTI); await A.click('[data-act=tab][data-tab=settings]'); await A.wait(500)
             await A.click('[data-act=limOpen]'); await A.wait(500)
             st = await A.sheet_text(); await A.ev("Nutcade.closeSheet()")
@@ -243,8 +267,9 @@ async def main():
             await A.click('[data-act=tab][data-tab=history]'); await A.wait(500)
             rows = await A.ev("[...document.querySelectorAll('.tx .amt')].map(e=>e.innerText)")
             chips = await A.ev("[...document.querySelectorAll('.tx .chip.unit')].map(e=>e.innerText)")
-            check('history: a USD or EUR line shows its own amount and unit chip; a SAT line is unchanged',
-                  any('12.50' not in r and '.' in r for r in rows) and 'USD' in chips and 'EUR' in chips and any(r in ('+1,000', '1,000') for r in rows), (rows[:6], chips[:4]))
+            check('history: the USD and EUR deposits read 5.00 and 2.50 with their unit chips, the SAT one 1,000 as before, none summed',
+                  any('5.00' in r for r in rows) and any('2.50' in r for r in rows) and any('1,000' in r and '.' not in r for r in rows)
+                  and 'USD' in chips and 'EUR' in chips and not any(x in ' '.join(rows) for x in ('1,750', '1,005', '1,002', '7.50')), (rows[:6], chips[:4]))
         await section('apart', apart)
 
         # =================== send and receive USD and EUR tokens between two wallets ===================
@@ -276,6 +301,7 @@ async def main():
         # =================== pay-out by Lightning from a USD account, and the fee in its unit ===================
         async def payout():
             inv = invoice(300, SAT)   # a 300 SAT invoice at another mint
+            mq = melt_quote(inv, 'usd')   # what the mint itself says this invoice costs in USD (asked separately, the same rate)
             isat = await A.ev(f"NutUnits.invoiceSats({J(inv)})")
             await use(A, USD); await A.home()
             await A.click('[data-act=send]'); await A.wait(200); await A.click('[data-act=sendMethod][data-m=ln]'); await A.wait(200)
@@ -293,7 +319,8 @@ async def main():
                 check('pay-out: it is paid in USD, the line and its fee are in USD, and only the USD balance drops',
                       not e and tx and tx.get('unit') == 'usd' and tx['status'] in ('done', 'pending') and b1 < b0 and b0 - b1 == tx['amount'] + tx['fee'] and await bal(A, MULTI) == 1000,
                       (e, tx and (tx.get('unit'), tx['amount'], tx['fee'], tx['status']), b0, b1, await bal(A, MULTI)))
-                check('pay-out: the mint kept a fee in USD, counted in USD (its quote said 2 cents)', tx and tx['fee'] >= 0 and tx['fee'] < 100, tx and tx['fee'])
+                check("pay-out: the line's amount is exactly the mint's own USD quote for the invoice, its fee no more than the mint's USD reserve",
+                      tx and tx['amount'] == mq['amount'] and 0 <= tx['fee'] <= mq['fee_reserve'], (tx and (tx['amount'], tx['fee']), mq['amount'], mq['fee_reserve']))
             # a method the mint does not offer for that unit: the button is not there
             D = ctx.get('D')
             if D:
@@ -334,6 +361,30 @@ async def main():
                       (await A.ev("(Nutcade.S.txs[0]||{}).unit"), await Bw.ev("Nutcade.S.txs.find(t=>t.type==='out').unit")))
             else:
                 check('request: Bob can pay a USD request', False, txt[:200])
+            # a payment in another unit than the request asks for: the coins are kept, the request stays open
+            await use(A, MULTI)
+            await A.ev("Nutcade.closeSheet()"); await A.home()
+            await A.click('[data-act=receive]'); await A.wait(200); await A.click('[data-act=recvMethod][data-m=ecash]'); await A.wait(200)
+            await A.click('[data-act=reqOpen]'); await A.wait(300)
+            await A.fill('#amtIn', '40'); await A.fill('#memoIn', 'sats please')
+            await A.click('[data-act=reqCreate]'); await A.wait(800); await A.close()
+            rq = await A.ev("Nutcade.S.requests[0]")
+            await deposit(Bw, USD, '1.00')
+            wtok, we, _ = await send_token(Bw, USD, 40)
+            if rq.get('unit') == 'sat' and wtok and not we:
+                kids = [k['id'] for k in json.loads(urllib.request.urlopen(MULTI + '/v1/keysets', timeout=10).read())['keysets']]
+                d = await A.ev(f"(()=>{{const t=CashuLib.getDecodedToken({J(wtok)}, {J(kids)}); return {{mint:t.mint, unit:t.unit, proofs:t.proofs.map(p=>({{id:p.id,amount:Number(p.amount),secret:p.secret,C:p.C}}))}}}})()")
+                a0 = await bal(A, USD)
+                await A.ev("(document.querySelector('#toast')||{}).innerText=''")
+                await A.ev(f"NutUnits.payload({J({'id': rq['id'], 'mint': d['mint'], 'unit': 'usd', 'proofs': d['proofs']})}, null)")
+                got = await A.until(f"(Nutcade.S.proofs[{J(USD)}]||[]).reduce((t,p)=>t+p.amount,0) >= {a0 + 40}", 20000)
+                t = await A.toast(); rq2 = await A.ev(f"Nutcade.S.requests.find(r=>r.id==={J(rq['id'])})")
+                line = await A.ev("Nutcade.S.txs[0]")
+                check('request: 40 USD cents sent to a 40 SAT request are kept in the USD account, but the request is not paid and stays open',
+                      got and rq2['paid'] == [] and not line.get('reqId') and line.get('unit') == 'usd', (got, rq2['paid'], line.get('reqId'), line.get('unit')))
+                check('request: and the wallet says so (the request asks for SAT, still open; the USD is yours)', 'still open' in t and 'SAT' in t and 'USD' in t, t)
+            else:
+                check('request: a wrong-unit payment could be set up', False, (rq.get('unit'), we))
             # a request in a unit we do not hold: refused, in plain words, nothing spent
             chf = await A.ev(f"""(()=>{{const pr=new CashuLib.PaymentRequest([], 'tst1', 500, 'chf', [{J(MULTI)}], 'swiss'); return pr.toEncodedRequest()}})()""")
             n0 = await A.ev("Nutcade.S.txs.length")
@@ -362,12 +413,22 @@ async def main():
             # the backstop: a SAT-only action clicked anyway does nothing and says so
             b0 = await A.ev("JSON.stringify(Nutcade.S.proofs)"); n0 = await A.ev("Nutcade.S.txs.length")
             msgs = {}
-            for act in ('nzSend', 'extraOpen', 'huntNew', 'ptOpen', 'allEcash', 'cashier', 'syncNow'):
-                await A.ev(f"""(()=>{{const b=document.createElement('button'); b.dataset.act={J(act)}; b.id='utest'; document.body.appendChild(b); b.click(); b.remove()}})()""")
-                await A.wait(250); msgs[act] = await A.toast()
+            for a in ('nzSend', 'extraOpen', 'huntNew', 'ptOpen', 'allEcash', 'cashier', 'splitOpen', 'contactEcash', 'ctPlay'):
+                msgs[a] = await act(A, a); await A.ev("Nutcade.closeSheet()")
             spent = b0 != await A.ev("JSON.stringify(Nutcade.S.proofs)") or n0 != await A.ev("Nutcade.S.txs.length")
-            check('SAT only: a nutzap, gift/Extra Life, treasure hunt, printed token, Send all, cashier mode or sync tapped with USD active refuses in plain words and spends nothing',
-                  all('SAT' in (m or '') for m in msgs.values()) and not spent, msgs)
+            check('SAT only: a nutzap, Extra Life, treasure hunt, printed token, Send all, cashier mode, bill split, paying a contact or send by sound tapped with USD active refuses in plain words and spends nothing',
+                  all(SAT_ONLY in (m or '') for m in msgs.values()) and not spent, msgs)
+            # steps on SAT records and SAT-only settings are not refused because another account is in use
+            ok = {}
+            for a, data in (('limOpen', {}), ('syncNow', {}), ('ptTake', {'b': 'none'}), ('ptCheck', {'b': 'none'}), ('nzClaim', {'id': 'none'}),
+                            ('extraContinue', {}), ('extraCash', {}), ('piggyEmpty', {}), ('lnAddrSync', {}), ('moveOpen', {'from': MULTI}), ('sendFrom', {'url': USD})):
+                ok[a] = await act(A, a, **data); await A.ev("Nutcade.closeSheet()")
+            check('SAT only: a step on a SAT record or setting (limit, sync, printed tokens, nutzap, Extra Life, piggy bank, Lightning address, moving SAT out, sending from a USD account) is never refused for the USD account in use',
+                  not any(SAT_ONLY in (m or '') for m in ok.values()), ok)
+            await use(A, USD)
+            r = await A.ev("Nutcade.S.active")
+            check('SAT only: and a SAT-only send is still refused at its source for a USD account (Send all through the send path)',
+                  SAT_ONLY in (await act(A, 'allEcash')) and r == USD, r)
             # and with a SAT account they are all back
             await use(A, MULTI); await A.home(); await A.wait(400)
             back = await A.ev("[...document.querySelectorAll('[data-act]')].map(b=>b.dataset.act)")
@@ -390,7 +451,11 @@ async def main():
             await w.pg.context.route(MULTI + '/v1/swap', lost)
             tok, e, _ = await send_token(w, USD, 100)
             await w.pg.context.unroute(MULTI + '/v1/swap', lost)
-            check('journal: a USD send whose answer never came leaves a record and an error, not a silent loss', bool(e) or bool(tok), (e, bool(tok)))
+            ops = await w.ev("Nutcade.S.ops.filter(o=>o.mint===" + J(USD) + ").length"); bnow = await bal(w, USD)
+            # (the app either says it failed and keeps the step in its journal or has already settled it from there, the
+            # coins back in the balance; or it settles it at once into a token: never a silent loss)
+            check('journal: a USD send whose answer never came is kept in the journal or settled from it (error shown, nothing lost), or settled into a token at once',
+                  (bool(e) and (ops >= 1 or bnow == b0)) or (not e and bool(tok)), (e, bool(tok), ops, b0, bnow))
             await w.pg.reload(); await w.wait(2000)
             settled = await w.until("Nutcade.S.ops.length===0", 60000); await w.wait(1500)
             b1 = await bal(w, USD); out = await w.ev("Nutcade.S.txs.filter(t=>t.type==='out'&&t.method==='ecash').map(t=>[t.unit||'sat',t.amount,t.status])")
@@ -408,7 +473,7 @@ async def main():
             await A.click('[data-act=tab][data-tab=settings]'); await A.wait(400)
             await A.ev("Nutcade.closeSheet()")
             async with A.pg.expect_download() as dl: await A.pg.evaluate("document.querySelector('[data-act=backupDownload]').click()")
-            text = open(await (await dl.value).path()).read()
+            text = open(await (await dl.value).path()).read(); ctx['bk'] = text
             await A.ev("Nutcade.closeSheet()")
             d = json.loads(text) if text.strip().startswith('{') else None
             check('backup: the file carries the unit accounts (mints with a unit field, coins under their keys)',
@@ -458,6 +523,196 @@ async def main():
             await R.pg.context.close()
         await section('backup', backup)
 
+        # =================== a wallet holding only USD: new phrase, restore, import and reset see its money ===================
+        async def phrase():
+            X = await wallet(b, 'u-X'); await X.create()
+            await add_account(X, DOLLAR, 'usd')   # (a mint with no SAT at all: added as its USD account)
+            XU = DOLLAR + '|usd'
+            ok, _, _ = await deposit(X, XU, '2.00')
+            check('phrase: a wallet holding only USD holds no SAT, and yet holds money', ok and await X.ev("NutUnits.satTotal()") == 0 and await X.ev("NutUnits.any()") is True,
+                  (ok, await X.ev("NutUnits.satTotal()"), await X.ev("NutUnits.any()")))
+            # Reset says what would be lost, never "empty", and lists the mint by its address
+            await act(X, 'resetAsk'); txt = await X.sheet_text(); await X.ev("Nutcade.closeSheet()")
+            check('reset: with only USD held it warns the 2.00 USD is lost without the words (not "Your wallet is empty")',
+                  'empty' not in txt and '2.00 USD' in txt, txt[:260])
+            check('reset: the mints to write down are addresses (no account key)', DOLLAR in txt and '|usd' not in txt, txt[:400])
+            # New phrase: the USD coins move under it (secureAll covers every unit)
+            old = await X.ev(f"(Nutcade.S.proofs[{J(XU)}]||[]).map(p=>p.secret)")
+            await act(X, 'newSeedAsk'); await X.fill('#confirmWord', 'NEW'); await X.click('[data-act=doNewSeed]'); await X.wait(400)
+            check('new phrase: with only USD held the new phrase is not marked as already covering the wallet', await X.ev("Nutcade.S.seed.secured") is False, await X.ev("Nutcade.S.seed.secured"))
+            words = (await X.ev("Nutcade.S.seed.mnemonic")).split()
+            await X.gate_step('gateToConfirm', "!!document.querySelector('[data-cw]')", tick='#wrote')
+            picks = await X.ev("[...document.querySelectorAll('[data-cw]')].map(e=>e.dataset.cw)")
+            await X.gate_fill({k: words[int(k)] for k in picks})
+            await X.until("!!document.querySelector('[data-act=gateStart]')", 60000)
+            await X.until("Nutcade.S.seed.secured===true", 60000)
+            new = await X.ev(f"(Nutcade.S.proofs[{J(XU)}]||[]).map(p=>p.secret)")
+            check('new phrase: the USD coins were moved under the new phrase (all new coins, the same 2.00 USD)',
+                  await X.ev("Nutcade.S.seed.secured") is True and new and not (set(new) & set(old)) and await bal(X, XU) == 200, (len(old), len(new), await bal(X, XU)))
+            await X.gate_step('gateStart', "!!document.querySelector('.tabbar')"); await X.ev("Nutcade.closeSheet()")
+            # Restore from other 12 words: the USD here moves into the restored wallet
+            other = await wallet(b, 'u-X2'); owords = await other.create(); await other.pg.context.close()
+            old = await X.ev(f"(Nutcade.S.proofs[{J(XU)}]||[]).map(p=>p.secret)")
+            await act(X, 'seedRestore'); await X.wait(300)
+            txt = await X.sheet_text()
+            check('restore: the sheet says the 2.00 USD here moves into the restored wallet', '2.00 USD' in txt, txt[:300])
+            rm = await X.ev("[...document.querySelectorAll('[data-rmint]')].map(i=>i.dataset.rmint)")
+            check('restore: the mints to scan are listed by address, each once', DOLLAR in rm and not any('|' in u for u in rm) and len(rm) == len(set(rm)), rm)
+            await X.fill('#phraseIn', owords)
+            await X.ev(f"[...document.querySelectorAll('[data-rmint]')].forEach(i=>i.checked=i.dataset.rmint==={J(DOLLAR)})")
+            await X.click('[data-act=doRestorePhrase]')
+            await X.until("!!document.querySelector('.sheet-body .credit-num')", 120000); await X.wait(500)
+            fails = await X.sheet_text()
+            new = await X.ev(f"(Nutcade.S.proofs[{J(XU)}]||[]).map(p=>p.secret)")
+            check('restore: with only USD held, the USD moves under the restored words (new coins, still 2.00 USD), and the USD-only mint scans without a failure',
+                  await X.ev("Nutcade.S.seed.mnemonic") == owords and new and not (set(new) & set(old)) and await bal(X, XU) == 200 and "Couldn't reach" not in fails,
+                  (len(new), await bal(X, XU), fails[:200]))
+            await X.ev("Nutcade.closeSheet()")
+            if await X.until("!!document.querySelector('[data-act=gateStart]')", 3000): await X.gate_step('gateStart', "!!document.querySelector('.tabbar')")
+            await X.ev("Nutcade.closeSheet()")
+            # importing a backup file with other words does not replace the phrase of a wallet holding USD
+            if ctx.get('bk'):
+                mine = await X.ev("Nutcade.S.seed.mnemonic")
+                await X.click('[data-act=tab][data-tab=settings]'); await X.wait(300)
+                await X.click('[data-act=restore]'); await X.wait(300)
+                await X.pg.fill('#restoreIn', ctx['bk']); await X.click('[data-act=doRestore]')
+                await X.until("!document.querySelector('#restoreIn')", 60000); await X.wait(1500)
+                check('import: a backup with other 12 words leaves the phrase of a wallet holding only USD as it is', await X.ev("Nutcade.S.seed.mnemonic") == mine and await bal(X, XU) == 200,
+                      (await X.ev("Nutcade.S.seed.mnemonic") == mine, await bal(X, XU)))
+            await X.pg.context.close()
+        await section('phrase', phrase)
+
+        # =================== a sweep of other 12 words, per unit ===================
+        async def sweep():
+            K = await wallet(b, 'u-K'); kw = await K.create()
+            await add_account(K, MULTI, 'sat'); await add_account(K, MULTI, 'usd')
+            await deposit(K, MULTI, '300'); await deposit(K, USD, '1.25')
+            ks, ku = await bal(K, MULTI), await bal(K, USD)
+            await K.pg.context.close()
+            S2 = await wallet(b, 'u-S2'); await S2.create()
+            await add_account(S2, MULTI, 'sat')
+            await act(S2, 'sweepOpen'); await S2.wait(300)
+            await S2.fill('#phraseIn', kw)
+            await S2.ev(f"[...document.querySelectorAll('[data-rmint]')].forEach(i=>i.checked=i.dataset.rmint==={J(MULTI)})")
+            await S2.click('[data-act=doSweep]')
+            await S2.until("!!document.querySelector('.sheet-body .credit-num')", 120000); await S2.wait(400)
+            head = await S2.ev("document.querySelector('.sheet-body .credit-num').innerText")
+            found = await S2.ev("(document.querySelector('[data-unitfound]')||{}).innerText||''")
+            check('sweep: the 300 SAT and 1.25 USD under other words are found and moved, each into its own account',
+                  ks == 300 and ku == 125 and await bal(S2, MULTI) == 300 and await bal(S2, USD) == 125, (ks, ku, await bal(S2, MULTI), await bal(S2, USD)))
+            check('sweep: the screen shows 300 SAT and +1.25 USD on its own line, never 425', '300' in head and '425' not in head and '1.25 USD' in found, (head, found))
+            await S2.pg.context.close()
+        await section('sweep', sweep)
+
+        # =================== tokens from outside: bad mint fields, unknown units, saved offline, back online ===================
+        async def offline():
+            Bw = ctx.get('B')
+            Q = await wallet(b, 'u-Q'); await Q.create()
+            await add_account(Q, MULTI, 'sat'); await add_account(Q, MULTI, 'usd'); await add_account(Q, MULTI, 'eur')
+            # a token whose mint field carries "|usd": refused, nothing saved, no account like "…|usd|usd"
+            n0 = await Q.ev("Nutcade.S.txs.length")
+            fake = await Q.ev(f"CashuLib.getEncodedToken({{mint:{J(USD)}, unit:'usd', proofs:[{{id:'00ad268c4d1f5826', amount:1, secret:'x'.repeat(64), C:'02'+'1'.repeat(64)}}]}})")
+            e, _, _ = await claim(Q, fake)
+            accs = [x['url'] for x in await accounts(Q)]
+            check("outside: a token whose mint field has '|usd' in it is refused, nothing is saved and no odd account appears",
+                  bool(e) and await Q.ev("Nutcade.S.txs.length") == n0 and not any(u.count('|') > 1 for u in accs) and len(accs) == 3, (e, accs))
+            await Q.ev(f"NutUnits.payload({J({'id': 'x', 'mint': USD, 'unit': 'sat', 'proofs': [{'id': '00ad268c4d1f5826', 'amount': 1, 'secret': 'y' * 64, 'C': '02' + '1' * 64}]})}, null)"); await Q.wait(500)
+            check("outside: a payment over Nostr naming the mint \"…|usd\" is ignored (never read as an account)", await Q.ev("Nutcade.S.txs.length") == n0 and len(await accounts(Q)) == 3)
+            # a token in a unit NUTCADE doesn't hold, pasted while offline: refused, never saved as a SAT line
+            xau = await Q.ev(f"CashuLib.getEncodedToken({{mint:{J(MULTI)}, unit:'xau', proofs:[{{id:'00ad268c4d1f5826', amount:5, secret:'z'.repeat(64), C:'02'+'1'.repeat(64)}}]}})")
+            await Q.pg.context.set_offline(True); await Q.ev("window.dispatchEvent(new Event('offline'))"); await Q.wait(300)
+            e, _, peek = await claim(Q, xau)
+            check('outside: a XAU token pasted offline is refused with a plain message and nothing is saved', 'XAU' in (e or '') and await Q.ev("Nutcade.S.txs.length") == n0, (e, await Q.ev("Nutcade.S.txs.length")))
+            check('outside: its preview shows the refusal, not an amount', 'XAU' in peek and '5' not in peek.replace('XAU', ''), peek)
+            # two tokens in two units saved offline, claimed when back online: each into its own account
+            await Q.pg.context.set_offline(False); await Q.ev("window.dispatchEvent(new Event('online'))"); await Q.wait(300)
+            if Bw:
+                await deposit(Bw, USD, '1.00'); await deposit(Bw, EUR, '1.00')
+                t1, e1, _ = await send_token(Bw, USD, 30); t2, e2, _ = await send_token(Bw, EUR, 20)
+                await Q.pg.context.set_offline(True); await Q.ev("window.dispatchEvent(new Event('offline'))"); await Q.wait(300)
+                await claim(Q, t1); await claim(Q, t2)
+                saved = await Q.ev("Nutcade.S.txs.filter(t=>t.status==='pending'&&t.incoming&&t.offline).map(t=>[NutUnits.unit(t.mint),t.amount])")
+                check('offline: the two tokens are saved to claim later, each with its own unit', sorted(saved) == [['eur', 20], ['usd', 30]], saved)
+                await Q.ev("(document.querySelector('#toast')||{}).innerText=''")
+                await Q.pg.context.set_offline(False); await Q.ev("window.dispatchEvent(new Event('online'))")
+                got = await Q.until(f"(Nutcade.S.proofs[{J(USD)}]||[]).reduce((t,p)=>t+p.amount,0)===30 && (Nutcade.S.proofs[{J(EUR)}]||[]).reduce((t,p)=>t+p.amount,0)===20", 30000)
+                t = await Q.toast()
+                check('offline: back online both are claimed, 0.30 USD and 0.20 EUR into their own accounts', got, (await bal(Q, USD), await bal(Q, EUR)))
+                check('offline: whatever is said about it names each unit, never one number (no "50 SAT")', '50' not in t and ('claimed' not in t or ('USD' in t and 'EUR' in t)), t)
+            await Q.pg.context.close()
+        await section('offline', offline)
+
+        # =================== Wallet Connect reads SAT only ===================
+        async def nwc():
+            r = await A.ev("NutUnits.nwc()")
+            sat_inv = set(await A.ev("Nutcade.S.txs.filter(t=>t.method==='ln'&&t.request&&(t.unit||'sat')==='sat').map(t=>t.request)"))
+            usd_inv = set(await A.ev("Nutcade.S.txs.filter(t=>t.method==='ln'&&t.request&&t.unit).map(t=>t.request)"))
+            listed = {x['invoice'] for x in r['list']}
+            check('Wallet Connect: its history lists the SAT Lightning lines only, never a USD or EUR one (whose amounts are cents, not millisats)',
+                  bool(usd_inv) and not (listed & usd_inv) and listed <= sat_inv and bool(listed), (len(listed), len(usd_inv), len(listed & usd_inv)))
+            check('Wallet Connect: its balance is the SAT balance in millisats', r['balance'] == await A.ev("NutUnits.satTotal()") * 1000, (r['balance'], await A.ev("NutUnits.satTotal()")))
+        await section('nwc', nwc)
+
+        # =================== the report card of a SAT-only wallet at a multi-unit mint ===================
+        async def card():
+            ks = json.loads(urllib.request.urlopen(MULTI + '/v1/keysets', timeout=10).read())['keysets']
+            nsat = sum(1 for k in ks if k.get('unit', 'sat') == 'sat'); nusd = sum(1 for k in ks if k.get('unit') == 'usd')
+            Y = await wallet(b, 'u-Y'); await Y.create(); await add_account(Y, MULTI, 'sat')
+            a = await Y.ev(f"NutUnits.inspect({J(MULTI)})"); a2 = await Y.ev(f"NutUnits.inspect({J(MULTI)})")
+            check('report card: a SAT-only wallet at a mint that also issues USD and EUR watches the SAT keysets only, as in 1.30.0',
+                  a['ksTotal'] == nsat and a2['noted'] == nsat and a2['news'] == 0 and a2['keys'] == 'A', (a, a2, nsat))
+            await add_account(Y, MULTI, 'usd')
+            a3 = await Y.ev(f"NutUnits.inspect({J(MULTI)})")
+            check('report card: adding its USD account starts watching the USD keysets without a "new keys" change (the grade stays)',
+                  a3['ksTotal'] == nsat + nusd and a3['news'] == 0 and a3['keys'] == 'A', (a3, nsat, nusd))
+            await Y.pg.context.close()
+        await section('card', card)
+
+        # =================== the unclaimed-token reminder, per unit ===================
+        async def remind():
+            tok, e, _ = await send_token(A, MULTI, 100, 'sats nobody took')
+            await A.ev(f"Nutcade.S.txs.filter(t=>t.type==='out'&&t.method==='ecash'&&t.status==='pending'&&t.token).forEach(t=>t.ts=Date.now()-31*86400e3); Nutcade.S.prefs.rmLater={{}}; Nutcade.S.prefs.remind=true")
+            await use(A, MULTI); await A.home(); await A.wait(500)
+            p = await A.ev("(document.querySelector('.rm-ask')||{}).innerText||''")
+            DUE = "NutRemind.due(Date.now()).map(x=>Nutcade.S.txs.find(t=>t.id===x.id)).map(t=>[t.unit||'sat',t.amount])"
+            due = await A.ev(DUE)
+            await A.ev("Nutcade.render()"); await A.wait(300); p = await A.ev("(document.querySelector('.rm-ask')||{}).innerText||''")
+            if await A.ev(DUE) != due: due = await A.ev(DUE); await A.ev("Nutcade.render()"); await A.wait(300); p = await A.ev("(document.querySelector('.rm-ask')||{}).innerText||''")
+            want = {}
+            for u, n in due: want[u] = want.get(u, 0) + n
+            usd = await A.ev(f"NutUnits.money({want.get('usd', 0)},'usd')"); sat = await A.ev(f"NutUnits.money({want.get('sat', 0)},'sat')")
+            check('reminder: the unclaimed tokens are listed each in its own unit, with one total per unit ("100 SAT · 1.00 USD in all"), never summed',
+                  not e and want.get('usd') and want.get('sat') and usd in p and sat in p and 'in all' in p and f"{want['sat'] + want['usd']:,}" not in p.replace(sat, '').replace(usd, ''), (p[:300], want))
+        await section('remind', remind)
+
+        # =================== the duress PIN's wallet coming back, per unit ===================
+        async def duress():
+            Z = await wallet(b, 'u-Z'); await Z.create()
+            await add_account(Z, MULTI, 'sat'); await deposit(Z, MULTI, '600')
+            await Z.ev("Nutcade.closeSheet()"); await Z.click('[data-act=tab][data-tab=settings]'); await Z.wait(150); await Z.click('[data-act=pinSet]'); await Z.wait(200)
+            await pad(Z, PIN); await Z.wait(300); await pad(Z, PIN)
+            await Z.until("Nutcade.vault.on && Nutcade.vault.open", 20000); await Z.wait(500); await Z.ev("Nutcade.closeSheet()")
+            await Z.click('[data-act=tab][data-tab=settings]'); await Z.wait(200); await Z.click('[data-act=duressOpen]'); await Z.wait(250)
+            await pad(Z, PIN); await Z.wait(800); await pad(Z, DPIN); await Z.wait(300); await pad(Z, DPIN); await Z.until("!!document.querySelector('#duressAmt')", 8000)
+            await Z.fill('#duressAmt', '200'); await Z.click('[data-act=duressMake]'); await Z.until("/READY/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 30000)
+            await Z.ev("Nutcade.closeSheet()")
+            # in the duress PIN's wallet: some USD comes in too
+            await Z.pg.reload(); await Z.wait(700); await unlock(Z, DPIN)
+            await add_account(Z, MULTI, 'usd'); ok, _, _ = await deposit(Z, USD, '0.75')
+            dsat, dusd = await bal(Z, MULTI), await bal(Z, USD)
+            await Z.pg.reload(); await Z.wait(700); await unlock(Z, PIN)
+            usd0 = await bal(Z, USD)
+            await Z.click('[data-act=tab][data-tab=settings]'); await Z.wait(200); await Z.click('[data-act=duressOpen]'); await Z.wait(250)
+            await pad(Z, PIN); await Z.until("!!document.querySelector('[data-act=duressOff]')", 8000)
+            await Z.click('[data-act=duressOff]'); await Z.wait(300)
+            await Z.ev("(document.querySelector('#toast')||{}).innerText=''")
+            await Z.click('[data-act=duressOffGo]'); await Z.until("!document.querySelector('[data-act=duressOffGo]')", 60000); await Z.wait(800)
+            t = await Z.toast()
+            check('duress: its SAT and its 0.75 USD come back, each into its own account here', ok and dusd == 75 and await bal(Z, USD) == usd0 + 75, (ok, dsat, dusd, await bal(Z, USD), usd0))
+            check('duress: the notice names each unit ("… SAT · 0.75 USD came back"), never one number', '0.75 USD' in t and 'SAT' in t and f"{dsat + 75}" not in t, (t, dsat))
+            await Z.pg.context.close()
+        await section('duress', duress)
+
         # =================== wallet sync: SAT coins in, USD coins out ===================
         async def sync():
             w = ctx.get('J')
@@ -490,6 +745,13 @@ async def main():
                     try{{const c=JSON.parse(CashuLib.nip44.v2.decrypt({J(e['content'])}, ck)); return c.filter(t=>t[0]==='mint').map(t=>t[1])}}catch(e){{return []}}}})()"""))
             check('sync: the wallet event lists the mint once, by its own address (never an account key)',
                   MULTI in mints and not any('|' in m for m in mints), mints)
+            sw = await w.ev("NutUnits.syncWant()")
+            check('sync: the wallet event it writes carries no counter of a USD keyset and no gone mark of a USD token',
+                  sw['unitKs'] and not (set(sw['counters']) & set(sw['unitKs'])) and sw['gone'] == await w.ev("Nutcade.S.txs.filter(t=>t.type==='out'&&t.status==='pending'&&Array.isArray(t.sent)&&NutUnits.unit(t.mint)==='sat').reduce((n,t)=>n+t.sent.length,0)"),
+                  sw)
+            # the mint-list backup (NUT-27) publishes mint addresses only
+            await w.until("!!Nutcade.S.prefs.mintBackupList", 20000)
+            check('mint-list backup: what was published to the relays is the mint address, never "…|usd"', await w.ev("Nutcade.S.prefs.mintBackupList") == MULTI, await w.ev("Nutcade.S.prefs.mintBackupList"))
             usd0 = await bal(w, USD)
             r = await w.ev("NutSync.pull().then(r=>r,e=>({error:e.message}))")
             check('sync: a read adds nothing to the USD account (its coins are never adopted from relays)',

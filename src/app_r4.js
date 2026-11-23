@@ -211,7 +211,7 @@ function bossSVG(hurt, dead) {
 const splitOf = r => r && r.split;
 // each payment counts as what the friend sent (before the mint's swap fee), up to one share
 const hitOf = (r, x) => Math.min(r.split.share, num(x.amount) + num(x.fee));
-const splitGot = r => r.paid.map(txById).filter(Boolean).reduce((t, x) => t + hitOf(r, x), 0);
+const splitGot = r => r.paid.map(txById).filter(x => x && txUnit(x) === (r.unit || 'sat')).reduce((t, x) => t + hitOf(r, x), 0);   // (only payments in the bill's own unit count)
 const splitLeft = r => Math.max(0, r.split.need - splitGot(r));
 const splitOpen = () => S.requests.filter(r => r.split && splitLeft(r) > 0 && Date.now() - r.created < 14 * 86400e3);
 function openSplit() {
@@ -227,7 +227,7 @@ function openSplit() {
 }
 function splitHTML(r, hurt) {
   const sp = r.split, left = splitLeft(r), dead = left === 0, pct = Math.round(left / sp.need * 100);
-  const hits = r.paid.map(txById).filter(Boolean);
+  const hits = r.paid.map(txById).filter(x => x && txUnit(x) === (r.unit || 'sat'));
   return `<div class="boss ${dead ? 'won' : ''}">
       <div class="boss-name">${dead ? 'BOSS DEFEATED!' : 'BILL BOSS'}</div>
       ${bossSVG(hurt, dead)}
@@ -322,8 +322,8 @@ function healthPanel() {
   </div>`;
 }
 function mintHealthLine(m) {
-  const h = healthOf(m.url);
-  return `<div class="tiny health ${h.cls}"><span class="nowrap hl"><span class="dot ${h.cls === 'bad' ? 'off' : ''}"></span><span>${h.label}</span></span>${health[m.url] ? `<span class="muted">${timeAgo(health[m.url].at)}</span>` : ''}</div>`;
+  const h = healthOf(m.url), at = health[acctUrl(m.url)];   // (a mint's health is the mint's: its accounts share it)
+  return `<div class="tiny health ${h.cls}"><span class="nowrap hl"><span class="dot ${h.cls === 'bad' ? 'off' : ''}"></span><span>${h.label}</span></span>${at ? `<span class="muted">${timeAgo(at.at)}</span>` : ''}</div>`;
 }
 function openMove(from, to, amount) {
   const src = satMints().filter(m => balanceOf(m.url) > 0 && supports(m, 'melt', 'bolt11'));
@@ -368,10 +368,13 @@ async function doMove(mv) {
 /* ---------- CSV export (all transactions, or one day's sales) ---------- */
 function exportCsv(list, name) {
     const q = v => { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    // amount_sat and fee_sat are in the line's own unit's smallest step (SAT, or cents for USD, EUR and CHF): `unit` says which, and the
-    // price columns are only ever filled for SAT (NUTCADE never converts another unit)
-    const head = ['date', 'direction', 'method', 'amount_sat', 'fee_sat', 'status', 'mint', 'note', 'tags', 'contact', 'fiat_currency', 'btc_price', 'fiat_value', 'unit'];
-    const rows = list.map(t => [new Date(t.ts).toISOString(), t.type === 'in' ? 'received' : 'sent', { ln: 'lightning', ecash: 'ecash', onchain: 'on-chain' }[t.method] || t.method, t.amount || 0, t.fee || 0, t.status, t.mint, t.note || '', tagsOf(t.note).join(' '), t.contactName || '', t.fx ? t.fx.cur : '', t.fx ? t.fx.rate : '', t.fx && t.amount ? (t.amount / 1e8 * t.fx.rate).toFixed(2) : '', txUnit(t)]);
+    // A list of SAT lines only is written exactly as before 1.31 (amount_sat, fee_sat, no unit column). One with any USD, EUR or
+    // CHF line has amount and fee columns written in each line's own unit as you'd read it (1200 for SAT, 12.50 for USD) and a
+    // unit column saying which; the price columns are only ever filled for SAT (NUTCADE never converts another unit). The
+    // mint column is always the mint's address.
+    const multi = list.some(t => txUnit(t) !== 'sat'), cell = (n, t) => multi ? fmtUEn(n || 0, txUnit(t)) : n || 0;
+    const head = ['date', 'direction', 'method', multi ? 'amount' : 'amount_sat', multi ? 'fee' : 'fee_sat', 'status', 'mint', 'note', 'tags', 'contact', 'fiat_currency', 'btc_price', 'fiat_value'].concat(multi ? ['unit'] : []);
+    const rows = list.map(t => [new Date(t.ts).toISOString(), t.type === 'in' ? 'received' : 'sent', { ln: 'lightning', ecash: 'ecash', onchain: 'on-chain' }[t.method] || t.method, cell(t.amount, t), cell(t.fee, t), t.status, t.mint ? acctUrl(t.mint) : t.mint, t.note || '', tagsOf(t.note).join(' '), t.contactName || '', t.fx ? t.fx.cur : '', t.fx ? t.fx.rate : '', t.fx && t.amount ? (t.amount / 1e8 * t.fx.rate).toFixed(2) : ''].concat(multi ? [txUnit(t)] : []));
     const text = '\ufeff' + [head, ...rows].map(r => r.map(q).join(',')).join('\r\n');
     try {
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));

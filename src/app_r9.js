@@ -236,7 +236,7 @@ function ksLine(m) {
   if (ks.st === 'ask') say.push(...ksAskText(ks));
   if (ksRecent(ks.last)) { if (ks.last.n) say.push(ks.last.n === 1 ? '1 coin moved off an old keyset' : `${fmt(ks.last.n)} coins moved off an old keyset`); if (ks.last.t) say.push(`${fmt(ks.last.t)} small coins combined`); if (ks.last.fee) say.push(`Fee ${money(ks.last.fee)}`); }
   if (ksRecent(ks.spent)) say.push(ks.spent.n === 1 ? '1 coin was already spent elsewhere' : `${fmt(ks.spent.n)} coins were already spent elsewhere`);
-  if (aside.length) say.push(aside.length === 1 ? `1 coin (${money(sum(aside))}) is set aside: the mint no longer accepts it.` : `${fmt(aside.length)} coins (${money(sum(aside))}) are set aside: the mint no longer accepts them.`, 'NUTCADE offers them to the mint again at each check-up.');
+  if (aside.length) say.push(aside.length === 1 ? `1 coin (${moneyAt(m.url, sum(aside))}) is set aside: the mint no longer accepts it.` : `${fmt(aside.length)} coins (${moneyAt(m.url, sum(aside))}) are set aside: the mint no longer accepts them.`, 'NUTCADE offers them to the mint again at each check-up.');
   if (ks.st === 'refused') say.push('The mint turned the check-up down. Your coins stay as they are; NUTCADE tries again later.');
   if (ks.st === 'wait') say.push("Waiting for the mint's answer about the check-up.");
   if (ks.st === 'down') say.push("Couldn't reach the mint for the check-up. NUTCADE tries again later.");

@@ -71,11 +71,11 @@ async function rmCheck(url) {
 }
 function rmPanel() {
   const due = rmShown(); if (!due.length) return '';
-  const n = due.length, soon = due.filter(x => x.soon).length, total = due.reduce((s, x) => s + num(x.t.amount), 0);
-  const rows = due.slice(0, RM_SHOW).map(({ t, soon }) => `<button class="linkbtn rm-row" data-act="tx" data-id="${esc(t.id)}"><span data-noi18n>${esc(fmtDate(t.ts))}</span> · <span>${money(t.amount)}</span>${t.note ? ` · <span data-noi18n>${esc(t.note)}</span>` : ''}${soon ? ' · <span class="rm-soon">KEYS RETIRING</span>' : ''}</button>`).join('');
+  const n = due.length, soon = due.filter(x => x.soon).length, total = moneyList(perUnit(due.map(x => x.t)));   // (one total per unit)
+  const rows = due.slice(0, RM_SHOW).map(({ t, soon }) => `<button class="linkbtn rm-row" data-act="tx" data-id="${esc(t.id)}"><span data-noi18n>${esc(fmtDate(t.ts))}</span> · <span>${moneyU(t.amount, txUnit(t))}</span>${t.note ? ` · <span data-noi18n>${esc(t.note)}</span>` : ''}${soon ? ' · <span class="rm-soon">KEYS RETIRING</span>' : ''}</button>`).join('');
   return `<div class="panel rm-ask" data-n="${n}"><span class="h2">Unclaimed tokens</span>
     <span class="tiny">${n === 1 ? '1 token you sent is still unclaimed — take it back?' : `${n} tokens you sent are still unclaimed — take them back?`}</span>
-    <span class="tiny">${money(total)} in all. Taking a token back cancels it: whoever has it can no longer claim it.</span>
+    <span class="tiny">${total} in all. Taking a token back cancels it: whoever has it can no longer claim it.</span>
     ${soon ? `<span class="tiny rm-warn">${soon === 1 ? 'Its mint is retiring the keys of 1 of them. Once the mint drops those keys, its sats are lost for everyone.' : `Their mints are retiring the keys of ${soon} of them. Once a mint drops those keys, their sats are lost for everyone.`}</span>` : ''}
     <div class="rm-list">${rows}${n > RM_SHOW ? `<span class="tiny muted">${n - RM_SHOW} more in Notes</span>` : ''}</div>
     <div class="row wrap"><button class="btn sm gold" data-act="rmTake">${n === 1 ? 'Take it back' : 'Take them back'}</button><button class="btn sm" data-act="rmLater">Later</button></div></div>`;
@@ -109,7 +109,7 @@ async function rmTakeAll() {
   const r = { back: 0, claimed: 0, part: 0, bad: [] };
   for (const { t } of rmShown()) {
     try { const x = await rmTakeOne(t); if (x === 'back') r.back++; else if (x === 'claimed') r.claimed++; else if (x === 'part') r.part++; }
-    catch (e) { r.bad.push(`${money(t.amount)}: ${friendly(e, t.mint).message}`); }
+    catch (e) { r.bad.push(`${moneyU(t.amount, txUnit(t))}: ${friendly(e, t.mint).message}`); }
   }
   return r;
 }

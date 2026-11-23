@@ -72,7 +72,36 @@ function unitTotals() {
   const t = {}; for (const m of S.mints) { const u = acctUnit(m.url); t[u] = (t[u] || 0) + balanceOf(m.url); }
   return UNIT_LIST.filter(u => u in t).map(u => [u, t[u]]);
 }
-const heldAny = () => S.mints.some(m => balanceOf(m.url) > 0);
+// any ecash at all, in any unit (what decides whether a new phrase, a restore, an import or a reset has money to look after;
+// totalBalance() is SAT only)
+const anyBalance = () => Object.keys(S.proofs || {}).some(k => sum(S.proofs[k]) > 0);
+const otherHeld = () => Object.keys(S.proofs || {}).some(k => !isSatAcct(k) && sum(S.proofs[k]) > 0);
+// totals of a list, one per unit ({ sat: 1200, usd: 150 }): never one number across units
+function perUnit(list, amt = x => x.amount, unit = x => txUnit(x)) { const t = {}; for (const x of list || []) { const u = unit(x), n = num(amt(x)); if (n) t[u] = (t[u] || 0) + n; } return t; }
+const addUnit = (t, u, n) => { if (num(n)) t[u] = (t[u] || 0) + num(n); return t; };
+// "1,200 SAT · 1.50 USD" (SAT alone reads exactly as money() always has); nothing at all reads as 0 SAT
+function moneyList(t, sep = ' · ') { const ps = UNIT_LIST.filter(u => num(t && t[u])).map(u => moneyU(t[u], u)); return ps.length ? ps.join(sep) : money(0); }
+const listEmpty = t => !UNIT_LIST.some(u => num(t && t[u]));
+// what this wallet holds, unit by unit
+const heldMoney = () => moneyList(Object.fromEntries(unitTotals()));
+// every mint address once (a mint's USD account is the same mint as its SAT account): what is written down or published
+const mintAddrs = () => [...new Set(S.mints.map(m => acctUrl(m.url)))];
+// a mint address that came from outside (a token, a payment, a request, another service): an address only, never an
+// account key. An address with '|' in it is refused, so "https://m|usd" can never name an account here.
+function extUrl(u) { const s = normUrl1(u); if (s.includes('|')) throw Object.assign(new Error("This mint address isn't valid."), { keep: true }); return s; }
+const extUrlOr = u => { try { return extUrl(u); } catch (e) { return null; } };
+// a token in a unit NUTCADE doesn't hold is refused before anything is saved or claimed
+const unitErr = u => Object.assign(new Error(`This token is in ${unitCode(u)}. NUTCADE holds SAT, USD, EUR and CHF.`), { keep: true });
+// the keysets of the USD, EUR and CHF accounts (wallet sync never publishes their counters or their coins)
+function unitKsIds() {
+  const ids = new Set(), add = ps => { for (const p of ps || []) if (p && p.id) ids.add(p.id); };
+  for (const k of Object.keys(S.proofs || {})) if (!isSatAcct(k)) add(S.proofs[k]);
+  for (const k of Object.keys(S.mintkeys || {})) if (!isSatAcct(k)) for (const id of Object.keys(S.mintkeys[k] || {})) ids.add(id);
+  for (const k of Object.keys(wallets)) if (!isSatAcct(k)) { try { for (const ks of wallets[k].ready.keyChain.getKeysets()) ids.add(ks.id); } catch (e) {} }
+  for (const t of S.txs) if (!isSatAcct(t.mint)) add(t.sent);
+  for (const p of S.pending) if (!isSatAcct(p.mint)) add(p.proofs);
+  return ids;
+}
 // the units a mint's wallet offers (its keysets, active or not), those NUTCADE holds, in table order
 function unitsOfWallet(w) {
   try { const ks = Object.values((w.keyChain && w.keyChain.keysets) || {}); const us = new Set(ks.map(k => k && k.unit)); return UNIT_LIST.filter(u => us.has(u)); } catch (e) { return []; }
@@ -82,6 +111,16 @@ async function mintUnits(url) {
   const r = await fetch(acctUrl(normUrl(url)) + '/v1/keysets'); if (!r.ok) throw new Error(`The mint answered ${r.status}.`);
   const j = await r.json(); const us = new Set(((j && j.keysets) || []).map(k => k && k.unit));
   return UNIT_LIST.filter(u => us.has(u));
+}
+// a list of mints to scan (restore, sweep): each address also stands for every other unit account it offers, added to the
+// list in place; its SAT account is left out when the mint issues no SAT and none is held here (a scan of it can't load)
+async function unitAccounts(list) {
+  for (const u of [...list]) if (isSatAcct(u)) {
+    let us; try { us = await mintUnits(u); } catch (e) { continue; }
+    for (const x of us) { const k = acctKey(u, x); if (x !== 'sat' && !list.includes(k)) list.push(k); }
+    if (us.length && !us.includes('sat') && !S.mints.find(m => m.url === u)) list.splice(list.indexOf(u), 1);
+  }
+  return list;
 }
 // the accounts at one mint, SAT first
 const acctsAt = url => { const u = acctUrl(url); return S.mints.filter(m => acctUrl(m.url) === u).sort((a, b) => UNIT_LIST.indexOf(acctUnit(a.url)) - UNIT_LIST.indexOf(acctUnit(b.url))); };
@@ -117,27 +156,33 @@ function unitAddRow(m) {
 }
 
 /* ---------- the SAT-only entry points ----------
-   Everything beyond Lightning and ecash counts in SAT, so with another unit's account in use these do nothing and say so
-   (the click dispatcher in app.js checks this list before any of them runs, so nothing is ever half-done in the wrong unit).
-   Their buttons are also left out of the screens, so the message is a backstop, not the normal way to meet them. */
+   Everything beyond Lightning and ecash counts in SAT, so these start nothing from another unit's account: they say so and
+   spend nothing. The click dispatcher in app.js checks this list before any of them runs, against the account the action
+   acts on (its button's own mint, data-from or data-url, else the account in use), so a step on a SAT record (taking back
+   a printed token, cashing out an Extra Life, claiming a nutzap) or a SAT-only setting (the spending limit, wallet sync,
+   the Lightning address) works whichever account is in use. Their buttons are also left out of the screens, so the message
+   is a backstop, not the normal way to meet them. */
 const SAT_ACTS = new Set([
   'allEcash', 'allOnchain', 'doOnchainAddr',                                     // Send all, on-chain
-  'cashier', 'tillOpen', 'tillCsv', 'splitOpen', 'splitCreate', 'splitShow',      // cashier mode, bill split
-  'extraOpen', 'extraStart', 'extraContinue', 'extraCash', 'extraCashGo', 'extraCopy',   // Extra Life
-  'huntNew', 'huntCreate', 'huntCards', 'huntPrint', 'huntShow', 'huntOpen',      // treasure hunts
-  'ptOpen', 'ptMake', 'ptPrint', 'ptReprint', 'ptTake', 'ptTakeAll', 'ptNext', 'ptCheck',   // printed tokens
-  'chalSend', 'chalSendOpen', 'chalQR',                                           // challenges with sats on them
-  'nzSend', 'nzClaim', 'nzRetry',                                                 // nutzaps
+  'cashier', 'splitOpen', 'splitCreate',                                          // cashier mode, bill split
+  'extraOpen', 'extraStart',                                                      // a new Extra Life
+  'huntNew', 'huntCreate',                                                        // a new treasure hunt
+  'ptOpen', 'ptMake',                                                             // new printed tokens
+  'chalSend', 'chalSendOpen',                                                     // challenges with sats on them
+  'nzSend',                                                                       // sending a nutzap
   'zapOpen', 'zapQuote', 'zapContact', 'lnurlQuote', 'lnurlAll', 'lnurlwGo',       // zaps, LNURL
-  'nwcNew', 'nwcCreate',                                                          // Wallet Connect
-  'moveOpen', 'moveQuote', 'swapToken',                                           // moving sats between mints
-  'piggyEmpty', 'piggyEmptyGo', 'limOpen', 'limSave',                             // piggy bank, spending limit
-  'ctListen', 'ctPlay',                                                           // send by sound
-  'syncNow', 'syncAddMint', 'syncRestoreOn',                                      // wallet sync
-  'myAddrQR', 'contactEcash', 'contactLn', 'payContact', 'sendFrom',              // contacts (sats over Nostr)
-  'lnAddrOn', 'lnAddrMint', 'lnAddrSync', 'tipQuote',                             // Lightning address, the tip jar
+  'moveOpen', 'swapToken',                                                       // moving sats between mints (moveQuote picks SAT mints only)
+  'ctPlay',                                                                       // send by sound
+  'contactEcash', 'contactLn', 'payContact',                                      // paying a contact (sats over Nostr)
+  'tipQuote',                                                                     // the tip jar
   'duressMake'                                                                    // the duress PIN's wallet is funded in SAT
 ]);
+// the account an action acts on: its button's own mint when it names one held here, else the account in use
+function actAcct(b) {
+  const d = (b && b.dataset) || {};
+  for (const v of [d.from, d.url]) { if (!v) continue; const k = normUrl(v); if (S.mints.some(m => m.url === k)) return k; }
+  return S.active;
+}
 
 // (tests: the units table and the pieces around it, so a check can read exactly what the app uses)
 window.NutUnits = {
@@ -146,5 +191,10 @@ window.NutUnits = {
   parse: (v, u) => { try { return parseUnitAmt(v, u); } catch (e) { return { error: e.message, why: e.amount || null }; } },
   key: (url, u) => acctKey(normUrl(url), u), url: k => acctUrl(k), unit: k => acctUnit(k),
   totals: () => unitTotals(), accounts: () => S.mints.map(m => ({ url: m.url, unit: acctUnit(m.url), unitField: m.unit || null, units: m.units || [], bal: balanceOf(m.url), name: m.name })),
-  satOnly: a => SAT_ACTS.has(a), mintUnits: u => mintUnits(u), invoiceSats: i => invoiceSats(i)
+  satOnly: a => SAT_ACTS.has(a), mintUnits: u => mintUnits(u), invoiceSats: i => invoiceSats(i),
+  satTotal: () => totalBalance(), any: () => anyBalance(), held: () => heldMoney(), addrs: () => mintAddrs(),
+  payload: (p, from) => receivePayload(p, from),   // (a NUT-18 payment as it arrives over Nostr)
+  nwc: async () => { const c = { id: 'units-test', seeAll: true }; return { list: (await NWC.list_transactions(c, { unpaid: true })).transactions, balance: (await NWC.get_balance(c)).balance }; },
+  inspect: async u => { const l = await inspectMint(u); return { ksTotal: l.ksTotal, noted: Object.keys(l.keysets).length, news: (l.changes || []).filter(c => c.kind === 'new').length, keys: (reportCard(u).rows.find(r => r.k === 'Keys') || {}).g }; },
+  syncWant: () => { const w = syWalletWant(null); return { counters: w.cs.map(([id]) => id), gone: w.gone.length, mints: w.mints, unitKs: [...unitKsIds()] }; }
 };

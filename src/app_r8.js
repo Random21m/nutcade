@@ -185,7 +185,7 @@ const GUARD = {
   phone: ['Back up with my phone', 'Enter your PIN to back up your 12 words with your phone.']
 };
 const guard = { run: null, pass: null };
-const guardOn = () => !!(vault.on && vault.open && (S.seed || totalBalance() > 0));
+const guardOn = () => !!(vault.on && vault.open && (S.seed || anyBalance()));
 function pinGuard(k, fn) {
   guard.pass = null;
   if (!guardOn()) return fn();
@@ -388,9 +388,9 @@ async function duressOff() {
   if (vaultBad()) throw new Error("This browser won't save data. Free up space and try again.");   // (its part is never wiped before its sats are saved here)
   const now = raw.get('vault') || rec; now.slot = fillerSlot(); raw.set('vault', now);   // (with the wallet as just saved, its sats from there included)
   delete vault.data.duress; queueVaultWrite(); await vault.chain;
-  let back = 0;   // (claimed now where the mint answers; the rest stays saved and is claimed later, like ecash saved offline)
-  for (const id of ids) { const t = txById(id); if (!t) continue; try { const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: id, reqId: null } }); incomingClaimed({ txId: id, reqId: null }, nt); back += num(nt.amount); } catch (e) {} }
-  return back;
+  const back = {};   // (claimed now where the mint answers, one total per unit; the rest stays saved and is claimed later, like ecash saved offline)
+  for (const id of ids) { const t = txById(id); if (!t) continue; try { const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: id, reqId: null } }); incomingClaimed({ txId: id, reqId: null }, nt); addUnit(back, txUnit(nt), nt.amount); } catch (e) {} }
+  return listEmpty(back) ? '' : moneyList(back);
 }
 // Reset wallet, inside the duress PIN's wallet: that wallet starts over empty (still opened by its PIN); the rest of
 // the vault, the real wallet included, is left exactly as it was

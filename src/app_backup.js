@@ -249,7 +249,7 @@ async function phoneBackup(force) {
   // (a copy this phone saved itself, and nothing newer since, is simply updated: new words after New recovery phrase)
   const mine = cur && old && old.pk === k.pk && cur.ev.created_at <= old.at && cur.words && old.fp === await pbFp(cur.words);
   if (cur && cur.words !== mnemonic && !mine && !force) { const x = new Error('The copy on the Nostr relays for this passkey holds other 12 words, saved from another phone or another wallet. Replacing it means that phone backup is lost.'); x.fix = { act: 'phoneGoForce', label: 'Replace anyway' }; throw x; }
-  const iv = rnd(12), body = JSON.stringify({ v: 1, words: mnemonic, mints: S.mints.map(m => m.url).slice(0, 20), at: Math.floor(Date.now() / 1000) });
+  const iv = rnd(12), body = JSON.stringify({ v: 1, words: mnemonic, mints: mintAddrs().slice(0, 20), at: Math.floor(Date.now() / 1000) });
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(k.pk) }, k.aes, new TextEncoder().encode(body));
   const ts = Math.max(Math.floor(Date.now() / 1000), ((old && old.pk === k.pk && old.at) || 0) + 1, cur ? cur.ev.created_at + 1 : 0);
   const ev = L.finalizeEvent({ kind: 30078, created_at: ts, tags: [['d', PB_D]], content: JSON.stringify({ v: 1, alg: 'A256GCM', iv: b64e(iv), ct: b64e(new Uint8Array(ct)) }) }, k.sk);
