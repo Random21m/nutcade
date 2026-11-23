@@ -332,8 +332,9 @@ async def main():
               const proofs = Array.from({ length: o.n || 2 }, (_, i) => coin(i));
               return CashuLib.getEncodedToken({ mint: %s, unit: 'sat', proofs }); })""" % J(M)
             async def rb(**o):
-                t0 = time.time(); r = await bo.ev(f"(async () => {{ const t = ({mk})({J(o)}); const r = await NutP2BK.bounty({{ token: t, amount: 0, until: Date.now() + 3600e3 }}); return r ? 'ok' : null; }})()")
-                return r, time.time() - t0
+                # (only the check is timed, in the page: building up to 65 test coins there costs about a second on a slow runner)
+                r = await bo.ev(f"(async () => {{ const t = ({mk})({J(o)}); const t0 = performance.now(); const r = await NutP2BK.bounty({{ token: t, amount: 0, until: Date.now() + 3600e3 }}); return [r ? 'ok' : null, (performance.now() - t0) / 1000]; }})()")
+                return r[0], r[1]
             r = {k: await rb(**o) for k, o in {
                 'good': {}, 'plain': {'plain': True, 'noE': True}, 'slot0': {'slot': 0}, 'slot2': {'slot': 2}, 'noE': {'noE': True},
                 'badE': {'E': '02' + 'f' * 64}, 'badE2': {'E': '04' + '1' * 64}, 'otherE': {'other': True}, 'hash': {'H2': True},
@@ -353,8 +354,10 @@ async def main():
             # the same caps for a nutzap: 64 coins is the most (1.28), and its key check is one x(k·E) a coin
             # (the worst case: 63 coins blinded for Bob's receiving key, the 64th not, so every coin's x(k·E) is worked out)
             ps64 = await bo.ev("(() => { const id = Object.keys(Nutcade.S.counters)[0]; const rnd = () => CashuLib.bytesToHex(crypto.getRandomValues(new Uint8Array(32))); return Array.from({length: 65}, (_, i) => { const E = NutZap.randomPub(); return { id, amount: 1, secret: JSON.stringify(['P2PK', { nonce: rnd(), data: i >= 63 ? NutZap.randomPub() : NutP2BK.blind(__nzPriv(), E, 0) }]), C: NutP2BK.lockPub(), p2pk_e: E }; }); })()")
-            t0 = time.time(); z65 = await bo.ev(f"NutZap.event({J(await al.ev(f'__nzEv({J(ps64)}, {{u:{J(M)}, p:{J(B_PK)}, dt:11}})'))})"); t65 = time.time() - t0
-            t0 = time.time(); z64 = await bo.ev(f"NutZap.event({J(await al.ev(f'__nzEv({J(ps64[:64])}, {{u:{J(M)}, p:{J(B_PK)}, dt:12}})'))})"); t64 = time.time() - t0
+            ev65 = await al.ev(f'__nzEv({J(ps64)}, {{u:{J(M)}, p:{J(B_PK)}, dt:11}})')   # (built before the clock starts)
+            t0 = time.time(); z65 = await bo.ev(f"NutZap.event({J(ev65)})"); t65 = time.time() - t0
+            ev64 = await al.ev(f'__nzEv({J(ps64[:64])}, {{u:{J(M)}, p:{J(B_PK)}, dt:12}})')
+            t0 = time.time(); z64 = await bo.ev(f"NutZap.event({J(ev64)})"); t64 = time.time() - t0
             check('bounty: a nutzap of 65 coins is refused as bad; one of 64 blinded coins, the last not for us, is refused as not ours, in under 5 s', z65 == 'bad' and z64 == 'lock' and t64 < 5, (z65, z64, round(t65, 2), round(t64, 2)))
         await section('bounty', bounty)
 
