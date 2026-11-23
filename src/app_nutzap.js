@@ -225,7 +225,7 @@ async function nzEvent(ev) {
     proofs.push(q);
   }
   if (new Set(proofs.map(p => p.secret)).size !== proofs.length) return skip('bad');
-  if (!proofs.every(nzMine)) return skip('lock');
+  if (!proofs.every(p => nzLock(p.secret)) || !proofs.every(nzMine)) return skip('lock');   // (every lock's rules first, a JSON read each; then one x(k·E) a blinded coin)
   // the coins must be the mint's: its sat keysets, and every DLEQ proof checked against its saved keys
   if (!S.mintkeys[mint]) { try { await getWallet(mint); } catch (e) {} }
   const ks = S.mintkeys[mint];
@@ -358,7 +358,9 @@ async function nzSendTo(target, info, amount, comment) {
   const m = nzPick(info, amount), name = String(target.name || shortNpub(target.pubkey)).trim().slice(0, 40);
   const txx = { nz: { to: target.pubkey, u: m.u, relays: nzRelays(info.relays).slice(0, 8), c: String(comment || '').slice(0, 280) } };
   if (target.contactId) Object.assign(txx, { contactId: target.contactId, contactName: name });
-  const tx = await sendEcash(amount, `Nutzap to ${name}`, nzKeyOf(info.pub), m.url, { txx, blind: true });   // (blinded when Hide who gets it is on: app_p2bk.js)
+  // never blinded (app_p2bk.js), whatever Hide who gets it says: a nutzap can't come back, and kind 10019 doesn't say whether
+  // the receiver's wallet supports NUT-28 (one that doesn't, NUTCADE 1.28 among them, could never spend it)
+  const tx = await sendEcash(amount, `Nutzap to ${name}`, nzKeyOf(info.pub), m.url, { txx });
   const ok = await single('nzsend:' + tx.id, () => nzDeliverOne(tx.id)).catch(() => false);
   return { tx: txById(tx.id) || tx, ok: !!ok };
 }

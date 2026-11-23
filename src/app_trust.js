@@ -62,7 +62,7 @@ function backupFileRow() {
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
 const WHATS_NEW = [   // (v1.29.0, with the v1.28.0 items; rewrite this list at every release)
-  'New, optional and off by default: Hide who gets it (P2BK, Settings, Privacy) hides the receiver\'s key in the gifts, bounties and nutzaps you send. Turn it on only if their wallet supports it (NUTCADE 1.29 or newer does).',
+  'New, optional and off by default: Hide who gets it (P2BK, Settings, Privacy) hides the receiver\'s key in the gifts and bounties you send. Turn it on only if their wallet supports it (NUTCADE 1.29 or newer does). Nutzaps are never hidden.',
   'Nutzaps (NIP-61): send ecash zaps to people on Nostr, locked to their key so only they can claim them. Open a contact and tap Send a nutzap.',
   'New, optional and off by default: Receive nutzaps (Settings, Privacy) publishes where people can send you nutzaps, with a receiving key made from your 12 words, and claims the ones that arrive.',
   'Nutzaps are public on Nostr: anyone can see who sent one, to whom and how much.',

@@ -938,7 +938,7 @@ async function sendEcashNow(amount, note, lockTo, url, opts) {
     finally { hold.release(); }
   }
   if (sum(S.proofs[url] || []) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
-  // Pay to Blinded Key (app_p2bk.js): a gift, bounty or nutzap (opts.blind) locks blinded keys while the setting is on. Only
+  // Pay to Blinded Key (app_p2bk.js): a gift or bounty (opts.blind) locks blinded keys while the setting is on (a nutzap never). Only
   // here, where the lock is built: blindKeys blinds the receiver's key and our refund key together, never one of them alone
   const blind = !!(lockTo && opts.blind && p2bkOn());
   if (blind) opts = Object.assign({}, opts, { txx: Object.assign({}, opts.txx || {}, { blinded: true }) });   // (on the line and on its journal record)

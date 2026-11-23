@@ -31,7 +31,8 @@ PYW = os.environ.get('MINT_PY', 'python3')
 TMP = tempfile.mkdtemp(prefix='p2bk-')
 TOTAL = "Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0)"
 HEX66 = re.compile(r'0[23][0-9a-f]{64}')
-WHATS = "New, optional and off by default: Hide who gets it (P2BK, Settings, Privacy) hides the receiver's key in the gifts, bounties and nutzaps you send. Turn it on only if their wallet supports it (NUTCADE 1.29 or newer does)."
+WHATS = "New, optional and off by default: Hide who gets it (P2BK, Settings, Privacy) hides the receiver's key in the gifts and bounties you send. Turn it on only if their wallet supports it (NUTCADE 1.29 or newer does). Nutzaps are never hidden."
+GIFTNOTE = "Only NUTCADE 1.29 or newer, or another wallet that supports NUT-28, can claim it: Hide who gets it is on. Locked ecash can't be sent offline."
 
 def py(*args, inp=None):
     r = subprocess.run([PYW, os.path.join(HERE, 'p2bk_py.py')] + [str(a) for a in args], input=J(inp) if inp is not None else None,
@@ -132,8 +133,8 @@ async def main():
             await settings(al)
             txt = await al.ev("document.querySelector('#set-privacy').innerText")
             check('pref: Settings, Privacy has "Hide who gets it (P2BK)", unticked, next to the nutzap setting', 'Hide who gets it (P2BK)' in txt and txt.index('Receive nutzaps') < txt.index('Hide who gets it') and not await al.ev("document.querySelector('#p_p2bk').checked"), txt[-600:])
-            check('pref: its text says what it hides, that the receiver\'s wallet must support it (NUTCADE 1.29 or newer) or it can\'t spend it, and that gifts and bounties come back after their time',
-                  all(x in txt for x in ("Hides the receiver's key in the ecash", 'NUTCADE 1.29 or newer does', "a wallet that doesn't can't spend it", 'Gifts and bounties can be taken back after their time runs out', 'Off by default')), txt[-500:])
+            check('pref: its text says it hides the key in gifts and bounties, that the receiver\'s wallet must support it (NUTCADE 1.29 or newer) or it can\'t spend it, that it comes back after its time, and that nutzaps are never hidden',
+                  all(x in txt for x in ("Hides the receiver's key in the gifts and bounties", 'NUTCADE 1.29 or newer does', "a wallet that doesn't can't spend it", 'comes back to you after its time runs out', 'Nutzaps you send are never hidden', 'Off by default')) and 'bounties and nutzaps' not in txt, txt[-500:])
             ok1 = await set_blind(al, True)
             await al.pg.reload(); await al.wait(1200); await settings(al)
             check('pref: turned on, it stays on after a reload (saved with the wallet)', ok1 and await al.ev("Nutcade.S.prefs.p2bk") is True and await al.ev("document.querySelector('#p_p2bk').checked"))
@@ -152,7 +153,7 @@ async def main():
             vs = json.loads(py('vectors', inp=cases))
             got = [[await al.ev(f"NutP2BK.blind({J(c['p'])}, {J(v['E'])}, {i})") for i in range(4)] for c, v in zip(cases, vs)]
             check('vectors: NUTCADE\'s blinded key equals Nutshell\'s for 12 random keys, slots 0 to 3', all(g == v['blinded'] for g, v in zip(got, vs)), [(g[:1], v['blinded'][:1]) for g, v in zip(got, vs) if g != v['blinded']][:2])
-            check('vectors: Nutshell derives back a private key for each slot whose public key is that blinded key', all(v['derived_pub'] == v['blinded'] for v in vs))
+            check('vectors: NUTCADE\'s blinded key also equals the public key of the private key Nutshell\'s receiver derives (derive_blinded_private_key), every slot', all(g == v['derived_pub'] for g, v in zip(got, vs)), [(g[:1], v['derived_pub'][:1]) for g, v in zip(got, vs) if g != v['derived_pub']][:2])
             c, v = cases[0], vs[0]
             other = await al.ev(f"NutP2BK.blind({J(cases[1]['p'])}, {J(v['E'])}, 0)")
             check('vectors: another key, another slot or another E gives another blinded key', other != v['blinded'][0] and len(set(v['blinded'])) == 4 and await al.ev(f"NutP2BK.blind({J(c['p'])}, {J(vs[1]['E'])}, 0)") != v['blinded'][0])
@@ -214,12 +215,8 @@ async def main():
                 ps = [json.loads(t[1]) for t in tags(z[0], 'proof')] if z else []
                 ls = [lk(x) for x in ps]
                 o = await al.ev(f"Nutcade.S.txs.find(t=>t.nz && t.type==='out' && t.amount==={100 + on})")
-                if on:
-                    check('grid on: nutzap: the event\'s proofs carry p2pk_e, locked to Bob\'s receiving key blinded (slot 0), the lock otherwise plain', r is True and ls and all(l['e'] and HEX66.fullmatch(l['e']) and l['data'] != K['b_nzpub'] and set(l['tags']) <= {'sigflag', 'n_sigs'} for l in ls) and o.get('blinded') is True, (r, ls[:1]))
-                    sl = json.loads(py('slots', inp={'proofs': ps, 'privs': [K['b_nz']]}))
-                    check('grid on: nutzap: Nutshell finds Bob\'s receiving key at slot 0 of every coin', all(s == [[0, 0]] for s in sl), sl[:2])
-                else:
-                    check('grid off: nutzap: locked to Bob\'s receiving key itself, no p2pk_e', r is True and ls and all(l['data'] == K['b_nzpub'] and not l['e'] for l in ls) and not o.get('blinded'), (r, ls[:1]))
+                # never blinded, whatever the setting says: a nutzap can't come back, and kind 10019 doesn't say whether the receiver supports NUT-28
+                check(f'grid {tag}: nutzap: sent plain (setting {tag}): locked to Bob\'s receiving key itself, no p2pk_e on any coin, not marked blinded', r is True and ls and all(l['data'] == K['b_nzpub'] and not l['e'] and 'p2pk_e' not in p for l, p in zip(ls, ps)) and not o.get('blinded') and all('p2pk_e' not in x for x in o.get('sent') or [{}]), (r, ls[:1], o.get('blinded')))
                 i = await bo.ev(f"Nutcade.S.txs.filter(t=>t.type==='in'&&t.nz&&t.amount==={100 + on}).map(t=>t.status)")
                 check(f'grid {tag}: nutzap: Bob\'s NUTCADE takes it and claims it once ({100 + on} SAT)', got and await bo.bal() == bb0 + 100 + on and i == ['done'], (await bo.bal() - bb0, i))
             check('grid: no page errors', not al.errs and not bo.errs, (al.errs[:3], bo.errs[:3]))
@@ -316,8 +313,59 @@ async def main():
             ok = await bo.until(f"{TOTAL} >= {bb0 + 20}", 20000); await bo.wait(500)
             check('nutzap lock: claimed through the usual claim (signed with the key derived from E), 20 SAT once', ok and await bo.bal() == bb0 + 20 and not await bo.ev("Nutcade.S.txs.some(t=>t.nz&&t.type==='in'&&t.status!=='done')"), await bo.bal() - bb0)
             r5 = await res(ps, dt=7)
-            check('nutzap lock: the same coins again in a new event credit nothing', await bo.bal() == bb0 + 20, r5)
+            lines = await bo.ev("Nutcade.S.txs.filter(t=>t.type==='in'&&t.nz&&t.amount===20).map(t=>t.status)")
+            check('nutzap lock: the same coins again in a new event credit nothing and add no second line (spent: refused, one done line, none waiting)', await bo.bal() == bb0 + 20 and r5 == 'spent' and lines == ['done'] and not await bo.ev("Nutcade.S.txs.some(t=>t.nz&&t.type==='in'&&t.status==='pending')"), (r5, lines))
         await section('nzlock', nzlock)
+
+        async def bounty():
+            # readBounty (app_r5.js), the check of a bounty sent to us, on coins made here: only the lock is read (no mint), so
+            # the coins need no signature. Bob's key blinded with E for HTLC slot 1 is the one good form
+            mk = """(o => { const ids = Object.keys(Nutcade.S.counters); const id = ids[0]; const H = 'ab'.repeat(32);
+              const rnd = () => CashuLib.bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+              const coin = (i) => { const e = rnd(), E = CashuLib.bytesToHex(CashuLib.getPubKeyFromPrivKey(CashuLib.hexToBytes(e)));
+                const slot = o.slot === undefined ? 1 : o.slot, mine = o.plain ? NutP2BK.lockPub() : NutP2BK.blind(__lockPriv(), E, slot);
+                const keys = Array.from({ length: o.before || 0 }, () => NutZap.randomPub()).concat([mine]); while (keys.length < (o.nkeys || 1)) keys.unshift(NutZap.randomPub());
+                const tags = [['pubkeys', ...keys], ['locktime', String(Math.floor(Date.now()/1000) + 3600)], ['refund', ...(Array(o.nrefund || 1).fill(0).map(() => NutZap.randomPub()))]];
+                const p = { id, amount: 1, secret: JSON.stringify(['HTLC', { nonce: rnd(), data: o.H2 && i ? 'cd'.repeat(32) : H, tags }]), C: NutP2BK.lockPub() };
+                if (!o.noE) p.p2pk_e = o.other ? NutZap.randomPub() : o.E !== undefined ? o.E : E;
+                return p; };
+              const proofs = Array.from({ length: o.n || 2 }, (_, i) => coin(i));
+              return CashuLib.getEncodedToken({ mint: %s, unit: 'sat', proofs }); })""" % J(M)
+            async def rb(**o):
+                t0 = time.time(); r = await bo.ev(f"(async () => {{ const t = ({mk})({J(o)}); const r = await NutP2BK.bounty({{ token: t, amount: 0, until: Date.now() + 3600e3 }}); return r ? 'ok' : null; }})()")
+                return r, time.time() - t0
+            r = {k: await rb(**o) for k, o in {
+                'good': {}, 'plain': {'plain': True, 'noE': True}, 'slot0': {'slot': 0}, 'slot2': {'slot': 2}, 'noE': {'noE': True},
+                'badE': {'E': '02' + 'f' * 64}, 'badE2': {'E': '04' + '1' * 64}, 'otherE': {'other': True}, 'hash': {'H2': True},
+                'pos2': {'before': 1, 'slot': 2}, 'pos2wrong': {'before': 1, 'slot': 1},
+                'keys10': {'nkeys': 10, 'slot': 10}, 'keys11': {'nkeys': 11, 'slot': 11}, 'refund11': {'nrefund': 11},
+                'coins64': {'n': 64}, 'coins65': {'n': 65}, 'coins64keys10': {'n': 64, 'nkeys': 10, 'slot': 10}}.items()}
+            print('bounty timings', {k: round(v[1], 2) for k, v in r.items()})
+            check('bounty: Bob\'s key blinded with the coin\'s E for HTLC slot 1 is read as his bounty; the plain key with no E too', r['good'][0] == 'ok' and r['plain'][0] == 'ok', r)
+            check('bounty: his key blinded for slot 0 or slot 2 in the first "pubkeys" place is refused', r['slot0'][0] is None and r['slot2'][0] is None, r)
+            check('bounty: a blinded key with no E, an E that is not a point (02 off the curve, 04) or another valid E is refused', all(r[k][0] is None for k in ('noE', 'badE', 'badE2', 'otherE')), r)
+            check('bounty: coins with different hashes are refused', r['hash'][0] is None, r)
+            check('bounty: his key in the second "pubkeys" place is read for slot 2, and refused when blinded for slot 1 there', r['pos2'][0] == 'ok' and r['pos2wrong'][0] is None, r)
+            check('bounty: 10 keys is read; 11 keys or 11 refund keys is refused', r['keys10'][0] == 'ok' and r['keys11'][0] is None and r['refund11'][0] is None, r)
+            check('bounty: 64 coins is read; 65 coins is refused', r['coins64'][0] == 'ok' and r['coins65'][0] is None, r)
+            check('bounty: the oversized ones are refused at once (under 1 s each, no point math); the largest allowed (64 coins, 10 keys, ours last) under 10 s',
+                  all(r[k][1] < 1.0 for k in ('keys11', 'refund11', 'coins65')) and r['coins64keys10'][0] == 'ok' and r['coins64keys10'][1] < 10, {k: round(v[1], 2) for k, v in r.items()})
+            # the same caps for a nutzap: 64 coins is the most (1.28), and its key check is one x(k·E) a coin
+            # (the worst case: 63 coins blinded for Bob's receiving key, the 64th not, so every coin's x(k·E) is worked out)
+            ps64 = await bo.ev("(() => { const id = Object.keys(Nutcade.S.counters)[0]; const rnd = () => CashuLib.bytesToHex(crypto.getRandomValues(new Uint8Array(32))); return Array.from({length: 65}, (_, i) => { const E = NutZap.randomPub(); return { id, amount: 1, secret: JSON.stringify(['P2PK', { nonce: rnd(), data: i >= 63 ? NutZap.randomPub() : NutP2BK.blind(__nzPriv(), E, 0) }]), C: NutP2BK.lockPub(), p2pk_e: E }; }); })()")
+            t0 = time.time(); z65 = await bo.ev(f"NutZap.event({J(await al.ev(f'__nzEv({J(ps64)}, {{u:{J(M)}, p:{J(B_PK)}, dt:11}})'))})"); t65 = time.time() - t0
+            t0 = time.time(); z64 = await bo.ev(f"NutZap.event({J(await al.ev(f'__nzEv({J(ps64[:64])}, {{u:{J(M)}, p:{J(B_PK)}, dt:12}})'))})"); t64 = time.time() - t0
+            check('bounty: a nutzap of 65 coins is refused as bad; one of 64 blinded coins, the last not for us, is refused as not ours, in under 5 s', z65 == 'bad' and z64 == 'lock' and t64 < 5, (z65, z64, round(t65, 2), round(t64, 2)))
+        await section('bounty', bounty)
+
+        async def giftnote():
+            async def note(on):
+                await set_blind(al, on); await al.home(); await al.click('[data-act=send]'); await al.wait(150); await al.pg.check('#giftOn'); await al.wait(100)
+                t = await al.ev("document.querySelector('#giftBox').innerText"); await al.ev("Nutcade.closeSheet()"); return t
+            on_t, off_t = await note(True), await note(False)
+            check('gift sheet: with Hide who gets it on it says only NUTCADE 1.29 or newer or a NUT-28 wallet can claim it (no cashu.me)', GIFTNOTE in on_t and 'cashu.me' not in on_t, on_t[-250:])
+            check('gift sheet: with it off it says NUTCADE or cashu.me with the same 12 words, as before', 'cashu.me using the same 12 words' in off_t and 'NUT-28' not in off_t, off_t[-250:])
+        await section('giftnote', giftnote)
 
         async def nutshell():
             # a Nutshell-made P2BK token locked to Bob's key, claimed by NUTCADE; one to his receiving key, sent as a nutzap
@@ -362,6 +410,7 @@ async def main():
         await section('extralife', extralife)
 
         async def crash():
+            # a blinded gift (nutzaps are never blinded) to Bob's key, the swap held and the page reloaded mid-send
             await set_blind(al, True)
             ab0, bb0 = await al.bal(), await bo.bal()
             SW = re.compile(re.escape(M) + r'/v1/swap$')
@@ -372,16 +421,16 @@ async def main():
                 try: await route.fulfill(response=r)
                 except Exception: pass
             await al.pg.route(SW, held)
-            await al.ev(f"NutZap.send({{pubkey:{J(B_PK)}, name:'Bob'}}, 130, 'crash').catch(()=>{{}}); 0")
+            await al.ev(f"Nutcade.r8.sendEcash(130, 'crash', {J(K['b_pub'])}, undefined, {{blind:true, locktime: Math.floor(Date.now()/1000)+3600, txx:{{lockUntil:(Math.floor(Date.now()/1000)+3600)*1000, giftTo:'Bob'}}}}).catch(()=>{{}}); 0")
             rec = await al.until("Nutcade.S.ops.some(o=>o.kind==='send'&&o.outs.length)", 10000); await al.wait(800)
             outs_e = await al.ev("(Nutcade.S.ops.find(o=>o.kind==='send')||{outs:[]}).outs.filter(o=>o.send).map(o=>o.e)")
             await al.pg.reload(); await al.wait(800); await al.pg.unroute(SW)
-            await al.until("Nutcade.S.ops.length===0", 60000); await al.wait(500); await al.ev("NutZap.tick(true)")
-            ok = await bo.until(f"{TOTAL} >= {bb0 + 130}", 25000); await al.wait(500)
-            o = await al.ev("Nutcade.S.txs.filter(t=>t.nz&&t.type==='out'&&t.amount===130)")
+            await al.until("Nutcade.S.ops.length===0", 60000); await al.wait(500)
+            o = await al.ev("Nutcade.S.txs.filter(t=>t.type==='out'&&t.amount===130&&t.lockUntil)")
             check('crash: the journal record holds each locked output\'s E before the mint is asked', rec and outs_e and all(e and HEX66.fullmatch(e) for e in outs_e), outs_e)
-            check('crash: after a reload the coins come back as the blinded nutzap, with their E, marked blinded', len(o) == 1 and o[0].get('blinded') is True and all(x.get('p2pk_e') for x in o[0]['sent']) and sorted(x['p2pk_e'] for x in o[0]['sent']) == sorted(outs_e), o[:1] and {k: o[0].get(k) for k in ('blinded', 'delivered')})
-            check('crash: delivered once, Bob credited 130 SAT once, the sender down exactly 130', ok and await bo.bal() == bb0 + 130 and await al.bal() == ab0 - 130 and len([e for e in evs(9321, A_PK) if e['content'] == 'crash']) == 1, (await bo.bal() - bb0, ab0 - await al.bal()))
+            check('crash: after a reload the coins come back as the blinded gift, with their E, marked blinded', len(o) == 1 and o[0].get('blinded') is True and all(x.get('p2pk_e') for x in o[0]['sent']) and sorted(x['p2pk_e'] for x in o[0]['sent']) == sorted(outs_e), o[:1] and {k: o[0].get(k) for k in ('blinded', 'status')})
+            r = await bo.ev(f"Nutcade.r8.recv({J(o[0]['token'] if o else '')}, 'crash gift').then(t=>t.amount, e=>e.message)")
+            check('crash: Bob claims it once (130 SAT), the sender down exactly 130', r == 130 and await bo.bal() == bb0 + 130 and await al.bal() == ab0 - 130, (r, await bo.bal() - bb0, ab0 - await al.bal()))
         await section('crash', crash)
 
         async def tokens():
@@ -395,10 +444,31 @@ async def main():
             check('token: a blinded token decodes with every coin\'s p2pk_e (as on the line)', [x['p2pk_e'] for x in d] == [x['p2pk_e'] for x in g['sent']], (d[:1], g['sent'][:1]))
             re4 = await al.ev(f"CashuLib.getEncodedToken({{mint:{J(M)}, unit:'sat', proofs: __dec({J(g['token'])})}})")
             check('token: encoded again it is the same token (cashuB keeps "pe")', re4 == g['token'], (re4[:60], g['token'][:60]))
+            # cashuA (V3): the bundled cashu-ts has no V3 encoder ({version:3} is ignored and a cashuB comes out: asserted, so a
+            # library change is noticed), so the cashuA is written by hand, as wallets that still make V3 (Nutshell) write it,
+            # and NUTCADE must read every coin's p2pk_e from it
             v3 = await al.ev(f"(()=>{{ try {{ return CashuLib.getEncodedToken({{mint:{J(M)}, unit:'sat', proofs: __dec({J(g['token'])})}}, {{version:3}}); }} catch (e) {{ return 'ERR '+e.message; }} }})()")
-            if v3.startswith('cashuA'):
-                d3 = await al.ev(f"__dec({J(v3)})")
-                check('token: as a cashuA token too, p2pk_e survives', [x['p2pk_e'] for x in d3] == [x['p2pk_e'] for x in g['sent']], d3[:1])
+            check('token: the library writes no cashuA (V3) token: asked for one it writes the same cashuB', v3 == g['token'], v3[:40])
+            ta = await al.ev(f"'cashuA' + btoa(JSON.stringify({{token:[{{mint:{J(M)}, proofs: __dec({J(g['token'])}).map(p=>({{id:p.id, amount:p.amount, secret:p.secret, C:p.C, p2pk_e:p.p2pk_e}}))}}], unit:'sat'}})).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')")
+            d3 = await al.ev(f"__dec({J(ta)})")
+            check('token: a cashuA (V3) token of the blinded coins is read as a token with every coin\'s p2pk_e', ta.startswith('cashuA') and await al.ev(f"Nutcade.classify({J(ta)}).kind") == 'token' and [x['p2pk_e'] for x in d3] == [x['p2pk_e'] for x in g['sent']], d3[:1])
+            # sound: the compact form has no room for E, so a blinded token goes as its whole text; a plain one is packed as before
+            sb = await al.ev(f"(()=>{{ const b = Nutcade.soundBytes({J(g['token'])}); return {{ first: b[0], back: Nutcade.soundText(b), secs: Chiptune.seconds(b) }}; }})()")
+            check('sound: a blinded gift is not packed (no 0xC1 compact form) but sent as its text, and comes back as the same token with its p2pk_e', sb['first'] != 0xC1 and sb['back'] == g['token'] and [x['p2pk_e'] for x in await al.ev(f"__dec({J(sb['back'])})")] == [x['p2pk_e'] for x in g['sent']] and sb['secs'] > 0, {k: sb[k] for k in ('first', 'secs')})
+            sbf = await al.ev(f"Nutcade.soundBytes({J(g['token'])}, false)[0]")
+            check('sound: "Faster, no proof" does not pack it either', sbf != 0xC1, sbf)
+            plain = await al.ev("Nutcade.r8.sendEcash(9, 'plain for sound').then(t=>t.token)")
+            sp = await al.ev(f"(()=>{{ const b = Nutcade.soundBytes({J(plain)}); return {{ first: b[0], n: b.length, back: __dec(Nutcade.soundText(b)), orig: __dec({J(plain)}) }}; }})()")
+            check('sound: an unblinded token is still packed (0xC1) and comes back with the same coins', sp['first'] == 0xC1 and [(x['secret'], x['C'], x['amount']) for x in sp['back']] == [(x['secret'], x['C'], x['amount']) for x in sp['orig']] and len(plain) > sp['n'], {k: sp[k] for k in ('first', 'n')})
+            await al.ev(f"Nutcade.r8.recv({J(plain)}, 'back', {{own:true, hand:true}}).catch(()=>0)")
+            # the gift's own line: Play as sound opens the sound sheet with the text form (no error)
+            if await al.ev("!!(window.Chiptune && Chiptune.canPlay && Chiptune.canPlay())"):
+                await al.click('[data-act=tab][data-tab=history]'); await al.wait(200)
+                await al.ev(f"document.querySelector('[data-act=tx][data-id={J(g['id'])}]').click()"); await al.wait(250)
+                await al.ev("(document.querySelector('.sheet [data-act=ctPlay]')||{click(){}}).click()"); await al.wait(400)
+                st = await al.sheet_text()
+                check('sound: Play as sound on the blinded gift opens the sound sheet (the text form) without an error', 'Hold this phone near' in st and not al.errs, st[:200])
+                await al.ev("Chiptune.stop && Chiptune.stop(); Nutcade.closeSheet()")
             # the backup, restored with the 12 words on a new phone, takes the gift back there (this phone's own return held off meanwhile)
             await al.pg.route(SWA, down)
             d = await al.ev("Nutcade.r8.backupData()")
@@ -452,7 +522,7 @@ async def main():
         await section('duress', duress)
 
         async def langs():
-            new = ["Hide who gets it (P2BK)", "Receiver", "Hidden in the ecash (P2BK)", WHATS]
+            new = ["Hide who gets it (P2BK)", "Receiver", "Hidden in the ecash (P2BK)", WHATS, GIFTNOTE]
             page = urllib.request.urlopen(URL, timeout=10).read().decode('utf-8')
             check('langs: the What\'s new list has the P2BK line', J(WHATS)[1:-1].replace("'", "\\'") in page or WHATS.replace("'", "\\'") in page)
             for lang in ('es', 'pt', 'de', 'fr'):

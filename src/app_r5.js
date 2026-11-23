@@ -85,13 +85,23 @@ async function readBounty(bo, rec) {
   try {
     const tok = cleanToken(String(bo.token || '')); const d = await decodeTok(tok);
     let H = null;
-    for (const p of d.proofs) {
-      const sec = JSON.parse(p.secret); if (sec[0] !== 'HTLC') return null;
-      const keys = ((sec[1].tags || []).find(t => t[0] === 'pubkeys') || []).slice(1);
-      // our key, or (Pay to Blinded Key, app_p2bk.js) our key blinded with the coin's E: the "pubkeys" keys are slots 1, 2...
-      const E = p.p2pk_e === undefined ? null : p2bkE(p.p2pk_e); if (p.p2pk_e !== undefined && !E) return null;
-      if (!keys.some((k, j) => p2bkMine(k, myLockPub(), myLockPriv(), E, j + 1))) return null;
+    // (E is the sender's: no point math on more coins or keys than a bounty of ours ever has, app_p2bk.js)
+    if (!d.proofs.length || d.proofs.length > P2BK_MAX_COINS) return null;
+    const locks = [];
+    for (const p of d.proofs) {   // the cheap checks of every coin first
+      const sec = JSON.parse(p.secret); if (!Array.isArray(sec) || sec[0] !== 'HTLC' || !sec[1] || typeof sec[1].data !== 'string') return null;
+      const tg = k => ((sec[1].tags || []).find(t => Array.isArray(t) && t[0] === k) || []).slice(1);
+      const keys = tg('pubkeys'); if (!keys.length || keys.length > P2BK_MAX_KEYS || tg('refund').length > P2BK_MAX_KEYS) return null;
+      if (p.p2pk_e !== undefined && !p2bkE(p.p2pk_e)) return null;
       if (H && sec[1].data !== H) return null; H = sec[1].data;
+      locks.push(keys);
+    }
+    const pub = myLockPub(), priv = myLockPriv();
+    for (let i = 0; i < d.proofs.length; i++) {
+      // our key, or (Pay to Blinded Key, app_p2bk.js) our key blinded with the coin's E: the "pubkeys" keys are slots 1, 2...
+      // x(k·E) once per coin, r per slot from it
+      const E = d.proofs[i].p2pk_e, zx = E === undefined ? null : p2bkX(priv, E); if (E !== undefined && !zx) return null;
+      if (!locks[i].some((k, j) => p2bkIs(k, pub, priv, zx, j + 1))) return null;
     }
     // the proofs carry a little extra for the mint's fee; show the amount the challenger put up when it's covered
     const amount = num(bo.amount) > 0 && num(bo.amount) <= sum(d.proofs) ? Math.floor(num(bo.amount)) : sum(d.proofs);
