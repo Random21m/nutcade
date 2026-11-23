@@ -46,7 +46,7 @@ async function createBounty(c, k, amount) {
   if (!(await mintCan(S.active, 14))) throw new Error(`${host(S.active)} can't lock sats to a secret (NUT-14). Pick another mint for bounties.`);
   const pre = rnd(32), H = await sha256hex(pre), until = Math.floor(Date.now() / 1000 + ((window.__nutcadeTest && __nutcadeTest.bountySecs) || BOUNTY_DAYS * 86400));
   const g = gameById(c.game);
-  const tx = await sendEcash(amount, `Bounty for ${k.name}: beat ${pad6(c.score)} on ${g ? g.name : c.game}`, '02' + k.pubkey, S.active, { locktime: until, hashlock: H, txx: { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name },
+  const tx = await sendEcash(amount, `Bounty for ${k.name}: beat ${pad6(c.score)} on ${g ? g.name : c.game}`, '02' + k.pubkey, S.active, { locktime: until, hashlock: H, blind: true, txx: { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name },
     follow: { k: 'bounty', chal: c.id, contact: k.id, b: { to: k.pubkey, name: k.name, pre: hex(pre), H, amount, until: until * 1000 } } });
   updTx(tx.id, { lockUntil: until * 1000, giftTo: k.name, contactId: k.id, contactName: k.name, bounty: c.id });
   c.bounties = (c.bounties || []).concat([{ to: k.pubkey, name: k.name, txId: tx.id, pre: hex(pre), H, amount, until: until * 1000, state: 'open' }]);
@@ -85,11 +85,23 @@ async function readBounty(bo, rec) {
   try {
     const tok = cleanToken(String(bo.token || '')); const d = await decodeTok(tok);
     let H = null;
-    for (const p of d.proofs) {
-      const sec = JSON.parse(p.secret); if (sec[0] !== 'HTLC') return null;
-      const keys = ((sec[1].tags || []).find(t => t[0] === 'pubkeys') || []).slice(1);
-      if (!keys.includes(myLockPub())) return null;
+    // (E is the sender's: no point math on more coins or keys than a bounty of ours ever has, app_p2bk.js)
+    if (!d.proofs.length || d.proofs.length > P2BK_MAX_COINS) return null;
+    const locks = [];
+    for (const p of d.proofs) {   // the cheap checks of every coin first
+      const sec = JSON.parse(p.secret); if (!Array.isArray(sec) || sec[0] !== 'HTLC' || !sec[1] || typeof sec[1].data !== 'string') return null;
+      const tg = k => ((sec[1].tags || []).find(t => Array.isArray(t) && t[0] === k) || []).slice(1);
+      const keys = tg('pubkeys'); if (!keys.length || keys.length > P2BK_MAX_KEYS || tg('refund').length > P2BK_MAX_KEYS) return null;
+      if (p.p2pk_e !== undefined && !p2bkE(p.p2pk_e)) return null;
       if (H && sec[1].data !== H) return null; H = sec[1].data;
+      locks.push(keys);
+    }
+    const pub = myLockPub(), priv = myLockPriv();
+    for (let i = 0; i < d.proofs.length; i++) {
+      // our key, or (Pay to Blinded Key, app_p2bk.js) our key blinded with the coin's E: the "pubkeys" keys are slots 1, 2...
+      // x(k·E) once per coin, r per slot from it
+      const E = d.proofs[i].p2pk_e, zx = E === undefined ? null : p2bkX(priv, E); if (E !== undefined && !zx) return null;
+      if (!locks[i].some((k, j) => p2bkIs(k, pub, priv, zx, j + 1))) return null;
     }
     // the proofs carry a little extra for the mint's fee; show the amount the challenger put up when it's covered
     const amount = num(bo.amount) > 0 && num(bo.amount) <= sum(d.proofs) ? Math.floor(num(bo.amount)) : sum(d.proofs);

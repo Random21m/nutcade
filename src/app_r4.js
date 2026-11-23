@@ -10,7 +10,8 @@ const unb64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/
 // Sound is slow (about 50 bytes a second), so tokens travel in a compact form only NUTCADE reads: hex secrets and
 // signatures as raw bytes. Since 1.26 each coin's DLEQ proof travels too (flag bit 2: 96 raw bytes, about 2 s a coin),
 // so the receiver can check the mint's signature while offline; the sound screen's "Faster, no proof" leaves them out.
-// Anything else is sent as text.
+// Anything else is sent as text, among it a token whose coins carry p2pk_e (a blinded gift or nutzap, app_p2bk.js): without its
+// E such a coin could never be spent, so packToken refuses it and the token travels whole.
 const CT_MAGIC = 0xC1;
 const dleqHex = q => !!(q && [q.e, q.s, q.r].every(h => typeof h === 'string' && /^[0-9a-f]{64}$/i.test(h)));
 function packToken(d, proof = true) {
@@ -27,6 +28,7 @@ function packToken(d, proof = true) {
     for (const p of ps) {
       const hexSecret = /^[0-9a-f]{64}$/.test(p.secret), C = String(p.C);
       if (!/^0[23][0-9a-f]{64}$/i.test(C)) throw new Error('signature');
+      if (p.p2pk_e !== undefined) throw new Error('p2pk_e');   // (Pay to Blinded Key: the compact form has no room for E; soundBytes sends such a token as text)
       const dq = proof && dleqHex(p.dleq);
       vint(num(p.amount)); out.push((hexSecret ? 0 : 1) | (p.witness ? 2 : 0) | (dq ? 4 : 0));
       if (hexSecret) hexb(p.secret); else str(p.secret);
@@ -149,13 +151,13 @@ function giftFields() {
       <div class="field"><label for="giftTo">Who</label><select id="giftTo" class="inp">${cs.map(c => `<option value="${esc(c.id)}" data-noi18n>${esc(c.name)}</option>`).join('')}<option value="">Someone else (paste their key)</option></select></div>
       <div class="field" id="giftKeyF" ${cs.length ? 'hidden' : ''}><label for="giftKey">Their npub or Cashu public key</label><input id="giftKey" class="inp" placeholder="npub1… or 02…" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <div class="field"><label>Comes back to you after</label><div class="seg three" role="group" aria-label="Comes back after">${GIFT_DAYS.map(([d, l]) => `<button type="button" data-act="giftDays" data-days="${d}" aria-pressed="${d === 7}">${l}</button>`).join('')}</div></div>
-      <div class="tiny muted">They claim it with NUTCADE, or with cashu.me using the same 12 words. Locked ecash can't be sent offline.</div>
+      <div class="tiny muted">${p2bkOn() ? "Only NUTCADE 1.29 or newer, or another wallet that supports NUT-28, can claim it: Hide who gets it is on. Locked ecash can't be sent offline." : "They claim it with NUTCADE, or with cashu.me using the same 12 words. Locked ecash can't be sent offline."}</div>
     </div>`;
 }
 const fmtDay = ms => fmtDate(ms);
 async function sendGift(amount, note, opts) {
   const pub = opts.pubkey, secs = Math.floor(Date.now() / 1000 + opts.seconds);
-  const tx = await sendEcash(amount, note, pub, S.active, { locktime: secs, txx: { lockUntil: secs * 1000, giftTo: opts.name || '', contactId: opts.contactId || null, contactName: opts.name || '' }, follow: opts.contactId ? { k: 'gift', contact: opts.contactId } : null });
+  const tx = await sendEcash(amount, note, pub, S.active, { locktime: secs, blind: true, txx: { lockUntil: secs * 1000, giftTo: opts.name || '', contactId: opts.contactId || null, contactName: opts.name || '' }, follow: opts.contactId ? { k: 'gift', contact: opts.contactId } : null });
   updTx(tx.id, { lockUntil: secs * 1000, giftTo: opts.name || '', contactId: opts.contactId || tx.contactId || null, contactName: opts.name || tx.contactName || '' });
   return txById(tx.id);
 }

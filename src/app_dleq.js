@@ -33,6 +33,22 @@ const DQ = (() => {
   };
   const mul = (p, k) => { k = md(k, N); let r = ZERO; for (let i = 255; i >= 0; i--) { r = dbl(r); if ((k >> BigInt(i)) & 1n) r = add(r, p); } return r; };
   const neg = ([x, y, z]) => [x, md(-y), z];
+  // k·p for a SECRET k (our private key times a point someone else chose: Pay to Blinded Key, app_p2bk.js). A Montgomery
+  // ladder: the same add and double for every bit, the points swapped with a mask instead of a branch, over a fixed 257 bits
+  // (k + N, the same point). BigInt arithmetic itself is not constant time, so this narrows the timing signal but can't
+  // promise none (src/README.md); mul above is for public scalars only.
+  const cswap = (a, b, m) => { for (let i = 0; i < 3; i++) { const d = (a[i] ^ b[i]) & m; a[i] ^= d; b[i] ^= d; } };
+  const mulSecret = (p, k) => {
+    k = md(k, N) + N; const r0 = [...ZERO], r1 = [...p];
+    for (let i = 256; i >= 0; i--) {
+      const m = -((k >> BigInt(i)) & 1n);
+      cswap(r0, r1, m);
+      const s = add(r0, r1), d = dbl(r0);
+      r1[0] = s[0]; r1[1] = s[1]; r1[2] = s[2]; r0[0] = d[0]; r0[1] = d[1]; r0[2] = d[2];
+      cswap(r0, r1, m);
+    }
+    return r0;
+  };
   const aff = p => { if (!p[2]) return null; const zi = inv(p[2]), z2 = zi * zi % P; return [p[0] * z2 % P, p[1] * z2 % P * zi % P]; };
   const h64 = n => n.toString(16).padStart(64, '0');
   const big = h => BigInt('0x' + h);
@@ -76,7 +92,9 @@ const DQ = (() => {
     const hash = hexOf(L.sha256(new TextEncoder().encode(unc(R1) + unc(R2) + unc(A) + unc(C_))));
     return hash === d.e;
   }
-  return { proofOk, wellFormed, hashToCurve, point, unc };
+  // a point as 02/03 + x (33 bytes as hex), or null at infinity
+  const comp = p => { const a = aff(p); return a ? ((a[1] & 1n) ? '03' : '02') + h64(a[0]) : null; };
+  return { proofOk, wellFormed, hashToCurve, point, unc, mul, mulSecret, add, comp, xOf: p => { const a = aff(p); return a ? h64(a[0]) : null; }, G, N };
 })();
 
 /* ---------- the mints' public keys, saved for offline use ---------- */
