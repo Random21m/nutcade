@@ -106,7 +106,7 @@ function saveMintKeys(url, w) {
   if (vault.decoy) return;
   try {
     const got = {};
-    for (const k of w.keyChain.getKeysets()) if (k.unit === 'sat') {
+    for (const k of w.keyChain.getKeysets()) {   // (the account's own unit: the wallet is built for it)
       const kk = k.keys instanceof Map ? Object.fromEntries(k.keys) : (k.keys || {});
       const keys = {}; for (const [a, pub] of Object.entries(kk)) if (/^0[23][0-9a-f]{64}$/i.test(String(pub))) keys[a] = String(pub).toLowerCase();
       if (Object.keys(keys).length) got[k.id] = keys;

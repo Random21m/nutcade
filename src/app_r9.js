@@ -29,7 +29,7 @@
 const KS_SOON = 7 * 86400e3, KS_TINY = 8, KS_TIDY_MIN = 24, KS_TIDY_SAVE = 16, KS_CAP = 1000;
 const ksExp = k => { const v = k && k.expiry; return v ? num(v) * 1000 : 0; };   // (final_expiry is in seconds)
 const ksSoon = (k, now = Date.now()) => !!ksExp(k) && ksExp(k) - now < KS_SOON;
-function ksAll(w) { try { return w.keyChain.getKeysets().filter(k => k.unit === 'sat'); } catch (e) { return []; } }
+function ksAll(w) { try { return w.keyChain.getKeysets(); } catch (e) { return []; } }   // (the account's own unit: getKeysets gives that unit's keysets)
 const ksMint = url => S.mints.find(m => m.url === normUrl(url || ''));
 const asideOf = url => ((ksMint(url) || {}).ks || {}).aside || [];
 // where new coins go: an active keyset that doesn't expire soon, the cheapest, the one expiring last

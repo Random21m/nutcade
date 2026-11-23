@@ -57,7 +57,7 @@ function radarEnsure() {
   radarFetch();
 }
 function radarOff() { radar.gen++; radar.busy = false; radar.map = new Map(); radar.sugg = []; radar.etag = ''; radar.at = 0; radar.next = 0; }
-const radarGet = url => (radarOn() && radarFresh() && radar.map.get(normUrl(url))) || null;
+const radarGet = url => (radarOn() && radarFresh() && radar.map.get(acctUrl(normUrl(url)))) || null;   // (a mint's rating is the mint's: its accounts share it)
 // what is on screen depends on this, so a change is redrawn
 const radarSig = () => radarOn() ? (radarFresh() ? 'f' : 'x') + S.mints.map(m => (radarGet(m.url) || {}).label || '-').join('') + radar.sugg.map(s => s.url).join(' ') : 'off';
 const RADAR_WORD = { good: ['✓', 'RELIABLE'], shaky: ['!', 'SHAKY'], down: ['✕', 'MINT DOWN'] };
@@ -69,7 +69,7 @@ const radarSpan = url => `<span data-radar="${esc(url)}">${radarChip(url)}</span
 const radarNote = () => !radarOn() || !radarFresh() ? '' : `<div class="tiny muted">Reliable, Shaky and Mint down come from MintRadar (mintradar.org), from its own checks of each mint. It is an operational health signal: it is not a statement that a mint holds your sats or is safe to deposit into. It never moves your sats or changes which mint NUTCADE uses.</div>`;
 function radarSuggHTML() {
   const note = radarNote(); if (!note) return '';
-  const known = new Set(S.mints.map(m => normUrl(m.url)));
+  const known = new Set(S.mints.map(m => acctUrl(normUrl(m.url))));
   const rows = radar.sugg.filter(s => !known.has(s.url) && !isBlocked(s.url));
   return note + (rows.length ? `<div class="field"><label>Suggested mints</label><div class="tiny muted">Online mints with a Reliability Score of 80 or more that handle sats. A good score is not a promise: only add mints you trust.</div><div class="txs">${rows.map(s => `<div class="panel" style="gap:8px;background:var(--panel-2)">
     <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="uname" style="font-family:var(--f-display);font-size:10px;line-height:1.5;color:var(--gold)">${esc(s.name)}</div><div class="tiny muted" data-noi18n style="overflow-wrap:anywhere">${esc(host(s.url))}</div></div>

@@ -4,7 +4,7 @@
 
 Every push runs the GitHub Actions workflow `.github/workflows/test-and-deploy.yml`; only a push to `main` deploys. Its **test** jobs come first. The suites are split into parallel jobs (grid_backup, r7, r8, polish, and two groups of the shorter ones), each starting only the mints it needs through `tests/run_all.sh --only ...`, so the whole run takes about 20 minutes. Each job does this:
 
-1. Four local Nutshell test mints start with fake Lightning: a normal one (with input fees), a no-fee one, one where every payment fails, and one where every payment stays pending. `tests/mock_nostr.py` starts a stand-in Nostr relay and npub.cash server, so the tests never touch public services. The two normal mints accept multi-path payments through a small test-only patch (`tests/stub/sitecustomize.py`).
+1. Local Nutshell test mints start with fake Lightning: a normal one (with input fees), a no-fee one, one where every payment fails, one where every payment stays pending, and (for the units suite) one that issues sat, usd and eur ecash and one that issues only usd. `tests/mock_nostr.py` starts a stand-in Nostr relay and npub.cash server, so the tests never touch public services. The two normal mints accept multi-path payments through a small test-only patch (`tests/stub/sitecustomize.py`).
 2. The browser suites run against them:
    - `tests/wallet_qa.py`: wallet flows, failed and stuck payments, backup, restore after a wipe
    - `tests/crash_qa.py`: a deposit interrupted mid-way is recovered on the next open
@@ -15,6 +15,7 @@ Every push runs the GitHub Actions workflow `.github/workflows/test-and-deploy.y
    - `tests/r3_qa.py`: amounts in your currency, #tags and CSV export, contacts, offline use and languages
    - `tests/r4_qa.py`: sending by sound (through a simulated microphone), refundable gifts, bill split, mint health and moving sats, cashier mode, challenges, piggy bank, and the new screens in every language
    - `tests/r7_qa.py`: LNURL-withdraw vouchers (limits, service errors, timeouts, expiry, double taps), blocked mints (refusals, Unblock, backup and restore), Nostr Wallet Connect (every method, NIP-44 and NIP-04, budgets, revoke, the PIN vault) and zaps, against stand-in LNURL services and an NWC app in `mock_nostr.py`, plus the new screens in every language
+   - `tests/units_qa.py`: USD, EUR and CHF ecash (a unit at a mint as its own account, deposits and pay-outs by Lightning, tokens and payment requests per unit, the sats-only features refusing, backups and restores)
    - `tests/polish_qa.py`: layout at 320, 375 and 430 px in every language (game controls, the PIN pad, the tab bar), tap-target and text sizes, toasts, themes, units, dates and translations, and centered dialogs on a computer
 3. Only on `main`, and only if the page check and every test job pass, does the **deploy** job publish `public/` to https://random21m.github.io/nutcade/ and write `SHA256SUMS.txt` next to the app.
 

@@ -210,7 +210,7 @@ function ptRead() {
 // mint's DLEQ proofs when that code is still small enough for paper (1.26: an offline phone can then check it), else without
 function ptModules(url, w, denoms, slimOnly) {
   const r = k => hex(rnd(k)); let id; try { id = w.getOutputKeyset().id; } catch (e) { id = '00' + r(7); }
-  const text = L.getEncodedToken({ mint: url, unit: 'sat', proofs: denoms.map(a => ({ id, amount: a, secret: r(32), C: '02' + r(32), dleq: { e: r(32), s: r(32), r: r(32) } })) });
+  const text = tokEnc({ mint: url, unit: 'sat', proofs: denoms.map(a => ({ id, amount: a, secret: r(32), C: '02' + r(32), dleq: { e: r(32), s: r(32), r: r(32) } })) });
   const full = slimOnly ? Infinity : ptCodeSize(text); if (full <= ptMax()) return full;
   try { return ptCodeSize(slimToken(text)); } catch (e) { return Infinity; }
 }
@@ -403,6 +403,6 @@ window.NutTokens = {
   showQR: text => openSheet('QR code', qrBlock(text, 'QR code')),
   // a token of n coins at the active mint, with DLEQ proofs, like a real one (only for measuring QR sizes)
   sampleToken: n => { const r = k => hex(rnd(k)); const id = Object.keys(S.counters)[0] || '00' + r(7);
-    return L.getEncodedToken({ mint: S.active, unit: 'sat', proofs: Array.from({ length: n }, (_, i) => ({ id, amount: 2 ** (i % 12), secret: r(32), C: '02' + r(32), dleq: { e: r(32), s: r(32), r: r(32) } })) }); },
+    return tokEnc({ mint: S.active, unit: 'sat', proofs: Array.from({ length: n }, (_, i) => ({ id, amount: 2 ** (i % 12), secret: r(32), C: '02' + r(32), dleq: { e: r(32), s: r(32), r: r(32) } })) }); },
   _logoScale: 0
 };

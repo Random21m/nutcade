@@ -61,11 +61,11 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.30.0, with the v1.29.0 items; rewrite this list at every release)
-  'New, optional and off by default: Sync this wallet across devices (Settings, Privacy) keeps your coins the same on every device with your 12 words and the switch on, through your Nostr relays, encrypted. Each mint checks every coin before it counts.',
-  'Relays can see how many sync events you publish, how big they are and when: use your own relays if you can. It doesn\'t work with other wallets\' sync.',
-  'Restoring from your 12 words tells you when wallet sync was on for them, and asks before turning it on here.',
-  'New, optional and off by default: Hide who gets it (P2BK, Settings, Privacy) hides the receiver\'s key in the gifts and bounties you send. Turn it on only if their wallet supports it (NUTCADE 1.29 or newer does). Nutzaps are never hidden.',
+const WHATS_NEW = [   // (v1.31.0, with the v1.30.0 items; rewrite this list at every release)
+  'New: NUTCADE now holds dollars, euros and francs as ecash too, where a mint issues them. Each unit at a mint is its own account with its own balance: amounts are never added together or converted.',
+  'Add one in Mints: a mint that offers USD or EUR shows a line of its own for each, and you add only the one you want. Sending, receiving, payment requests and Lightning in and out work in that unit, as the mint quotes it.',
+  'Everything else stays SAT only and says so: gifts, bounties, nutzaps, printed tokens, wallet sync, the arcade, the spending limit, the piggy bank and the Bitcoin price never mix units.',
+  'Sync this wallet across devices (Settings, Privacy, off by default) keeps your SAT coins the same on every device with your 12 words and the switch on. USD, EUR and CHF ecash is never published to your relays.',
 ];
 let newVer = null, verCheckedAt = 0, verBusy = false;
 const verParts = v => String(v || '').split(/[.-]/).slice(0, 3).map(x => parseInt(x, 10) || 0);
@@ -296,7 +296,8 @@ function mintInfoHTML(url, state) {
     ${i.version ? sec('Software', `<div class="tiny" data-noi18n>${esc(clipText(String(i.version), 60))}</div>`) : ''}
     <div class="tiny muted">This text was written by the mint, not by NUTCADE. Read it with care: a mint that says it is safe has not been checked by us.</div>`;
 }
-function openMintInfo(url) {
+function openMintInfo(key) {
+  const url = acctUrl(key);   // (the mint's own address: its accounts, whatever their unit, say the same about the mint)
   openSheet('Mint details', mintInfoHTML(url, mlog(url).info ? 'done' : 'busy') + '<button class="btn block" data-act="close">Done</button>', body => {
     let live = true;
     (async () => {

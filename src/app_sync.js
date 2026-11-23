@@ -72,7 +72,7 @@ function syNextTs(min) { const st = sySt(); st.ts = Math.max(Math.floor(Date.now
 // one of OUR mints for a mint address an event wrote (exact match once normalised), or null; the event's text is never used itself
 function syMint(u) {
   if (typeof u !== 'string' || u.length > 300 || !/^https?:\/\/[^\s]+$/i.test(u.trim())) return null;
-  const n = normUrl(u); return S.mints.some(m => m.url === n) ? n : null;
+  const n = normUrl1(u); return isSatAcct(n) && S.mints.some(m => m.url === n) ? n : null;   // (sync is SAT only: a coin event for another unit is never ours)
 }
 const syPow2 = a => Number.isSafeInteger(a) && a > 0 && a <= 2 ** 40 && Number.isInteger(Math.log2(a));
 // a coin as an event wrote it, checked for shape only (null: this coin is skipped)
@@ -221,7 +221,7 @@ async function syPullNow(why) {
   for (const t of live) if (!t.url && /^https?:\/\/[^\s]+$/i.test(t.mint.trim()) && t.mint.length <= 300) other.add(normUrl(t.mint));
   r.other = [...other].filter(u => !isBlocked(u)).slice(0, SY_OTHER);
   // 1. coins our other device handed out in a token: never counted here
-  for (const m of S.mints) {
+  for (const m of satMints()) {
     const url = m.url, marked = p => { const h = syHash(p.secret); return rd.gone.has(h) && !own.has(h); };
     if (!(S.proofs[url] || []).some(marked)) continue;
     await mintLock(url, async () => {
@@ -235,7 +235,7 @@ async function syPullNow(why) {
   }
   // 2. coins we hold that no event lists any more: the mint says which are spent (dropped with a line, as always)
   const liveAt = url => new Set(live.filter(t => t.url === url).flatMap(t => t.proofs.map(p => p.secret)));
-  for (const m of S.mints) {
+  for (const m of satMints()) {
     const url = m.url, mine = syPub(url); if (!mine.length || isBlocked(url)) continue;
     const ls = liveAt(url); if (mine.every(p => ls.has(p.secret))) continue;
     try { r.spent += num(await mintLock(url, () => pruneSpent(url))); } catch (e) {}
@@ -307,7 +307,7 @@ function syWalletWant(rw) {
   for (const [h] of syOwnGone()) if (!g.has(h)) g.set(h, now);   // (ours first, newest first: re-dated when written)
   if (rw) for (const [h, t] of [...rw.gone].sort((a, b) => b[1] - a[1])) if (!g.has(h) && now - t < SY_GONE_AGE) g.set(h, t);
   const gone = [...g].slice(0, SY_GONE);
-  const mints = [...new Set(S.mints.map(m => m.url).concat(rw ? rw.mints : []))].slice(0, SY_MINTS);
+  const mints = [...new Set(satMints().map(m => m.url).concat(rw ? rw.mints : []))].slice(0, SY_MINTS);
   return { cs, gone, mints };
 }
 const syWalletNeed = (rw, w) => !rw || w.cs.some(([id, n]) => n > (rw.counters[id] || 0)) || w.gone.some(([h]) => !rw.gone.has(h)) || w.mints.some(u => !rw.mints.includes(u));
@@ -350,7 +350,7 @@ async function syPushNow() {
   }
   // 2. each mint's coins and gone marks
   const remote = syView.gone;
-  for (const m of S.mints) {
+  for (const m of satMints()) {   // (SAT coins only: USD, EUR and CHF coins are never published)
     const url = m.url;
     if (S.ops.some(o => o.mint === url)) continue;   // (a step still open here: published once it has settled)
     const local = syPub(url), lset = new Set(local.map(p => p.secret));
@@ -478,6 +478,7 @@ function sySettingsHTML() {
   const other = on && !syDecoy() ? (S.prefs.syncOther || []).filter(u => typeof u === 'string').slice(0, SY_OTHER) : [];
   const left = on && syLastRes && !syDecoy() ? syLastRes.unchecked + syLastRes.pending : 0;
   return toggle('sync', 'Sync this wallet across devices', "Keeps your coins the same on every device that has your 12 words and this switch on. Your coins are kept on your Nostr relays, encrypted with a key made from your 12 words; each mint checks every coin before it counts. Relays can still see how many events you publish, how big they are and when: use your own relays if you can. It doesn't work with other wallets' sync (cashu.me, Minibits). Off by default.")
+    + '<div class="tiny muted" data-syncsat>Only SAT coins are synced. USD, EUR and CHF ecash is never published to your relays and never taken from them: it stays on the device that holds it.</div>'
     + (on ? `<div class="row between tiny"><span>Wallet sync</span><span style="color:${st === 'IN SYNC' ? 'var(--lime)' : 'var(--gold)'}">${st}</span></div>`
       + other.map(u => `<div class="notice">Coins for a mint you don't use were found on your relays. NUTCADE doesn't add mints by itself: add it if you trust it, then sync again.</div><div class="tiny" data-noi18n>${esc(host(u))}</div><button class="btn sm" data-act="syncAddMint" data-u="${esc(u)}">Add this mint</button>`).join('')
       + (left ? `<div class="tiny muted">Some coins on your relays couldn't be checked with their mint yet: ${left}. NUTCADE tries again next time.</div>` : '')

@@ -57,7 +57,7 @@ function unpackToken(b) {
     }
   }
   if (i !== b.length) throw new Error('trailing bytes');   // (also a cut-short payload: hexs past the end reads short)
-  return L.getEncodedToken(Object.assign({ mint, unit, proofs }, memo ? { memo } : {}));
+  return tokEnc(Object.assign({ mint, unit, proofs }, memo ? { memo } : {}));
 }
 function soundBytes(text, proof = true) {
   const c = classify(text);
@@ -265,8 +265,8 @@ function splitPanels() {
 /* ---------- mint health: spread, response times, warnings, moving sats ---------- */
 const health = {};   // url -> { ok, ms, at }
 let healthBusy = false;
-async function probeHealth(url) {
-  const t0 = performance.now();
+async function probeHealth(url0) {
+  const url = acctUrl(url0), t0 = performance.now();   // (a mint's accounts share one health check)
   try {
     const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 6000);
     const r = await fetch(url + '/v1/info', { cache: 'no-store', signal: ac.signal }); clearTimeout(tm);
@@ -277,21 +277,21 @@ async function probeHealth(url) {
 }
 async function checkHealth() {
   if (healthBusy || isOffline()) return; healthBusy = true;
-  try { await Promise.all(S.mints.map(m => probeHealth(m.url))); } finally { healthBusy = false; }
+  try { await Promise.all([...new Set(S.mints.map(m => acctUrl(m.url)))].map(u => probeHealth(u))); } finally { healthBusy = false; }
   if (tab === 'mints' && !$('#layer .sheet')) refresh();
 }
 const SPREAD_COLS = ['var(--gold)', 'var(--cyan)', 'var(--pink)', 'var(--lime)', 'var(--violet)', 'var(--red)'];
 const msFmt = n => Math.round(num(n)).toLocaleString(numLocale(), { useGrouping: 'always' });   // a latency is not an amount: Hide amounts leaves it alone
-function healthOf(url) {
-  const h = health[url];
+function healthOf(url0) {
+  const url = acctUrl(url0), h = health[url];
   if (!h) return { cls: 'wait', label: 'CHECKING' };
   if (!h.ok) return { cls: 'bad', label: 'NOT ANSWERING' };
   if (h.ms > 2500) return { cls: 'slow', label: `SLOW · ${msFmt(h.ms)} MS` };
   return { cls: 'good', label: `ONLINE · ${msFmt(h.ms)} MS` };
 }
 function evenOut() {   // biggest mint down toward half, into the healthiest other mint that can take Lightning
-  const tot = totalBalance(); if (S.mints.length < 2 || tot < 1000) return null;
-  const by = S.mints.map(m => ({ m, bal: balanceOf(m.url) })).sort((a, b) => b.bal - a.bal);
+  const tot = totalBalance(); if (satMints().length < 2 || tot < 1000) return null;   // (moving sats is SAT only)
+  const by = satMints().map(m => ({ m, bal: balanceOf(m.url) })).sort((a, b) => b.bal - a.bal);
   const top = by[0]; if (top.bal / tot <= 0.6 || !supports(top.m, 'melt', 'bolt11')) return null;
   const to = by.slice(1).filter(x => supports(x.m, 'mint', 'bolt11') && !isBlocked(x.m.url) && !belowMin(x.m.url) && (!health[x.m.url] || health[x.m.url].ok)).sort((a, b) => a.bal - b.bal)[0];
   if (!to) return null;
@@ -301,7 +301,8 @@ function evenOut() {   // biggest mint down toward half, into the healthiest oth
 function healthPanel() {
   if (!S.mints.length) return '';
   const tot = totalBalance();
-  const rows = S.mints.map((m, i) => ({ m, bal: balanceOf(m.url), col: SPREAD_COLS[i % SPREAD_COLS.length] }));
+  const rows = satMints().map((m, i) => ({ m, bal: balanceOf(m.url), col: SPREAD_COLS[i % SPREAD_COLS.length] }));   // (the spread of your SAT; other units are never added in)
+  const uRows = unitTotals().filter(([u]) => u !== 'sat');
   const notes = [];
   for (const r of rows) if (belowMin(r.m.url)) notes.push(`<div class="notice red">${esc(r.m.name)} now accepts only ${mintMax(r.m.url)} coins per request; NUTCADE needs at least ${MIN_REQ}. ${r.bal > 0 ? 'It takes no new deposits: move your sats there to another mint.' : 'It takes no new deposits.'}</div>`);   // (never "looking good" above it)
   for (const r of rows) if (r.bal > 0 && health[r.m.url] && !health[r.m.url].ok) notes.push(`<div class="notice red">${esc(r.m.name)} isn't answering and holds ${money(r.bal)}. If it stays down, those sats are stuck until it's back. Move them once it answers again.</div>`);
@@ -315,8 +316,9 @@ function healthPanel() {
     <div class="row between"><span class="h2">Mint health</span><button class="btn sm" data-act="healthCheck">${healthBusy ? 'Checking…' : 'Check now'}</button></div>
     ${tot ? `<div class="spread" role="img" aria-label="How your sats are spread across mints">${rows.filter(r => r.bal).map(r => `<i style="flex:${r.bal};background:${r.col}"></i>`).join('')}</div>
     <div class="legend" data-noi18n>${rows.filter(r => r.bal).map(r => `<span><i style="background:${r.col}"></i>${esc(r.m.name)} ${Math.round(r.bal / tot * 100)}%</span>`).join('')}</div>` : '<div class="tiny muted">No sats yet. Health checks still show which mints answer.</div>'}
+    ${uRows.length ? `<div class="tiny muted" data-unitlines><span data-noi18n>${uRows.map(([u, n]) => moneyU(n, u)).join(' · ')}</span> in other units, counted on their own</div>` : ''}
     ${notes.join('')}
-    ${S.mints.some(m => canMoveFrom(m.url)) ? '<button class="btn sm" data-act="moveOpen">Move sats between mints</button>' : ''}
+    ${satMints().some(m => canMoveFrom(m.url)) ? '<button class="btn sm" data-act="moveOpen">Move sats between mints</button>' : ''}
   </div>`;
 }
 function mintHealthLine(m) {
@@ -324,8 +326,8 @@ function mintHealthLine(m) {
   return `<div class="tiny health ${h.cls}"><span class="nowrap hl"><span class="dot ${h.cls === 'bad' ? 'off' : ''}"></span><span>${h.label}</span></span>${health[m.url] ? `<span class="muted">${timeAgo(health[m.url].at)}</span>` : ''}</div>`;
 }
 function openMove(from, to, amount) {
-  const src = S.mints.filter(m => balanceOf(m.url) > 0 && supports(m, 'melt', 'bolt11'));
-  const dst = S.mints.filter(m => supports(m, 'mint', 'bolt11') && !isBlocked(m.url) && !belowMin(m.url));   // nothing moves into a blocked mint, or one below NUTCADE's request minimum
+  const src = satMints().filter(m => balanceOf(m.url) > 0 && supports(m, 'melt', 'bolt11'));
+  const dst = satMints().filter(m => supports(m, 'mint', 'bolt11') && !isBlocked(m.url) && !belowMin(m.url));   // nothing moves into a blocked mint, or one below NUTCADE's request minimum
   // a mint can be moved from only if another mint can take the sats (canMoveFrom); the button isn't offered otherwise
   const movable = src.filter(m => canMoveFrom(m.url));
   if (!movable.length || (from && !canMoveFrom(from))) { toast('Moving sats needs two mints that both handle Lightning.', 'gold'); return; }
@@ -366,8 +368,10 @@ async function doMove(mv) {
 /* ---------- CSV export (all transactions, or one day's sales) ---------- */
 function exportCsv(list, name) {
     const q = v => { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    const head = ['date', 'direction', 'method', 'amount_sat', 'fee_sat', 'status', 'mint', 'note', 'tags', 'contact', 'fiat_currency', 'btc_price', 'fiat_value'];
-    const rows = list.map(t => [new Date(t.ts).toISOString(), t.type === 'in' ? 'received' : 'sent', { ln: 'lightning', ecash: 'ecash', onchain: 'on-chain' }[t.method] || t.method, t.amount || 0, t.fee || 0, t.status, t.mint, t.note || '', tagsOf(t.note).join(' '), t.contactName || '', t.fx ? t.fx.cur : '', t.fx ? t.fx.rate : '', t.fx && t.amount ? (t.amount / 1e8 * t.fx.rate).toFixed(2) : '']);
+    // amount_sat and fee_sat are in the line's own unit's smallest step (SAT, or cents for USD, EUR and CHF): `unit` says which, and the
+    // price columns are only ever filled for SAT (NUTCADE never converts another unit)
+    const head = ['date', 'direction', 'method', 'amount_sat', 'fee_sat', 'status', 'mint', 'note', 'tags', 'contact', 'fiat_currency', 'btc_price', 'fiat_value', 'unit'];
+    const rows = list.map(t => [new Date(t.ts).toISOString(), t.type === 'in' ? 'received' : 'sent', { ln: 'lightning', ecash: 'ecash', onchain: 'on-chain' }[t.method] || t.method, t.amount || 0, t.fee || 0, t.status, t.mint, t.note || '', tagsOf(t.note).join(' '), t.contactName || '', t.fx ? t.fx.cur : '', t.fx ? t.fx.rate : '', t.fx && t.amount ? (t.amount / 1e8 * t.fx.rate).toFixed(2) : '', txUnit(t)]);
     const text = '\ufeff' + [head, ...rows].map(r => r.map(q).join(',')).join('\r\n');
     try {
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
@@ -668,7 +672,7 @@ S.piggy = store.get('piggy', { saved: 0 });
 let internalMove = false, piggyOK = 0;
 const piggySaved = () => S.prefs.piggy ? Math.max(0, Math.min(num(S.piggy.saved), totalBalance())) : 0;
 function piggyRoundUp(t) {
-  if (!S.prefs.piggy || internalMove || t.type !== 'out' || t.piggyBreak || t.upkeep || t.note === 'Ecash already spent elsewhere') return 0;   // (not payments: a keyset check-up, coins another device spent)
+  if (!S.prefs.piggy || internalMove || t.type !== 'out' || t.piggyBreak || t.upkeep || t.note === 'Ecash already spent elsewhere' || !isSatAcct(t.mint)) return 0;   // (the piggy bank is in SAT: another unit's payment never rounds up into it)   // (not payments: a keyset check-up, coins another device spent)
   const step = +S.prefs.piggyStep || 100, a = num(t.amount);
   const r = (step - a % step) % step; if (!r) return 0;
   S.piggy.saved = num(S.piggy.saved) + r; store.set('piggy', S.piggy);

@@ -21,14 +21,15 @@ const arrMoney = n => { const was = maskAmounts; maskAmounts = !!S.prefs.hideAmo
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 // One spelling per mint: lowercase scheme and host, no default port (:443, :80), no trailing slash. The path keeps
 // its case, since servers may treat /Mint and /mint differently.
-const normUrl = u => {
+const normUrl1 = u => {
   u = String(u || '').trim(); if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
   try { const x = new URL(u); return (x.protocol + '//' + x.host + x.pathname + x.search).replace(/\/+$/, ''); } catch (e) { return u.replace(/\/+$/, ''); }
 };
-const host = u => { try { const x = new URL(u); return x.host + (x.pathname === '/' ? '' : x.pathname); } catch (e) { return u; } };
+const host = u => { u = String(u ?? '').replace(/\|(usd|eur|chf)$/, ''); try { const x = new URL(u); return x.host + (x.pathname === '/' ? '' : x.pathname); } catch (e) { return u; } };
 const plain = ps => (ps || []).map(p => { const o = {}; for (const k in p) o[k] = p[k]; o.amount = num(p.amount); return o; });
 const hex = b => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+/*@@app_units.js@@*/
 
 /* ---------- storage ---------- */
 /* Storage. When a PIN is set, the sensitive keys live only inside an encrypted vault:
@@ -110,6 +111,7 @@ const MINT_MS = 20000, MELT_MS = 120000, STEP_MS = 150000;
 {
   const _fetch = window.fetch && window.fetch.bind(window);
   if (_fetch) window.fetch = (input, init) => {
+    if (typeof input === 'string' && /\|(usd|eur|chf)\/v1\//.test(input)) input = input.replace(/\|(usd|eur|chf)(?=\/v1\/)/, '');   // (a unit account's key: the mint's own address)
     const u = String(typeof input === 'string' ? input : (input && input.url) || '').split('?')[0];
     if (!/\/v1\/(info|keys|keysets|swap|mint|melt|checkstate|restore)\b/.test(u)) return _fetch(input, init);
     // A paused tab (NUTCADE opened in another tab) asks a mint nothing more: not even the next step of something it
@@ -407,7 +409,7 @@ async function restoreFromMint(url, onStep, opts = {}) {
 async function restoreFromMintNow(url, onStep, opts) {
   await syncIfStale();
   const isNew = !S.mints.find(m => m.url === url);
-  if (isNew) await addMint(url, { dropped: true });   // (your sats there are found even if the mint now takes fewer coins per request than NUTCADE needs)
+  if (isNew) await addMint(url, { dropped: true, sat: true });   // (your sats there are found even if the mint now takes fewer coins per request than NUTCADE needs)
   const w = await getWallet(url);
   // Coins of a step still open at this mint belong to that step, never to "Recovered": payments (in flight here are
   // waited for; their change goes to them), swaps (settled from their record), deposits with counters on record
@@ -415,7 +417,7 @@ async function restoreFromMintNow(url, onStep, opts) {
   for (const p of S.pending.filter(p => p.mint === url && p.id !== opts.except)) await reconcile(p, { force: true }).catch(() => {});
   await lateCheck(url, true).catch(() => {});
   for (const o of S.ops.filter(o => o.mint === url && o.id !== opts.except)) await settleOp(o.id).catch(() => {});
-  const keysets = w.keyChain.getKeysets().filter(k => k.unit === 'sat');
+  const keysets = w.keyChain.getKeysets();   // (the account's unit only: the wallet is built for it)
   let found = [];
   for (const k of keysets) {
     onStep && onStep(`Scanning ${host(url)} · keyset ${k.id.slice(0, 8)}…`);
@@ -471,7 +473,7 @@ async function restoreFromMintNow(url, onStep, opts) {
   }
   if (fresh.length) { addProofs(url, fresh); if (left) addTx({ type: 'in', method: 'ecash', amount: left, mint: url, note: 'Recovered with recovery phrase', self: true }); }
   // a mint below the minimum that this scan added and where nothing of yours is: not kept (the restore says so)
-  if (isNew && belowMin(url) && !balanceOf(url) && !S.txs.some(t => t.mint === url) && !S.pending.some(p => p.mint === url) && !S.ops.some(o => o.mint === url) && !S.quotes.some(q => q.mint === url)) {
+  if (isNew && (belowMin(url) || (!isSatAcct(url) && opts.unitScan)) && !balanceOf(url) && !S.txs.some(t => t.mint === url) && !S.pending.some(p => p.mint === url) && !S.ops.some(o => o.mint === url) && !S.quotes.some(q => q.mint === url)) {
     S.mints = S.mints.filter(m => m.url !== url); delete S.proofs[url]; if (S.active === url) S.active = S.mints[0] ? S.mints[0].url : null;
   }
   save();
@@ -527,7 +529,7 @@ const wallets = {};
 async function getWallet(url) {
   if (wallets[url]) return wallets[url];
   const p = (async () => {
-    const w = new L.Wallet(url, { unit: 'sat', bip39seed: seedFor(), counterSource });
+    const w = new L.Wallet(acctUrl(url), { unit: acctUnit(url), bip39seed: seedFor(), counterSource });   // (a unit account: the mint's address, that unit's keysets)
     await w.loadMint();
     saveMintKeys(url, w);   // (its public keys, for checking tokens taken while offline: app_dleq.js)
     ksBind(w);   // (new coins never on a keyset that expires soon, when the mint has another)
@@ -566,9 +568,9 @@ function friendly(e, url) {
   }
   return e instanceof Error ? e : new Error(m);
 }
-function methodsOf(w) {
+function methodsOf(w, unit = 'sat') {
   const info = w.getMintInfo();
-  const pick = n => { try { const s = info.isSupported(n); return s.disabled ? [] : (s.params || []).filter(m => m.unit === 'sat').map(m => ({ method: m.method, min: m.min_amount == null ? null : num(m.min_amount), max: m.max_amount == null ? null : num(m.max_amount), confirmations: m.options && m.options.confirmations })); } catch (e) { return []; } };
+  const pick = n => { try { const s = info.isSupported(n); return s.disabled ? [] : (s.params || []).filter(m => m.unit === unit).map(m => ({ method: m.method, min: m.min_amount == null ? null : num(m.min_amount), max: m.max_amount == null ? null : num(m.max_amount), confirmations: m.options && m.options.confirmations })); } catch (e) { return []; } };
   return { mint: pick(4), melt: pick(5) };
 }
 const supports = (mint, dir, method) => !!(mint && mint.methods && (mint.methods[dir] || []).some(m => m.method === method));
@@ -576,10 +578,25 @@ const methodInfo = (mint, dir, method) => mint && mint.methods && (mint.methods[
 
 async function addMint(url, opts = {}) {
   url = normUrl(url);
-  const w = await getWallet(url);
+  let w;
+  try { w = await getWallet(url); }
+  catch (e) {   // a mint with no SAT keyset (USD only, say): its first unit NUTCADE holds is added instead, unless SAT was asked for
+    if (!isSatAcct(url) || opts.sat || S.mints.find(x => x.url === url)) throw e;
+    const us = await mintUnits(url).catch(() => null);
+    if (!us || us.includes('sat')) throw e;
+    if (!us.length) { const f = new Error(`${host(url)} doesn't issue SAT, USD, EUR or CHF ecash, so NUTCADE can't hold its ecash.`); f.keep = true; throw f; }
+    return addMint(acctKey(url, us[0]), opts);
+  }
+  const units = unitsOfWallet(w);
+  // asked for SAT at a mint that issues no SAT ecash: its first unit NUTCADE holds becomes the account instead
+  if (!units.includes(acctUnit(url)) && isSatAcct(url) && !opts.sat && !S.mints.find(x => x.url === url)) {
+    if (!units.length) { delete wallets[url]; const f = new Error(`${host(url)} doesn't issue SAT, USD, EUR or CHF ecash, so NUTCADE can't hold its ecash.`); f.keep = true; throw f; }
+    delete wallets[url];
+    return addMint(acctKey(url, units[0]), opts);
+  }
   const info = w.getMintInfo();
   let m = S.mints.find(x => x.url === url);
-  const rec = { url, name: info.name || host(url), desc: info.description || '', methods: methodsOf(w) };
+  const rec = Object.assign({ url, name: info.name || host(url), desc: info.description || '', methods: methodsOf(w, acctUnit(url)), units }, isSatAcct(url) ? {} : { unit: acctUnit(url) });
   const isNew = !m;
   if (isNew && belowMin(url) && !opts.dropped) { const e = new Error(`${rec.name} only accepts ${mintMax(url)} coins per request; NUTCADE needs at least ${MIN_REQ}.`); e.keep = true; delete wallets[url]; throw e; }   // (it couldn't take deposits)
   if (m) Object.assign(m, rec); else { S.mints.push(rec); m = rec; }
@@ -591,12 +608,13 @@ async function addMint(url, opts = {}) {
 }
 const activeMint = () => S.mints.find(m => m.url === S.active) || null;
 const balanceOf = url => sum(S.proofs[url]);
-const totalBalance = () => S.mints.reduce((t, m) => t + balanceOf(m.url), 0);
-const pendingOut = () => S.pending.filter(p => !p.paid).reduce((t, p) => t + sum(p.proofs), 0);
+const totalBalance = () => S.mints.reduce((t, m) => t + (isSatAcct(m.url) ? balanceOf(m.url) : 0), 0);   // (SAT only: other units are never added in)
+const pendingOut = (unit = 'sat') => S.pending.filter(p => !p.paid && acctUnit(p.mint) === unit).reduce((t, p) => t + sum(p.proofs), 0);   // (one unit at a time: never a total across units)
 
 function addTx(t) {
   const tx = Object.assign({ id: uid(), ts: Date.now(), note: '', status: 'done', fee: 0 }, t);
-  if (price.rate && price.cur && !tx.fx) tx.fx = { cur: price.cur, rate: price.rate };
+  if (!isSatAcct(tx.mint)) tx.unit = acctUnit(tx.mint);   // (a unit account's line says its unit; the price in your currency is for SAT only)
+  else if (price.rate && price.cur && !tx.fx) tx.fx = { cur: price.cur, rate: price.rate };
   if (internalMove) tx.move = true;
   const ru = piggyRoundUp(tx); if (ru) tx.roundup = ru;
   S.txs.unshift(tx);
@@ -683,7 +701,7 @@ async function checkQuoteNow(id, txId) {
         if (proofs === WAIT) return 'waiting';
         if (proofs === ISSUED) {
           const got = await creditDepositRange(w, q).catch(() => null);
-          if (got != null && !S.quotes.some(x => x.quote === q.quote)) { refresh(); document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote })); if (got) arrToast(q.txId, `+${arrMoney(got)} received`, 'lime'); return 'paid'; }
+          if (got != null && !S.quotes.some(x => x.quote === q.quote)) { refresh(); document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote })); if (got) arrToast(q.txId, `+${arrMoneyU(got, acctUnit(q.mint))} received`, 'lime'); return 'paid'; }
           return 'waiting';
         }
         const held = new Set((S.proofs[q.mint] || []).map(p => p.secret));
@@ -691,8 +709,8 @@ async function checkQuoteNow(id, txId) {
         updTx(q.txId, { status: 'done', ts: Date.now() });
         dropQuote(q); sfx('coin'); refresh();
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
-        if (!$('#layer .sheet')) celebrate('in', q.amount);
-        arrToast(q.txId, `+${arrMoney(q.amount)} received`, 'lime');   // (src/app_arrive.js: not beside its notice)
+        if (!$('#layer .sheet')) celebrate('in', q.amount, acctUnit(q.mint));
+        arrToast(q.txId, `+${arrMoneyU(q.amount, acctUnit(q.mint))} received`, 'lime');   // (src/app_arrive.js: not beside its notice)
         return 'paid';
       }
       if (r.state === 'ISSUED') {
@@ -786,7 +804,9 @@ async function creditDepositRange(w, q) {
 function cleanToken(t) { t = String(t || '').trim().replace(/^(web\+)?cashu:(\/\/)?/i, ''); const m = t.match(/cashu[AB][A-Za-z0-9_\-+/=]+/); return m ? m[0] : t; }
 function peekToken(t) {
   const meta = L.getTokenMetadata(cleanToken(t));
-  return { mint: normUrl(meta.mint), amount: num(meta.amount), unit: meta.unit || 'sat', memo: meta.memo || '' };
+  const unit = String(meta.unit || 'sat').toLowerCase();
+  // a token in a unit NUTCADE holds names its account (SAT: the mint's address as before; USD: "<address>|usd"); any other unit keeps the address
+  return { mint: unitOk(unit) ? acctKey(normUrl(meta.mint), unit) : normUrl(meta.mint), amount: num(meta.amount), unit, memo: meta.memo || '' };
 }
 /* Our own token, still out (pending, or seen claimed): found by its coins' secrets, not its text. The same coins come
    back in another encoding too (by sound, which leaves out the DLEQ proofs; cashuA; a card), and that is still ours. */
@@ -829,7 +849,7 @@ async function receiveTokenNow(token, note, opts = {}) {
   token = cleanToken(token);
   const meta = peekToken(token);
   if (!opts.own && isBlocked(meta.mint)) throw blockedErr(meta.mint);   // your own token coming back is still yours
-  if (meta.unit !== 'sat') throw new Error(`This token is in ${meta.unit}. NUTCADE handles sats only.`);
+  if (!unitOk(meta.unit)) throw new Error(`This token is in ${unitCode(meta.unit)}. NUTCADE holds SAT, USD, EUR and CHF.`);
   // Your own sats coming back (a token of yours taken back, a gift, bounty or treasure nobody opened, an Extra Life
   // cashed out, a part of one of those saved to claim later, the duress wallet's sats) and an Extra Life left to you
   // (locked to this wallet's key: nobody else can ever move it) are claimed even at a mint below the minimum, in
@@ -927,7 +947,7 @@ function maxSendable(w, have) {
 }
 function shortOf(e, w, url, want, melt) {
   if (!/not enough (funds|proofs)/i.test(String(e && e.message || ''))) return e;
-  const have = S.proofs[url] || [], total = sum(have);
+  const have = S.proofs[url] || [], total = sum(have), money = n => moneyAt(url, n);
   if (melt) return new Error(`This payment needs ${money(want)} plus the mint's fee to spend ecash, and this mint holds ${money(total)}.`);
   const max = maxSendable(w, have);
   const f = new Error(max > 0 ? `${money(want)} plus the mint's fee is more than this mint holds. The most you can send is ${money(max)}.` : `This mint's fee is more than its balance of ${money(total)}, so nothing can be sent from it.`);
@@ -936,7 +956,9 @@ function shortOf(e, w, url, want, melt) {
 }
 function sendEcash(amount, note, lockTo, url = S.active, opts = {}) { return tooManyRetry(url, () => mintLock(url, () => sendEcashNow(amount, note, lockTo, url, opts))); }
 async function sendEcashNow(amount, note, lockTo, url, opts) {
-  piggyGuard(amount);
+  // another unit than SAT: a plain token (or a payment request's), nothing of the SAT-only extras, outside the SAT spending limit
+  if (!isSatAcct(url)) { if (opts.all || opts.pick || opts.blind || opts.locktime || opts.hashlock || opts.nz) throw satOnlyErr(); opts = Object.assign({}, opts, { noLimit: true }); }
+  else piggyGuard(amount);
   const w = await getWallet(url);
   if (opts.all) {   // Send all (app_sendall.js): still exactly what the confirm screen showed, or nothing is sent
     const p = allEcashPlan(w, S.proofs[url] || [], url);
@@ -945,7 +967,7 @@ async function sendEcashNow(amount, note, lockTo, url, opts) {
     try { return await sendEcashSwap(w, amount, note, null, url, opts, undefined, hold); }
     finally { hold.release(); }
   }
-  if (sum(S.proofs[url] || []) < amount) throw new Error(`Not enough funds. This mint holds ${money(sum(S.proofs[url] || []))}.`);
+  if (sum(S.proofs[url] || []) < amount) throw new Error(`Not enough funds. This mint holds ${moneyAt(url, sum(S.proofs[url] || []))}.`);
   // Pay to Blinded Key (app_p2bk.js): a gift or bounty (opts.blind) locks blinded keys while the setting is on (a nutzap never). Only
   // here, where the lock is built: blindKeys blinds the receiver's key and our refund key together, never one of them alone
   const blind = !!(lockTo && opts.blind && p2bkOn());
@@ -978,7 +1000,7 @@ async function sendEcashSwap(w, amount, note, lockTo, url, opts, outCfg, hold) {
   const { r: { keep, send }, op } = await spentRetry(url, attempt).catch(e => { throw opts.all && /not enough (funds|proofs)/i.test(String(e && e.message || '')) ? allChanged() : shortOf(e, w, url, amount, false); });
   const used = new Set(have.map(p => p.secret));
   S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep));
-  const token = L.getEncodedToken({ mint: url, proofs: send, unit: 'sat' });
+  const token = tokEnc({ mint: url, proofs: send, unit: 'sat' });
   // the fee is everything the balance dropped by beyond the amount: the mint's fee for this swap (NUT-02) plus the
   // fee the token carries so the receiver gets the full amount
   const tx = addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(have) - sum(keep) - amount), mint: url, note, status: 'pending', token, sent: plain(send), locked: lockTo || null }, opts.txx || {}, hold.id ? { limId: hold.id } : {}));
@@ -1003,7 +1025,7 @@ function meltCost(url, amount, reserve) {
   }
   return { amount, reserve, mintFee, total: amount + reserve + mintFee };
 }
-const costRows = c => `<dt>Fee reserve</dt><dd>${money(c.reserve)}</dd>${c.mintFee ? `<dt>Mint fee, at most</dt><dd>${money(c.mintFee)}</dd>` : ''}<dt>Total, at most</dt><dd>${money(c.total)}</dd>`;
+const costRows = (c, url = S.active) => { const money = n => moneyAt(url, n); return `<dt>Fee reserve</dt><dd>${money(c.reserve)}</dd>${c.mintFee ? `<dt>Mint fee, at most</dt><dd>${money(c.mintFee)}</dd>` : ''}<dt>Total, at most</dt><dd>${money(c.total)}</dd>`; };
 async function meltQuote(kind, dest, amount) {
   const w = await getWallet(S.active);
   if (kind === 'ln') return w.createMeltQuoteBolt11(dest);
@@ -1030,8 +1052,9 @@ async function payPrep(w, kind, mq, feeIndex, note, dest, url, extra, lim = {}) 
   if (steps && kind !== 'ln') throw minErr(url);   // (on-chain: its change could need more outputs than the mint takes; paid only from mints that take enough)   // (the payment spends the swap's sent coins: as many as it asked for)
   const pm = steps ? planMelt(w, url, need) : null; if (steps) plan = null;
   const most = pm ? pm.T + pm.fees : plan ? plan.spend : meltCost(url, amount, reserve).total;
-  if (sum(have) < most) throw new Error(`Not enough funds. Need ${money(most)} including fees; this mint holds ${money(sum(have))}.`);
-  piggyGuard(need);
+  if (sum(have) < most) throw new Error(`Not enough funds. Need ${moneyAt(url, most)} including fees; this mint holds ${moneyAt(url, sum(have))}.`);
+  if (!isSatAcct(url)) { if (extra && (extra.nwc || extra.zap)) throw satOnlyErr(); lim = Object.assign({}, lim, { free: true }); }   // (another unit: outside the SAT limit and piggy bank)
+  else piggyGuard(need);
   const hold = limitGate(most, lim);
   try { return await withPick(w, plan && plan.sel, () => payPrepSwap(w, kind, mq, note, dest, url, extra, amount, need, hold, !!pm)); }
   catch (e) { hold.release(); throw e; }
@@ -1080,7 +1103,7 @@ async function meltNow(w, kind, mq, feeIndex, url, tx, pend, spent, amount, onCo
     const r = await reconcileNow(pend.id, tx.id, {}).catch(() => null);
     if (r === 'paid') return txById(tx.id);
     const f = friendly(e, url), t = txById(tx.id);
-    if (t && t.status === 'failed') f.also = t.cost ? `The ecash came back, except ${money(t.cost)} the mint kept as its fee.` : 'Nothing left your wallet.';
+    if (t && t.status === 'failed') f.also = t.cost ? `The ecash came back, except ${moneyAt(url, t.cost)} the mint kept as its fee.` : 'Nothing left your wallet.';
     throw f;
   }
 }
@@ -1429,7 +1452,7 @@ async function settleOpNow(id) {
       addTx({ type: 'out', method: 'ecash', amount, fee, mint: op.mint, note: `Extra Life for ${f.heir.name}`, status: 'done', extraLife: true, settled: true });
       setTimeout(() => sendHeirCopy().catch(() => {}), 0);
     } else {
-      const t = addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee, mint: op.mint, note: op.note || '', status: 'pending', token: L.getEncodedToken({ mint: op.mint, proofs: ps, unit: 'sat' }), sent: ps, settled: true }, op.tx || {}));
+      const t = addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee, mint: op.mint, note: op.note || '', status: 'pending', token: tokEnc({ mint: op.mint, proofs: ps, unit: 'sat' }), sent: ps, settled: true }, op.tx || {}));
       if (f.k === 'bounty') bountyRecovered(f, t, Object.prototype.hasOwnProperty.call(op, 'impLine'));   // a working bounty again: its secret is kept, the challenge is sent
       else if (f.k === 'gift' && contactById(f.contact)) setTimeout(() => deliverToContact(contactById(f.contact), txById(t.id)).catch(() => {}), 0);   // and it still goes to the contact
       else if (f.k === 'hunt-make') setTimeout(() => huntFinish(Object.assign({}, f, { txId: t.id })).catch(() => {}), 0);   // the treasure hunt is still set up
@@ -1595,6 +1618,12 @@ function tr(s) {
   // numbers become {#}; a second try keeps punctuation right after a number ("like 1000." is "like {#}.")
   for (const re of [NUMRE, NUMEND]) { if (out !== undefined) break; const nums = []; const key = core.replace(re, x => { nums.push(x); return '{#}'; }); if (nums.length && d.t[key] !== undefined) { let i = 0; out = d.t[key].replace(/\{#\}/g, () => nums[i++] ?? ''); } }
   if (out === undefined && d.re) for (const [re, rep_] of d.re) { const mm = re.exec(core); if (mm) { const miss = window.__i18nMiss; window.__i18nMiss = null; try { out = rep_.replace(/\$(\d)/g, (_, k) => tr(mm[+k] || '')); } finally { window.__i18nMiss = miss; } break; } }
+  if (out === undefined && /(?:\d|•••)[\d,.\u00a0\u202f]*\s(?:USD|EUR|CHF)\b/.test(core)) {
+    // "This mint holds 12.50 USD." uses the "12.50 SAT" translation, with the unit put back where SAT stood
+    const codes = [], asSat = core.replace(/((?:\d|•••)[\d,.\u00a0\u202f]*)\s(USD|EUR|CHF)\b/g, (m, n, c) => { codes.push(c); return n + ' SAT'; });
+    let t = asSat; const miss = window.__i18nMiss; window.__i18nMiss = null; try { t = tr(asSat); } finally { window.__i18nMiss = miss; }
+    if (t !== asSat) { let i = 0; out = t.replace(/((?:\d|•••)[\d,.\u00a0\u202f]*)\s(?:SAT|sat)\b/g, (m, n) => n + ' ' + (codes[i++] || codes[codes.length - 1])); }
+  }
   if (out === undefined && core.includes('₿')) {   // "₿67 in your piggy bank" uses the "67 SAT in your piggy bank" translation
     const asSat = core.replace(/₿(\d[\d,.\u00a0\u202f]*\d|\d|•••)/g, '$1 SAT'); let t = asSat; if (asSat !== core) { const miss = window.__i18nMiss; window.__i18nMiss = null; try { t = tr(asSat); } finally { window.__i18nMiss = miss; } }
     if (t !== asSat) out = t.replace(/(\d[\d,.\u00a0\u202f]*\d|\d|•••) SAT/g, '₿$1');
@@ -1924,14 +1953,14 @@ async function lnurlInvoice(target, sats, comment, base) {   // (base: the addre
 
 /* ---------- payment effects: coin drop on receive, coin launch on send ---------- */
 const COIN = ['..yyyy..', '.yYYYYy.', 'yYyyyyYy', 'yYyYYyYy', 'yYyYYyYy', 'yYyyyyYy', '.yYYYYy.', '..yyyy..'];
-function celebrate(dir, amount) {
+function celebrate(dir, amount, unit) {
   if (document.querySelector('.cashier')) return;   // the till has its own PAID! screen
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const old = document.getElementById('fxLayer'); if (old) old.remove();
   const layer = document.createElement('div'); layer.id = 'fxLayer'; layer.setAttribute('aria-hidden', 'true');
   const label = document.createElement('div'); label.className = 'fx-label ' + (dir === 'in' ? 'in' : 'out');
   const big = document.createElement('b'); big.textContent = dir === 'in' ? '1UP!' : 'SENT!';
-  const amt = document.createElement('span'); amt.textContent = (dir === 'in' ? '+' : '-') + money(amount);
+  const amt = document.createElement('span'); amt.textContent = (dir === 'in' ? '+' : '-') + moneyU(amount, unit);
   label.append(big, amt); layer.appendChild(label);
   document.body.appendChild(layer);
   if (reduce) { setTimeout(() => layer.remove(), 1400); return; }
@@ -1963,7 +1992,7 @@ function celebrate(dir, amount) {
 /* tokens: qrCanvas(text, mode, plain) is in app_tokens.js (the acorn in the middle, read back) */
 function slimToken(t) {
   const d = L.getDecodedToken(t, Object.keys(S.counters));
-  return L.getEncodedToken({ mint: d.mint, unit: d.unit || 'sat', memo: d.memo, proofs: d.proofs.map(p => { const o = Object.assign({}, p); delete o.dleq; return o; }) });
+  return tokEnc({ mint: d.mint, unit: d.unit || 'sat', memo: d.memo, proofs: d.proofs.map(p => { const o = Object.assign({}, p); delete o.dleq; return o; }) });
 }
 // Above this many characters a single QR code gets too dense for most phone cameras, so it plays as an animated QR instead.
 const QR_STATIC_MAX = 1000;
@@ -2146,6 +2175,7 @@ function fiatToSats(t, rate = price.rate) {
 function satsOf(id) {
   const el = typeof id === 'string' ? $('#' + id) : id; if (!el) return 0;
   const v = String(el.value || '').trim(); if (!v) return 0;
+  if (el.dataset.unit && el.dataset.unit !== 'sat') return parseUnitAmt(v, el.dataset.unit);   // (a unit account's field: its own unit, in cents)
   if (el.dataset.cur === 'fiat') {
     // typed in SAT and only the view was switched: the amount is still exactly the SAT typed
     const bk = el._unitBack; if (bk && bk.cur === 'sat' && bk.shown === el.value) return parseSat(bk.typed);
@@ -2154,7 +2184,11 @@ function satsOf(id) {
   }
   return parseSat(v);
 }
-function setSats(el, n) { if (!el) return; el._unitBack = null; el.dataset.cur = 'sat'; el.value = n; const w = el.closest('.amtwrap'); if (w) { const b = w.querySelector('.unitbtn'); if (b) b.textContent = 'SAT'; el.setAttribute('inputmode', 'numeric'); } unitLabel(el); amtConv(el); }
+function setSats(el, n) {
+  if (!el) return;
+  // a field of another unit holds that unit's own text ("4.76"), never a count of its cents
+  if (el.dataset.unit && el.dataset.unit !== 'sat') { el.value = fmtUEn(n, el.dataset.unit); amtConv(el); return; }
+  el._unitBack = null; el.dataset.cur = 'sat'; el.value = n; const w = el.closest('.amtwrap'); if (w) { const b = w.querySelector('.unitbtn'); if (b) b.textContent = 'SAT'; el.setAttribute('inputmode', 'numeric'); } unitLabel(el); amtConv(el); }
 // "Amount (SAT)" becomes "Amount (USD)" when you type in your currency
 function unitLabel(el) {
   const lab = el.id && document.querySelector(`label[for="${el.id}"]`); if (!lab) return;
@@ -2166,7 +2200,8 @@ function amtConv(el) {
   let t = '', bad = false;
   try {
     const n = satsOf(el);   // throws when the amount can't be read: the field is marked and the hint stays empty
-    if (n && canFiat()) t = el.dataset.cur === 'fiat' ? `≈ ${money(n)}` : `≈ ${fiatOf(n)}`;
+    // (the price in your currency is for SAT: a USD, EUR or CHF field gets no conversion, ever)
+    if (n && canFiat() && !(el.dataset.unit && el.dataset.unit !== 'sat')) t = el.dataset.cur === 'fiat' ? `≈ ${money(n)}` : `≈ ${fiatOf(n)}`;
   } catch (e) { bad = !!e.amount; }
   if (bad) el.setAttribute('aria-invalid', 'true');
   else { el.removeAttribute('aria-invalid'); const er = $('#sheetErr [data-amount]'); if (er) er.remove(); }   // fixed: the old reason goes
@@ -2174,7 +2209,7 @@ function amtConv(el) {
 }
 function enhanceAmounts(root) {
   if (!root || !S.prefs.fiat) return;
-  root.querySelectorAll('input.amount:not([data-enh])').forEach(el => {
+  root.querySelectorAll('input.amount:not([data-enh]):not([data-unit])').forEach(el => {
     el.dataset.enh = '1'; el.dataset.cur = 'sat';
     const lab = el.id && root.querySelector(`label[for="${el.id}"]`); if (lab && /\(SAT\b/.test(lab.textContent)) lab.dataset.en = lab.textContent;
     const wrap = document.createElement('div'); wrap.className = 'amtwrap';
@@ -2339,11 +2374,12 @@ function txRow(t) {
   const method = { ln: 'LN', ecash: 'ECASH', onchain: 'ON-CHAIN', fee: 'FEE' }[t.method];
   const moved = !(t.status === 'failed' || t.status === 'expired');   // a failed or expired payment moved nothing: its amount is struck through
   const stat = (t.status !== 'done' ? `<span class="chip ${t.status === 'pending' ? 'pending' : t.status === 'claimed' || t.status === 'reclaimed' ? 'claimed' : 'failed'}">${esc(t.status.toUpperCase())}</span>` : '') + (t.lockUntil && t.status === 'pending' ? '<span class="chip ecash">LOCKED</span>' : '') + (t.print ? '<span class="chip ecash">PRINTED</span>' : '') + (t.move ? '<span class="chip claimed">MOVE</span>' : '') + (t.cashier ? '<span class="chip ln">SALE</span>' : '') + (t.nwc ? '<span class="chip ecash">NWC</span>' : '') + (t.zap ? '<span class="chip claimed">ZAP</span>' : '') + (t.nz ? '<span class="chip claimed">NUTZAP</span>' : '') + (t.refused && t.status === 'pending' && isBlocked(t.mint) ? '<span class="chip failed">BLOCKED</span>' : '');
-  const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : t.method === 'fee' ? (num(t.fee) ? '-' + fmt(t.fee) : fmt(0)) : (moved ? sign : '') + fmt(t.amount);
+  const u = txUnit(t), f = n => fmtU(n, u);   // (a line in another unit than SAT shows that unit: never added to SAT lines)
+  const amt = t.method === 'onchain' && t.type === 'in' && !t.amount ? 'WAIT' : t.method === 'fee' ? (num(t.fee) ? '-' + f(t.fee) : f(0)) : (moved ? sign : '') + f(t.amount);
   const wide = amt.length > 11;   // a huge amount gets its own line under the note instead of squeezing the chips
   return `<button class="tx ${esc(t.type)}" data-act="tx" data-id="${esc(t.id)}"><span class="ico" aria-hidden="true">${t.type === 'in' ? '↓' : '↑'}</span>
     <span class="mid"><div class="note ${t.note ? '' : 'empty'}">${esc(noteText(t.note) || 'Add a note…')}</div>
-    <div class="meta"><span class="chip ${t.method === 'ecash' ? 'ecash' : 'ln'}">${method}</span>${stat}<span${Date.now() - t.ts >= 604800e3 ? ' data-noi18n' : ''}>${timeAgo(t.ts)}</span></div></span>
+    <div class="meta"><span class="chip ${t.method === 'ecash' ? 'ecash' : 'ln'}">${method}</span>${unitChip(u)}${stat}<span${Date.now() - t.ts >= 604800e3 ? ' data-noi18n' : ''}>${timeAgo(t.ts)}</span></div></span>
     <span class="amt${wide ? ' wide' : ''}${moved ? '' : ' void'}">${amt}</span></button>`;
 }
 function timeAgo(ts) {
@@ -2474,23 +2510,26 @@ function viewWallet() {
     <div class="panel"><div class="row between"><span class="h2">Arcade</span><button class="btn sm violet" data-act="tab" data-tab="arcade">Play</button></div><div id="topScore" class="tiny muted"></div></div>
     <button class="linkbtn tiny" style="justify-self:center;color:var(--pink)" data-act="support">${HEART}<span>Support NUTCADE</span></button>
   </section>`;
-  const bal = balanceOf(m.url), tot = totalBalance(), po = pendingOut();
+  const bal = balanceOf(m.url), tot = totalBalance(), mu = acctUnit(m.url), po = pendingOut(mu);
+  // the total of every mint: one line per unit, never one number across units
+  const tots = unitTotals(), allLine = tots.length > 1 || (tots.length === 1 && tots[0][1] !== bal) ? `<span class="tiny muted" data-totals>All mints <span data-noi18n>${tots.map(([u, n]) => moneyU(n, u)).join(' · ')}</span></span>` : '';
   const recent = visTxs().slice(0, recentCount());
   return `<section class="screen">${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}${radarWarn()}
     <div class="credits">
-      <div class="row between"><span class="label">Credits</span><span class="row" style="gap:10px">${tot !== bal ? `<span class="tiny muted">All mints ${money(tot)}</span>` : ''}${hideBtn()}${vault.on ? '<button class="lockbtn" data-act="lockNow" aria-label="Lock wallet" title="Lock wallet"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2h1v8H4V7zm1 0h4V5a2 2 0 0 0-4 0zm1 3v3h2v-3z"/></svg></button>' : ''}</span></div>
-      <div class="credit-num tap" data-act="hideToggle" title="${S.prefs.hideAmounts ? 'Tap to show amounts' : 'Tap to hide amounts'}" aria-live="polite">${S.prefs.btcSymbol ? '₿' : ''}${fmt(bal)}<small>${unitTag()}</small></div>
-      ${fiatOf(bal) ? `<div class="tiny muted fiat" data-sats="${bal}">≈ ${fiatOf(bal)}</div>` : ''}
+      <div class="row between"><span class="label">Credits</span><span class="row" style="gap:10px">${allLine}${hideBtn()}${vault.on ? '<button class="lockbtn" data-act="lockNow" aria-label="Lock wallet" title="Lock wallet"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2h1v8H4V7zm1 0h4V5a2 2 0 0 0-4 0zm1 3v3h2v-3z"/></svg></button>' : ''}</span></div>
+      <div class="credit-num tap" data-act="hideToggle" title="${S.prefs.hideAmounts ? 'Tap to show amounts' : 'Tap to hide amounts'}" aria-live="polite">${mu === 'sat' ? `${S.prefs.btcSymbol ? '₿' : ''}${fmt(bal)}<small>${unitTag()}</small>` : `${fmtU(bal, mu)}<small>${unitCode(mu)}</small>`}</div>
+      ${mu === 'sat' && fiatOf(bal) ? `<div class="tiny muted fiat" data-sats="${bal}">≈ ${fiatOf(bal)}</div>` : ''}
+      ${mu === 'sat' ? '' : `<div class="tiny muted" data-unitnote>${esc(unitCode(mu))} ecash: Lightning and ecash only. The extras (gifts, bounties, sync, nutzaps and the rest) work with SAT only.</div>`}
       ${piggySaved() ? `<div class="tiny piggy-line">${pigSVG('tiny')}<span>${money(piggySaved())} in your piggy bank · ${money(Math.max(0, tot - piggySaved()))} to spend</span></div>` : ''}
-      <button class="mint-pill" data-act="pickMint" aria-label="${tr('Change mint')}"><span class="dot"></span><span>${esc(m.name)}</span><span class="muted">▾</span></button>
-      ${po ? `<div class="tiny" style="color:var(--violet)">${money(po)} in flight. <button class="linkbtn" data-act="reconcileAll">Check now</button></div>` : ''}
+      <button class="mint-pill" data-act="pickMint" aria-label="${tr('Change mint')}"><span class="dot"></span><span>${esc(m.name)}</span>${unitChip(mu)}<span class="muted">▾</span></button>
+      ${po ? `<div class="tiny" style="color:var(--violet)">${moneyU(po, mu)} in flight. <button class="linkbtn" data-act="reconcileAll">Check now</button></div>` : ''}
     </div>
     <div class="pushes">
       <button class="push recv" data-act="receive"><span class="cap" aria-hidden="true">↓</span><span class="t">RECEIVE</span></button>
       <button class="push send" data-act="send"><span class="cap" aria-hidden="true">↑</span><span class="t">SEND</span></button>
     </div>
-    <div class="scanrow"><button class="btn violet scan-btn" data-act="scan"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h5v1H2v4H1zm9 0h5v5h-1V2h-4zM1 10h1v4h4v1H1zm13 0h1v5h-5v-1h4zM4 4h3v3H4zm5 0h3v3H9zM4 9h3v3H4zm5 0h1v1H9zm2 0h1v1h-1zm-2 2h1v1H9zm2 1h1v1h-1z"/></svg>Scan QR code</button>${window.Chiptune && window.Chiptune.canListen() ? '<button class="btn violet" data-act="ctListen" aria-label="Listen for a code sent as sound"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 1h4v8H6zM4 6h1v3a3 3 0 0 0 6 0V6h1v3a4 4 0 0 1-3.5 4V15h-1v-2A4 4 0 0 1 4 9z"/></svg>Listen</button>' : ''}</div>
-    <div class="toolrow"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm pink" data-act="splitOpen">Split a bill</button>${S.extra ? '' : '<button class="btn sm lime" data-act="extraOpen">Extra Life</button>'}<button class="btn sm violet" data-act="huntNew">Treasure hunt</button></div>
+    <div class="scanrow"><button class="btn violet scan-btn" data-act="scan" data-sat-ok><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h5v1H2v4H1zm9 0h5v5h-1V2h-4zM1 10h1v4h4v1H1zm13 0h1v5h-5v-1h4zM4 4h3v3H4zm5 0h3v3H9zM4 9h3v3H4zm5 0h1v1H9zm2 0h1v1h-1zm-2 2h1v1H9zm2 1h1v1h-1z"/></svg>Scan QR code</button>${mu === 'sat' && window.Chiptune && window.Chiptune.canListen() ? '<button class="btn violet" data-act="ctListen" aria-label="Listen for a code sent as sound"><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 1h4v8H6zM4 6h1v3a3 3 0 0 0 6 0V6h1v3a4 4 0 0 1-3.5 4V15h-1v-2A4 4 0 0 1 4 9z"/></svg>Listen</button>' : ''}</div>
+    ${mu === 'sat' ? `<div class="toolrow"><button class="btn sm gold" data-act="cashier">Cashier mode</button><button class="btn sm pink" data-act="splitOpen">Split a bill</button>${S.extra ? '' : '<button class="btn sm lime" data-act="extraOpen">Extra Life</button>'}<button class="btn sm violet" data-act="huntNew">Treasure hunt</button></div>` : ''}
     ${importsPanel()}${rmPanel()}${ksAskPanel()}${splitPanels()}${piggyPanel()}${extraPanel()}${huntsPanel()}
     <div id="priceMount"></div>
     <div class="panel">
@@ -2524,9 +2563,9 @@ function viewMints() {
   return `<section class="screen">
     <div class="row between"><h2 class="h2">Your mints</h2><button class="btn sm gold" data-act="pickMint">Add mint</button></div>
     ${healthPanel()}${radarWarn()}${radarNote()}
-    ${S.mints.length ? `<div class="txs">${S.mints.map(m => `<div class="panel ${m.url === S.active ? 'hot' : ''}" style="gap:8px">
-      <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="uname" style="font-family:var(--f-display);font-size:11px;line-height:1.5;color:var(--gold)">${esc(m.name)}</div><div class="tiny muted" data-noi18n style="overflow-wrap:anywhere">${esc(host(m.url))}</div></div>
-      <div style="font-family:var(--f-display);font-size:12px;white-space:nowrap">${fmt(balanceOf(m.url))}</div></div>
+    ${S.mints.length ? `<div class="txs">${mintOrder().map(m => `<div class="panel ${m.url === S.active ? 'hot' : ''}" style="gap:8px" data-acct="${esc(m.url)}">
+      <div class="row between" style="align-items:flex-start"><div style="min-width:0"><div class="uname" style="font-family:var(--f-display);font-size:11px;line-height:1.5;color:var(--gold)">${esc(m.name)}${unitChip(acctUnit(m.url))}</div><div class="tiny muted" data-noi18n style="overflow-wrap:anywhere">${esc(host(m.url))}</div></div>
+      <div style="font-family:var(--f-display);font-size:12px;white-space:nowrap">${fmtU(balanceOf(m.url), acctUnit(m.url))}${isSatAcct(m.url) ? '' : ` <small>${unitCode(acctUnit(m.url))}</small>`}</div></div>
       <div class="row between" style="gap:8px">${mintHealthLine(m)}${reportChip(m.url)}</div>
       <div class="row" style="flex-wrap:wrap;gap:6px">${radarSpan(m.url)}${methodChips(m)}</div>
       ${blockedNotice(m.url)}${minNotice(m.url)}${ksLine(m)}
@@ -2534,7 +2573,7 @@ function viewMints() {
       <button class="btn sm" data-act="refreshMint" data-url="${esc(m.url)}">Refresh</button>
       <button class="btn sm" data-act="mintInfo" data-url="${esc(m.url)}">Details</button>
       ${isBlocked(m.url) ? `<button class="btn sm gold" data-act="unblockMint" data-url="${esc(m.url)}">Unblock</button>` : `<button class="btn sm" data-act="blockMint" data-url="${esc(m.url)}">Block</button>`}
-      <button class="btn sm red" data-act="removeMint" data-url="${esc(m.url)}">Remove</button></div></div>`).join('')}</div>`
+      <button class="btn sm red" data-act="removeMint" data-url="${esc(m.url)}">Remove</button></div>${unitAddRow(m)}</div>`).join('')}</div>`
       : `<div class="empty-state"><b>NO MINTS</b>Add a mint to start holding ecash.</div>`}
     <div class="tiny muted" style="text-align:center">Mint settings, backup and privacy live in the Settings tab.</div>
   </section>`;
@@ -2683,7 +2722,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.30.0';
+const APP_VERSION = '1.31.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -2928,7 +2967,8 @@ function npcPrivFor(pub) {
 async function npcConnect(wantMint) {
   const u = (await npc('/api/v2/user/info')).data.user;
   let mint = u.mintUrl ? normUrl(u.mintUrl) : '';
-  const want = wantMint ? normUrl(wantMint) : (S.mints.find(m => m.url === mint) ? mint : (activeMint() && supports(activeMint(), 'mint', 'bolt11') ? S.active : mint));
+  // npub.cash pays in sats, so the mint it pays into is a SAT account (never a USD, EUR or CHF one)
+  const want = acctUrl(wantMint ? normUrl(wantMint) : (S.mints.find(m => m.url === mint) ? mint : (activeMint() && isSatAcct(S.active) && supports(activeMint(), 'mint', 'bolt11') ? S.active : mint)));
   if (want) { await getWallet(want).catch(() => {}); if (belowMin(want)) throw minErr(want); }   // (the Lightning address's payments are deposits there)
   if (want && want !== mint) {
     if (!S.mints.find(m => m.url === want)) await addMint(want);
@@ -3007,7 +3047,7 @@ async function liveWatch(key, url, cmd, subscribe) {
   try {
     const w = await getWallet(url);
     const sup = w.getMintInfo().isSupported(17);
-    if (!sup || !sup.supported || !(sup.params || []).some(p => p.unit === 'sat' && (p.commands || []).includes(cmd))) { live.set(key, 'none'); return; }
+    if (!sup || !sup.supported || !(sup.params || []).some(p => p.unit === acctUnit(url) && (p.commands || []).includes(cmd))) { live.set(key, 'none'); return; }
     const cancel = await subscribe(w);
     if (live.get(key) === null) live.set(key, cancel); else { try { cancel(); } catch (e) {} }
   } catch (e) { live.delete(key); }
@@ -3033,7 +3073,7 @@ function liveSync() {
       if (spent.size < t.sent.length) return;
       // The mint pushed SPENT for every proof in the token: it has been claimed (or reclaimed by us, which wins).
       const cur = txById(t.id);
-      if (cur && cur.status === 'pending' && !reclaiming.has(t.id)) { updTx(t.id, { status: 'claimed' }); refresh(); toast(`Your ${money(t.amount)} token was claimed`, 'lime'); }
+      if (cur && cur.status === 'pending' && !reclaiming.has(t.id)) { updTx(t.id, { status: 'claimed' }); refresh(); toast(`Your ${moneyU(t.amount, txUnit(t))} token was claimed`, 'lime'); }
     }, () => liveDrop(k)));
   }
   for (const k of [...live.keys()]) if (!want.has(k)) liveDrop(k);
@@ -3043,7 +3083,7 @@ function liveSync() {
 /* ---------- multinut: one Lightning invoice paid from several mints (NUT-15) ---------- */
 async function mppMints() {
   const out = [];
-  for (const m of S.mints) {
+  for (const m of satMints()) {   // (several mints paying one invoice: SAT only)
     const bal = balanceOf(m.url); if (bal <= 0) continue;
     try {
       const w = await getWallet(m.url);
@@ -3121,12 +3161,14 @@ function openMultinut(invoice, amount, dest, note) {
 
 /* ---------- payment requests (NUT-18) ---------- */
 // Requests are received as NIP-17 gift-wrapped DMs to the same Nostr key cashu.me uses (first 32 bytes of the seed).
-function newRequest(amount, memo, onlyMine) {
+function newRequest(amount, memo, onlyMine, unit = acctUnit(S.active)) {
   const pub = L.nostrPub(nostrKey());
   const id = hex(rnd(4));
   const transport = [{ type: 'nostr', target: L.nprofileEncode({ pubkey: pub, relays: relays() }), tags: [['n', '17']] }];
-  const pr = new L.PaymentRequest(transport, id, amount || undefined, 'sat', onlyMine && S.mints.length ? S.mints.map(m => m.url) : undefined, memo || undefined);
-  const r = { id, encoded: pr.toEncodedRequest(), amount: amount || 0, memo: memo || '', created: Date.now(), paid: [] };
+  // the request asks for the active account's unit, and (when asked) only from the mints that hold it here
+  const mine = S.mints.filter(m => acctUnit(m.url) === unit).map(m => acctUrl(m.url));
+  const pr = new L.PaymentRequest(transport, id, amount || undefined, unit, onlyMine && mine.length ? [...new Set(mine)] : undefined, memo || undefined);
+  const r = { id, encoded: pr.toEncodedRequest(), amount: amount || 0, memo: memo || '', unit, created: Date.now(), paid: [] };
   S.requests.unshift(r); S.requests = S.requests.slice(0, 30); store.set('requests', S.requests);
   dmListen();
   return r;
@@ -3165,11 +3207,12 @@ function onGiftWrap(ev) {
   }).catch(() => {});
 }
 async function receivePayload(p, from) {
-  if ((p.unit || 'sat') !== 'sat') return;
-  const mint = normUrl(p.mint);
+  const pu = String(p.unit || 'sat').toLowerCase();
+  if (!unitOk(pu)) return;
+  const mint = acctKey(normUrl(p.mint), pu);
   if (p.proofs.some(x => !x || (x.p2pk_e !== undefined && !p2bkE(x.p2pk_e)))) return;   // (a blinded lock's E must be a point: app_p2bk.js)
   const proofs = p.proofs.map(x => Object.assign({}, x, { amount: num(x.amount) }, x.p2pk_e !== undefined ? { p2pk_e: p2bkE(x.p2pk_e) } : {}));
-  const token = L.getEncodedToken({ mint, proofs, unit: 'sat' });
+  const token = tokEnc({ mint: acctUrl(mint), proofs, unit: pu });
   if (S.txs.some(t => t.token === token || t.incoming === token)) return;
   const req = S.requests.find(r => r.id && r.id === p.id);
   const who = from && S.contacts.find(c => c.pubkey === from);
@@ -3178,14 +3221,14 @@ async function receivePayload(p, from) {
   if (isBlocked(mint)) {   // refused, and said so: it waits in your notes in case you unblock the mint
     addTx({ type: 'in', method: 'ecash', amount: sum(proofs), mint, note, status: 'pending', incoming: token, reqId: p.id || null, refused: true });
     sfx('err'); refresh();
-    toast(`Refused ${money(sum(proofs))} from ${mintName(mint)}: you blocked that mint. It waits in your notes if you unblock it.`, 'gold');
+    toast(`Refused ${moneyU(sum(proofs), pu)} from ${mintName(mint)}: you blocked that mint. It waits in your notes if you unblock it.`, 'gold');
     return;
   }
   if (!S.mints.find(m => m.url === mint)) {
     if (!req && !who) return;   // ecash from an unknown mint is only kept when it answers one of our requests or comes from a contact
     addTx({ type: 'in', method: 'ecash', amount: sum(proofs), mint, note, status: 'pending', incoming: token, reqId: p.id || null });
     sfx('blip'); refresh();
-    toast(`${money(sum(proofs))} arrived from ${host(mint)}, a mint you don't use yet. Open it in your notes to claim it.`, 'gold');
+    toast(`${moneyU(sum(proofs), pu)} arrived from ${host(mint)}, a mint you don't use yet. Open it in your notes to claim it.`, 'gold');
     return;
   }
   try {
@@ -3194,8 +3237,8 @@ async function receivePayload(p, from) {
     if (!req) arrivalFrom(tx.id, 'nostr');   // (arrival notices: src/app_arrive.js)
     if (req) reqPaid(req.id, tx);
     sfx('coin'); refresh();
-    if (!$('#layer .sheet')) celebrate('in', tx.amount);
-    arrToast(tx.id, `+${arrMoney(tx.amount)} received${req ? ' for your request' : ''}`, 'lime');
+    if (!$('#layer .sheet')) celebrate('in', tx.amount, pu);
+    arrToast(tx.id, `+${arrMoneyU(tx.amount, pu)} received${req ? ' for your request' : ''}`, 'lime');
     document.dispatchEvent(new CustomEvent('nutcade:request', { detail: { id: p.id, amount: tx.amount } }));
   } catch (e) { /* already claimed or not valid: nothing to add */ }
 }
@@ -3228,7 +3271,7 @@ async function deliverPayment(pr, payload, wrap) {
    coins are delivered once the wallet is back: the Nostr message is made once and kept, so sending it again is the
    same message (relays and the payee see it once). If the payee already has the coins (spent), the line is closed;
    if it can't be delivered after several tries, the coins come back with a line that says so. */
-const reqPayload = (pr, url, proofs) => Object.assign({ id: pr.id, mint: url, unit: 'sat', proofs }, pr.description ? { memo: pr.description } : {});
+const reqPayload = (pr, url, proofs) => Object.assign({ id: pr.id, mint: acctUrl(url), unit: acctUnit(url), proofs }, pr.description ? { memo: pr.description } : {});
 function reqWrap(pr, payload) {
   const tr = (pr.transport || []).find(t => t.type === 'nostr'); if (!tr) return null;
   try { const d = L.nip19decode(tr.target); const to = d.type === 'nprofile' ? d.data.pubkey : d.type === 'npub' ? d.data : null; return to ? L.nip17.wrapEvent(rnd(32), { publicKey: to }, JSON.stringify(payload)) : null; } catch (e) { return null; }
@@ -3278,7 +3321,7 @@ function nfcText(message) {
   for (const rec of message.records || []) {
     if (rec.recordType === 'mime' && /octet-stream/.test(rec.mediaType || '')) {
       const u = new Uint8Array(rec.data.buffer, rec.data.byteOffset, rec.data.byteLength);
-      if (String.fromCharCode(...u.slice(0, 4)) === 'craw') return L.getEncodedToken(L.getDecodedTokenBinary(u, Object.keys(S.counters)));
+      if (String.fromCharCode(...u.slice(0, 4)) === 'craw') return tokEnc(L.getDecodedTokenBinary(u, Object.keys(S.counters)));
     }
     if (['text', 'url', 'absolute-url'].includes(rec.recordType)) {
       const s = new TextDecoder(rec.encoding || 'utf-8').decode(rec.data);
@@ -3339,7 +3382,7 @@ function saveContact(c) {
 const contactById = id => S.contacts.find(c => c.id === id);
 async function sendToContactNostr(c, amount, note) {
   const tx = await sendEcash(amount, note, null);
-  const payload = { mint: S.active, unit: 'sat', proofs: tx.sent, memo: note || undefined };
+  const payload = { mint: acctUrl(S.active), unit: acctUnit(S.active), proofs: tx.sent, memo: note || undefined };
   const list = [...new Set((c.relays || []).concat(relays()))].slice(0, 8);
   const ev = L.nip17.wrapEvent(rnd(32), { publicKey: c.pubkey }, JSON.stringify(payload));
   const ok = await relayPublish(ev, 8000, list);
@@ -3404,15 +3447,15 @@ function offlineAmounts(proofs, amount) {
   return [below, above].filter(Boolean);
 }
 function sendOffline(amount, note, url = S.active) {
-  piggyGuard(amount);
-  const hold = limitGate(amount); hold.release();   // (nothing in between: the coins and the line are written right here)
+  if (isSatAcct(url)) piggyGuard(amount);
+  const hold = limitGate(amount, isSatAcct(url) ? {} : { free: true }); hold.release();   // (another unit: outside the SAT limit and piggy bank)   // (nothing in between: the coins and the line are written right here)
   const busy = new Set(S.ops.filter(o => o.mint === url).flatMap(o => o.inputs));   // coins a step still in flight may have spent
   const have = (S.proofs[url] || []).filter(p => !busy.has(p.secret));
   const pick = pickExact(have, amount);
-  if (!pick) { const near = offlineAmounts(have, amount); throw new Error(`Offline, NUTCADE can only send amounts made of the exact coins you hold.${near.length ? ` Try ${near.map(money).join(' or ')}.` : ''}`); }
+  if (!pick) { const near = offlineAmounts(have, amount); throw new Error(`Offline, NUTCADE can only send amounts made of the exact coins you hold.${near.length ? ` Try ${near.map(n => moneyAt(url, n)).join(' or ')}.` : ''}`); }
   const ids = new Set(pick.map(p => p.secret));
   S.proofs[url] = (S.proofs[url] || []).filter(p => !ids.has(p.secret));
-  const token = L.getEncodedToken({ mint: url, proofs: pick, unit: 'sat' });
+  const token = tokEnc({ mint: url, proofs: pick, unit: 'sat' });
   save();
   return addTx(Object.assign({ type: 'out', method: 'ecash', amount, mint: url, note, status: 'pending', token, sent: plain(pick), offline: true }, hold.id ? { limId: hold.id } : {}));
 }
@@ -3481,10 +3524,10 @@ async function sweepPhrase(phrase, urls, onStep) {
     try {
       const isNew = !S.mints.find(m => m.url === url);
       if (isNew) await addMint(url, { dropped: true });   // (sats of yours, found under another phrase: they come in even at a mint below the minimum)
-      const other = new L.Wallet(url, { unit: 'sat', bip39seed: otherSeed });
+      const other = new L.Wallet(acctUrl(url), { unit: acctUnit(url), bip39seed: otherSeed });
       await other.loadMint();
       let found = [];
-      for (const k of other.keyChain.getKeysets().filter(k => k.unit === 'sat')) {
+      for (const k of other.keyChain.getKeysets()) {
         onStep && onStep(`Scanning ${host(url)} · keyset ${k.id.slice(0, 8)}…`);
         const r = await other.batchRestore(300, undefined, 0, k.id);
         if (r.proofs && r.proofs.length) {
@@ -3567,7 +3610,7 @@ function openMintPicker() {
     <div class="tiny">${esc(blurb)}</div><div class="row" style="gap:6px;flex-wrap:wrap" data-chips>${extra}</div></div>`;
   openSheet('Choose a mint', `
     <div class="notice cyan">A mint holds the Bitcoin behind your ecash. Only add mints you trust, and spread larger amounts across several.</div>
-    ${S.mints.length ? `<div class="field"><label>Your mints</label><div class="txs">${S.mints.map(m => `<button class="tx in" data-act="useMint" data-url="${esc(m.url)}"><span class="ico">${m.url === S.active ? '★' : '·'}</span><span class="mid"><div class="note">${esc(m.name)}</div><div class="meta">${esc(host(m.url))}</div></span><span class="amt">${fmt(balanceOf(m.url))}</span></button>`).join('')}</div></div>` : ''}
+    ${S.mints.length ? `<div class="field"><label>Your mints</label><div class="txs">${mintOrder().map(m => `<button class="tx in" data-act="useMint" data-url="${esc(m.url)}"><span class="ico">${m.url === S.active ? '★' : '·'}</span><span class="mid"><div class="note">${esc(m.name)}</div><div class="meta">${esc(host(m.url))}${unitChip(acctUnit(m.url))}</div></span><span class="amt">${fmtU(balanceOf(m.url), acctUnit(m.url))}</span></button>`).join('')}</div></div>` : ''}
     <div class="field"><label for="mintUrl">Mint address</label><div class="row inrow"><input id="mintUrl" class="inp" data-noi18n placeholder="https://mint.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn solid gold" data-act="addMintUrl">Add</button></div></div>
     <div id="mintErr"></div>
     <div class="field"><label>Popular mints</label><div class="txs">${CURATED.map(c => card(c.url, c.name, c.blurb, c.test ? '<span class="chip failed">TEST SATS</span>' : '')).join('')}</div></div>
@@ -3588,6 +3631,9 @@ async function probeCard(el) {
     const chips = [];
     if (meth('4').includes('bolt11') || meth('5').includes('bolt11')) chips.push('<span class="chip ln">LIGHTNING</span>');
     if (meth('4').includes('onchain') || meth('5').includes('onchain')) chips.push('<span class="chip ln" style="color:var(--lime)">ON-CHAIN</span>');
+    const us = await mintUnits(u).catch(() => []);   // the units it issues: each is an account of its own
+    for (const x of us) if (x !== 'sat') chips.push(unitChip(x));
+    if (us.length && !us.includes('sat')) chips.push('<span class="chip failed">NO SAT</span>');
     el.querySelector('[data-chips]').insertAdjacentHTML('afterbegin', chips.join(''));
   } catch (e) {
     el.querySelector('[data-chips]').insertAdjacentHTML('afterbegin', '<span class="chip claimed">OFFLINE</span>');
@@ -3645,8 +3691,9 @@ function needSeed() { if (!S.seed) { closeSheet(); tab = 'wallet'; render(); toa
 function needMint() { if (!S.seed) { closeSheet(); tab = 'wallet'; render(); toast('Set up your recovery phrase first', 'gold'); return true; } if (!activeMint()) { openMintPicker(); return true; } return false; }
 function methodSeg(dir, cur) {
   const m = activeMint();
-  const opts = [['ecash', 'ECASH'], ['ln', 'LIGHTNING'], ['onchain', 'ON-CHAIN']];
-  return `<div class="seg three" role="group" aria-label="Method">${opts.map(([k, l]) => `<button data-act="${dir}Method" data-m="${k}" aria-pressed="${cur === k}">${l}</button>`).join('')}</div>`;
+  const sat = !m || isSatAcct(m.url);   // (on-chain is SAT only: it isn't offered for another unit)
+  const opts = [['ecash', 'ECASH'], ['ln', 'LIGHTNING']].concat(sat ? [['onchain', 'ON-CHAIN']] : []);
+  return `<div class="seg ${sat ? 'three' : 'two'}" role="group" aria-label="Method">${opts.map(([k, l]) => `<button data-act="${dir}Method" data-m="${k}" aria-pressed="${cur === k}">${l}</button>`).join('')}</div>`;
 }
 function openReceive(method = 'ln') {
   if (method === 'ecash' ? needSeed() : needMint()) return;
@@ -3658,32 +3705,33 @@ function openReceive(method = 'ln') {
     <div id="tokPeek"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Lunch money from Sam"></div>
     <button class="btn solid lime block" data-act="doReceiveToken">Claim ecash</button>
-    ${window.Chiptune && window.Chiptune.canListen() ? '<button class="btn block violet" data-act="ctListen">Listen for a token sent as sound</button>' : ''}
-    ${S.seed ? '<button class="btn block" data-act="reqOpen">Request a payment</button><button class="btn block" data-act="splitOpen">Split a bill</button><button class="linkbtn tiny" data-act="myAddrQR" style="justify-self:start">Show my ecash address (for contacts)</button>' : ''}`;
+    ${isSatAcct(S.active) && window.Chiptune && window.Chiptune.canListen() ? '<button class="btn block violet" data-act="ctListen">Listen for a token sent as sound</button>' : ''}
+    ${S.seed ? `<button class="btn block" data-act="reqOpen">Request a payment</button>${isSatAcct(S.active) ? '<button class="btn block" data-act="splitOpen">Split a bill</button><button class="linkbtn tiny" data-act="myAddrQR" style="justify-self:start">Show my ecash address (for contacts)</button>' : ''}` : ''}`;
   else if (method === 'ln') inner = supports(m, 'mint', 'bolt11') ? `
     ${S.prefs.npc ? `<div class="panel lnaddr"><div class="row between"><span class="label">Your Lightning address</span><button class="linkbtn tiny" data-act="lnAddr">Manage</button></div><div class="code addr">${esc(npcAddress())}</div><div class="row"><button class="btn sm" data-act="copy" data-text="${esc(npcAddress())}">Copy</button><button class="btn sm violet" data-act="lnAddrQR">Show QR</button></div><div class="tiny muted">Payments to it land here whenever NUTCADE is open. Or make a one-time invoice below.</div></div>`
       : `<button class="linkbtn tiny" data-act="lnAddr" style="justify-self:start">＠ Get your own Lightning address</button>`}
-    <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="2100" autocomplete="off"></div>
+    <div class="field">${amtField('amtIn', 'Amount ({U})', '2100')}</div>${isSatAcct(m.url) ? '' : `<div class="tiny muted">The invoice is in SAT. ${esc(m.name)} credits the amount above in ${unitCode(acctUnit(m.url))} at its own rate: NUTCADE doesn't convert anything.</div>`}
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Arcade fund"></div>
     <button class="btn solid lime block" data-act="doLnInvoice">Create invoice</button>` : notSupported('Lightning deposits');
   else inner = supports(m, 'mint', 'onchain') ? `
     <div class="notice">On-chain deposits need ${esc(methodInfo(m, 'mint', 'onchain')?.confirmations || 'a few')} confirmation(s). NUTCADE watches the address while it's open.${minMax(methodInfo(m, 'mint', 'onchain'))}</div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Savings top-up"></div>
     <button class="btn solid lime block" data-act="doOnchainAddr">Get Bitcoin address</button>` : notSupported('On-chain deposits');
-  openSheet('Receive', `${methodSeg('recv', method)}${m && method !== 'ecash' ? `<div class="tiny muted">Into <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b></div>${blockedNotice(m.url)}` : ''}${inner}<div id="sheetErr"></div>`);
+  openSheet('Receive', `${methodSeg('recv', method)}${m && method !== 'ecash' ? `<div class="tiny muted">Into <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b>${unitChip(acctUnit(m.url))}</div>${blockedNotice(m.url)}` : ''}${inner}<div id="sheetErr"></div>`);
 }
-function minMax(mi) { if (!mi) return ''; const a = []; if (mi.min) a.push(`min ${fmt(mi.min)}`); if (mi.max) a.push(`max ${fmt(mi.max)}`); return a.length ? ` <span>Limits: ${a.join(', ')} SAT.</span>` : ''; }   // its own sentence, so it's translated on its own
-function notSupported(what) { return `<div class="notice red">${what} aren't offered by ${esc(activeMint().name)}. Pick a mint that lists them in the mint picker.</div><button class="btn block gold" data-act="pickMint">Open mint picker</button>`; }
+function minMax(mi, unit = acctUnit(S.active)) { if (!mi) return ''; const a = []; if (mi.min) a.push(`min ${fmtU(mi.min, unit)}`); if (mi.max) a.push(`max ${fmtU(mi.max, unit)}`); return a.length ? ` <span>Limits: ${a.join(', ')} ${unitCode(unit)}.</span>` : ''; }   // its own sentence, so it's translated on its own
+function notSupported(what) { return `<div class="notice red">${what} aren't offered by ${esc(acctName(activeMint()))}. Pick a mint that lists them in the mint picker.</div><button class="btn block gold" data-act="pickMint">Open mint picker</button>`; }
 
 function openSend(method = 'ecash') {
   if (needMint()) return;
   const m = activeMint(); let inner = '';
+  const sat = isSatAcct(m.url);   // (another unit: a plain token; Send all, gifts and printed tokens are SAT only)
   if (method === 'ecash') inner = `
-    <div class="field"><div class="row between"><label for="amtIn">Amount (SAT)</label><button class="linkbtn tiny" data-act="allEcash">Send all</button></div><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="500" autocomplete="off"></div>
+    ${sat ? `<div class="field"><div class="row between"><label for="amtIn">Amount (SAT)</label><button class="linkbtn tiny" data-act="allEcash">Send all</button></div><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="500" autocomplete="off"></div>` : `<div class="field">${amtField('amtIn', 'Amount ({U})', '')}</div>`}
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="High score bet with Alex"></div>
-    ${giftFields()}
+    ${sat ? giftFields() : ''}
     <button class="btn solid pink block" data-act="doSendEcash">Create token</button>
-    <button class="btn block violet" data-act="ptOpen">Print tokens</button>
+    ${sat ? '<button class="btn block violet" data-act="ptOpen">Print tokens</button>' : ''}
     <button class="linkbtn tiny" data-act="reqPayOpen" style="justify-self:start">Pay a payment request instead</button>`;   // tokens: Print tokens
   else if (method === 'ln') inner = supports(m, 'melt', 'bolt11') ? `
     <div class="field"><div class="row between"><label for="destIn">Invoice or Lightning address</label><button class="btn sm violet" data-act="scan" data-hint="Point at a Lightning invoice or address."><svg class="ico-scan" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h5v1H2v4H1zm9 0h5v5h-1V2h-4zM1 10h1v4h4v1H1zm13 0h1v5h-5v-1h4zM4 4h3v3H4zm5 0h3v3H9zM4 9h3v3H4zm5 0h1v1H9zm2 0h1v1h-1zm-2 2h1v1H9zm2 1h1v1h-1z"/></svg>Scan</button></div><textarea id="destIn" class="inp" placeholder="lnbc… or name@domain.com" autocomplete="off" spellcheck="false"></textarea></div>
@@ -3694,10 +3742,10 @@ function openSend(method = 'ecash') {
     <div class="field"><div class="row between"><label for="amtIn">Amount (SAT)</label><button class="linkbtn tiny" data-act="allOnchain">Send all</button></div><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="50000" autocomplete="off"></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" placeholder="Move to cold storage"></div>
     <button class="btn solid pink block" data-act="doMeltQuote" data-k="onchain">Get fee options</button>${minMax(methodInfo(m, 'melt', 'onchain')) ? `<div class="tiny muted">${minMax(methodInfo(m, 'melt', 'onchain'))}</div>` : ''}` : notSupported('On-chain withdrawals');
-  openSheet('Send', `${contactChips()}${methodSeg('send', method)}<div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>${inner}<div id="sheetErr"></div>`);
+  openSheet('Send', `${sat ? contactChips() : ''}${methodSeg('send', method)}<div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b>${unitChip(acctUnit(m.url))} · ${moneyAt(m.url, balanceOf(m.url))} available</div>${inner}<div id="sheetErr"></div>`);
 }
 const val = id => ($('#' + id) || {}).value || '';
-const amt = () => { const n = satsOf('amtIn'); if (!n || n <= 0) throw new Error('Enter an amount in sats, like 1000.'); return n; };
+const amt = () => { const n = satsOf('amtIn'), u = (($('#amtIn') || {}).dataset || {}).unit; if (!n || n <= 0) throw new Error(u && u !== 'sat' ? `Enter an amount in ${unitCode(u)}, like ${fmtU(1250, u)}.` : 'Enter an amount in sats, like 1000.'); return n; };
 function showErr(e) { sfx('err'); const el = $('#sheetErr'); if (el) el.innerHTML = errHTML(e); else toast(e.message || String(e), 'red'); }
 async function run(btn, label, fn) {
   const old = btn ? btn.innerHTML : ''; if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner">${label}</span>`; }
@@ -3715,23 +3763,25 @@ function showInvoice(tx) {
   if (quotePaid(q) || st !== 'pending') {
     setBody(`<div class="notice">${PAID_COLLECTING}</div><div class="row" style="justify-content:center"><span class="spinner" id="payState">COLLECTING</span></div>`, () => {
       if (!q) return null; let alive = true;
-      (async () => { while (alive) { const r = await checkQuote(q).catch(() => null); if (r === 'paid') { if (alive) showDone('in', (txById(tx.id) || tx).amount, 'Lightning'); return; } await sleep(3000); } })();
+      (async () => { while (alive) { const r = await checkQuote(q).catch(() => null); if (r === 'paid') { if (alive) showDone('in', (txById(tx.id) || tx).amount, 'Lightning', '', txUnit(tx)); return; } await sleep(3000); } })();
       return () => { alive = false; };
     });
     return;
   }
+  const tu = txUnit(tx), isat = tu === 'sat' ? null : invoiceSats(tx.request);
   setBody(`<div class="label" style="text-align:center">Pay this invoice</div>
-    <div class="credit-num" style="text-align:center;font-size:26px">${fmt(tx.amount)}<small>${unitTag()}</small></div>
+    <div class="credit-num" style="text-align:center;font-size:26px">${fmtU(tx.amount, tu)}<small>${unitTagU(tu)}</small></div>
+    ${tu === 'sat' ? '' : `<dl class="kv" data-unitinv><dt>Invoice</dt><dd>${isat != null ? money(isat) : '?'}</dd><dt>Credited by the mint</dt><dd>${moneyU(tx.amount, tu)}</dd></dl>`}
     ${qrBlock('lightning:' + tx.request.toUpperCase(), 'Lightning invoice QR')}
     <div class="code">${esc(tx.request)}</div>
     <div class="row"><button class="btn block" data-act="copy" data-text="${esc(tx.request)}">Copy invoice</button></div>
     <div class="row" style="justify-content:center"><span class="spinner" id="payState">WAITING FOR PAYMENT</span></div>`, () => {
     if (!q) return null;
     let alive = true;
-    const onPaid = e => { if (e.detail === q.quote && alive) { alive = false; showDone('in', tx.amount, 'Lightning'); } };
+    const onPaid = e => { if (e.detail === q.quote && alive) { alive = false; showDone('in', tx.amount, 'Lightning', '', tu); } };
     document.addEventListener('nutcade:paid', onPaid);
     liveSync();
-    (async () => { while (alive) { try { const r = await checkQuote(q); if (r === 'paid') { if (alive) { alive = false; showDone('in', tx.amount, 'Lightning'); } return; } if (r === 'expired') { const s = $('#payState'); if (s) s.textContent = 'INVOICE EXPIRED'; return; } } catch (e) { } await sleep(3000); } })();
+    (async () => { while (alive) { try { const r = await checkQuote(q); if (r === 'paid') { if (alive) { alive = false; showDone('in', tx.amount, 'Lightning', '', tu); } return; } if (r === 'expired') { const s = $('#payState'); if (s) s.textContent = 'INVOICE EXPIRED'; return; } } catch (e) { } await sleep(3000); } })();
     return () => { alive = false; document.removeEventListener('nutcade:paid', onPaid); };
   });
 }
@@ -3750,21 +3800,21 @@ function showAddress(tx) {
 }
 function showToken(tx, sentTo) {
   setBody(`<div class="label" style="text-align:center">${tx.lockUntil ? 'Locked gift' : 'Ecash token'}</div>
-    <div class="credit-num" style="text-align:center;font-size:26px">${fmt(tx.amount)}<small>${unitTag()}</small></div>
+    <div class="credit-num" style="text-align:center;font-size:26px">${fmtU(tx.amount, txUnit(tx))}<small>${unitTagU(txUnit(tx))}</small></div>
     ${qrBlock(tx.token, 'Ecash token QR')}
     <div class="code">${esc(tx.token)}</div>
     <button class="btn solid pink block" data-act="copy" data-text="${esc(tx.token)}">Copy token</button>
     ${nfcOK() ? `<button class="btn block violet" data-act="nfcWrite" data-text="${esc(tx.token)}">Write to NFC card</button>` : ''}
-    ${ctBtn(tx.token, 'Play as sound', 'btn block violet')}
+    ${txUnit(tx) === 'sat' ? ctBtn(tx.token, 'Play as sound', 'btn block violet') : ''}
     ${tx.lockUntil ? `<div class="notice cyan">Only ${esc(tx.giftTo || 'the person you picked')} can claim this. ${sentTo ? 'It was also sent to them over Nostr. ' : ''}If they haven't by ${fmtDay(tx.lockUntil)}, NUTCADE takes it back for you.</div>`
     : '<div class="notice cyan">Anyone holding this token can claim it. It stays in your notes until they do, and you can reclaim it if they never claim it.</div>'}`);
 }
 let lastContact = null;
-function showDone(dir, amount, how, extra = '') {
-  sfx('start'); celebrate(dir, amount);
+function showDone(dir, amount, how, extra = '', unit = 'sat') {
+  sfx('start'); celebrate(dir, amount, unit);
   setBody(`<div style="text-align:center;display:grid;gap:14px;padding:10px 0">
     <div style="font-family:var(--f-display);font-size:18px;color:${dir === 'in' ? 'var(--lime)' : 'var(--pink)'}">${dir === 'in' ? '1UP!' : 'SENT!'}</div>
-    <div class="credit-num" style="font-size:30px">${dir === 'in' ? '+' : '-'}${fmt(amount)}<small>${unitTag()}</small></div>
+    <div class="credit-num" style="font-size:30px">${dir === 'in' ? '+' : '-'}${fmtU(amount, unit)}<small>${unitTagU(unit)}</small></div>
     <div class="muted">${esc(how)}</div>
     ${extra}<button class="btn solid gold block" data-act="close">Continue</button></div>`);
   refresh();
@@ -3774,13 +3824,14 @@ function showMeltQuote(kind, mq, dest, note, all) {   // (all: a Send all quote,
   const head = $('#layer .sheet-head h3'); if (head) { head.textContent = tr('Pay'); head.closest('.sheet').setAttribute('aria-label', tr('Pay')); }
   const opts = kind === 'onchain' ? (mq.fee_options || []) : [];
   const worst = kind === 'ln' ? costShown(S.active, amount, mq.fee_reserve) : meltCost(S.active, amount, Math.max(0, ...(mq.fee_options || []).map(o => num(o.fee_reserve))));
+  const au = acctUnit(all ? all.url : S.active), money = n => moneyU(n, au), isat = au === 'sat' || kind !== 'ln' ? null : invoiceSats(mq.request || dest);   // (another unit: the mint's own quote in it, and the invoice's SAT as the invoice states them)
   const feeRow = kind === 'ln' ? costRows(worst) : worst.mintFee ? `<dt>Mint fee, at most</dt><dd>${money(worst.mintFee)}</dd>` : '';
-  setBody(`${all ? `<div class="notice cyan">Send all: everything at this mint, less the fees.</div>${all.capped ? `<div class="tiny muted">The most this address or mint takes in one payment is ${money(all.max)}, so the rest stays at this mint.</div>` : ''}` : ''}<dl class="kv"><dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd ${AUTO_NOTE.test(note) ? '' : 'data-noi18n'}>${esc(note)}</dd>` : ''}</dl>
+  setBody(`${all ? `<div class="notice cyan">Send all: everything at this mint, less the fees.</div>${all.capped ? `<div class="tiny muted">The most this address or mint takes in one payment is ${money(all.max)}, so the rest stays at this mint.</div>` : ''}` : ''}<dl class="kv">${isat != null ? `<dt>Invoice</dt><dd>${moneyU(isat, 'sat')}</dd>` : ''}<dt>Pay</dt><dd>${money(amount)}</dd>${feeRow}<dt>To</dt><dd class="tiny">${esc(dest.length > 40 ? dest.slice(0, 18) + '…' + dest.slice(-14) : dest)}</dd>${note ? `<dt>Note</dt><dd ${AUTO_NOTE.test(note) ? '' : 'data-noi18n'}>${esc(note)}</dd>` : ''}</dl>
     ${opts.length ? `<div class="field"><label>Fee speed</label><div class="txs">${opts.map((o, i) => `<label class="tx out" style="cursor:pointer"><span class="ico"><input type="radio" name="fee" value="${o.fee_index}" ${i === 0 ? 'checked' : ''} style="accent-color:var(--pink)"></span><span class="mid"><div class="note">${esc(tr(`~${o.estimated_blocks} block${o.estimated_blocks === 1 ? '' : 's'}`))}</div><div class="meta">≈ ${Math.round(o.estimated_blocks * 10)} min</div></span><span class="amt">${fmt(o.fee_reserve)}</span></label>`).join('')}</div></div>` : ''}
     ${kind === 'ln' ? changeNote(S.active) : ''}
-    ${kind === 'ln' && !all && balanceOf(S.active) < worst.total ? `<div class="notice">${esc((activeMint() || {}).name || 'This mint')} holds ${money(balanceOf(S.active))}, not enough on its own.${S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? ' You can split the payment across your mints.' : ''}</div>` : ''}
+    ${kind === 'ln' && !all && balanceOf(S.active) < worst.total ? `<div class="notice">${esc((activeMint() || {}).name || 'This mint')} holds ${money(balanceOf(S.active))}, not enough on its own.${au === 'sat' && satMints().filter(m => balanceOf(m.url) > 0).length > 1 ? ' You can split the payment across your mints.' : ''}</div>` : ''}
     <button class="btn solid pink block" id="payBtn">Pay ${money(amount)}</button>${all ? '<button class="btn block" data-act="close">Cancel</button>' : ''}
-    ${kind === 'ln' && !all && S.mints.filter(m => balanceOf(m.url) > 0).length > 1 ? `<button class="btn block violet" id="mppBtn">Pay from several mints</button>` : ''}<div id="sheetErr"></div>`, body => {
+    ${kind === 'ln' && !all && au === 'sat' && satMints().filter(m => balanceOf(m.url) > 0).length > 1 ? `<button class="btn block violet" id="mppBtn">Pay from several mints</button>` : ''}<div id="sheetErr"></div>`, body => {
     const mb = body.querySelector('#mppBtn'); if (mb) mb.onclick = () => openMultinut(mq.request, amount, dest, note);
     body.querySelector('#payBtn').onclick = e => run(e.currentTarget, 'PAYING', async () => {
       const fi = kind === 'onchain' ? parseInt((body.querySelector('input[name=fee]:checked') || {}).value || '0', 10) : 0;
@@ -3792,7 +3843,7 @@ function showMeltQuote(kind, mq, dest, note, all) {   // (all: a Send all quote,
       if (ct) updTx(tx.id, { contactId: ct.id, contactName: ct.name });
       lastContact = null;
       const save = isAddr && !ct ? `<button class="btn block violet" data-act="contactFrom" data-ln="${esc(dest.toLowerCase())}">Save ${esc(dest)} as a contact</button>` : '';
-      if (tx.status === 'done') showDone('out', amount, kind === 'ln' ? (zx ? note : ct ? `Lightning to ${ct.name}` : 'Lightning') : 'On-chain' + (tx.outpoint ? ' · ' + tx.outpoint.slice(0, 12) + '…' : ''), save);
+      if (tx.status === 'done') showDone('out', amount, kind === 'ln' ? (zx ? note : ct ? `Lightning to ${ct.name}` : 'Lightning') : 'On-chain' + (tx.outpoint ? ' · ' + tx.outpoint.slice(0, 12) + '…' : ''), save, au);
       else { setBody(`<div class="notice">Payment is in flight. NUTCADE will settle it when the mint confirms. Check the transaction in your notes.</div><button class="btn block gold" data-act="close">OK</button>`); refresh(); }
     });
     return null;
@@ -3803,7 +3854,7 @@ function openTx(id) {
   const t = txById(id); if (!t) return;
   const method = { ln: 'Lightning', ecash: 'Ecash', onchain: 'On-chain', fee: 'Mint fee' }[t.method];
   const mint = S.mints.find(m => m.url === t.mint);
-  const moved = !(t.status === 'failed' || t.status === 'expired'), head = t.method === 'fee' ? t.fee : t.amount;
+  const moved = !(t.status === 'failed' || t.status === 'expired'), head = t.method === 'fee' ? t.fee : t.amount, tu = txUnit(t), money = n => moneyU(n, tu);
   let extra = nzTxExtra(t);   // (a nutzap: src/app_nutzap.js)
   if (extra) {}
   else if (t.status === 'failed' && t.type === 'out') extra = `<div class="notice">${t.cost ? `This payment didn't go through. The ecash came back, except ${money(t.cost)} the mint kept as its fee for getting it ready.` : "This payment didn't go through. Nothing left your wallet."}</div>`;
@@ -3813,17 +3864,17 @@ function openTx(id) {
   else if (t.status === 'pending' && t.incoming && t.offline) extra = `${checkLine(t)}<div class="notice">Saved while offline. NUTCADE claims it automatically when the mint can be reached.</div><button class="btn block lime" data-act="claimIncoming" data-id="${esc(t.id)}">Claim now</button>`;
   else if (t.status === 'pending' && t.incoming) extra = `<div class="notice">This ecash came from ${esc(host(t.mint))}, a mint you don't use yet. Claiming adds that mint and trusts it with ${money(t.amount)}.</div><button class="btn block lime" data-act="claimIncoming" data-id="${esc(t.id)}">Trust mint &amp; claim</button>`;
   else if (t.status === 'pending' && t.method === 'ecash' && t.token) extra = `${t.lockUntil ? `<div class="notice cyan">Locked to ${esc(t.giftTo || 'one person')}. ${Date.now() < t.lockUntil ? `If they haven't claimed it by ${fmtDay(t.lockUntil)}, it comes back to you automatically.` : 'The lock has run out, so you can take it back.'}</div>` : ''}${qrBlock(t.token, 'Ecash token QR')}<div class="code">${esc(t.token)}</div>
-    <div class="row" style="flex-wrap:wrap"><button class="btn sm pink" data-act="copy" data-text="${esc(t.token)}">Copy token</button>${nfcOK() ? `<button class="btn sm violet" data-act="nfcWrite" data-text="${esc(t.token)}">Write to NFC</button>` : ''}${ctBtn(t.token)}<button class="btn sm" data-act="checkClaim" data-id="${esc(t.id)}">Check claimed</button>${t.lockUntil ? (Date.now() < t.lockUntil ? `<button class="btn sm" disabled>Back on ${fmtDay(t.lockUntil)}</button>` : `<button class="btn sm gold" data-act="giftTake" data-id="${esc(t.id)}">Take it back</button>`) : `<button class="btn sm gold" data-act="reclaim" data-id="${esc(t.id)}">Reclaim</button>`}</div>`;
+    <div class="row" style="flex-wrap:wrap"><button class="btn sm pink" data-act="copy" data-text="${esc(t.token)}">Copy token</button>${nfcOK() ? `<button class="btn sm violet" data-act="nfcWrite" data-text="${esc(t.token)}">Write to NFC</button>` : ''}${tu === 'sat' ? ctBtn(t.token) : ''}<button class="btn sm" data-act="checkClaim" data-id="${esc(t.id)}">Check claimed</button>${t.lockUntil ? (Date.now() < t.lockUntil ? `<button class="btn sm" disabled>Back on ${fmtDay(t.lockUntil)}</button>` : `<button class="btn sm gold" data-act="giftTake" data-id="${esc(t.id)}">Take it back</button>`) : `<button class="btn sm gold" data-act="reclaim" data-id="${esc(t.id)}">Reclaim</button>`}</div>`;
   else if (t.status === 'pending' && t.type === 'in' && t.method === 'ln') extra = quotePaid(S.quotes.find(x => x.quote === t.quote)) ? `<div class="notice">${PAID_COLLECTING}</div>` : `<button class="btn block lime" data-act="resumeInvoice" data-id="${esc(t.id)}">Show invoice</button>`;
   else if (t.status === 'pending' && t.type === 'in' && t.method === 'onchain') extra = `<div class="row" style="flex-wrap:wrap"><button class="btn sm lime" data-act="resumeAddr" data-id="${esc(t.id)}">Show address</button><button class="btn sm red" data-act="stopWatch" data-id="${esc(t.id)}">Stop watching</button></div>`;
   else if (t.status === 'pending' && t.type === 'out') extra = `<button class="btn block violet" data-act="reconcileTx" data-id="${esc(t.id)}">Check payment</button>`;
   else if (t.changePending && t.type === 'out') extra = `<div class="notice">This payment went through. Its change (the unused fee reserve) hasn't come back from the mint yet, so the fee shown is the most it can be. NUTCADE keeps trying, and the fee drops when the change is back.</div><button class="btn block violet" data-act="reconcileTx" data-id="${esc(t.id)}">Try now</button>`;
   openSheet(t.method === 'fee' ? 'Mint fee' : t.type === 'in' ? 'Received' : 'Sent', `
-    <div class="credit-num${moved ? '' : ' void'}" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${moved ? (t.type === 'in' ? '+' : '-') : ''}${head ? fmt(head) : '…'}<small>${unitTag()}</small></div>
+    <div class="credit-num${moved ? '' : ' void'}" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${moved ? (t.type === 'in' ? '+' : '-') : ''}${head ? fmtU(head, tu) : '…'}<small>${unitTagU(tu)}</small></div>
     <div class="field"><label for="noteEdit">Note</label><textarea id="noteEdit" class="inp" maxlength="500" placeholder="What was this for?">${esc(noteText(t.note))}</textarea></div>
     <button class="btn solid gold block" data-act="saveNote" data-id="${esc(t.id)}">Save note</button>
     <dl class="kv"><dt>Method</dt><dd>${method}</dd><dt>Status</dt><dd>${esc(TX_STATUS[t.status] || t.status)}</dd>${t.fee && t.method !== 'fee' ? `<dt>Fee</dt><dd>${money(t.fee)}</dd>` : ''}
-    <dt>Mint</dt><dd data-noi18n>${esc(mint ? mint.name : host(t.mint))}</dd><dt>When</dt><dd data-noi18n>${fmtDate(t.ts, true)}</dd>
+    <dt>Mint</dt><dd data-noi18n>${esc(mint ? acctName(mint) : host(t.mint))}</dd>${tu === 'sat' ? '' : `<dt>Unit</dt><dd data-noi18n>${esc(unitCode(tu))}</dd>`}<dt>When</dt><dd data-noi18n>${fmtDate(t.ts, true)}</dd>
     ${t.outpoint ? `<dt>Tx</dt><dd class="tiny">${esc(t.outpoint)}</dd>` : ''}${t.nwcName ? `<dt>App</dt><dd data-noi18n>${esc(t.nwcName)}</dd>` : ''}${t.lnurlw ? `<dt>Voucher</dt><dd data-noi18n>${esc(t.lnurlw)}</dd>` : ''}${t.roundup ? `<dt>Round-up</dt><dd>+${money(t.roundup)} to piggy bank</dd>` : ''}${t.print ? `<dt>Printed token</dt><dd data-noi18n>#${esc(t.print.code)}</dd>` : ''}${t.lockUntil ? `<dt>Locked to</dt><dd ${t.giftTo && !t.hunt ? 'data-noi18n' : ''}>${esc(t.giftTo || 'one person')}</dd>` : ''}${nzTxRow(t)}${t.blinded ? '<dt>Receiver</dt><dd>Hidden in the ecash (P2BK)</dd>' : ''}${t.type === 'out' && t.method !== 'ecash' && t.request ? `<dt>To</dt><dd class="tiny">${esc(t.request.slice(0, 24))}…</dd>` : ''}</dl>
     ${extra}${t.print ? '<button class="btn block" data-act="ptList">Printed tokens</button>' : ''}<div id="sheetErr"></div>`);   // tokens
 }
@@ -3835,26 +3886,26 @@ function openRequest() {
   const recent = S.requests.slice(0, 5);
   openSheet('Request a payment', `
     <p style="margin:0">Make a payment request that any Cashu wallet (like cashu.me) can pay. The ecash comes straight to this wallet over Nostr, even if you're not looking at this screen.</p>
-    <div class="field"><label for="amtIn">Amount (SAT, optional)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="Any amount" autocomplete="off"></div>
+    <div class="field">${amtField('amtIn', 'Amount ({U}, optional)', 'Any amount')}</div>${isSatAcct(S.active) ? '' : `<div class="tiny muted">In ${esc(unitCode(acctUnit(S.active)))}, for your ${esc(unitCode(acctUnit(S.active)))} account. A wallet that doesn't hold ${esc(unitCode(acctUnit(S.active)))} can't pay it.</div>`}
     <div class="field"><label for="memoIn">What it's for (the payer sees this)</label><input id="memoIn" class="inp" maxlength="120" placeholder="Pizza night"></div>
     ${S.mints.length ? `<label class="toggle" for="onlyMine"><span><span class="tl">Only from my mints</span><span class="th">The payer must use one of the mints you use, so you never get ecash from a mint you don't trust.</span></span><input id="onlyMine" type="checkbox" checked></label>` : ''}
     <button class="btn solid lime block" data-act="reqCreate">Create request</button>
-    <button class="btn block pink" data-act="splitOpen">Split a bill with friends instead</button>
-    ${recent.length ? `<div class="sub">Recent requests</div><div class="txs">${recent.map(r => `<button class="tx in" data-act="reqShow" data-id="${esc(r.id)}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note ${r.memo ? '' : 'empty'}">${esc(r.memo || 'No description')}</div><div class="meta"><span>${timeAgo(r.created)}</span>${r.paid.length ? `<span class="chip claimed">PAID ×${r.paid.length}</span>` : ''}</div></span><span class="amt">${r.amount ? fmt(r.amount) : esc(tr('ANY'))}</span></button>`).join('')}</div>` : ''}
+    ${isSatAcct(S.active) ? '<button class="btn block pink" data-act="splitOpen">Split a bill with friends instead</button>' : ''}
+    ${recent.length ? `<div class="sub">Recent requests</div><div class="txs">${recent.map(r => `<button class="tx in" data-act="reqShow" data-id="${esc(r.id)}"><span class="ico" aria-hidden="true">?</span><span class="mid"><div class="note ${r.memo ? '' : 'empty'}">${esc(r.memo || 'No description')}</div><div class="meta"><span>${timeAgo(r.created)}</span>${r.paid.length ? `<span class="chip claimed">PAID ×${r.paid.length}</span>` : ''}</div></span><span class="amt">${r.amount ? fmtU(r.amount, r.unit || 'sat') : esc(tr('ANY'))}</span></button>`).join('')}</div>` : ''}
     <div id="sheetErr"></div>`);
 }
 function showRequest(r) {
   const paidBefore = r.paid.length;
   openSheet('Payment request', `
     <div class="label" style="text-align:center">${r.memo ? `<span data-noi18n>${esc(r.memo)}</span>` : 'Pay me'}</div>
-    <div class="credit-num" style="text-align:center;font-size:26px">${r.amount ? fmt(r.amount) : esc(tr('ANY'))}<small>${unitTag()}</small></div>
+    <div class="credit-num" style="text-align:center;font-size:26px">${r.amount ? fmtU(r.amount, r.unit || 'sat') : esc(tr('ANY'))}<small>${unitTagU(r.unit || 'sat')}</small></div>
     ${qrBlock(r.encoded, 'Payment request QR')}
     <div class="code">${esc(r.encoded)}</div>
-    <button class="btn solid lime block" data-act="copy" data-text="${esc(r.encoded)}">Copy request</button>${nfcBtn('nfcWrite', 'Write to NFC card', `data-text="${esc(r.encoded)}"`, 'btn block violet')}${ctBtn(r.encoded, 'Play as sound', 'btn block violet')}
+    <button class="btn solid lime block" data-act="copy" data-text="${esc(r.encoded)}">Copy request</button>${nfcBtn('nfcWrite', 'Write to NFC card', `data-text="${esc(r.encoded)}"`, 'btn block violet')}${(r.unit || 'sat') === 'sat' ? ctBtn(r.encoded, 'Play as sound', 'btn block violet') : ''}
     <div class="row" style="justify-content:center"><span class="spinner" id="payState">WAITING FOR PAYMENT</span></div>
     <div class="tiny muted">Payments arrive over Nostr while NUTCADE is open, and the ones sent while it's closed arrive the next time you open it (for 30 days).</div>`, () => {
     dmListen();
-    const on = e => { if (e.detail && e.detail.id === r.id) showDone('in', e.detail.amount, 'Payment request'); };
+    const on = e => { if (e.detail && e.detail.id === r.id) showDone('in', e.detail.amount, 'Payment request', '', r.unit || 'sat'); };
     document.addEventListener('nutcade:request', on);
     return () => document.removeEventListener('nutcade:request', on);
   });
@@ -3862,16 +3913,17 @@ function showRequest(r) {
 function openPayRequest(enc) {
   let pr; try { pr = decodeRequest(enc); } catch (e) { closeSheet(); sfx('err'); toast(e.message, 'red'); return; }
   const amount = pr.amount ? num(pr.amount) : 0;
-  const allowed = pr.mints && pr.mints.length ? pr.mints.map(normUrl) : null;
-  const usable = S.mints.filter(m => (!allowed || allowed.includes(m.url)) && balanceOf(m.url) > 0);
+  const pu = String(pr.unit || 'sat').toLowerCase();   // the unit it asks for: paid from an account in that unit, never another
+  const allowed = pr.mints && pr.mints.length ? pr.mints.map(u => normUrl(acctKey(normUrl(u), pu))) : null;
+  const usable = unitOk(pu) ? S.mints.filter(m => acctUnit(m.url) === pu && (!allowed || allowed.includes(m.url)) && balanceOf(m.url) > 0) : [];
   const tr = (pr.transport || []).find(t => t.type === 'nostr' || t.type === 'post');
   const pick = usable.find(m => m.url === S.active) || usable.slice().sort((a, b) => balanceOf(b.url) - balanceOf(a.url))[0];
   let body = `<div class="label">${pr.description ? `<span data-noi18n>${esc(pr.description)}</span>` : 'Payment request'}</div>
-    ${amount ? `<div class="credit-num" style="font-size:26px">${fmt(amount)}<small>${unitTag()}</small></div>` : `<div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off"></div>`}`;
-  if (pr.unit && pr.unit !== 'sat') body += `<div class="notice red">This request asks for ${esc(pr.unit)}. NUTCADE pays in sats only.</div>`;
+    ${amount ? `<div class="credit-num" style="font-size:26px">${fmtU(amount, unitOk(pu) ? pu : 'sat')}<small>${unitTagU(unitOk(pu) ? pu : 'sat')}</small></div>` : `<div class="field">${amtField('amtIn', 'Amount ({U})', '1000', unitOk(pu) ? pu : 'sat')}</div>`}`;
+  if (!unitOk(pu)) body += `<div class="notice red">This request asks for ${esc(unitCode(pu))}. NUTCADE holds SAT, USD, EUR and CHF.</div>`;
   else if (allowed && allowed.every(isBlocked)) body += errHTML(blockedErr(allowed[0], 'request'));
-  else if (!usable.length) body += `<div class="notice red">${allowed ? `This request only accepts ecash from ${allowed.map(u => esc(host(u))).join(', ')}, and you don't hold any there.` : "You don't have any sats to pay with yet."}</div>${allowed ? `<button class="btn block gold" data-act="addMint" data-url="${esc(allowed[0])}">Add ${esc(host(allowed[0]))}</button>` : ''}`;
-  else body += `<div class="field"><label for="reqMint">Pay from</label><select id="reqMint" class="inp">${usable.map(m => `<option value="${esc(m.url)}" ${m === pick ? 'selected' : ''}>${esc(m.name)} · ${fmt(balanceOf(m.url))}</option>`).join('')}</select></div>
+  else if (!usable.length) body += `<div class="notice red">${allowed ? `This request only accepts ${esc(unitCode(pu))} ecash from ${allowed.map(u => esc(host(u))).join(', ')}, and you don't hold any there.` : `You don't hold any ${esc(unitCode(pu))} ecash to pay with yet.`}</div>${allowed ? `<button class="btn block gold" data-act="addMint" data-url="${esc(allowed[0])}">Add ${esc(host(allowed[0]))}${pu === 'sat' ? '' : ' · ' + esc(unitCode(pu))}</button>` : ''}`;
+  else body += `<div class="field"><label for="reqMint">Pay from</label><select id="reqMint" class="inp">${usable.map(m => `<option value="${esc(m.url)}" ${m === pick ? 'selected' : ''}>${esc(acctName(m))} · ${fmtU(balanceOf(m.url), acctUnit(m.url))}</option>`).join('')}</select></div>
     <div class="field"><label for="noteIn">Note (only you see it)</label><input id="noteIn" class="inp" maxlength="200" value="${esc(pr.description || '')}"></div>
     ${tr ? `<div class="tiny muted">Sent ${tr.type === 'nostr' ? 'privately over Nostr' : 'to ' + esc(host(tr.target))}${pr.nut10 && pr.nut10.kind === 'P2PK' ? ', locked to the requester\'s key' : ''}.</div>` : '<div class="notice">This request has no delivery address, so NUTCADE will make a token for you to send yourself.</div>'}
     <button class="btn solid pink block" data-act="payReq" data-req="${esc(enc)}">Pay</button>`;
@@ -3881,8 +3933,8 @@ function openPayRequest(enc) {
 /* ---------- Lightning address sheet ---------- */
 function openLnAddr() {
   if (needSeed()) return;
-  const lnMints = S.mints.filter(m => supports(m, 'mint', 'bolt11'));
-  const cur = S.prefs.npc ? S.prefs.npcMint : (activeMint() && supports(activeMint(), 'mint', 'bolt11') ? S.active : (lnMints[0] || {}).url);
+  const lnMints = satMints().filter(m => supports(m, 'mint', 'bolt11'));   // (npub.cash pays in sats: a SAT account takes it)
+  const cur = S.prefs.npc ? S.prefs.npcMint : (activeMint() && isSatAcct(S.active) && supports(activeMint(), 'mint', 'bolt11') ? S.active : (lnMints[0] || {}).url);
   const pick = lnMints.length ? `<div class="field"><label for="npcMint">Mint that receives the payments</label><select id="npcMint" class="inp">${lnMints.map(m => `<option data-noi18n value="${esc(m.url)}" ${m.url === cur ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>` : '';
   if (!S.prefs.npc) return openSheet('Lightning address', `
     <p style="margin:0">Get a permanent Lightning address that anyone can pay from any Lightning wallet, like an email address for sats.</p>
@@ -4156,8 +4208,8 @@ const A = {
   amtUnit: b => { const el = b.parentElement.querySelector('input'); if (el) { toggleUnit(el); el.focus(); } },
   csv: () => exportCsv(S.txs, `nutcade-transactions-${new Date().toISOString().slice(0, 10)}.csv`),
   tx: b => openTx(b.dataset.id),
-  addMint: b => run(b, 'ADDING', async () => { if (isBlocked(b.dataset.url)) throw blockedErr(b.dataset.url, 'add'); const m = await addMint(b.dataset.url, { activate: true }); sfx('coin'); toast(`${m.name} added`, 'lime'); closeSheet(); render(); }),
-  addMintUrl: b => run(b, 'ADDING', async () => { const u = val('mintUrl'); if (!u.trim()) throw new Error('Type a mint address first.'); if (isBlocked(normUrl(u))) throw blockedErr(normUrl(u), 'add'); const m = await addMint(u, { activate: true }); sfx('coin'); toast(`${m.name} added`, 'lime'); closeSheet(); render(); }),
+  addMint: b => run(b, 'ADDING', async () => { if (isBlocked(b.dataset.url)) throw blockedErr(b.dataset.url, 'add'); const m = await addMint(b.dataset.url, { activate: true }); sfx('coin'); toast(`${acctName(m)} added`, 'lime'); closeSheet(); render(); }),
+  addMintUrl: b => run(b, 'ADDING', async () => { const u = val('mintUrl'); if (!u.trim()) throw new Error('Type a mint address first.'); if (isBlocked(normUrl(u))) throw blockedErr(normUrl(u), 'add'); const m = await addMint(u, { activate: true }); sfx('coin'); toast(`${acctName(m)} added`, 'lime'); closeSheet(); render(); }),
   useMint: b => { S.active = b.dataset.url; save(); closeSheet(); render(); toast('Mint switched', 'cyan'); },
   refreshMint: b => run(b, '…', async () => { delete wallets[b.dataset.url]; await addMint(b.dataset.url); await ksCheck(b.dataset.url, { manual: true }).catch(() => {}); render(); toast('Mint info refreshed', 'cyan'); }),
   removeMint: b => {
@@ -4184,9 +4236,13 @@ const A = {
     if (isOffline()) { const h = holdIncoming(tok, val('noteIn').trim(), { check: true }); sfx('blip'); refresh(); setBody(`${checkLine(h)}<div class="notice">You're offline, so this token is saved and will be claimed automatically when you're back online. Until then it isn't yours yet: the sender could still spend it.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
     let tx; try { tx = await receiveToken(tok, val('noteIn').trim()); }
     catch (e) { if (!netErr(e) || e.asked) throw e; const h = holdIncoming(tok, val('noteIn').trim(), { check: true }); refresh(); setBody(`${checkLine(h)}<div class="notice">The mint can't be reached right now, so the token is saved and will be claimed automatically when it can. Until then it isn't yours yet.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
-    sfx('coin'); showDone('in', tx.amount, 'Ecash');
+    sfx('coin'); showDone('in', tx.amount, 'Ecash', '', txUnit(tx));
   }),
   doSendEcash: b => run(b, 'MINTING TOKEN', async () => { const a = amt(), note = val('noteIn').trim(); let tx;
+    if (!isSatAcct(S.active)) {   // another unit: a plain token, nothing of the SAT-only extras
+      if (isOffline()) throw new Error(`Making a ${unitCode(acctUnit(S.active))} token needs the mint, and you're offline. Try again online.`);
+      tx = await sendEcash(a, note, null); sfx('coin'); refresh(); showToken(tx); return;
+    }
     if (($('#giftOn') || {}).checked) {
       if (isOffline()) throw new Error("Locking ecash needs the mint, and you're offline. Turn off the lock or try again online.");
       const c = contactById(val('giftTo')); const pub = c ? '02' + c.pubkey : lockPubFrom(val('giftKey'));
@@ -4280,16 +4336,18 @@ const A = {
     const list = [...new Set(urls)];
     if (!list.length) throw new Error('Pick at least one mint to scan.');
     const log = $('#restoreLog'); const line = t => { if (log) log.innerHTML = esc(t); };
-    const same = S.seed && S.seed.mnemonic === phrase;
+    const same = S.seed && S.seed.mnemonic === phrase; const found = [];   // (what each non-SAT unit found: shown on its own line, never added to the SAT total)
     const hadBalance = totalBalance() > 0;
     if (!same) setSeed(phrase, true); else { S.seed.backedUp = true; store.set('seed', S.seed); }
     await pbKeep(phrase).catch(() => {});   // (restored with the phone: that phone backup is this wallet's now)
     if (!same && hadBalance) { line('Moving your current ecash under the restored phrase…'); await secureAll(); }
     else if (!same) { S.seed.secured = true; store.set('seed', S.seed); }
+    // every unit a listed mint offers is scanned as its own account (USD coins of these 12 words are found too)
+    for (const u of [...list]) if (isSatAcct(u)) { for (const x of await mintUnits(u).catch(() => [])) { const k = acctKey(u, x); if (x !== 'sat' && !list.includes(k)) list.push(k); } }
     let total = 0; const fails = [];
     let syncWas = false; try { syncWas = await syRestoreLook(line); } catch (e) {}   // wallet sync: one read of the sync key's events (nothing written, sync stays off); the scan below leaves out coins they mark as handed out
     for (const u of list) {
-      try { total += await restoreFromMint(u, line); } catch (e) { fails.push(host(u)); }
+      try { const got = await restoreFromMint(u, line, isSatAcct(u) ? {} : { unitScan: 1 }); if (isSatAcct(u)) total += got; else if (got) found.push([acctUnit(u), got]); } catch (e) { fails.push(host(u) + (isSatAcct(u) ? '' : ' · ' + unitCode(acctUnit(u)))); }
     }
     if (!S.active && S.mints[0]) S.active = S.mints[0].url; save();
     const lows = lowRestored(list);
@@ -4297,16 +4355,17 @@ const A = {
     setBody(`<div style="text-align:center;display:grid;gap:12px">
       <div style="font-family:var(--f-display);font-size:16px;color:${total ? 'var(--lime)' : 'var(--gold)'}">${total ? 'CONTINUE!' : 'SCAN COMPLETE'}</div>
       <div class="credit-num" style="font-size:28px">${fmt(total)}<small>${unitTag()}</small></div>
-      <p style="margin:0">${total ? 'Recovered and back in your wallet.' : 'No unspent ecash was found on those mints for this phrase.'}</p>
+      ${found.length ? `<div class="tiny" style="color:var(--lime)" data-unitfound data-noi18n>${found.map(([u, n]) => '+' + moneyU(n, u)).join(' · ')}</div>` : ''}
+      <p style="margin:0">${total || found.length ? 'Recovered and back in your wallet.' : 'No unspent ecash was found on those mints for this phrase.'}</p>
       ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}. Try those again later from Mints → Find lost ecash.</div>` : ''}${lows}
       ${syncWas ? `<div class="notice cyan">Wallet sync was on for these 12 words on another device. Turn it on here too to keep your coins the same on both.</div><button class="btn block lime" data-act="syncRestoreOn">Turn on wallet sync</button>` : ''}
       <button class="btn solid gold block" data-act="close">Continue</button></div>`);
   }),
   findLost: b => run(b, 'SCANNING', async () => {
     if (!S.mints.length) throw new Error('Add the mints you used first, then scan.');
-    let total = 0, fails = 0;
-    for (const m of S.mints) { try { total += await restoreFromMint(m.url, t => { b.innerHTML = '<span class="spinner">SCANNING</span>'; }); } catch (e) { fails++; } }
-    render(); toast(total ? `Found ${money(total)}` : fails ? `Nothing found; ${fails} mint(s) didn't answer` : 'No lost ecash found', total ? 'lime' : 'cyan'); if (total) sfx('coin');
+    let total = 0, fails = 0; const found = [];
+    for (const m of S.mints) { try { const got = await restoreFromMint(m.url, t => { b.innerHTML = '<span class="spinner">SCANNING</span>'; }); if (isSatAcct(m.url)) total += got; else if (got) found.push(moneyU(got, acctUnit(m.url))); } catch (e) { fails++; } }
+    render(); toast(total || found.length ? `Found ${[total ? money(total) : null].concat(found).filter(Boolean).join(' · ')}` : fails ? `Nothing found; ${fails} mint(s) didn't answer` : 'No lost ecash found', total || found.length ? 'lime' : 'cyan'); if (total || found.length) sfx('coin');
   }),
   support: () => { sfx('select'); openSupport(); },
   pinKey: b => {
@@ -4387,7 +4446,7 @@ const A = {
     if (!has()) { toast('Nothing to export on this mint', 'gold'); return; }
     pinGuard('export', () => {
       const m = has(); if (!m) { toast('Nothing to export on this mint', 'gold'); return; }
-      const ps = S.proofs[m.url], tok = L.getEncodedToken({ mint: m.url, proofs: ps, unit: 'sat' });
+      const ps = S.proofs[m.url], tok = tokEnc({ mint: m.url, proofs: ps, unit: 'sat' });
       openSheet('Export ecash', `<div class="notice red">This token holds your entire ${esc(m.name)} balance (${money(sum(ps))}). Anyone who has it can spend it. After you claim it in another wallet, use Remove spent ecash here.</div>
       <div class="code" style="max-height:160px">${esc(tok)}</div><button class="btn solid gold block" data-act="copy" data-text="${esc(tok)}">Copy token</button>`);
     });
@@ -4475,7 +4534,7 @@ const A = {
   reqCreate: b => run(b, 'CREATING', async () => {
     const a = satsOf('amtIn');
     if (!a && val('amtIn').trim()) throw amtErr('Leave the amount empty to accept any amount, or type more than 0.', 'zero');
-    const r = newRequest(a, val('memoIn').trim(), !!($('#onlyMine') || {}).checked); sfx('coin'); showRequest(r);
+    const r = newRequest(a, val('memoIn').trim(), !!($('#onlyMine') || {}).checked, acctUnit(S.active)); sfx('coin'); showRequest(r);
   }),
   reqShow: b => { const r = S.requests.find(x => x.id === b.dataset.id); if (r) showRequest(r); },
   reqPayOpen: () => openSheet('Pay a payment request', `<div class="field"><label for="pasteIn">Paste the request (starts with creqA)</label><textarea id="pasteIn" class="inp" autocomplete="off" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="pasteGo">Continue</button><div class="btngrid"><button class="btn violet" data-act="scan" data-hint="Point at a payment request.">Scan</button>${nfcBtn('nfcScan', 'Tap NFC')}</div><div id="sheetErr"></div>`, () => nfcStop),
@@ -4483,10 +4542,11 @@ const A = {
     const pr = decodeRequest(b.dataset.req);
     const a = pr.amount ? num(pr.amount) : amt();
     const url = val('reqMint'); if (!url) throw new Error('Pick a mint to pay from.');
-    if (balanceOf(url) < a) throw new Error(`Not enough funds. That mint holds ${money(balanceOf(url))}.`);
+    if (String(pr.unit || 'sat').toLowerCase() !== acctUnit(url)) throw new Error(`This request asks for ${unitCode(String(pr.unit || 'sat'))}, and that account holds ${unitCode(acctUnit(url))}. Nothing was sent.`);
+    if (balanceOf(url) < a) throw new Error(`Not enough funds. That mint holds ${moneyAt(url, balanceOf(url))}.`);
     const { tx, sent, why } = await payRequest(pr, a, url, val('noteIn').trim() || pr.description || 'Payment request', b.dataset.req);
     sfx('coin'); refresh();
-    if (sent) return showDone('out', a, 'Payment request');
+    if (sent) return showDone('out', a, 'Payment request', '', acctUnit(url));
     if (!(pr.transport || []).length) return showToken(tx);
     setBody(`<div class="notice red">The ecash was made but couldn't be delivered${why ? ': ' + esc(why) : ''}. It's safe in this token: send it another way, or reclaim it from your notes.</div>${qrBlock(tx.token, 'Ecash token QR')}<button class="btn solid pink block" data-act="copy" data-text="${esc(tx.token)}">Copy token</button><button class="btn block" data-act="close">Close</button>`);
   }),
@@ -4533,10 +4593,11 @@ const A = {
 /*@@app_remind_actions.js@@*/
 /*@@app_nutzap_actions.js@@*/
 /*@@app_sync_actions.js@@*/
+/*@@app_units_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
-  const canSwap = dest && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;
-  el.innerHTML = `<div class="notice">This token is from ${esc(host(meta.mint))}, a mint you haven't added. Claiming adds it and trusts it with ${money(meta.amount)}.${canSwap ? ` Or swap it into ${esc(dest.name)} over Lightning (small fee).` : ''}</div>`;
+  const canSwap = dest && isSatAcct(dest.url) && meta.unit === 'sat' && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;   // (a swap is Lightning between SAT accounts)
+  el.innerHTML = `<div class="notice">This token is from ${esc(host(meta.mint))}${meta.unit === 'sat' ? '' : ' · ' + esc(unitCode(meta.unit))}, a mint you haven't added. Claiming adds it and trusts it with ${moneyU(meta.amount, meta.unit)}.${canSwap ? ` Or swap it into ${esc(dest.name)} over Lightning (small fee).` : ''}</div>`;
   const btn = $('[data-act="doReceiveToken"]'); btn.dataset.trust = '1'; btn.textContent = 'Trust mint & claim';
   if (canSwap && !$('[data-act="swapToken"]')) btn.insertAdjacentHTML('afterend', `<button class="btn block violet" data-act="swapToken">Swap into ${esc(dest.name)}</button>`);
 }
@@ -4546,6 +4607,7 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   if (b.disabled) return;   // tokens: a disabled button (one that is busy, like Make or Create token) does nothing, however it is clicked
   if (b.type === 'checkbox') return;
+  if (SAT_ACTS.has(b.dataset.act) && notSat()) { e.preventDefault(); return; }   // (units: everything but Lightning and ecash is SAT only, and says so; app_units.js)
   const f = A[b.dataset.act]; if (f) { e.preventDefault(); f(b, e); }
 });
 document.addEventListener('change', e => {
@@ -4569,7 +4631,7 @@ document.addEventListener('input', e => {
   }
   if (k === 'tokPeek') {
     const el = $('#tokPeek'); const v = e.target.value.trim(); if (!v) { el.innerHTML = ''; return; }
-    try { const m = peekToken(v); el.innerHTML = (isBlocked(m.mint) ? errHTML(blockedErr(m.mint)) : '') + `<dl class="kv"><dt>Amount</dt><dd style="color:var(--gold)">${money(m.amount)}</dd><dt>Mint</dt><dd data-noi18n>${esc(host(m.mint))}</dd>${m.memo ? `<dt>Memo</dt><dd data-noi18n>${esc(m.memo)}</dd>` : ''}</dl>`; }
+    try { const m = peekToken(v); el.innerHTML = (isBlocked(m.mint) ? errHTML(blockedErr(m.mint)) : '') + `<dl class="kv"><dt>Amount</dt><dd style="color:var(--gold)">${moneyU(m.amount, m.unit)}</dd><dt>Mint</dt><dd data-noi18n>${esc(host(m.mint))}</dd>${m.memo ? `<dt>Memo</dt><dd data-noi18n>${esc(m.memo)}</dd>` : ''}</dl>`; }
     catch (x) { el.innerHTML = '<div class="tiny muted">Waiting for a valid cashu token…</div>'; }
   }
 });
