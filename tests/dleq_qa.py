@@ -3,7 +3,7 @@ Uses the local test mints 3338 and 3339 and a second wallet that sends real toke
 
 The checker against vectors made by Nutshell's own code (good proofs accepted, every changed field refused) and the NUT-00
 hash_to_curve test vector; each mint's public keys saved when it is loaded (and kept after a reload); a real token received
-while offline is saved with "Signature checked offline"; a token with a changed proof or signature is refused and nothing is
+while offline is saved with "Mint signature verified offline"; a token with a changed proof or signature is refused and nothing is
 saved; a token without proofs, from a mint whose keys aren't saved, or on a keyset newer than the saved keys is saved as
 "Not checked" (never called fake); back online the saved token is claimed; tokens sent by sound carry the proofs (flag bit 2)
 and "Faster, no proof" leaves them out, an older payload without them still reads, an unknown flag is refused; printed
@@ -83,11 +83,11 @@ async def main():
             st = await w.ev(f"Nutcade.dq.check({J(tok)})")
             check('flow: the check finds every coin signed by the mint', st['state'] == 'ok' and st['n'] >= 1, st)
             e1, t1 = await receive_off(w, tok)
-            check('flow: received offline, the token is saved with "Signature checked offline"', not e1 and 'Signature checked offline' in t1 and "isn't yours yet" in t1, (e1, t1[:200]))
+            check('flow: received offline, the token is saved with "Mint signature verified offline"', not e1 and 'Mint signature verified offline' in t1 and "isn't yours yet" in t1, (e1, t1[:200]))
             hd = await held(w)
             check('flow: the saved token records the check', [x['dleq'] for x in hd] == ['ok'], hd)
             await w.home(); await w.click('[data-act=tab][data-tab=history]'); await w.wait(200); await w.click('[data-act=tx]'); await w.wait(250)
-            check('flow: its History screen shows the check too', 'Signature checked offline' in await w.sheet_text()); await w.close()
+            check('flow: its History screen shows the check too', 'Mint signature verified offline' in await w.sheet_text()); await w.close()
             # forged: a changed proof, or a changed signature
             tok2, _ = await fr.send_ecash(300, 'to be changed')
             for name, js in (('a changed proof', "if(i===0) p.dleq.e=p.dleq.e.slice(0,-1)+(p.dleq.e.slice(-1)==='1'?'2':'1')"), ('a changed signature', "if(i===0) p.C=p.C.slice(0,2)+p.C.slice(4)+p.C.slice(2,4)"), ('the same coin twice', "if(i===1) {const q=d.proofs[0]; p.secret=q.secret; p.C=q.C; p.dleq=q.dleq; p.amount=q.amount}")):
@@ -163,7 +163,7 @@ async def main():
         await section('flow', flow)
 
         async def langs():
-            strs = ["✓ Signature checked offline: the mint really signed these coins. It can't show they're unspent: only the mint can say that when you claim.",
+            strs = ["✓ Mint signature verified offline. Unspent status is unknown until these coins are claimed at the mint. Don't treat this as final payment yet.", "Claimed at the mint.",
                     "Not checked: the wallet that made this token left out the mint's signature proofs.",
                     "Not checked: NUTCADE doesn't have the keys the mint signed these coins with yet. It gets them the next time it reaches the mint.",
                     "This token's coins weren't signed by its mint. It may be fake, so NUTCADE didn't save it.", "Faster, no proof",
@@ -176,7 +176,7 @@ async def main():
                 check(f'lang {lang}: every new text is translated', not left, left[:2])
                 await w.ev("Nutcade.openSheet('x', '<div class=notice>' + Nutcade.dq.line({dleq:'ok'}) + '</div><label class=row><input type=checkbox> Faster, no proof</label>')"); await w.wait(200)
                 t = await w.ev("document.querySelector('.sheet-body').innerText")
-                check(f'lang {lang}: shown on a screen, no English is left', 'Signature checked' not in t and 'Faster, no proof' not in t, t[:160])
+                check(f'lang {lang}: shown on a screen, no English is left', 'Mint signature verified' not in t and 'Faster, no proof' not in t, t[:160])
                 check(f'lang {lang}: no errors', not w.errs, w.errs[:2]); await w.pg.context.close()
         await section('langs', langs)
 

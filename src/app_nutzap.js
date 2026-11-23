@@ -394,10 +394,11 @@ async function openNutzap(target) {
 // the history screen of a nutzap (src/app.js openTx)
 function nzTxExtra(t) {
   if (!t.nz) return '';
-  if (t.type === 'in' && t.status === 'pending' && t.incoming) return `<div class="notice">This nutzap is waiting to be claimed. NUTCADE claims it as soon as the mint can be reached.</div><button class="btn block lime" data-act="nzClaim" data-id="${esc(t.id)}">Claim now</button>`;
+  if (t.type === 'in' && t.status === 'pending' && t.incoming) return `${checkLine(t)}<div class="notice">This nutzap is waiting to be claimed. NUTCADE claims it as soon as the mint can be reached.</div><button class="btn block lime" data-act="nzClaim" data-id="${esc(t.id)}">Claim now</button>`;
   if (t.type === 'in' && t.status === 'failed' && t.incoming) return `<div class="notice">The mint turned this nutzap down several times, so NUTCADE stopped trying. Nothing was added to your balance.</div><button class="btn block" data-act="nzClaim" data-id="${esc(t.id)}">Try again</button>`;
   if (t.type === 'out' && t.status === 'pending') return `<div class="notice cyan">${t.delivered ? 'Sent as a nutzap over Nostr.' : 'Not delivered yet: no relay has taken this nutzap so far. NUTCADE keeps trying.'} Its ecash is locked to their key, so only they can claim it.</div>
     <div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="checkClaim" data-id="${esc(t.id)}">Check claimed</button>${t.delivered ? '' : `<button class="btn sm gold" data-act="nzRetry" data-id="${esc(t.id)}">Try now</button>`}</div>`;
+  if (t.type === 'in' && t.status === 'done') return `<div class="notice cyan">Claimed at the mint.</div>`;
   return '';
 }
 const nzTxRow = t => t.nz ? `<dt>${t.type === 'in' ? 'From' : 'To'}</dt><dd class="tiny" data-noi18n>${esc(shortNpub(t.type === 'in' ? t.nz.from : t.nz.to))}</dd>` : '';

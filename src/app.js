@@ -2744,7 +2744,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.31.0';
+const APP_VERSION = '1.31.1';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -3899,6 +3899,7 @@ function openTx(id) {
   else if (t.status === 'pending' && t.type === 'in' && t.method === 'onchain') extra = `<div class="row" style="flex-wrap:wrap"><button class="btn sm lime" data-act="resumeAddr" data-id="${esc(t.id)}">Show address</button><button class="btn sm red" data-act="stopWatch" data-id="${esc(t.id)}">Stop watching</button></div>`;
   else if (t.status === 'pending' && t.type === 'out') extra = `<button class="btn block violet" data-act="reconcileTx" data-id="${esc(t.id)}">Check payment</button>`;
   else if (t.changePending && t.type === 'out') extra = `<div class="notice">This payment went through. Its change (the unused fee reserve) hasn't come back from the mint yet, so the fee shown is the most it can be. NUTCADE keeps trying, and the fee drops when the change is back.</div><button class="btn block violet" data-act="reconcileTx" data-id="${esc(t.id)}">Try now</button>`;
+  else if (t.type === 'in' && t.status === 'done' && t.fromIncoming) extra = `<div class="notice cyan">Claimed at the mint.</div>`;
   openSheet(t.method === 'fee' ? 'Mint fee' : t.type === 'in' ? 'Received' : 'Sent', `
     <div class="credit-num${moved ? '' : ' void'}" style="font-size:28px;color:${t.type === 'in' ? 'var(--lime)' : 'var(--pink)'}">${moved ? (t.type === 'in' ? '+' : '-') : ''}${head ? fmtU(head, tu) : '…'}<small>${unitTagU(tu)}</small></div>
     <div class="field"><label for="noteEdit">Note</label><textarea id="noteEdit" class="inp" maxlength="500" placeholder="What was this for?">${esc(noteText(t.note))}</textarea></div>

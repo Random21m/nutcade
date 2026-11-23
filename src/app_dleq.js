@@ -157,7 +157,7 @@ const DQ_MAX = 300;   // (about 2 s at most on a slow phone)
 const forgedErr = () => Object.assign(new Error("This token's coins weren't signed by its mint. It may be fake, so NUTCADE didn't save it."), { forged: true });
 // the line shown on a saved token's screen about its check
 function checkLine(t) {
-  if (t.dleq === 'ok') return `<div class="notice cyan">✓ Signature checked offline: the mint really signed these coins. It can't show they're unspent: only the mint can say that when you claim.</div>`;
+  if (t.dleq === 'ok') return `<div class="notice cyan">✓ Mint signature verified offline. Unspent status is unknown until these coins are claimed at the mint. Don't treat this as final payment yet.</div>`;
   if (t.dleq === 'noproof') return `<div class="notice">Not checked: the wallet that made this token left out the mint's signature proofs.</div>`;
   if (t.dleq === 'nokeys') return `<div class="notice">Not checked: NUTCADE doesn't have the keys the mint signed these coins with yet. It gets them the next time it reaches the mint.</div>`;
   return '';
