@@ -1,7 +1,13 @@
 """Local stand-ins for a Nostr relay and the npub.cash v2 API, used by round2_qa.py.
 
 Run: python mock_nostr.py [port]   (default 3350)
-  ws://127.0.0.1:PORT/relay                 Nostr relay (EVENT / REQ / CLOSE, replaceable kinds incl. 10019, NIP-09 deletion)
+  ws://127.0.0.1:PORT/relay                 Nostr relay (EVENT / REQ / CLOSE, replaceable kinds incl. 10019 and 17375, NIP-09 deletion,
+                                            the REQ "limit"; filters by kind, author, ids, since and #tags)
+  POST /test/relay_mode {drop, reorder, dup, kinds}  a misbehaving relay (sync_qa.py): drop = say OK but keep nothing; reorder =
+                                            answer a REQ in a shuffled order; dup = send every stored event twice. kinds: only these kinds
+                                            (default: all). POST /test/relay_mode {} puts it back to normal.
+  POST /test/inject {event, raw}            store an event as a relay would serve it (raw: without checking its signature, as a lying relay)
+  POST /test/forget {ids}                   the relay loses these events
   http://127.0.0.1:PORT/api/v2/...          npub.cash v2: user/info, user/mint, wallet/quotes (NIP-98 auth)
   ws://127.0.0.1:PORT/api/v2/ws/quote       npub.cash quote updates (challenge, then "update" messages)
   POST /test/pay?pubkey=HEX&amount=N&lock=1 test helper: create a (locked) mint quote at the user's mint
@@ -31,6 +37,13 @@ quotes = {}        # pubkey -> [quote]
 sockets = {}       # pubkey -> set(WebSocket)
 log = []
 subs = {}        # WebSocket -> {sub_id: [filters]}  (live subscriptions, like a real relay)
+reqs = []        # the last REQ filters received (sync_qa.py: the duress wallet never reads)
+mode = {}        # a misbehaving relay (POST /test/relay_mode): drop, reorder, dup, kinds
+import random
+
+
+def misbehaves(what, kind):
+    return bool(mode.get(what)) and (not mode.get('kinds') or kind in mode['kinds'])
 
 
 def event_id(e):
@@ -74,7 +87,11 @@ async def relay(ws: WebSocket):
             if m[0] == 'EVENT':
                 e = m[1]
                 ok = verify(e)
-                if ok and (30000 <= e['kind'] < 40000 or e['kind'] == 10019):   # (parameterized replaceable, and NIP-61 nutzap info: one per author)
+                if ok and misbehaves('drop', e['kind']):   # (a relay that says OK and keeps nothing)
+                    log.append(('dropped', e['kind'], True))
+                    await ws.send_text(json.dumps(['OK', e.get('id'), True, '']))
+                    continue
+                if ok and (30000 <= e['kind'] < 40000 or e['kind'] in (10019, 17375)):   # (parameterized replaceable, NIP-61 nutzap info and the NIP-60 wallet event: one per author)
                     d = next((t[1] for t in e['tags'] if t[0] == 'd'), '')
                     for k, old in list(events.items()):
                         if old['kind'] == e['kind'] and old['pubkey'] == e['pubkey'] and next((t[1] for t in old['tags'] if t[0] == 'd'), '') == d:
@@ -93,9 +110,14 @@ async def relay(ws: WebSocket):
                 if ok: await fanout(e)
             elif m[0] == 'REQ':
                 sub, fs = m[1], m[2:]
-                hits = [e for e in events.values() if any(matches(e, f) for f in fs)]
-                for e in sorted(hits, key=lambda x: -x['created_at']):
-                    await ws.send_text(json.dumps(['EVENT', sub, e]))
+                reqs.append(fs); del reqs[:-300]
+                hits = sorted([e for e in events.values() if any(matches(e, f) for f in fs)], key=lambda x: -x['created_at'])
+                lim = min([f['limit'] for f in fs if isinstance(f.get('limit'), int)] or [len(hits)])
+                hits = hits[:max(0, lim)]
+                if any(misbehaves('reorder', e['kind']) for e in hits): random.shuffle(hits)
+                for e in hits:
+                    for _ in range(2 if misbehaves('dup', e['kind']) else 1):
+                        await ws.send_text(json.dumps(['EVENT', sub, e]))
                 await ws.send_text(json.dumps(['EOSE', sub]))
                 subs[ws][sub] = fs
             elif m[0] == 'CLOSE':
@@ -203,6 +225,28 @@ async def pay(pubkey: str, amount: int, lock: int = 1):
 posted = []
 
 
+@app.post('/test/relay_mode')
+async def relay_mode(request: Request):
+    b = await request.json(); mode.clear(); mode.update({k: b[k] for k in ('drop', 'reorder', 'dup', 'kinds') if k in b})
+    return {'mode': mode}
+
+
+@app.post('/test/inject')
+async def inject(request: Request):
+    b = await request.json(); e = b['event']
+    if not b.get('raw') and not verify(e): return {'ok': False}
+    events[e['id']] = e; await fanout(e)
+    return {'ok': True, 'id': e['id']}
+
+
+@app.post('/test/forget')
+async def forget(request: Request):
+    b = await request.json(); n = 0
+    for i in b.get('ids', []):
+        if events.pop(i, None): n += 1
+    return {'forgot': n}
+
+
 @app.post('/test/post')
 async def post_payment(request: Request):
     """Stand-in for a NUT-18 HTTP POST payment request endpoint."""
@@ -212,7 +256,7 @@ async def post_payment(request: Request):
 
 @app.get('/test/state')
 async def state():
-    return {'events': list(events.values()), 'posted': posted, 'users': users, 'quotes': quotes, 'sockets': {k: len(v) for k, v in sockets.items()}, 'log': log[-50:],
+    return {'events': list(events.values()), 'posted': posted, 'users': users, 'quotes': quotes, 'sockets': {k: len(v) for k, v in sockets.items()}, 'log': log[-50:], 'reqs': reqs, 'mode': mode,
             'vouchers': vouchers, 'payees': payees, 'zaps': zaps}
 
 
