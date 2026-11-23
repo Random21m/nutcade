@@ -12,7 +12,7 @@ Object.assign(A, {
     blockMint(u); sfx('blip'); render();
     const canMove = canMoveFrom(u);
     setBody(`<div class="notice red">${esc(n)} is blocked. Tokens, payment requests and deposits from it will be refused, and NUTCADE will tell you each time.</div>
-      ${bal ? `<div class="notice">${canMove ? `Your ${money(bal)} at ${esc(n)} stays usable: you can still send it or move it to another mint.` : `Your ${money(bal)} at ${esc(n)} stays usable: you can still send it.`}</div>` : ''}
+      ${bal ? `<div class="notice">${canMove ? `Your ${moneyAt(u, bal)} at ${esc(n)} stays usable: you can still send it or move it to another mint.` : `Your ${moneyAt(u, bal)} at ${esc(n)} stays usable: you can still send it.`}</div>` : ''}
       ${canMove ? `<button class="btn solid gold block" data-act="moveOpen" data-from="${esc(u)}">Move sats out</button><button class="btn block" data-act="close">Done</button>` : `${bal ? noMoveHTML(u) : ''}<button class="btn solid gold block" data-act="close">Done</button>`}`);
   },
   sendFrom: b => { S.active = b.dataset.url; save(); closeSheet(); render(); openSend('ecash');

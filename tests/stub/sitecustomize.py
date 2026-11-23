@@ -49,7 +49,8 @@ if _pdir:
             self.payment_secrets[payment_hash] = pre.hex()
             with open(os.path.join(_pdir, payment_hash), 'w') as fh: fh.write(pre.hex())
             from cashu.core.base import Unit as _U
-            amount_msat = _M(amount.to(_U.msat, round='up').amount)
+            # (usd and eur at FakeWallet's own fixed rate, exactly as its create_invoice does: a multi-unit test mint)
+            amount_msat = _M(amount.to(_U.msat, round='up').amount) if amount.unit in (_U.sat, _U.msat) else _M(__import__('math').ceil(amount.amount / self.fake_btc_price * 1e9))
             b = _B(currency='bc', amount_msat=amount_msat, date=int(_dt.now().timestamp()), tags=tags)
             self.created_invoices.append(b)
             pr = _enc(b, self.privkey)

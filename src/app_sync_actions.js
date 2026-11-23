@@ -19,7 +19,7 @@ Object.assign(A, {
   syncAddMint: b => run(b, 'ADDING', async () => {
     const u = String(b.dataset.u || '');
     if (!(S.prefs.syncOther || []).includes(u)) return;
-    await addMint(u);
+    await addMint(u, { sat: true });   // (synced coins are SAT: the mint is added as its SAT account)
     S.prefs.syncOther = (S.prefs.syncOther || []).filter(x => x !== u); save();
     await syRun('manual').catch(() => {});
     refresh();

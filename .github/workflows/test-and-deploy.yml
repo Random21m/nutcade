@@ -85,6 +85,8 @@ jobs:
             suites: p2bk
           - name: sync
             suites: sync
+          - name: units
+            suites: units
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out

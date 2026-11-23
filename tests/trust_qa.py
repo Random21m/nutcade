@@ -296,7 +296,8 @@ async def main():
             check('words: the right words (any case, extra spaces) pass; the sheet closes; a toast says so', not await w.ev("!!document.querySelector('#layer .sheet')") and 'check out' in await w.toast(), await w.toast())
             pc = await w.ev("Nutcade.S.prefs.phraseCheck")
             check('words: only when it was passed and when to ask next are kept (about six months on)', set(pc) == {'done', 'next'} and abs(pc['next'] - pc['done'] - 182 * DAY) < 5000 and abs(time.time() * 1000 - pc['done']) < 60000, pc)
-            nets = [r for r in w.reqs if any(x in (r[1] + r[2]) for x in words)] + [f for f in w.frames if sum(1 for x in set(words) if re.search(r'\b' + x + r'\b', f)) >= 2]
+            # a word of the phrase as a whole word (a plain substring also matches "art" inside "start=" in an unrelated URL, say the price chart's)
+            nets = [r for r in w.reqs if any(re.search(r'\b' + x + r'\b', r[1] + r[2]) for x in words)] + [f for f in w.frames if sum(1 for x in set(words) if re.search(r'\b' + x + r'\b', f)) >= 2]
             check('words: nothing was sent anywhere that holds your words (requests and socket frames while checking)', not nets, nets[:2])
             check('words: the notice is gone, and Settings says when they were last checked', not await w.ev("/Time to check/.test(document.querySelector('.screen').innerText)"))
             await tab(w, 'settings'); st = await w.ev("document.querySelector('#set-backup').innerText")

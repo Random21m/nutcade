@@ -12,7 +12,7 @@ Object.assign(A, {
   duressChange: () => { duressUI.change = true; duressNewPad(); },
   duressOff: () => setBody(`<p style="margin:0">The duress PIN stops working. The sats in its wallet come back to this one.</p>
     <button class="btn solid red block" data-act="duressOffGo">Turn off duress PIN</button><button class="btn block" data-act="close">Keep it</button><div id="sheetErr"></div>`),
-  duressOffGo: b => run(b, 'TURNING OFF', async () => { pinChangeCheck(); const back = await duressOff(); pinChangeUse(); duressUI.old = ''; closeSheet(); refresh(); sfx('blip'); toast(back ? `Duress PIN off. ${money(back)} came back to this wallet.` : 'Duress PIN off', 'gold'); }),
+  duressOffGo: b => run(b, 'TURNING OFF', async () => { pinChangeCheck(); const back = await duressOff(); pinChangeUse(); duressUI.old = ''; closeSheet(); refresh(); sfx('blip'); toast(back ? `Duress PIN off. ${back} came back to this wallet.` : 'Duress PIN off', 'gold'); }),
   duressMake: b => run(b, 'SETTING UP', async () => {
     const a = parseSat(val('duressAmt'));
     if (a > 0 && a > balanceOf(S.active)) throw new Error(`Not enough funds. This mint holds ${money(balanceOf(S.active))}.`);

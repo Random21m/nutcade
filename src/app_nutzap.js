@@ -58,7 +58,7 @@ const nzOn = () => nzAllowed() && S.prefs.nutzap === true;
 const nzLive = () => nzOn() && !tabLocked && !(vault.on && !vault.open) && !writeGuard.paused;
 // the mints a nutzap is taken at: the ones you use, never blocked or limiting request size below NUTCADE's minimum (MIN_REQ,
 // 128: twice the most coins a nutzap may hold, so one taken can always be claimed in one request at a mint listed here)
-const nzMints = () => S.mints.map(m => m.url).filter(u => !isBlocked(u) && !belowMin(u));
+const nzMints = () => satMints().map(m => m.url).filter(u => !isBlocked(u) && !belowMin(u));   // (nutzaps are SAT only, NIP-61 unit sat)
 const nzTrusted = url => nzMints().includes(url);
 // THE check for every relay address nutzaps use (yours, a contact's, the ones a 10019 lists): ws:// or wss:// only, a host,
 // no user name or password, no spaces or control characters, at most 200 characters; returned as one fixed spelling, or null
@@ -231,7 +231,7 @@ async function nzEvent(ev) {
   const ks = S.mintkeys[mint];
   if (!ks) { nzWaitSet(ev, true); return 'nokeys'; }   // (the mint can't be reached and its keys aren't saved: looked at again later)
   if (!proofs.every(p => nzHas(ks, p.id) && nzHas(ks[p.id], String(p.amount)))) return skip('keyset');   // (own keys only: never one from Object.prototype)
-  let token; try { token = L.getEncodedToken({ mint, proofs, unit: 'sat' }); } catch (e) { return skip('bad'); }
+  let token; try { token = tokEnc({ mint, proofs, unit: 'sat' }); } catch (e) { return skip('bad'); }
   const dq = offlineCheck(token).state;
   if (dq !== 'ok') return skip(dq === 'bad' ? 'forged' : 'noproof');
   const secs = new Set(proofs.map(p => p.secret));
@@ -245,7 +245,7 @@ async function nzEvent(ev) {
   if (nzSeen.has(ev.id) || S.txs.some(t => t.nz && t.nz.id === ev.id)) return 'seen';
   const open = S.txs.filter(t => t.type === 'in' && t.nz && t.status === 'pending' && t.incoming);
   if (open.length >= NZ_LINES || open.reduce((n, t) => n + t.incoming.length, 0) > NZ_BYTES) { nzWaitSet(ev, true); return 'full'; }   // (looked at again once some are claimed)
-  try { token = L.getEncodedToken({ mint, proofs, unit: 'sat' }); } catch (e) { return skip('bad'); }
+  try { token = tokEnc({ mint, proofs, unit: 'sat' }); } catch (e) { return skip('bad'); }
   const c = nzComment(ev.content);
   const t = addTx({ type: 'in', method: 'ecash', amount: sum(proofs), mint, note: `Nutzap from ${nzWho(ev.pubkey)}${c ? ': "' + c + '"' : ''}`, status: 'pending', incoming: token, dleq: 'ok', nz: { id: ev.id, from: ev.pubkey, at: num(ev.created_at) } });
   nzMark(ev.id); nzWaitSet(ev, false);
@@ -280,7 +280,7 @@ async function nzClaim(t0, force, hand) {
         else if (st.length === ps.length && !S.ops.some(o => o.follow && o.follow.k === 'incoming' && o.follow.txId === cur.id)) {
           const left = ps.filter((p, i) => !(st[i] && st[i].state === 'SPENT')).map(p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq ? { dleq: p.dleq } : {}, p.p2pk_e ? { p2pk_e: p.p2pk_e } : {}));
           if (!left.length) { S.txs = S.txs.filter(x => x.id !== cur.id); save(); refresh(); return null; }
-          if (left.length < ps.length) { updTx(cur.id, { incoming: L.getEncodedToken({ mint: cur.mint, proofs: left, unit: 'sat' }), amount: sum(left) }); await saveNow(); }
+          if (left.length < ps.length) { updTx(cur.id, { incoming: tokEnc({ mint: cur.mint, proofs: left, unit: 'sat' }), amount: sum(left) }); await saveNow(); }
         }
       } catch (x) {}
     }

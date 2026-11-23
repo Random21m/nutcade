@@ -20,6 +20,7 @@ let limitOK = null;           // the PIN was entered for the payment being retri
 const limitsOn = () => !!(S.limits && (S.limits.per > 0 || S.limits.day > 0));
 // what an outgoing history line took from the wallet
 function limValue(t) {
+  if (!isSatAcct(t.mint)) return 0;   // the spending limit counts SAT only: a USD, EUR or CHF payment is never added to it, nor compared with it
   if (t.status === 'failed' || t.status === 'expired') return 0;   // nothing left (what the mint kept is its own fee line)
   if (t.status === 'reclaimed') return num(t.fee);                  // the token came back: only its fee left
   return num(t.amount) + num(t.fee);
@@ -118,6 +119,7 @@ function limitPanel() {
 function openLimits() {
   const L = S.limits || {};
   openSheet('Spending limit', `<p style="margin:0">Limits for every way sats leave this wallet: Lightning, ecash, gifts, requests, Wallet Connect, zaps and moves between mints. Fees count too.</p>
+    <div class="tiny muted">The limit is in SAT and counts SAT only. USD, EUR and CHF ecash is outside it.</div>
     <div class="field"><label for="limPer">Ask for my PIN above (SAT, one payment)</label><input id="limPer" class="inp" inputmode="numeric" autocomplete="off" placeholder="Off" value="${L.per > 0 ? fmt(L.per) : ''}" ${vault.on ? '' : 'disabled'}>
       ${vault.on ? '' : '<div class="tiny muted">Set a PIN first to use this one.</div>'}</div>
     <div class="field"><label for="limDay">At most (SAT, any 24 hours)</label><input id="limDay" class="inp" inputmode="numeric" autocomplete="off" placeholder="Off" value="${L.day > 0 ? fmt(L.day) : ''}"></div>
@@ -183,7 +185,7 @@ const GUARD = {
   phone: ['Back up with my phone', 'Enter your PIN to back up your 12 words with your phone.']
 };
 const guard = { run: null, pass: null };
-const guardOn = () => !!(vault.on && vault.open && (S.seed || totalBalance() > 0));
+const guardOn = () => !!(vault.on && vault.open && (S.seed || anyBalance()));
 function pinGuard(k, fn) {
   guard.pass = null;
   if (!guardOn()) return fn();
@@ -334,7 +336,7 @@ async function fundDecoyNow(dek, data, url, token) {
     async reserveAt(id, start, count) { ctrs[id] = start + count; return { start, count }; },
     async advanceToAtLeast(id, m) { if ((ctrs[id] || 0) < m) ctrs[id] = m; },
     async snapshot() { return Object.assign({}, ctrs); }, async setNext(id, n) { ctrs[id] = n; } };
-  const w = new L.Wallet(url, { unit: 'sat', bip39seed: L.mnemonicToSeedSync(data.seed.mnemonic), counterSource: cs }); await w.loadMint();
+  const w = new L.Wallet(acctUrl(url), { unit: acctUnit(url), bip39seed: L.mnemonicToSeedSync(data.seed.mnemonic), counterSource: cs }); await w.loadMint();
   const ps = (w.decodeToken(cleanToken(token)).proofs || []), m = mintMax(url);
   const wait = (data.txs || []).find(t => t.incoming === cleanToken(token) && t.status === 'pending');   // (the token's line in that wallet: settled with the step, if it comes to that)
   const op = { id: uid(), kind: 'receive', mint: url, inputs: ps.map(p => p.secret), amount: 0, note: '', locked: false, extra: false, txId: null, tx: null, follow: wait ? { k: 'incoming', txId: wait.id, reqId: null } : null, own: null, created: Date.now(), ctr: [], outs: [], mk: 1 };
@@ -375,10 +377,10 @@ async function duressOff() {
   try { d = await openBox(await decoyKey(), rec.slot.data); } catch (e) {}
   const toks = [];
   if (d) {
-    for (const [u, ps] of Object.entries(d.proofs || {})) if (ps && ps.length) toks.push(L.getEncodedToken({ mint: u, proofs: ps, unit: 'sat' }));
+    for (const [u, ps] of Object.entries(d.proofs || {})) if (ps && ps.length) toks.push(tokEnc({ mint: u, proofs: ps, unit: 'sat' }));
     for (const t of d.txs || []) if (t.status === 'pending' && t.incoming) toks.push(t.incoming);
     for (const t of d.txs || []) if (t.type === 'out' && t.status === 'pending' && t.token && !t.locked) toks.push(t.token);
-    for (const p of d.pending || []) if (p.proofs && p.proofs.length && !p.paid) toks.push(L.getEncodedToken({ mint: p.mint, proofs: p.proofs, unit: 'sat' }));
+    for (const p of d.pending || []) if (p.proofs && p.proofs.length && !p.paid) toks.push(tokEnc({ mint: p.mint, proofs: p.proofs, unit: 'sat' }));
   }
   const ids = [];
   for (const t of toks) { try { const meta = peekToken(t); if (!S.mints.find(m => m.url === meta.mint)) await addMint(meta.mint, { dropped: true }).catch(() => {}); const h = holdIncoming(t, "Back from the duress PIN's wallet"); updTx(h.id, { mine: true, back: 'hand' }); ids.push(h.id); } catch (e) {} }
@@ -386,9 +388,9 @@ async function duressOff() {
   if (vaultBad()) throw new Error("This browser won't save data. Free up space and try again.");   // (its part is never wiped before its sats are saved here)
   const now = raw.get('vault') || rec; now.slot = fillerSlot(); raw.set('vault', now);   // (with the wallet as just saved, its sats from there included)
   delete vault.data.duress; queueVaultWrite(); await vault.chain;
-  let back = 0;   // (claimed now where the mint answers; the rest stays saved and is claimed later, like ecash saved offline)
-  for (const id of ids) { const t = txById(id); if (!t) continue; try { const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: id, reqId: null } }); incomingClaimed({ txId: id, reqId: null }, nt); back += num(nt.amount); } catch (e) {} }
-  return back;
+  const back = {};   // (claimed now where the mint answers, one total per unit; the rest stays saved and is claimed later, like ecash saved offline)
+  for (const id of ids) { const t = txById(id); if (!t) continue; try { const nt = await receiveToken(t.incoming, t.note, { follow: { k: 'incoming', txId: id, reqId: null } }); incomingClaimed({ txId: id, reqId: null }, nt); addUnit(back, txUnit(nt), nt.amount); } catch (e) {} }
+  return listEmpty(back) ? '' : moneyList(back);
 }
 // Reset wallet, inside the duress PIN's wallet: that wallet starts over empty (still opened by its PIN); the rest of
 // the vault, the real wallet included, is left exactly as it was
@@ -646,7 +648,7 @@ async function sendBatched(w, amount, note, lockTo, url, opts, outCfg) {
       const coins = await makeCoins(w, url, D, m, { limId: hold.id });
       const ids = new Set(coins.map(p => p.secret));
       S.proofs[url] = (S.proofs[url] || []).filter(p => !ids.has(p.secret));
-      const token = L.getEncodedToken({ mint: url, proofs: coins, unit: 'sat' });
+      const token = tokEnc({ mint: url, proofs: coins, unit: 'sat' });
       const tx = addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee: Math.max(0, sum(coins) - amount), mint: url, note, status: 'pending', token, sent: plain(coins), locked: null }, opts.txx || {}, hold.id ? { limId: hold.id } : {}));
       save();
       return tx;
@@ -715,7 +717,7 @@ function tokenParts(w, proofs, m) {
   return go(0) ? parts.map(g => g.slice()) : null;
 }
 async function receiveInParts(w, meta, token, note, parts, own, mine, back, extra) {   // (extra: kept on each part's line, a nutzap's mark)
-  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: L.getEncodedToken({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true, mk: 1 }, mine ? { mine: true } : {}, back ? { back } : {}, extra || {})));   // (mk: its mark, or none for an Extra Life left to you, is what it says)
+  const n = parts.length, lines = parts.map((g, i) => addTx(Object.assign({ type: 'in', method: 'ecash', amount: sum(g), mint: meta.mint, note: [(note || meta.memo || '').trim(), `(part ${i + 1} of ${n})`].filter(Boolean).join(' '), status: 'pending', incoming: tokEnc({ mint: meta.mint, proofs: g, unit: 'sat' }), offline: true, mk: 1 }, mine ? { mine: true } : {}, back ? { back } : {}, extra || {})));   // (mk: its mark, or none for an Extra Life left to you, is what it says)
   save();   // (every part is saved before the first is claimed: if NUTCADE closes in between, the rest are claimed later)
   let got = 0, last = null, err = null;
   for (const t of lines) {

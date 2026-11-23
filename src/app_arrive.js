@@ -74,7 +74,7 @@ function arrivalSeen(t) {
 function arrivalFrom(id, k) {
   try { const l = arrLedger(), p = l.pend.find(x => x.id === id); if (p && p.k !== 'request' && p.k !== 'back') { p.k = k; raw.set('arrivals', l); } } catch (e) {}
 }
-const arrItem = p => { const t = txById(p.id); if (!t || !arrQual(t)) return null; return { id: t.id, k: t.reqId ? 'request' : ARR_KINDS.includes(p.k) ? p.k : 'token', a: num(t.amount), m: t.mint }; };
+const arrItem = p => { const t = txById(p.id); if (!t || !arrQual(t)) return null; return { id: t.id, k: t.reqId ? 'request' : ARR_KINDS.includes(p.k) ? p.k : 'token', a: num(t.amount), m: t.mint, u: txUnit(t) }; };
 function arrSeen(ids) {
   if (!ids.length || !arrOpen()) return;
   const l = arrLedger(), n = l.pend.length; l.pend = l.pend.filter(p => !ids.includes(p.id));
@@ -90,26 +90,30 @@ if (window.NutAudio && !window.NutAudio.arrWrapped) {   // the app's own coin fo
 
 /* ---------- the notices ---------- */
 const arrCount = n => tr(n === 1 ? '1 payment' : `${fmt(n)} payments`);
+// a group per kind AND unit: USD, EUR and CHF arrivals are never added to SAT ones
 function arrGroups(items) {
-  const g = {}; for (const it of items) { const x = g[it.k] || (g[it.k] = { k: it.k, n: 0, a: 0 }); x.n++; x.a += it.a; }
-  return ARR_KINDS.filter(k => g[k]).map(k => g[k]);
+  const g = new Map();
+  for (const it of items) { const key = it.k + '|' + (it.u || 'sat'); const x = g.get(key) || { k: it.k, u: it.u || 'sat', n: 0, a: 0 }; x.n++; x.a += it.a; g.set(key, x); }
+  return [...g.values()].sort((a, b) => ARR_KINDS.indexOf(a.k) - ARR_KINDS.indexOf(b.k) || UNIT_LIST.indexOf(a.u) - UNIT_LIST.indexOf(b.u));
 }
+// what arrived, per unit, as one line: "+1,000 SAT · +12.50 USD"
+const arrTotals = items => UNIT_LIST.filter(u => items.some(x => (x.u || 'sat') === u)).map(u => '+' + arrMoneyU(items.filter(x => (x.u || 'sat') === u).reduce((t, x) => t + x.a, 0), u)).join(' · ');
 // A notice is one short card over the logo bar, never over the balance, the lock or the mint (about 60 px high, at
 // any size): the amount, Details, and what came (for a summary: "while you were away"). Details opens a sheet with
 // everything: the kind and mint, or the summary's count and total per kind, and the way to the notes.
 function arrCardHTML(type, items) {
-  const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
+  const total = arrTotals(items), one = items.length === 1 && type === 'live' ? items[0] : null;
   const sub = type === 'away' ? '<span class="arr-what">While you were away</span>'
     : one ? `<span class="arr-what">${esc(ARR_LABEL[one.k])}</span><span class="arr-mint" data-noi18n>${esc(mintName(one.m))}</span>` : `<span class="arr-what">${esc(arrCount(items.length))}</span>`;
   // (the amount has the first line to itself and is never cut; the second line, what came, gives way instead)
-  return `<div class="arr-row"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-big" data-noi18n>+${esc(arrMoney(total))}</span><span class="arr-sp"></span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
+  return `<div class="arr-row"><span class="arr-ico" aria-hidden="true">↓</span><span class="arr-big" data-noi18n>${esc(total)}</span><span class="arr-sp"></span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">×</button></div>
     <div class="arr-sub">${sub}<span class="arr-sp"></span><button type="button" class="btn sm arr-more" data-act="arrMore">Details</button></div>`;
 }
 function arrDetailsHTML(type, items) {
-  const total = items.reduce((t, x) => t + x.a, 0), one = items.length === 1 && type === 'live' ? items[0] : null;
-  const lines = one ? `<dl class="kv"><dt>Amount</dt><dd data-noi18n>+${esc(arrMoney(one.a))}</dd><dt>From</dt><dd>${esc(ARR_LABEL[one.k])}</dd><dt>Mint</dt><dd data-noi18n>${esc(mintName(one.m))}</dd></dl>`
-    : `${type === 'away' ? '<div class="arr-note">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(arrMoney(g.a))}</span></div>`).join('')}</div>
-      <div class="arr-total"><span>Total</span><span data-noi18n>+${esc(arrMoney(total))}</span></div>`;
+  const total = arrTotals(items), one = items.length === 1 && type === 'live' ? items[0] : null;
+  const lines = one ? `<dl class="kv"><dt>Amount</dt><dd data-noi18n>+${esc(arrMoneyU(one.a, one.u))}</dd><dt>From</dt><dd>${esc(ARR_LABEL[one.k])}</dd><dt>Mint</dt><dd data-noi18n>${esc(mintName(one.m))}</dd></dl>`
+    : `${type === 'away' ? '<div class="arr-note">Since you last had NUTCADE open</div>' : ''}<div class="arr-lines">${arrGroups(items).map(g => `<div class="arr-line" data-k="${g.k}" data-n="${g.n}" data-a="${g.a}"><span class="arr-k">${esc(ARR_LABEL[g.k])}</span><span class="arr-n">${esc(arrCount(g.n))}</span><span class="arr-a" data-noi18n>+${esc(arrMoneyU(g.a, g.u))}</span></div>`).join('')}</div>
+      <div class="arr-total"><span>Total</span><span data-noi18n>${esc(total)}</span></div>`;
   return `<div class="arr-details" data-type="${type}" data-ids="${esc(items.map(x => x.id).join(' '))}">${lines}
     <div class="arr-acts"><button type="button" class="btn solid gold" data-act="arrNotes">Open notes</button><button type="button" class="btn" data-act="close">OK</button></div></div>`;
 }
@@ -206,8 +210,8 @@ const arrSysOk = () => !!S.prefs.arrNotify && typeof Notification !== 'undefined
 // wallet: the duress PIN's wallet is a wallet with a PIN, and the real one is too (silence would give the duress PIN away)
 function arrSysMode() { return vault.on ? 'generic' : 'full'; }
 function arrSysBody(items) {
-  if (items.length === 1) { const x = items[0]; return `${tr(ARR_LABEL[x.k])}: +${arrMoney(x.a)} · ${mintName(x.m)}`; }
-  return arrGroups(items).map(g => `${tr(ARR_LABEL[g.k])}: ${arrCount(g.n)} · +${arrMoney(g.a)}`).join('\n');
+  if (items.length === 1) { const x = items[0]; return `${tr(ARR_LABEL[x.k])}: +${arrMoneyU(x.a, x.u)} · ${mintName(x.m)}`; }
+  return arrGroups(items).map(g => `${tr(ARR_LABEL[g.k])}: ${arrCount(g.n)} · +${arrMoneyU(g.a, g.u)}`).join('\n');
 }
 async function arrSys(title, items) {
   const mode = arrSysMode();

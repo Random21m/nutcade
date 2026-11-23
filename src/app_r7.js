@@ -52,9 +52,9 @@ function decodeBolt11(pr) {
    in the backup file. */
 S.blocked = raw.get('blocked', []);   // [{url, name, at}]
 const saveBlocked = () => raw.set('blocked', S.blocked);
-const isBlocked = url => !!url && S.blocked.some(b => b.url === normUrl(url));
+const isBlocked = url => !!url && S.blocked.some(b => acctUrl(normUrl(b.url)) === acctUrl(normUrl(url)));   // (a mint is blocked as a mint: every unit account at it)
 function blockedErr(url, what) {
-  const n = (S.blocked.find(b => b.url === normUrl(url)) || {}).name || mintName(url);
+  const n = (S.blocked.find(b => acctUrl(normUrl(b.url)) === acctUrl(normUrl(url))) || {}).name || mintName(url);
   const e = new Error(what === 'add' ? `${n} is blocked. Unblock it to add it again.` : what === 'ln' ? `${n} is blocked, so NUTCADE won't receive into it. Unblock it or pick another mint.`
     : what === 'request' ? `This request only takes ecash from ${n}, which you blocked.`
     : `${n} is blocked, so NUTCADE refused this ecash.`);
@@ -62,24 +62,24 @@ function blockedErr(url, what) {
   return e;
 }
 function blockMint(url) {
-  url = normUrl(url);
-  if (!isBlocked(url)) { S.blocked.push({ url, name: mintName(url), at: Date.now() }); saveBlocked(); }
+  const key = normUrl(url); url = acctUrl(key);
+  if (!isBlocked(url)) { S.blocked.push({ url, name: mintName(key), at: Date.now() }); saveBlocked(); }
 }
-function unblockMint(url) { url = normUrl(url); S.blocked = S.blocked.filter(b => b.url !== url); saveBlocked(); }
+function unblockMint(url) { url = acctUrl(normUrl(url)); S.blocked = S.blocked.filter(b => acctUrl(normUrl(b.url)) !== url); saveBlocked(); }
 function openBlock(url) {
   const bal = balanceOf(url), n = mintName(url);
   const canMove = canMoveFrom(url);
   openSheet('Block mint', `<p style="margin:0">Block ${esc(n)}? NUTCADE will refuse ecash, payment requests and new deposits from it, and always tell you when it does. You can unblock it any time.</p>
-    ${bal ? `<div class="notice">${canMove ? `Your ${money(bal)} at ${esc(n)} stays usable: you can still send it or move it to another mint. Moving it out is a good idea.` : `Your ${money(bal)} at ${esc(n)} stays usable: you can still send it.`}</div>` : ''}
+    ${bal ? `<div class="notice">${canMove ? `Your ${moneyAt(url, bal)} at ${esc(n)} stays usable: you can still send it or move it to another mint. Moving it out is a good idea.` : `Your ${moneyAt(url, bal)} at ${esc(n)} stays usable: you can still send it.`}</div>` : ''}
     ${S.prefs.npc && S.prefs.npcMint === url ? `<div class="notice">Your Lightning address still sends payments to ${esc(n)}. Change its mint in Settings → Lightning address.</div>` : ''}
     <button class="btn solid gold block" data-act="blockMintGo" data-url="${esc(url)}">Block this mint</button>
     ${canMove ? `<button class="btn block" data-act="moveOpen" data-from="${esc(url)}">Move sats out first</button>` : bal ? noMoveHTML(url) : ''}<div id="sheetErr"></div>`);
 }
 // sats can move out of a mint over Lightning only to another mint (not blocked) that takes Lightning deposits
-const canMoveFrom = url => balanceOf(url) > 0 && supports(S.mints.find(m => m.url === url), 'melt', 'bolt11') && S.mints.some(m => m.url !== url && !isBlocked(m.url) && supports(m, 'mint', 'bolt11'));
-const noMoveHTML = url => `<div class="notice">There's no other mint here that takes Lightning deposits, so these sats can't be moved yet. Add a mint to move them to, or send them from ${esc(mintName(url))}.</div>
+const canMoveFrom = url => isSatAcct(url) && balanceOf(url) > 0 && supports(S.mints.find(m => m.url === url), 'melt', 'bolt11') && satMints().some(m => m.url !== url && !isBlocked(m.url) && supports(m, 'mint', 'bolt11'));
+const noMoveHTML = url => `<div class="notice">${isSatAcct(url) ? `There's no other mint here that takes Lightning deposits, so these sats can't be moved yet. Add a mint to move them to, or send them from ${esc(mintName(url))}.` : `Moving ecash between mints works with SAT only, so this ${esc(unitCode(acctUnit(url)))} ecash can't be moved. You can still send it from ${esc(mintName(url))}.`}</div>
   <div class="btngrid"><button class="btn" data-act="pickMint">Add a mint</button><button class="btn" data-act="sendFrom" data-url="${esc(url)}">Send from ${esc(mintName(url))}</button></div>`;
-const blockedNotice = url => isBlocked(url) ? `<div class="notice red">${esc(mintName(url))} is blocked: its tokens, payment requests and deposits are refused.${balanceOf(url) ? ` Your ${money(balanceOf(url))} there still works, so you can move it out.` : ''}</div>` : '';
+const blockedNotice = url => isBlocked(url) ? `<div class="notice red">${esc(mintName(url))} is blocked: its tokens, payment requests and deposits are refused.${balanceOf(url) ? (isSatAcct(url) ? ` Your ${money(balanceOf(url))} there still works, so you can move it out.` : ` Your ${moneyAt(url, balanceOf(url))} there still works, so you can still send it.`) : ''}</div>` : '';
 
 /* ---------- LNURL (LUD-01, LUD-17): a scanned or pasted LNURL is read first, to see what it is ---------- */
 function lnurlHttp(v) {
@@ -122,7 +122,7 @@ function showWithdraw(j, url) {
   if (!j.callback || !j.k1 || !/^https?:\/\//i.test(String(j.callback))) { setBody(errHTML(serviceErr("This voucher can't be read: it's missing its payment details.")) + '<button class="btn block" data-act="close">Close</button>'); return; }
   if (wdUsed.has(String(j.k1))) { setBody(errHTML(serviceErr('This voucher was already used in this wallet.', '', 'Nothing was received and nothing was spent.')) + '<button class="btn block" data-act="close">Close</button>'); return; }
   if (!(max >= 1) || max < min) { setBody(errHTML(serviceErr('This voucher has nothing left to withdraw. It may have been used already.', '', 'Nothing was received and nothing was spent.')) + '<button class="btn block" data-act="close">Close</button>'); return; }
-  const mints = S.mints.filter(m => supports(m, 'mint', 'bolt11'));
+  const mints = satMints().filter(m => supports(m, 'mint', 'bolt11'));
   const ok = mints.filter(m => !isBlocked(m.url));
   curWd = { k1: String(j.k1), callback: String(j.callback), min, max, desc, host: host(url) };
   const pick = ok.find(m => m.url === S.active) || ok[0];
@@ -298,6 +298,7 @@ function nwcSpent(c) {
   let s = 0;
   for (const t of S.txs) {
     if (t.ts < from) continue;
+    if (txUnit(t) !== 'sat') continue;   // (an app's budget is in SAT and only SAT is ever paid for it)
     if (t.nwc === c.id && t.type === 'out' && t.method !== 'fee' && t.status !== 'failed' && t.status !== 'expired') s += num(t.amount) + num(t.fee);
     else if (t.method === 'fee' && t.feeFor && (txById(t.feeFor) || {}).nwc === c.id) s += num(t.fee);
   }
@@ -476,7 +477,7 @@ function nwcTx(t) {
   return o;
 }
 // an app sees only the payments and invoices it made, unless you let it see the whole wallet history
-const lnTxs = c => S.txs.filter(t => t.method === 'ln' && t.request && (c.seeAll || t.nwc === c.id));
+const lnTxs = c => S.txs.filter(t => t.method === 'ln' && t.request && txUnit(t) === 'sat' && (c.seeAll || t.nwc === c.id));   // (SAT only: a USD line's amount is cents, never millisats)
 const NWC = {
   async get_info(c) { return { alias: 'NUTCADE', color: '#ffc700', pubkey: c.pub, network: 'mainnet', block_height: 0, block_hash: '', methods: NWC_METHODS, notifications: NWC_NOTES }; },
   async get_balance(c) {
@@ -493,13 +494,17 @@ const NWC = {
     if (d.timestamp + d.expiry < Date.now() / 1000) throw nwcErr('OTHER', 'The invoice has expired.');
     const sats = d.sats;
     // the same invoice is never paid twice: a paid one answers with its proof, one in flight is refused
-    const prev = S.txs.find(t => t.type === 'out' && t.method === 'ln' && (t.request === inv || t.invoice === inv) && t.status !== 'failed' && t.status !== 'expired');
+    const prevAny = S.txs.find(t => t.type === 'out' && t.method === 'ln' && (t.request === inv || t.invoice === inv) && t.status !== 'failed' && t.status !== 'expired');
+    // (Wallet Connect sees SAT lines only, as lookup_invoice and list_transactions do: an invoice this wallet paid, or is
+    // paying, from a USD, EUR or CHF account answers like one an app may not see, after a moment, and is never paid again)
+    if (prevAny && txUnit(prevAny) !== 'sat') { await sleep(1500 + Math.random() * 2500); throw nwcErr('PAYMENT_FAILED', 'The payment failed. Nothing left the wallet.'); }
+    const prev = prevAny;
     // (an app that may only see its own payments gets the very answer an invoice that can't be paid gets, after a
     // moment, so it can't tell this wallet paid it; nothing is paid again)
     if (prev && !c.seeAll && prev.nwc !== c.id) { await sleep(1500 + Math.random() * 2500); throw nwcErr('PAYMENT_FAILED', 'The payment failed. Nothing left the wallet.'); }
     if (prev && prev.status === 'done') return { preimage: prev.preimage || '', fees_paid: num(prev.fee) * 1000 };
     if (prev) throw nwcErr('OTHER', 'This invoice is already being paid.');
-    const cands = S.mints.filter(m => supports(m, 'melt', 'bolt11') && balanceOf(m.url) >= sats).sort((a, b) => (b.url === S.active) - (a.url === S.active) || balanceOf(b.url) - balanceOf(a.url));
+    const cands = satMints().filter(m => supports(m, 'melt', 'bolt11') && balanceOf(m.url) >= sats).sort((a, b) => (b.url === S.active) - (a.url === S.active) || balanceOf(b.url) - balanceOf(a.url));
     if (!cands.length) throw nwcErr('INSUFFICIENT_BALANCE', `Not enough sats: no mint in this wallet holds ${sats} sat.`);
     let mq = null, url = null;
     for (const m of cands) {
@@ -543,7 +548,7 @@ const NWC = {
     if (msat % 1000) throw nwcErr('OTHER', 'Amounts that are not whole sats are not supported.');
     const sats = msat / 1000;
     if (sats > MAX_SAT) throw nwcErr('OTHER', 'That amount is too large.');
-    const pick = [activeMint()].concat(S.mints).find(m => m && supports(m, 'mint', 'bolt11') && !isBlocked(m.url));
+    const pick = [activeMint()].concat(satMints()).find(m => m && isSatAcct(m.url) && supports(m, 'mint', 'bolt11') && !isBlocked(m.url));
     if (!pick) throw nwcErr('OTHER', isBlocked(S.active) ? `${mintName(S.active)} is blocked in NUTCADE, and no other mint can receive Lightning.` : 'No mint in this wallet can receive Lightning.');
     const mi = methodInfo(pick, 'mint', 'bolt11');
     if (mi && ((mi.min && sats < mi.min) || (mi.max && sats > mi.max))) throw nwcErr('OTHER', `The mint takes ${mi.min || 1} to ${mi.max || MAX_SAT} sat.`);

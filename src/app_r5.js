@@ -76,14 +76,17 @@ async function retryBounties() {
 // Decoding a token needs its mint's keyset ids. A wallet that never held sats at that mint doesn't have them yet, so ask the mint.
 async function decodeTok(t) {
   t = cleanToken(String(t || ''));
+  const md = L.getTokenMetadata(t), u = String(md.unit || 'sat').toLowerCase();
+  extUrl(md.mint);   // (the token's mint field is an address only: one with '|' in it is refused here, before anything reads it)
   try { return L.getDecodedToken(t, Object.keys(S.counters)); } catch (e) {}
-  const w = await getWallet(normUrl(L.getTokenMetadata(t).mint));
+  const w = await getWallet(acctKey(extUrl(md.mint), unitOk(u) ? u : 'sat'));   // (the token's mint is an address; its unit picks the account's keysets)
   return w.decodeToken(t);
 }
 // an incoming bounty: check the ecash really is locked to us and to the hash before showing it
 async function readBounty(bo, rec) {
   try {
     const tok = cleanToken(String(bo.token || '')); const d = await decodeTok(tok);
+    if (String(d.unit || 'sat').toLowerCase() !== 'sat') return null;   // (bounties are SAT only: one in another unit is not for us)
     let H = null;
     // (E is the sender's: no point math on more coins or keys than a bounty of ours ever has, app_p2bk.js)
     if (!d.proofs.length || d.proofs.length > P2BK_MAX_COINS) return null;
@@ -105,7 +108,7 @@ async function readBounty(bo, rec) {
     }
     // the proofs carry a little extra for the mint's fee; show the amount the challenger put up when it's covered
     const amount = num(bo.amount) > 0 && num(bo.amount) <= sum(d.proofs) ? Math.floor(num(bo.amount)) : sum(d.proofs);
-    return { token: tok, amount, mint: normUrl(d.mint), H, until: num(bo.until) || Date.now() + BOUNTY_DAYS * 86400e3, state: 'open', game: rec.game };
+    return { token: tok, amount, mint: extUrl(d.mint), H, until: num(bo.until) || Date.now() + BOUNTY_DAYS * 86400e3, state: 'open', game: rec.game };
   } catch (e) { return null; }
 }
 async function attachBounty(rec, bounty, signer, from) {
@@ -121,7 +124,7 @@ async function claimBounty(rec, pre, from) {
   const b = rec.bounty; if (!b || b.state === 'won' || from !== rec.pubkey) return;
   if (await sha256hex(L.hexToBytes(pre)) !== b.H) return;
   const d = await decodeTok(b.token);
-  const unlocked = L.getEncodedToken({ mint: d.mint, unit: 'sat', proofs: d.proofs.map(p => Object.assign({}, p, { witness: JSON.stringify({ preimage: pre }) })) });
+  const unlocked = tokEnc({ mint: d.mint, unit: 'sat', proofs: d.proofs.map(p => Object.assign({}, p, { witness: JSON.stringify({ preimage: pre }) })) });
   const who = nameFor(rec.pubkey) || rec.by, g = gameById(rec.game);
   try { await receiveToken(unlocked, `Bounty from ${who}: beat ${pad6(rec.score)} on ${g ? g.name : rec.game}`, { follow: { k: 'bounty-won', rec: rec.id } }); }
   catch (e) { if (/spent/i.test(e.message || '') && b.state !== 'won') { if (e.op) await settleOp(e.op.id).catch(() => {}); if (b.state !== 'won') { b.state = 'gone'; saveChallenges(); } } return; }
@@ -158,7 +161,7 @@ async function lockExtra(url, amount, heirPub, until, follow, ctx = {}) {
     return plain(send);
   });
 }
-const extraToken = () => S.extra && L.getEncodedToken({ mint: S.extra.mint, unit: 'sat', proofs: S.extra.proofs });
+const extraToken = () => S.extra && tokEnc({ mint: S.extra.mint, unit: 'sat', proofs: S.extra.proofs });
 async function sendHeirCopy() {
   const x = S.extra; if (!x) return false;
   const k = S.contacts.find(c => c.pubkey === x.heir.pubkey);
@@ -255,6 +258,7 @@ async function extraTick() {
 async function onExtraLife(p, from) {
   if (p.t === 'nutcade-extralife-end') { S.heirlooms.filter(h => h.from === from && h.state === 'waiting').forEach(h => { h.state = 'ended'; }); saveHeir(); if (tab === 'wallet' && !$('#layer .sheet')) refresh(); return; }
   let d; try { d = await decodeTok(p.token); } catch (e) { return; }
+  if (String(d.unit || 'sat').toLowerCase() !== 'sat') return;   // (Extra Life is SAT only: a copy in another unit is not for us)
   let until = 0;
   for (const pr of d.proofs) {
     let sec; try { sec = JSON.parse(pr.secret); } catch (e) { return; }
@@ -264,7 +268,7 @@ async function onExtraLife(p, from) {
     until = Math.max(until, lt * 1000);
   }
   const who = nameFor(from);
-  const h = { from, name: who || 'A friend', token: cleanToken(String(p.token)), amount: sum(d.proofs), mint: normUrl(d.mint), until, state: 'waiting', at: Date.now() };
+  const h = { from, name: who || 'A friend', token: cleanToken(String(p.token)), amount: sum(d.proofs), mint: extUrl(d.mint), until, state: 'waiting', at: Date.now() };
   // a renewal always replaces the copy we hold: the old one is dead at the mint once our friend continued,
   // even when two renewals land in the same second and carry the same date
   const old = S.heirlooms.find(x => x.from === from && x.state === 'waiting');
@@ -343,7 +347,7 @@ function openHeirCopy() {
    worth knowing) and recommendations on Nostr (NIP-87). */
 S.mintlog = store.get('mintlog', {});
 const saveMlog = () => store.set('mintlog', S.mintlog);
-function mlog(url) { if (!S.mintlog[url]) S.mintlog[url] = { first: Date.now(), pr: '', ms: [], ops: [0, 0], keysets: {}, changes: [] }; return S.mintlog[url]; }
+function mlog(url0) { const url = acctUrl(url0); if (!S.mintlog[url]) S.mintlog[url] = { first: Date.now(), pr: '', ms: [], ops: [0, 0], keysets: {}, changes: [] }; return S.mintlog[url]; }
 function logProbe(url, h) {
   const l = mlog(url); l.pr = (l.pr + (h.ok ? '1' : '0')).slice(-200);
   if (h.ok && h.ms != null) l.ms = l.ms.concat([h.ms]).slice(-30);
@@ -357,8 +361,8 @@ function opMark(url, ok, e) {
 }
 const GRADES = ['F', 'D', 'C', 'B', 'A'];
 const gradeCls = g => ({ A: 'good', B: 'good', C: 'slow', D: 'slow', F: 'bad' })[g] || 'wait';
-async function inspectMint(url) {
-  const l = mlog(url), now = Date.now();
+async function inspectMint(url0) {
+  const url = acctUrl(url0), l = mlog(url), now = Date.now();
   const get = async p => { const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 7000); try { const r = await fetch(url + p, { cache: 'no-store', signal: ac.signal }); return r.ok ? await r.json() : null; } finally { clearTimeout(tm); } };
   const [info, ks] = await Promise.all([get('/v1/info').catch(() => null), get('/v1/keysets').catch(() => null)]);
   if (info && info.pubkey) {
@@ -367,14 +371,17 @@ async function inspectMint(url) {
     l.info = mintInfoOf(info);   // (what the report card used, plus the contact, terms and description Mints → Details shows: see app_trust.js)
   }
   if (ks && Array.isArray(ks.keysets)) {
-    const had = Object.keys(l.keysets).length;
-    for (const k of ks.keysets.filter(k => (k.unit || 'sat') === 'sat')) {
-      const old = l.keysets[k.id];
-      if (!old) { l.keysets[k.id] = { first: now, active: !!k.active }; if (had) l.changes.push({ at: now, kind: 'new', id: k.id }); }
+    // only the units this wallet holds at the mint are watched (SAT as in 1.30 when none is held yet); a unit watched for the
+    // first time has its keysets noted without a change, so adding USD at a mint never reads as "new keys"
+    const held = new Set(S.mints.filter(m => acctUrl(m.url) === url).map(m => acctUnit(m.url))); if (!held.size) held.add('sat');
+    const uOf = v => (v && v.unit) || 'sat', had = new Set(Object.values(l.keysets).map(uOf));
+    for (const k of ks.keysets.filter(k => held.has(k.unit || 'sat'))) {
+      const old = l.keysets[k.id], ku = k.unit || 'sat';
+      if (!old) { l.keysets[k.id] = Object.assign({ first: now, active: !!k.active }, ku === 'sat' ? {} : { unit: ku }); if (had.has(ku)) l.changes.push({ at: now, kind: 'new', id: k.id }); }
       else if (old.active && !k.active) { old.active = false; l.changes.push({ at: now, kind: 'retired', id: k.id }); }
       else old.active = !!k.active;
     }
-    l.ksTotal = ks.keysets.filter(k => (k.unit || 'sat') === 'sat').length;
+    l.ksTotal = ks.keysets.filter(k => held.has(k.unit || 'sat')).length;
     l.changes = l.changes.slice(-20);
   }
   l.checked = now; saveMlog();
