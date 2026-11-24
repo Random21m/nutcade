@@ -2,6 +2,20 @@
 (function(){
 'use strict';
 const L = window.CashuLib;
+/* A mint login window (browser login, app_auth.js) coming back here with its code: the code is handed to the wallet's
+   tab through local storage (only when that tab is waiting for this very login) and the window closes. Nothing else
+   of the wallet starts in it. */
+try {
+  const q = new URLSearchParams(location.search), st = q.get('state'), w = JSON.parse(localStorage.getItem('nutcade:authwait') || 'null');
+  if (st && (q.get('code') || q.get('error')) && w && w.state === st && Date.now() - w.at < 15 * 60e3) {
+    localStorage.setItem('nutcade:authcode', JSON.stringify({ state: st, code: q.get('code') || '', error: q.get('error') || '' }));
+    history.replaceState(null, '', location.pathname);
+    const D = window.NUTCADE_I18N || {}, lg = (JSON.parse(localStorage.getItem('nutcade:prefs') || '{}') || {}).lang, s = 'Logged in. You can close this window.';
+    document.body.innerHTML = '<p style="font:16px sans-serif;padding:24px"></p>'; document.body.firstChild.textContent = (D[lg] && D[lg].t && D[lg].t[s]) || s;
+    setTimeout(() => { try { window.close(); } catch (e) {} }, 100);
+    return;
+  }
+} catch (e) {}
 const $ = (s, r=document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num = a => a == null ? 0 : (typeof a === 'object' && typeof a.toNumber === 'function') ? a.toNumber() : Number(a) || 0;
@@ -41,7 +55,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
    part of the vault that is open (the real wallet's, or the duress PIN's: see "duress PIN" in app_r8.js), and while
    it is locked nothing of a wallet is read or written at all. So storage looks the same whichever wallet is open, and
    with or without a duress PIN. */
-const DEVICE_KEYS = new Set(['vault', 'pinfails', 'pinchg', 'gen', 'probe', 'pad', 'initials', 'priceRange']);
+const DEVICE_KEYS = new Set(['vault', 'pinfails', 'pinchg', 'gen', 'probe', 'pad', 'initials', 'priceRange', 'authwait', 'authcode']);   // (authwait/authcode: a mint login window on its way back, app_auth.js; no token in them)
 const devKey = k => DEVICE_KEYS.has(k) || /^scores:/.test(k);
 const lsGet = (k, d) => { try { const v = localStorage.getItem('nutcade:' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
 const lsSet = (k, v) => { let ok = true, n = 0; try { const j = JSON.stringify(v); localStorage.setItem('nutcade:' + k, j); n = String(j).length; } catch (e) { ok = false; } noteSave(k, ok, v); if (ok) { useSizes.set(k, 8 + k.length + n); useSoon(); } return ok; };
@@ -97,7 +111,7 @@ const raw = {
   del(k) { if (inVault(k)) { if (vault.open && !writeGuard.paused) { delete vault.data[k]; queueVaultWrite(); } return; } lsDel(k); }
 };
 // everything that holds ecash, keys or anything that can spend: with a PIN, only inside the encrypted vault
-const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc', 'ops', 'oplate', 'extra', 'hunts', 'found', 'imports', 'limits'];
+const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc', 'ops', 'oplate', 'extra', 'hunts', 'found', 'imports', 'limits', 'auth'];
 const vault = { on: false, open: false, data: {}, dek: null, chain: Promise.resolve(), queued: false, decoy: false, sealing: false };
 vault.on = raw.get('vault', null) != null;
 // A tab paused because NUTCADE opened in another tab never writes the wallet again: work it still had in flight can't
@@ -113,7 +127,7 @@ const MINT_MS = 20000, MELT_MS = 120000, STEP_MS = 150000;
   if (_fetch) window.fetch = (input, init) => {
     if (typeof input === 'string' && /\|(usd|eur|chf)\/v1\//.test(input)) input = input.replace(/\|(usd|eur|chf)(?=\/v1\/)/, '');   // (a unit account's key: the mint's own address)
     const u = String(typeof input === 'string' ? input : (input && input.url) || '').split('?')[0];
-    if (!/\/v1\/(info|keys|keysets|swap|mint|melt|checkstate|restore)\b/.test(u)) return _fetch(input, init);
+    if (!/\/v1\/(info|keys|keysets|swap|mint|melt|checkstate|restore|auth)\b/.test(u)) return _fetch(input, init);   // (auth: a mint's blind auth tokens, NUT-22)
     // A paused tab (NUTCADE opened in another tab) asks a mint nothing more: not even the next step of something it
     // started, whose result it could never write down. The tab in charge settles what it left, from its records.
     if (writeGuard.paused) return Promise.reject(pausedErr());
@@ -318,9 +332,9 @@ async function syncIfStale() {
     if (!vault.open || !vault.dek) return;
     await vault.chain;
     if (vaultBad()) { try { c = (await readVault(vault.dek)).counters; } catch (e) {} }   // (the vault in memory is the newer one: only the counters of the one on disk are taken)
-    else { await openVault(vault.dek); const d = vault.data; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.txs = d.txs || []; S.quotes = d.quotes || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null; S.opsdone = raw.get('opsdone', []); c = raw.get('counters', {}); }
+    else { await openVault(vault.dek); const d = vault.data; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.txs = d.txs || []; S.quotes = d.quotes || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null; S.opsdone = raw.get('opsdone', []); S.auth = d.auth || {}; c = raw.get('counters', {}); }
   } else {
-    for (const [k, d] of [['proofs', {}], ['pending', []], ['txs', []], ['quotes', []], ['ops', []], ['oplate', []], ['extra', null], ['opsdone', []]]) if (!saveHealth.failed.has(k)) S[k] = raw.get(k, d);
+    for (const [k, d] of [['proofs', {}], ['pending', []], ['txs', []], ['quotes', []], ['ops', []], ['oplate', []], ['extra', null], ['opsdone', []], ['auth', {}]]) if (!saveHealth.failed.has(k)) S[k] = raw.get(k, d);   // (auth: the mint logins and their BATs, app_auth.js)
     c = raw.get('counters', {});
   }
   for (const k in c || {}) S.counters[k] = Math.max(S.counters[k] || 0, c[k] || 0);
@@ -354,6 +368,7 @@ function setSeed(mnemonic, backedUp) {
   seedBytes = null;
   if (changed && S.prefs) { S.prefs.npc = false; S.prefs.npcSince = 0; S.prefs.npcName = ''; S.prefs.mintBackupAt = 0; S.prefs.mintBackupList = ''; S.prefs.sync = false; delete S.prefs.syncSt; S.prefs.syncOther = []; S.prefs.amOn = false; S.prefs.amMint = ''; S.prefs.amMin = AM_MIN_DEF; if (typeof npcSocketStop === 'function') npcSocketStop(); }
   for (const k in wallets) delete wallets[k];
+  if (changed && S.auth && Object.keys(S.auth).length) { S.auth = {}; store.set('auth', S.auth); }   // (other words: no mint login is kept, log in again)
   if (!store.set('seed', S.seed)) throw new Error("This browser won't save data. Open NUTCADE in a normal browser tab.");
   requestPersist();
 }
@@ -498,7 +513,7 @@ async function restoreFromMintScan(url, onStep, opts, st) {
 /* A mint that answers a request with an error code (NUT-00) did none of it: it signed nothing for that request. */
 // (a keyset error, 12000-12999, comes wrapped by the library as a StaleKeysetError around the mint's own answer)
 const isRefusal = e => { const x = e && e.name === 'StaleKeysetError' && e.cause ? e.cause : e; return !!x && (x.name === 'MintOperationError' || (x.status >= 400 && x.status < 500 && typeof x.code === 'number')); };
-const isDupOutputs = e => e && (e.code === 11003 || /already signed/i.test(String(e.message || '')));
+const isDupOutputs = e => e && (e.code === 11003 || /already signed/i.test(String(e.message || '')) || !!e.authMasked);   // (authMasked: a mint with a login that refused the request with no reason, app_auth.js)
 async function withRepair(url, fn, ropts) {
   try { const r = await fn(); opMark(url, true); return r; }
   catch (e) {
@@ -542,8 +557,11 @@ const wallets = {};
 async function getWallet(url) {
   if (wallets[url]) return wallets[url];
   const p = (async () => {
-    const w = new L.Wallet(acctUrl(url), { unit: acctUnit(url), bip39seed: seedFor(), counterSource });   // (a unit account: the mint's address, that unit's keysets)
+    const mint = authMint(acctUrl(url));   // (with its login, if it asks for one: app_auth.js)
+    const w = new L.Wallet(mint, { unit: acctUnit(url), bip39seed: seedFor(), counterSource });   // (a unit account: the mint's address, that unit's keysets)
     await w.loadMint();
+    try { if (typeof mint === 'object') mint.setMintInfo(w.getMintInfo()); } catch (e) {}
+    authSeen(acctUrl(url), w);
     saveMintKeys(url, w);   // (its public keys, for checking tokens taken while offline: app_dleq.js)
     ksBind(w);   // (new coins never on a keyset that expires soon, when the mint has another)
     p.ready = w;   // for the few places that need it without waiting (the cost shown on a pay screen)
@@ -1046,6 +1064,7 @@ async function meltQuote(kind, dest, amount) {
   return w.createMeltQuoteOnchain(dest, amount);
 }
 async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {}) {
+  await authGate(url, 3);   // (a mint with a login: the BATs for the swap and the payment in hand first, app_auth.js)
   const { grant, noLimit, limAuto, noPiggy, ...txExtra } = extra || {};   // (limAuto: no person at the screen, an automatic move: a PIN entered for something else is never used)
   const w = await getWallet(url);
   const c = await tooManyRetry(url, () => mintLock(url, () => payPrep(w, kind, mq, feeIndex, note, dest, url, txExtra, { grant, free: noLimit, auto: !!txExtra.nwc || !!limAuto, noPiggy: !!noPiggy })));
@@ -1256,6 +1275,7 @@ async function recoverChange(pend) {
 const opsRunning = new Set(), opRetry = new Set();
 const closeOp = op => { S.ops = S.ops.filter(o => o.id !== op.id); S.opsdone = [op.id].concat((S.opsdone || []).filter(x => x !== op.id)).slice(0, 300); };
 async function journaled(url, kind, info, run) {
+  await authGate(url);   // (a mint with a login and none to be had: refused here, before anything is written down)
   const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, follow: info.follow || null, own: info.own || null, created: Date.now(), ctr: [], outs: [] };
   if (info.lim && info.lim.id) op.lim = { id: info.lim.id, a: info.lim.a, at: Date.now() };
   op.mk = 1;   // (written by 1.16.0 or later: a claim of our own coins is marked below; see opMarks for older records)
@@ -2589,7 +2609,7 @@ function viewMints() {
       <div style="font-family:var(--f-display);font-size:12px;white-space:nowrap">${fmtU(balanceOf(m.url), acctUnit(m.url))}${isSatAcct(m.url) ? '' : ` <small>${unitCode(acctUnit(m.url))}</small>`}</div></div>
       <div class="row between" style="gap:8px">${mintHealthLine(m)}${reportChip(m.url)}</div>
       <div class="row" style="flex-wrap:wrap;gap:6px">${radarSpan(m.url)}${methodChips(m)}</div>
-      ${blockedNotice(m.url)}${minNotice(m.url)}${ksLine(m)}
+      ${blockedNotice(m.url)}${minNotice(m.url)}${ksLine(m)}${authLine(m)}
       <div class="row" style="flex-wrap:wrap">${m.url === S.active ? '<span class="chip ecash">ACTIVE</span>' : `<button class="btn sm lime" data-act="useMint" data-url="${esc(m.url)}">Use</button>`}${isBlocked(m.url) ? '<span class="chip failed">BLOCKED</span>' : ''}
       <button class="btn sm" data-act="refreshMint" data-url="${esc(m.url)}">Refresh</button>
       <button class="btn sm" data-act="mintInfo" data-url="${esc(m.url)}">Details</button>
@@ -2743,7 +2763,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.32.0';
+const APP_VERSION = '1.33.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -3553,7 +3573,7 @@ async function sweepPhrase(phrase, urls, onStep) {
     const isNew = !S.mints.find(m => m.url === url);
     try {
       if (isNew) await addMint(url, { dropped: true, sat: isSatAcct(url) });   // (sats of yours, found under another phrase: they come in even at a mint below the minimum)
-      const other = new L.Wallet(acctUrl(url), { unit: acctUnit(url), bip39seed: otherSeed });
+      const other = new L.Wallet(authMint(acctUrl(url)), { unit: acctUnit(url), bip39seed: otherSeed });   // (with this device's login at a mint that asks for one)
       await other.loadMint();
       let found = [];
       for (const k of other.keyChain.getKeysets()) {
@@ -3794,7 +3814,7 @@ function showInvoice(tx) {
   if (quotePaid(q) || st !== 'pending') {
     setBody(`<div class="notice">${PAID_COLLECTING}</div><div class="row" style="justify-content:center"><span class="spinner" id="payState">COLLECTING</span></div>`, () => {
       if (!q) return null; let alive = true;
-      (async () => { while (alive) { const r = await checkQuote(q).catch(() => null); if (r === 'paid') { if (alive) showDone('in', (txById(tx.id) || tx).amount, 'Lightning', '', txUnit(tx)); return; } await sleep(3000); } })();
+      (async () => { while (alive) { const r = await checkQuote(q).catch(e => { authHint(e); return null; }); if (r === 'paid') { if (alive) showDone('in', (txById(tx.id) || tx).amount, 'Lightning', '', txUnit(tx)); return; } await sleep(3000); } })();
       return () => { alive = false; };
     });
     return;
@@ -3812,7 +3832,7 @@ function showInvoice(tx) {
     const onPaid = e => { if (e.detail === q.quote && alive) { alive = false; showDone('in', tx.amount, 'Lightning', '', tu); } };
     document.addEventListener('nutcade:paid', onPaid);
     liveSync();
-    (async () => { while (alive) { try { const r = await checkQuote(q); if (r === 'paid') { if (alive) { alive = false; showDone('in', tx.amount, 'Lightning', '', tu); } return; } if (r === 'expired') { const s = $('#payState'); if (s) s.textContent = 'INVOICE EXPIRED'; return; } } catch (e) { } await sleep(3000); } })();
+    (async () => { while (alive) { try { const r = await checkQuote(q); if (r === 'paid') { if (alive) { alive = false; showDone('in', tx.amount, 'Lightning', '', tu); } return; } if (r === 'expired') { const s = $('#payState'); if (s) s.textContent = 'INVOICE EXPIRED'; return; } } catch (e) { authHint(e); } await sleep(3000); } })();
     return () => { alive = false; document.removeEventListener('nutcade:paid', onPaid); };
   });
 }
@@ -4044,6 +4064,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_p2bk.js@@*/
 /*@@app_sync.js@@*/
 /*@@app_automove.js@@*/
+/*@@app_auth.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4222,7 +4243,7 @@ function wipeWallet() {
   // the vault is closed first, so nothing written below can land in it (or bring it back); then every record of the
   // wallet goes, with the PIN, its tries and changes, and only the device's own settings and arcade tables stay
   vault.on = false; vault.open = false; vault.decoy = false; vault.dek = null; vault.data = {};
-  try { for (const k of Object.keys(localStorage)) { if (!k.startsWith('nutcade:')) continue; const n = k.slice(8); if (n === 'prefs' || (devKey(n) && !/^(vault|pinfails|pinchg|gen)$/.test(n))) continue; localStorage.removeItem(k); } } catch (e) {}
+  try { for (const k of Object.keys(localStorage)) { if (!k.startsWith('nutcade:')) continue; const n = k.slice(8); if (n === 'prefs' || (devKey(n) && !/^(vault|pinfails|pinchg|gen|authwait|authcode)$/.test(n))) continue; localStorage.removeItem(k); } } catch (e) {}
   try { npcSocketStop(); dmStop(); nzStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'amOn', 'amMint', 'amMin']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
   location.reload();
 }
@@ -4379,10 +4400,10 @@ const A = {
     else if (!same) { S.seed.secured = true; store.set('seed', S.seed); }
     // every unit a listed mint offers is scanned as its own account (USD coins of these 12 words are found too)
     const miss = []; await unitAccounts(list, miss);
-    let total = 0; const fails = [];
+    let total = 0; const fails = [], logins = [];   // (logins: mints that need a login before they can be scanned, app_auth.js)
     let syncWas = false; try { syncWas = await syRestoreLook(line); } catch (e) {}   // wallet sync: one read of the sync key's events (nothing written, sync stays off); the scan below leaves out coins they mark as handed out
     for (const u of list) {
-      try { const got = await restoreFromMint(u, line, isSatAcct(u) ? {} : { unitScan: 1 }); if (isSatAcct(u)) total += got; else if (got) found.push([acctUnit(u), got]); } catch (e) { fails.push(host(u) + (isSatAcct(u) ? '' : ' · ' + unitCode(acctUnit(u)))); }
+      try { const got = await restoreFromMint(u, line, isSatAcct(u) ? {} : { unitScan: 1 }); if (isSatAcct(u)) total += got; else if (got) found.push([acctUnit(u), got]); } catch (e) { (authWant(e, u) ? logins : fails).push(host(u) + (isSatAcct(u) ? '' : ' · ' + unitCode(acctUnit(u)))); }
     }
     if (!S.active && S.mints[0]) S.active = S.mints[0].url; save();
     const lows = lowRestored(list);
@@ -4392,14 +4413,15 @@ const A = {
       <div class="credit-num" style="font-size:28px">${fmt(total)}<small>${unitTag()}</small></div>
       ${found.length ? `<div class="tiny" style="color:var(--lime)" data-unitfound data-noi18n>${found.map(([u, n]) => '+' + moneyU(n, u)).join(' · ')}</div>` : ''}
       <p style="margin:0">${total || found.length ? 'Recovered and back in your wallet.' : 'No unspent ecash was found on those mints for this phrase.'}</p>
-      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}. Try those again later from Mints → Find lost ecash.</div>` : ''}${unitMissHTML(miss)}${unmoved.filter(Boolean).map(h => `<div class="notice red">Couldn't move the ecash at ${esc(h)} under the restored phrase. It is still in this wallet: tap Protect it on the wallet screen to try again.</div>`).join('')}${unmoved.length && !unmoved.some(Boolean) ? `<div class="notice red">Some ecash couldn't be moved under the restored phrase. It is still in this wallet: tap Protect it on the wallet screen to try again.</div>` : ''}${lows}
+      ${fails.length ? `<div class="notice red">Couldn't reach: ${fails.map(esc).join(', ')}. Try those again later from Mints → Find lost ecash.</div>` : ''}${logins.length ? `<div class="notice">Log in to these mints on the Mints tab, then scan them with Find lost ecash:</div><div class="tiny" data-noi18n>${logins.map(esc).join(', ')}</div>` : ''}${unitMissHTML(miss)}${unmoved.filter(Boolean).map(h => `<div class="notice red">Couldn't move the ecash at ${esc(h)} under the restored phrase. It is still in this wallet: tap Protect it on the wallet screen to try again.</div>`).join('')}${unmoved.length && !unmoved.some(Boolean) ? `<div class="notice red">Some ecash couldn't be moved under the restored phrase. It is still in this wallet: tap Protect it on the wallet screen to try again.</div>` : ''}${lows}
       ${syncWas ? `<div class="notice cyan">Wallet sync was on for these 12 words on another device. Turn it on here too to keep your coins the same on both.</div><button class="btn block lime" data-act="syncRestoreOn">Turn on wallet sync</button>` : ''}
       <button class="btn solid gold block" data-act="close">Continue</button></div>`);
   }),
   findLost: b => run(b, 'SCANNING', async () => {
     if (!S.mints.length) throw new Error('Add the mints you used first, then scan.');
-    let total = 0, fails = 0; const found = [];
-    for (const m of S.mints) { try { const got = await restoreFromMint(m.url, t => { b.innerHTML = '<span class="spinner">SCANNING</span>'; }); if (isSatAcct(m.url)) total += got; else if (got) found.push(moneyU(got, acctUnit(m.url))); } catch (e) { fails++; } }
+    let total = 0, fails = 0, logins = 0; const found = [];
+    for (const m of S.mints) { try { const got = await restoreFromMint(m.url, t => { b.innerHTML = '<span class="spinner">SCANNING</span>'; }); if (isSatAcct(m.url)) total += got; else if (got) found.push(moneyU(got, acctUnit(m.url))); } catch (e) { if (authWant(e, m.url)) logins++; else fails++; } }
+    if (logins && !total && !found.length) { render(); toast('Some mints need a login first: log in on the Mints tab, then scan again.', 'gold'); return; }
     render(); toast(total || found.length ? `Found ${[total ? money(total) : null].concat(found).filter(Boolean).join(' · ')}` : fails ? `Nothing found; ${fails} mint(s) didn't answer` : 'No lost ecash found', total || found.length ? 'lime' : 'cyan'); if (total || found.length) sfx('coin');
   }),
   support: () => { sfx('select'); openSupport(); },
@@ -4498,6 +4520,7 @@ const A = {
     closeSheet(); gate = { step: 'show' }; render(); window.scrollTo(0, 0);
   },
   resetAsk: () => pinGuard('reset', () => openSheet('Reset wallet', `${pbWarn('reset')}<div class="notice red">This deletes your recovery phrase, ecash, notes and history from this browser, then returns you to the start screen to create a new wallet or restore one. ${anyBalance() ? `If you don't have your 12 words and mint list, your ${heldMoney()} is lost forever.` : 'Your wallet is empty.'}</div>
+    ${Object.keys(S.auth || {}).length ? '<div class="tiny">Mint logins on this device are deleted too.</div>' : ''}
     ${S.mints.length ? `<div class="th">Your mints, to write down with your words:</div><div class="code" style="color:var(--ink)">${mintAddrs().map(u => esc(u)).join('<br>')}</div>` : ''}
     <div class="field"><label for="confirmWord">Type RESET to confirm</label><input id="confirmWord" class="inp" autocomplete="off" autocapitalize="characters"></div>
     <button class="btn solid red block" data-act="doReset">Reset wallet</button><div id="sheetErr"></div>`)),
@@ -4631,6 +4654,7 @@ const A = {
 /*@@app_sync_actions.js@@*/
 /*@@app_units_actions.js@@*/
 /*@@app_automove_actions.js@@*/
+/*@@app_auth_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && isSatAcct(dest.url) && meta.unit === 'sat' && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;   // (a swap is Lightning between SAT accounts)
@@ -4774,7 +4798,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON }, storage: { health: () => ({ bad: saveBad(), keys: [...saveHealth.failed.keys()], told: saveHealth.told }), pct: () => usePct(), bytes: () => useBytes(), check: () => useCheck(), level: () => useLevel } };
+window.Nutcade = { auth: authHooks, loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON }, storage: { health: () => ({ bad: saveBad(), keys: [...saveHealth.failed.keys()], told: saveHealth.told }), pct: () => usePct(), bytes: () => useBytes(), check: () => useCheck(), level: () => useLevel } };
 window.Nutcade.bk = { cap: () => phoneCapCheck(), rec: () => pbRec(), fetch: () => phoneFetch(), lock: (t, p) => lockBackup(t, p), unlock: (d, p) => unlockBackup(d, p), extras: d => importExtras(d) };
 window.Nutcade.dq = { check: t => offlineCheck(t), line: t => checkLine(t), ok: (p, A) => DQ.proofOk(p, A), h2c: m => DQ.unc(DQ.hashToCurve(new TextEncoder().encode(m))), ptText: t => ptText({ token: t }), slim: t => slimToken(t) };
 window.Nutcade.mr = { radar, parse: radarParse, ensure: radarEnsure, bkSent: () => Object.keys(bkSettings()), bkAllowed: () => Object.keys(BK_SET) };

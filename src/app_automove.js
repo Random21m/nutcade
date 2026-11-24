@@ -17,7 +17,7 @@
    - the spending limit would refuse it: it is an ordinary payment, checked before (the "with the PIN" limit for one
      payment, the day limit), and the payment itself passes limitGate with `auto` so a PIN you entered for something
      else is never used for it. It never asks for the PIN: such a move waits, and you can move it yourself;
-   - my mint isn't answering, asks for a login (NUT-21/22 errors), or can't take deposits any more: the whole run stops;
+   - my mint isn't answering, asks for a login (NUT-21/22 errors, or no login in hand: app_auth.js), or can't take deposits any more: the whole run stops (a login there runs it again);
    - the sending mint can't pay over Lightning, isn't answering or asks for a login: that mint is skipped.
    Each of these leaves one plain line in Settings (and one toast for a run that a new reason stopped).
    USD, EUR and CHF accounts are never moved and never added to anything here: the line says they were skipped.
@@ -42,13 +42,13 @@ const AM_TXT = {
   unset: () => 'Pick your mint below. Nothing moves until you do.',
   mybad: () => "Your mint can't take Lightning deposits now, so nothing moved. Pick another mint.",
   mydown: () => "Your mint isn't answering, so nothing moved. NUTCADE tries again when sats arrive or when you open it.",
-  mylogin: () => 'Your mint asks for a login, so nothing moved. NUTCADE tries again when sats arrive or when you open it.',
+  mylogin: () => 'Log in to your mint on the Mints tab: it asks for a login, so nothing moved. Auto-move runs again as soon as you log in.',
   none: a => `Nothing to move: no other mint holds ${money(a[0])} or more.`,
   moved: a => `Moved ${money(a[0])} to your mint.`,
   waiting: a => `${money(a[0])} on its way to your mint.`,
   noln: () => "Can't pay out over Lightning, so its sats stay there.",
   down: () => "Isn't answering, so its sats stay there for now.",
-  login: () => 'Asks for a login, so its sats stay there for now.',
+  login: () => 'Asks for a login, so its sats stay there for now. Log in to it on the Mints tab.',
   fee: a => `The fees (up to ${money(a[0])}) are more than 2% of ${money(a[1])}, so nothing moved.`,
   per: a => `This move (${money(a[0])} with fees) is over your limit for one payment and needs your PIN, so nothing moved. You can move it yourself.`,
   day: a => `This move (${money(a[0])} with fees) is more than what is left of your daily limit, so nothing moved.`,

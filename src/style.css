@@ -670,3 +670,7 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .chip.rdr{font-family:var(--f-display);font-size:9px;line-height:20px;white-space:nowrap}
 .chip.rdr.good{color:var(--lime)} .chip.rdr.shaky{color:var(--gold)} .chip.rdr.down{color:var(--red)}
 #radarSugg:empty,[data-radar]:empty{display:none}
+/* mint login (1.33): the line on a mint's panel, the device code on the login sheet */
+.authline{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;border:1px dashed var(--faint);border-radius:8px;padding:8px 10px;min-width:0}
+.authline>.tiny{flex:1 1 160px}
+.authcode{font-family:var(--f-display);font-size:20px;letter-spacing:2px;text-align:center;color:var(--gold);overflow-wrap:anywhere;padding:8px 0;user-select:all}
