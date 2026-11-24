@@ -61,7 +61,8 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.31.1, with the v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+const WHATS_NEW = [   // (v1.31.2, with the v1.31.1 and v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+  'The support address has changed. The Support screen, its QR code and the tip button use the new one, an npub.cash address. Be wary of any other "NUTCADE support" address.',
   'Clearer wording on a token received offline and on a waiting nutzap: a mint signature checked offline doesn\'t show the coins are unspent or the payment final. Once claimed, the line says Claimed at the mint.',
   'New: NUTCADE now holds dollars, euros and francs as ecash too, where a mint issues them. Each unit at a mint is its own account with its own balance: amounts are never added together or converted.',
   'Add one in Mints: a mint that offers USD or EUR shows a line of its own for each, and you add only the one you want. Sending, receiving, payment requests and Lightning in and out work in that unit, as the mint quotes it.',
@@ -247,7 +248,7 @@ const HELP = [
     'Two more relays (relay.nostr.band and relay.cashumints.space) are asked only when you tap Find mints people recommend.',
     'Coinbase, for the price and the price chart, only while Show Bitcoin price is on.',
     'MintRadar (mintradar.org), only while Show mint reliability is on: it sees the internet address of your phone when NUTCADE downloads its public list of mint health. NUTCADE asks for the whole list, so MintRadar never learns which mints you use.',
-    'npub.cash, while your Lightning address is on, and npubx.cash, when you tip from inside the app (the tip address is an npubx.cash address).',
+    'npub.cash, while your Lightning address is on and when you tip from inside the app (the support address is an npub.cash address).',
     'The web address of any Lightning address, LNURL, voucher or payment request you pay or scan, and of a Nostr profile when you zap it. It sees that one request.',
     'This website, to load NUTCADE, its QR scanner and the update check. GitHub, which hosts it, sees these requests like any website visit.',
     'GitHub pages (the source, release notes and the problem report form), only when you tap a link to them.'], after: [

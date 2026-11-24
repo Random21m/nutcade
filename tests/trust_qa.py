@@ -155,8 +155,8 @@ async def main():
             hs = helptext[helptext.index("What does NUTCADE contact"):helptext.index("Reporting a problem")]
             check('privacy: so does the Help answer (the hosts, in the same words)', all(h in hs for h in claimed - {'api.exchange.coinbase.com', 'ws-feed.exchange.coinbase.com', 'api.coinbase.com', 'mint.minibits.cash', 'mint.cubabitcoin.org', 'testnut.cashu.space', 'nofees.testnut.cashu.space'}) and 'Coinbase' in hs and 'Minibits' in hs and 'Cuba Bitcoin' in hs and '8333.space' in hs, hs[:60])
             # the support address (1.22.1): one address everywhere, the LNURL and the QR picture say the same thing, the old one is gone
-            SUP = 'npub1qh7gzgypv0zjf6txpg679nwye2ue405cxp5ktt3ftw8kmdgnh83qpsdq60@npubx.cash'
-            OLDS = 'npub18wnvs7ncun8exphx8h7r9c6p9kg6jagpe8ck0g2qll0ushv8rp4slzjlpw'
+            SUP = 'npub1vj8zjhnmkhekv93e2xmrz7kfwuxq25vrzw53u4dqhwd2lp5smvks3mwu2n@npub.cash'
+            OLDS = 'npub1qh7gzgypv0zjf6txpg679nwye2ue405cxp5ktt3ftw8kmdgnh83qpsdq60'
             m = re.search(r"DONATE = \{ address: '([^']+)', lnurl: '([^']+)'", SRC['app.js'])
             def bech(s):
                 C = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'; a = b = 0; r = bytearray()
