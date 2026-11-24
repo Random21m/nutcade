@@ -30,7 +30,7 @@ J = json.dumps
 A, B, AU = 'http://127.0.0.1:3338', 'http://127.0.0.1:3339', 'http://127.0.0.1:3347'
 AUP = 'http://127.0.0.1:3349'   # (the auth mint whose payments stay pending)
 OIDC = 'http://127.0.0.1:3348'
-PROT = {'/v1/swap', '/v1/mint/quote/bolt11', '/v1/mint/bolt11', '/v1/melt/quote/bolt11', '/v1/melt/bolt11', '/v1/checkstate', '/v1/restore'}
+PROT = {'/v1/swap', '/v1/mint/quote/bolt11', '/v1/mint/bolt11', '/v1/mint/bolt11/batch', '/v1/melt/quote/bolt11', '/v1/melt/bolt11', '/v1/checkstate', '/v1/restore'}
 ST = f"Nutcade.auth.state({J(AU)})"
 LANGS = ('en', 'es', 'pt', 'de', 'fr')
 

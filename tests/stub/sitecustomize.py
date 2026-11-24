@@ -103,3 +103,27 @@ if _hdir:
         _hl.Ledger._store_blinded_messages = _store
     except Exception as e:  # never stop the mint from starting
         print('sitecustomize: hold patch failed', e)
+
+# Test-only: batched minting (NUT-29). Nutshell 0.21 always advertises nuts[29] (max_batch_size = its request limit).
+# NUTCADE_BATCH=off: a mint without NUT-29 (not in its info, and its batch endpoint refuses like an unknown one would);
+# NUTCADE_BATCH=<n>: advertises max_batch_size n and refuses a batch of more quotes than that.
+_bt = os.environ.get('NUTCADE_BATCH')
+if _bt:
+    try:
+        from cashu.mint import features as _bf, ledger as _bl
+        from cashu.core.errors import TransactionError as _BTE
+        _o_bf = _bf.LedgerFeatures.add_batch_features
+        def _batch_features(self, mint_features):
+            r = _o_bf(self, mint_features)
+            if _bt == 'off': r.pop(29, None)
+            else: r[29] = dict(r.get(29) or {}, max_batch_size=int(_bt))
+            return r
+        _bf.LedgerFeatures.add_batch_features = _batch_features
+        _o_mb = _bl.Ledger.mint_batch
+        async def _mint_batch(self, payload, *a, **k):
+            if _bt == 'off': raise _BTE('batch minting is not supported')
+            if len(payload.quotes) > int(_bt): raise _BTE('batch too large')
+            return await _o_mb(self, payload, *a, **k)
+        _bl.Ledger.mint_batch = _mint_batch
+    except Exception as e:  # never stop the mint from starting
+        print('sitecustomize: batch patch failed', e)
