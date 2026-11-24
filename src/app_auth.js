@@ -209,7 +209,8 @@ const auReq = addr => async o0 => {
    place that acts on the mint's reason (spent coins pruned and tried again, a pending step left to wait, "already
    claimed", a deposit already issued) would see only "the mint turned this down". So the mint is asked what is true,
    and the refusal gets the answer a mint without login would have given: the request's coins SPENT (11001) or
-   PENDING (11002), else its quote (a deposit ISSUED, PENDING or UNPAID; a payment PAID or PENDING). Nothing found:
+   PENDING (11002), else its quote (a deposit ISSUED, PENDING or UNPAID, or any deposit of a batch, NUT-29; a payment PAID or
+   PENDING). Nothing found:
    authMasked, so the usual catch-up scan may run once ("outputs already signed", 11003, the one reason left unseen). */
 async function auTruth(addr, o, e) {
   const say = (code, detail) => { e.code = code; e.message = detail; e.detail = detail; delete e.authMasked; };
@@ -228,6 +229,9 @@ async function auTruth(addr, o, e) {
   if (q && path === '/v1/mint/bolt11') {
     const r = await inTime(w.checkMintQuoteBolt11(q), 20000), st = r && r.state;
     if (st === 'ISSUED') say(20002, 'quote already issued'); else if (st === 'PENDING') say(20005, 'quote is pending'); else if (st === 'UNPAID') say(20001, 'quote not paid');
+  } else if (path === '/v1/mint/bolt11/batch' && Array.isArray(body.quotes) && body.quotes.length && body.quotes.length <= 100) {   // (a batch, NUT-29: each of its deposits)
+    const sts = await Promise.all(body.quotes.map(x => typeof x === 'string' ? inTime(w.checkMintQuoteBolt11(x), 20000).then(r => r && r.state, () => null) : null));
+    if (sts.includes('ISSUED')) say(20002, 'quote already issued'); else if (sts.includes('PENDING')) say(20005, 'quote is pending'); else if (sts.includes('UNPAID')) say(20001, 'quote not paid');
   } else if (q && path === '/v1/melt/bolt11') {
     const r = await inTime(w.checkMeltQuoteBolt11(q), 20000), st = r && r.state;
     if (st === 'PAID') say(20006, 'invoice already paid'); else if (st === 'PENDING') say(20005, 'quote is pending');

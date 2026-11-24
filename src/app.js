@@ -701,7 +701,7 @@ async function checkQuoteNow(id, txId) {
       if (r.state === 'PAID') {
         let cfg;
         if (r.pubkey) {   // NUT-20 locked quote (npub.cash can lock payments to your Nostr key)
-          const k = npcPrivFor(r.pubkey) || (S.p2pk.find(x => hex(L.getPubKeyFromPrivKey(L.hexToBytes(x.priv))) === String(r.pubkey).toLowerCase()) || {}).priv;
+          const k = quoteKey(r.pubkey);   // (src/app_batch.js)
           if (!k) throw new Error("This payment is locked to a key this wallet doesn't have.");
           cfg = { privkey: k };
         }
@@ -808,11 +808,13 @@ function closeDepositEmpty(q) {
 async function creditDepositRange(w, q) {
   // the mint signs a deposit's amount exactly, at one of its counter ranges; other coins at these counters were signed
   // for another request (by a device holding this wallet): not this deposit's, so it is closed with nothing
-  let r = { proofs: [] }, other = false;
+  // (a batch's counters, NUT-29: its coins add up to the batch's total, for every deposit in it: src/app_batch.js)
+  let r = { proofs: [] }, other = false, hit = null;
   for (const c of depCtrs(q)) {
     const x = await restoreRange(w, q.mint, c.start, c.n, c.id), all = sum(x.proofs || []);
     if (!all) continue;
-    if (q.amount == null || all === num(q.amount)) { r = x; other = false; break; }
+    const want = c.b ? c.t : q.amount;
+    if (want == null || all === num(want)) { r = x; other = false; hit = c; break; }
     other = true;
   }
   if (other) { closeDepositEmpty(q); return 0; }
@@ -824,6 +826,11 @@ async function creditDepositRange(w, q) {
   // it left again: "already spent elsewhere".)
   const sent = new Set(S.txs.flatMap(t => (t.sent || []).map(p => p.secret))); away = away.filter(p => !held2.has(p.secret) && !sent.has(p.secret));
   if (!found.length && !away.length && (q.empty = (q.empty || 0) + 1) < 3) { save(); return 0; }   // nothing there yet: it waits, it isn't closed at 0
+  if (hit && hit.b) {   // every deposit of that batch still open is booked with it, in one write
+    const grp = [q].concat(S.quotes.filter(x => x.quote !== q.quote && x.mint === q.mint && depCtrs(x).some(c => c.b === hit.b)));
+    const got = btBook(q.mint, grp, plain(found), plain(away));
+    return got.length ? got[0][1] : 0;
+  }
   const was = txById(q.txId), before = was && was.status === 'done' ? num(was.amount) : 0;
   S.proofs[q.mint] = (S.proofs[q.mint] || []).concat(plain(found));
   updTx(q.txId, { status: 'done', amount: before + sum(found) + sum(away), ts: Date.now() }); spentElsewhere(q.mint, sum(away), q.impLine);
@@ -2763,7 +2770,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.33.0';
+const APP_VERSION = '1.34.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -3052,7 +3059,7 @@ function npcSync() {
       if (!page.length) break;
     } while (offset < total);
     if (latest > (S.prefs.npcSince || 0)) { S.prefs.npcSince = latest; save(); }
-    for (const q of S.quotes.filter(x => x.npc)) await checkQuote(q).catch(() => {});
+    await depAll(S.quotes.filter(x => x.npc));
     return added;
   })().finally(() => { npcBusy = null; });
   return npcBusy;
@@ -3101,7 +3108,7 @@ function liveSync() {
   const want = new Set();
   for (const q of S.quotes.filter(q => q.kind === 'bolt11')) {
     const k = 'mq:' + q.quote; want.add(k);
-    liveWatch(k, q.mint, 'bolt11_mint_quote', w => w.on.mintQuotePaid(q.quote, () => checkQuote(q).catch(() => {}), () => liveDrop(k)));
+    liveWatch(k, q.mint, 'bolt11_mint_quote', w => w.on.mintQuotePaid(q.quote, () => depCheck(q).catch(() => {}), () => liveDrop(k)));
   }
   for (const p of S.pending.filter(p => p.kind === 'ln' && !p.paid)) {
     const k = 'melt:' + p.quote; want.add(k);
@@ -4065,6 +4072,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_sync.js@@*/
 /*@@app_automove.js@@*/
 /*@@app_auth.js@@*/
+/*@@app_batch.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4742,7 +4750,7 @@ async function mintTick(url, startup) {
     if (!startup && o.nextTry && now < o.nextTry) continue;
     try { await step(settleOp(o.id)); } catch (e) { o.tries = (o.tries || 0) + 1; o.nextTry = Date.now() + Math.min(30 * 60e3, 15e3 * 2 ** (o.tries - 1)); save(); }
   }
-  for (const q of S.quotes.filter(q => q.mint === url && (q.kind === 'onchain' || now - (txById(q.txId)?.ts || 0) < maxAge))) await step(checkQuote(q)).catch(() => {});
+  await depAll(S.quotes.filter(q => q.mint === url && (q.kind === 'onchain' || now - (txById(q.txId)?.ts || 0) < maxAge)), step);   // (several paid at a NUT-29 mint: one batch, src/app_batch.js)
   for (const p of S.pending.filter(p => p.mint === url)) await step(reconcile(p, { force: !!startup })).catch(() => {});
   await step(fetchPreimages(url)).catch(() => {});
   if (S.prefs.checkSent) for (const t of S.txs.filter(t => t.mint === url && t.status === 'pending' && t.method === 'ecash' && t.sent).slice(0, 10)) await step(checkClaim(t)).catch(() => {});
@@ -4784,7 +4792,7 @@ setInterval(() => { if (document.hidden || tabLocked || $('#layer .sheet')) retu
 setInterval(() => {
   if (document.hidden || tabLocked || (vault.on && !vault.open) || !S.seed) return;
   const fresh = S.quotes.filter(q => q.kind === 'bolt11' && Date.now() - (txById(q.txId)?.ts || 0) < 30 * 60e3);
-  for (const q of fresh) checkQuote(q).then(r => { if (r === 'paid' && !$('#layer .sheet') && tab !== 'arcade') refresh(); }).catch(() => {});
+  for (const q of fresh) depCheck(q).then(r => { if (r === 'paid' && !$('#layer .sheet') && tab !== 'arcade') refresh(); }).catch(() => {});
 }, 8000);
 
 function livePrice(v, cur) {
@@ -4801,6 +4809,7 @@ window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });
 window.Nutcade = { auth: authHooks, loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON }, storage: { health: () => ({ bad: saveBad(), keys: [...saveHealth.failed.keys()], told: saveHealth.told }), pct: () => usePct(), bytes: () => useBytes(), check: () => useCheck(), level: () => useLevel } };
 window.Nutcade.bk = { cap: () => phoneCapCheck(), rec: () => pbRec(), fetch: () => phoneFetch(), lock: (t, p) => lockBackup(t, p), unlock: (d, p) => unlockBackup(d, p), extras: d => importExtras(d) };
 window.Nutcade.dq = { check: t => offlineCheck(t), line: t => checkLine(t), ok: (p, A) => DQ.proofOk(p, A), h2c: m => DQ.unc(DQ.hashToCurve(new TextEncoder().encode(m))), ptText: t => ptText({ token: t }), slim: t => slimToken(t) };
+window.Nutcade.bt = { max: u => btMax(u), offClear: () => bt.off.clear(), skipped: id => bt.skip.has(id) };   // (batched deposits: src/app_batch.js)
 window.Nutcade.mr = { radar, parse: radarParse, ensure: radarEnsure, bkSent: () => Object.keys(bkSettings()), bkAllowed: () => Object.keys(BK_SET) };
 setLang();
 /* Offline: a service worker keeps a copy of the app (network first, so updates still arrive right away). */

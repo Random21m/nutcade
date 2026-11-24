@@ -91,6 +91,8 @@ jobs:
             suites: auto_move
           - name: auth
             suites: auth
+          - name: batch
+            suites: batch
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out
