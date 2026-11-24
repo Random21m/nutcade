@@ -87,6 +87,8 @@ jobs:
             suites: sync
           - name: units
             suites: units
+          - name: auto_move
+            suites: auto_move
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out

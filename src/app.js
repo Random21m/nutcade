@@ -79,7 +79,7 @@ function useScan() {
 }
 useScan();
 // the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
-const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'p2bk', 'sync', 'syncSt', 'syncOther'];
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'p2bk', 'sync', 'syncSt', 'syncOther', 'amOn', 'amMint', 'amMin'];
 const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const walletPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const inVault = k => vault.on && !devKey(k);
@@ -352,7 +352,7 @@ function setSeed(mnemonic, backedUp) {
   const changed = !S.seed || S.seed.mnemonic !== mnemonic;
   S.seed = { mnemonic, backedUp: !!backedUp, created: Date.now() };
   seedBytes = null;
-  if (changed && S.prefs) { S.prefs.npc = false; S.prefs.npcSince = 0; S.prefs.npcName = ''; S.prefs.mintBackupAt = 0; S.prefs.mintBackupList = ''; S.prefs.sync = false; delete S.prefs.syncSt; S.prefs.syncOther = []; if (typeof npcSocketStop === 'function') npcSocketStop(); }
+  if (changed && S.prefs) { S.prefs.npc = false; S.prefs.npcSince = 0; S.prefs.npcName = ''; S.prefs.mintBackupAt = 0; S.prefs.mintBackupList = ''; S.prefs.sync = false; delete S.prefs.syncSt; S.prefs.syncOther = []; S.prefs.amOn = false; S.prefs.amMint = ''; S.prefs.amMin = AM_MIN_DEF; if (typeof npcSocketStop === 'function') npcSocketStop(); }
   for (const k in wallets) delete wallets[k];
   if (!store.set('seed', S.seed)) throw new Error("This browser won't save data. Open NUTCADE in a normal browser tab.");
   requestPersist();
@@ -628,7 +628,6 @@ function addTx(t) {
   const tx = Object.assign({ id: uid(), ts: Date.now(), note: '', status: 'done', fee: 0 }, t);
   if (!isSatAcct(tx.mint)) tx.unit = acctUnit(tx.mint);   // (a unit account's line says its unit; the price in your currency is for SAT only)
   else if (price.rate && price.cur && !tx.fx) tx.fx = { cur: price.cur, rate: price.rate };
-  if (internalMove) tx.move = true;
   const ru = piggyRoundUp(tx); if (ru) tx.roundup = ru;
   S.txs.unshift(tx);
   save();
@@ -1047,9 +1046,9 @@ async function meltQuote(kind, dest, amount) {
   return w.createMeltQuoteOnchain(dest, amount);
 }
 async function payMelt(kind, mq, feeIndex, note, dest, url = S.active, extra = {}) {
-  const { grant, noLimit, ...txExtra } = extra || {};
+  const { grant, noLimit, limAuto, noPiggy, ...txExtra } = extra || {};   // (limAuto: no person at the screen, an automatic move: a PIN entered for something else is never used)
   const w = await getWallet(url);
-  const c = await tooManyRetry(url, () => mintLock(url, () => payPrep(w, kind, mq, feeIndex, note, dest, url, txExtra, { grant, free: noLimit, auto: !!txExtra.nwc })));
+  const c = await tooManyRetry(url, () => mintLock(url, () => payPrep(w, kind, mq, feeIndex, note, dest, url, txExtra, { grant, free: noLimit, auto: !!txExtra.nwc || !!limAuto, noPiggy: !!noPiggy })));
   try {
     if (writeGuard.paused) throw pausedErr();   // (paused in between: the tab in charge settles the prepared ecash)
     return await single('melt:' + c.pend.id, () => meltNow(w, kind, mq, feeIndex, url, c.tx, c.pend, c.spent, c.amount, c.onCountersReserved));
@@ -1069,7 +1068,7 @@ async function payPrep(w, kind, mq, feeIndex, note, dest, url, extra, lim = {}) 
   const most = pm ? pm.T + pm.fees : plan ? plan.spend : meltCost(url, amount, reserve).total;
   if (sum(have) < most) throw new Error(`Not enough funds. Need ${moneyAt(url, most)} including fees; this mint holds ${moneyAt(url, sum(have))}.`);
   if (!isSatAcct(url)) { if (extra && (extra.nwc || extra.zap)) throw satOnlyErr(); lim = Object.assign({}, lim, { free: true }); }   // (another unit: outside the SAT limit and piggy bank)
-  else piggyGuard(need);
+  else if (!lim.noPiggy) piggyGuard(need);   // (a move between your own mints: the sats stay yours)
   const hold = limitGate(most, lim);
   try { return await withPick(w, plan && plan.sel, () => payPrepSwap(w, kind, mq, note, dest, url, extra, amount, need, hold, !!pm)); }
   catch (e) { hold.release(); throw e; }
@@ -1680,7 +1679,7 @@ function setLang() {
 
 /* ---------- sound ---------- */
 const PREF_DEFAULTS = { sound: true, music: true, crt: true, theme: 'neon', btcSymbol: false, fiat: true, currency: 'USD',
-  checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100, ksAuto: true, mintRadar: false, remind: true, nutzap: false, p2bk: false };
+  checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100, ksAuto: true, mintRadar: false, remind: true, nutzap: false, p2bk: false, amOn: false, amMint: '', amMin: 1000 };
 for (const k in PREF_DEFAULTS) if (S.prefs[k] === undefined) S.prefs[k] = PREF_DEFAULTS[k];
 S.p2pk = store.get('p2pk', []);   // [{pub, priv, created, used}]
 S.requests = store.get('requests', []);
@@ -2744,7 +2743,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.31.2';
+const APP_VERSION = '1.32.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -2839,6 +2838,8 @@ function viewSettings() {
       ${S.prefs.piggy ? `<div class="field"><label for="p_piggyStep">Round up to the nearest</label><select id="p_piggyStep" class="inp" data-act="prefSelect" data-k="piggyStep">${[10, 100, 1000].map(v => `<option value="${v}" ${(+S.prefs.piggyStep || 100) === v ? 'selected' : ''}>${fmt(v)} SAT</option>`).join('')}</select></div>
       <div class="row between tiny"><span>Saved so far</span><span style="color:var(--gold)">${money(piggySaved())}</span></div>${piggySaved() ? '<button class="btn sm" data-act="piggyEmpty">Empty piggy bank</button>' : ''}` : ''}
     </div>
+
+    ${amSettingsHTML()}
 
     <div class="panel" id="set-tools"><span class="h2">Wallet tools</span>
       <p class="th" style="margin:0">Use these if your balance looks wrong or a payment seems stuck.</p>
@@ -4042,6 +4043,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_nutzap.js@@*/
 /*@@app_p2bk.js@@*/
 /*@@app_sync.js@@*/
+/*@@app_automove.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4221,7 +4223,7 @@ function wipeWallet() {
   // wallet goes, with the PIN, its tries and changes, and only the device's own settings and arcade tables stay
   vault.on = false; vault.open = false; vault.decoy = false; vault.dek = null; vault.data = {};
   try { for (const k of Object.keys(localStorage)) { if (!k.startsWith('nutcade:')) continue; const n = k.slice(8); if (n === 'prefs' || (devKey(n) && !/^(vault|pinfails|pinchg|gen)$/.test(n))) continue; localStorage.removeItem(k); } } catch (e) {}
-  try { npcSocketStop(); dmStop(); nzStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
+  try { npcSocketStop(); dmStop(); nzStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'amOn', 'amMint', 'amMin']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
   location.reload();
 }
 const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: bkTxs(), p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: bkImports(), quotes: S.quotes, requests: S.requests, contacts: S.contacts, settings: bkSettings(), trophies: bkTrophies(), plays: store.get('plays', null), arcade: bkArcade() }, null, 1);
@@ -4302,7 +4304,7 @@ const A = {
   stopWatch: b => { const t = txById(b.dataset.id); S.quotes = S.quotes.filter(q => q.quote !== t.quote); updTx(t.id, { status: 'expired' }); closeSheet(); refresh(); },
   reconcileTx: b => run(b, 'CHECKING', async () => { const t = txById(b.dataset.id); const p = S.pending.find(x => x.txId === t.id); if (!p) { toast('Nothing pending for this one', 'cyan'); return; } const r = await reconcile(p, { force: true }); const cp = (txById(t.id) || {}).changePending; toast(cp ? "Paid. Its change hasn't come back yet; NUTCADE keeps trying." : { paid: 'Payment confirmed', returned: 'Payment failed. Sats returned.', pending: 'Still in flight' }[r], r === 'pending' || cp ? 'gold' : 'lime'); closeSheet(); refresh(); }),
   reconcileAll: b => run(b, '…', async () => { for (const p of [...S.pending]) await reconcile(p, { force: true }).catch(() => {}); refresh(); }),
-  pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'mintRadar') { if (b.checked) { radar.next = 0; radarEnsure(); } else radarOff(); } if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } if (b.dataset.k === 'nutzap') nzToggled(b.checked); if (b.dataset.k === 'sync') syToggled(b.checked); refresh(); sfx('blip'); },
+  pref: b => { S.prefs[b.dataset.k] = b.checked; save(); if (!S.prefs.sound || !S.prefs.music) window.NutAudio && window.NutAudio.stopMusic(); if (b.dataset.k === 'fiat' && b.checked) fetchPrice(true); if (b.dataset.k === 'mintRadar') { if (b.checked) { radar.next = 0; radarEnsure(); } else radarOff(); } if (b.dataset.k === 'nostrBackup' && b.checked) { S.prefs.mintBackupList = ''; scheduleMintBackup(0); } if (b.dataset.k === 'nutzap') nzToggled(b.checked); if (b.dataset.k === 'sync') syToggled(b.checked); if (b.dataset.k === 'amOn') amToggled(b.checked); refresh(); sfx('blip'); },
   backup: () => pinGuard('backup', () => showBackupText(backupData())),
   restore: () => pinGuard('import', () => openSheet('Import backup', `${pbWarn('replace')}<div class="field"><span class="flabel">Backup file</span><div class="row filepick"><label class="btn sm violet"><span>Choose a file</span><input id="restoreFile" type="file" accept=".json,application/json"></label><span id="restoreFileName" class="tiny muted">No file chosen</span></div></div><div class="field"><label for="restoreIn">Or paste the backup text</label><textarea id="restoreIn" class="inp" spellcheck="false"></textarea></div><button class="btn solid gold block" data-act="doRestore">Restore</button><div id="sheetErr"></div>`)),
   doRestore: b => !guardHeld('import') ? closeSheet() : run(b, 'CHECKING', async () => {
@@ -4628,6 +4630,7 @@ const A = {
 /*@@app_nutzap_actions.js@@*/
 /*@@app_sync_actions.js@@*/
 /*@@app_units_actions.js@@*/
+/*@@app_automove_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && isSatAcct(dest.url) && meta.unit === 'sat' && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;   // (a swap is Lightning between SAT accounts)
@@ -4747,6 +4750,7 @@ async function tickBody(startup) {
     syTick(startup).catch(() => {}),   // wallet sync: read at start and now and then, a failed write tried again (app_sync.js)
     recheckImported().catch(() => {})
   ]);
+  if (startup) amRun('start').catch(() => {});   // auto-move: once at the start, after the checks above settled what was in flight (app_automove.js)
   if (S.prefs.nostrBackup && S.mints.length && S.prefs.mintBackupList !== mintAddrs().join(' ') && Date.now() - mintBackupTry > 10 * 60e3) scheduleMintBackup(startup ? 4000 : 0);
 }
 let tickCount = 0;

@@ -13,11 +13,11 @@
    The payment then goes through the same steps as any other: the spending limit (and the PIN that lets one payment go
    over it), the piggy bank, the operation journal and the recovery of a payment that failed. If the coins or the fees
    changed in between (another tab, a coin that arrived or was spent), it stops with nothing sent. */
-const allErr = msg => { const e = new Error(msg); e.keep = true; return e; };
+const allErr = msg => { const e = new Error(msg); e.keep = true; e.allKind = 'quote'; return e; };   // (allKind: what auto-move says about it, app_automove.js)
 const allChanged = () => allErr('Your balance at this mint changed, so nothing was sent. Tap Send all again to see the new amount.');
 const allNone = () => allErr('Nothing to send: this mint holds 0 SAT.');
-const allFeeErr = (fees, bal) => allErr(`The fees (${money(fees)}) are as much as this mint's balance of ${money(bal)}, so nothing can be sent from it.`);
-const allDustErr = (a, min) => allErr(`After the fees, ${money(a)} would be left to send, less than the smallest payment allowed here (${money(min)}). Nothing was sent.`);
+const allFeeErr = (fees, bal) => Object.assign(allErr(`The fees (${money(fees)}) are as much as this mint's balance of ${money(bal)}, so nothing can be sent from it.`), { allKind: 'fee', fees, bal });
+const allDustErr = (a, min) => Object.assign(allErr(`After the fees, ${money(a)} would be left to send, less than the smallest payment allowed here (${money(min)}). Nothing was sent.`), { allKind: 'dust' });
 /* The token that takes everything at this mint: { amount (what the receiver gets), fee (the mint's fee for the swap and
    the fee the token carries for its receiver), spend (amount + fee: what leaves the balance), left (what stays: a SAT or
    two that one more SAT of token would cost more than) }. Throws a sentence when nothing can be sent. */

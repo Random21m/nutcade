@@ -341,24 +341,32 @@ function openMove(from, to, amount) {
     <button class="btn solid gold block" data-act="moveQuote">Get quote</button>
     <div id="sheetErr"></div>`);
 }
-async function moveQuote(from, to, amount) {
+// the two quotes of a move: a deposit at `to` for exactly `amount`, and the payment of its invoice from `from`.
+// tag(side, promise) lets a caller tell which mint an error came from (auto-move, app_automove.js); nothing is paid here
+async function moveQuotes(from, to, amount, tag = (s, p) => p) {
   if (from === to) throw new Error('Pick two different mints.');
-  const wTo = await getWallet(to), wFrom = await getWallet(from);
+  const wTo = await tag('to', getWallet(to)), wFrom = await tag('from', getWallet(from));
   { const e = quoteFitErr(to, amount); if (e) throw e; }   // (refused before anything is paid)
-  const mintQ = await wTo.createMintQuoteBolt11(amount);
-  const mq = await wFrom.createMeltQuoteBolt11(mintQ.request);
+  const mintQ = await tag('to', wTo.createMintQuoteBolt11(amount));
+  const mq = await tag('from', wFrom.createMeltQuoteBolt11(mintQ.request));
+  return { from, to, amount, mintQ, mq };
+}
+async function moveQuote(from, to, amount) {
+  const { mintQ, mq } = await moveQuotes(from, to, amount);
   const need = num(mq.amount) + num(mq.fee_reserve);
   if (balanceOf(from) < need) throw new Error(`${(S.mints.find(m => m.url === from) || {}).name || host(from)} holds ${money(balanceOf(from))}, not enough for ${money(amount)} plus up to ${money(num(mq.fee_reserve))} in fees. Try ${money(Math.max(1, balanceOf(from) - num(mq.fee_reserve) - 2))}.`);
   return { from, to, amount, mintQ, mq };
 }
-async function doMove(mv) {
-  const nm = u => (S.mints.find(m => m.url === u) || {}).name || host(u);
+// o.auto: an automatic move (app_automove.js): its lines say so, and the spending limit never uses a PIN entered for something else
+async function doMove(mv, o = {}) {
+  const nm = u => (S.mints.find(m => m.url === u) || {}).name || host(u), auto = o.auto ? { autoMove: true } : {};
   // the receiving side is recorded first, so if NUTCADE closes mid-move the deposit is still claimed later
-  const inTx = addTx({ type: 'in', method: 'ln', amount: mv.amount, mint: mv.to, note: `Moved from ${nm(mv.from)}`, status: 'pending', request: mv.mintQ.request, quote: mv.mintQ.quote, move: true });
+  const inTx = addTx(Object.assign({ type: 'in', method: 'ln', amount: mv.amount, mint: mv.to, note: `Moved from ${nm(mv.from)}`, status: 'pending', request: mv.mintQ.request, quote: mv.mintQ.quote, move: true }, auto));
   const q = { kind: 'bolt11', quote: mv.mintQ.quote, request: mv.mintQ.request, amount: mv.amount, mint: mv.to, txId: inTx.id, expiry: mv.mintQ.expiry || null };
   S.quotes.push(q); save();
-  internalMove = true;
-  let out; try { out = await payMelt('ln', mv.mq, 0, `Moved to ${nm(mv.to)}`, mv.mintQ.request, mv.from); } finally { internalMove = false; }
+  // this payment's own line is marked a move (no round-up, not an arrival) and it doesn't stop at the piggy bank (the sats
+  // stay yours); only this call: anything else paid or received meanwhile is treated as usual
+  const out = await payMelt('ln', mv.mq, 0, `Moved to ${nm(mv.to)}`, mv.mintQ.request, mv.from, Object.assign({ move: true, noPiggy: true }, o.auto ? { limAuto: true, autoMove: true } : {}));
   updTx(out.id, { move: true });
   if (out.status === 'failed') return { ok: false };
   for (let i = 0; i < 30; i++) { const r = await checkQuote(q).catch(() => null); if (r === 'paid') return { ok: true, fee: num(txById(out.id).fee) }; await sleep(1500); }
@@ -672,17 +680,17 @@ function challengePanel() {
 
 /* ---------- round-up piggy bank ---------- */
 S.piggy = store.get('piggy', { saved: 0 });
-let internalMove = false, piggyOK = 0;
+let piggyOK = 0;
 const piggySaved = () => S.prefs.piggy ? Math.max(0, Math.min(num(S.piggy.saved), totalBalance())) : 0;
 function piggyRoundUp(t) {
-  if (!S.prefs.piggy || internalMove || t.type !== 'out' || t.piggyBreak || t.upkeep || t.note === 'Ecash already spent elsewhere' || !isSatAcct(t.mint)) return 0;   // (the piggy bank is in SAT: another unit's payment never rounds up into it)   // (not payments: a keyset check-up, coins another device spent)
+  if (!S.prefs.piggy || t.move || t.type !== 'out' || t.piggyBreak || t.upkeep || t.note === 'Ecash already spent elsewhere' || !isSatAcct(t.mint)) return 0;   // (the piggy bank is in SAT: another unit's payment never rounds up into it)   // (not payments: a keyset check-up, coins another device spent)
   const step = +S.prefs.piggyStep || 100, a = num(t.amount);
   const r = (step - a % step) % step; if (!r) return 0;
   S.piggy.saved = num(S.piggy.saved) + r; store.set('piggy', S.piggy);
   return r;
 }
 function piggyGuard(spend) {
-  if (!S.prefs.piggy || internalMove || Date.now() < piggyOK) return;
+  if (!S.prefs.piggy || Date.now() < piggyOK) return;
   const saved = piggySaved();
   if (saved > 0 && totalBalance() - spend < saved) { const e = new Error('This payment dips into your piggy bank.'); e.piggy = { spend, saved }; throw e; }
 }
