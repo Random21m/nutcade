@@ -28,6 +28,7 @@ from r8_qa import set_pin, unlock, PIN
 
 J = json.dumps
 A, B, AU = 'http://127.0.0.1:3338', 'http://127.0.0.1:3339', 'http://127.0.0.1:3347'
+AUP = 'http://127.0.0.1:3349'   # (the auth mint whose payments stay pending)
 OIDC = 'http://127.0.0.1:3348'
 PROT = {'/v1/swap', '/v1/mint/quote/bolt11', '/v1/mint/bolt11', '/v1/melt/quote/bolt11', '/v1/melt/bolt11', '/v1/checkstate', '/v1/restore'}
 ST = f"Nutcade.auth.state({J(AU)})"
@@ -98,15 +99,15 @@ async def mints_tab(w):
 async def auth_line(w): return await w.ev(f"(document.querySelector('[data-auth=\"{AU}\"]')||{{}}).innerText||''")
 
 
-async def login(w, approve=True, expect=True):
+async def login(w, approve=True, expect=True, mint=AU):
     """Mints tab -> Log in -> the code shown -> approved at the login server (as a person would there)"""
     await mints_tab(w)
-    await w.click(f'[data-act=authLogin][data-url="{AU}"]')
+    await w.click(f'[data-act=authLogin][data-url="{mint}"]')
     got = await w.until("!!((document.querySelector('#authCode')||{}).textContent||'').trim() || !!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 20000)
     code = await w.ev("((document.querySelector('#authCode')||{}).textContent||'').trim()")
     if not code: return {'code': '', 'err': await w.err()}
     if approve: oidc('/test/approve', {'user_code': code})
-    ok = await w.until(f"{ST}.inn", 20000) if expect else False
+    ok = await w.until(f"Nutcade.auth.state({J(mint)}).inn", 20000) if expect else False
     await w.wait(300)
     return {'code': code, 'ok': ok, 'err': await w.err(), 'sheet': await w.sheet_text()}
 
@@ -344,6 +345,66 @@ async def main():
                   ok_d and tok and not e and await bal(w, AU) in (b0 - 25, b0 - 25 + 50) and not await w.ev(f"Nutcade.S.ops.some(o=>o.mint==={J(AU)})"), (ok_d, e, await bal(w, AU), b0))
             errs.extend(w.errs + d.errs); await w.pg.context.close(); await d.pg.context.close()
         await section('two', two)
+
+        # ======================= a refusal Nutshell hides behind "Blind authentication failed" =======================
+        # (Nutshell answers every refused protected request with 31002, whatever the reason: the wallet asks the mint
+        # what is true, so it acts as it does at a mint without login: spent coins pruned, pending left pending,
+        # an already claimed token said so)
+        async def masked():
+            from wallet_qa import W
+            async def copies(mint, n):
+                """a wallet with n SAT at mint, logged in, opened on two devices (its storage copied: same 12 words, coins, login)"""
+                w = await fresh(b, 'au-m0', mints=(mint,)); await login(w, mint=mint); await w.ev("Nutcade.closeSheet()")
+                await deposit(w, n, mint)
+                ls = await w.ev("JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter(k=>k.startsWith('nutcade:')).map(k=>[k,localStorage.getItem(k)])))")
+                await w.pg.context.close(); out = []
+                for i in range(2):
+                    ctx = await b.new_context(viewport={'width': 390, 'height': 844})
+                    await ctx.add_init_script(f"if(!sessionStorage.getItem('x')){{sessionStorage.setItem('x',1); const d={ls}; for(const k in d) localStorage.setItem(k,d[k]);}}")
+                    pg = await ctx.new_page(); x = W(pg, 'au-m' + str(i + 1)); pg.on('pageerror', lambda e, x=x: x.errs.append('PAGEERROR ' + str(e)))
+                    await pg.goto(URL); await pg.wait_for_timeout(2500); out.append(x)
+                return out
+            async def phantom(w, mint): return await w.ev(f"NutSync.states({J(mint)}, Nutcade.S.proofs[{J(mint)}]||[]).then(s=>Nutcade.S.proofs[{J(mint)}].filter((p,i)=>s[i]!=='UNSPENT').reduce((t,p)=>t+p.amount,0))")
+            oidc('/test/reset')
+            # spent on the other device
+            d1, d2 = await copies(AU, 500)
+            tok, e = await send_token(d1, 400)
+            tok2, e2 = await send_token(d2, 50)
+            await d2.wait(1500)
+            ph, b2 = await phantom(d2, AU), await bal(d2, AU)
+            notes = await d2.ev(f"Nutcade.S.txs.filter(t=>t.mint==={J(AU)}).map(t=>[t.type,t.amount,t.status,t.note||''])")
+            check('masked: coins spent on the other device: the send goes through at once, the spent coins are removed (one line), no spent coin left in the balance',
+                  tok and tok2 and not e2 and ph == 0 and b2 == 50 and any('spent elsewhere' in n[3] for n in notes), (bool(tok2), e2, b2, ph, notes[:5]))
+            await d2.pg.reload(); await d2.wait(4000)
+            check('masked: and still so after a reload', await phantom(d2, AU) == 0 and await bal(d2, AU) == 50, (await bal(d2, AU), await phantom(d2, AU)))
+            # already claimed: the token claimed, then claimed again (and taken back by its sender)
+            r = await fresh(b, 'au-m3', mints=(AU,)); await login(r); await r.ev("Nutcade.closeSheet()")
+            tok2, _ = await send_token(d1, 30)
+            async def rcv(x, t): await x.home(); return await x.receive_token(t)
+            _, e3, _ = await rcv(r, tok2)
+            _, e4, t4 = await rcv(r, tok2); await r.wait(1500)
+            _, e5, t5 = await rcv(d1, tok2)
+            check('masked: a token already claimed: claimed again or taken back by its sender, the mint\'s answer is "already spent", not "Blind authentication failed"',
+                  not e3 and re.search('already (spent|claimed)', e4 + t4, re.I) and re.search('already (spent|claimed)', e5 + t5, re.I) and 'Blind authentication failed' not in e4 + e5, (e3, e4, e5))
+            for x in (d1, d2, r): errs.extend(x.errs); await x.pg.context.close()
+            # pending: a token made of coins that are in a payment still in flight at the mint (their state PENDING)
+            p1 = await fresh(b, 'au-m4', mints=(AUP,)); await login(p1, mint=AUP); await p1.ev("Nutcade.closeSheet()")
+            await deposit(p1, 300, AUP)
+            e6, _ = await pay(p1, 100, AUP)
+            await p1.until(f"Nutcade.S.pending.some(p=>p.mint==={J(AUP)})", 15000)
+            ptok = await p1.ev(f"(()=>{{const p=Nutcade.S.pending.find(p=>p.mint==={J(AUP)}); return CashuLib.getEncodedToken({{mint:{J(AUP)}, proofs:p.proofs, unit:'sat'}})}})()")
+            pre = await p1.ev(f"NutSync.states({J(AUP)}, Nutcade.S.pending.find(p=>p.mint==={J(AUP)}).proofs)")
+            p2 = await fresh(b, 'au-m5', mints=(AUP,)); await login(p2, mint=AUP); await p2.ev("Nutcade.closeSheet()")
+            await p2.home(); await p2.click('[data-act=receive]'); await p2.wait(150); await p2.click('[data-act=recvMethod][data-m=ecash]'); await p2.wait(100)
+            await p2.fill('#tokIn', ptok); await p2.click('[data-act=doReceiveToken]'); await p2.wait(1200)
+            if await p2.ev("!!document.querySelector('[data-act=doReceiveToken][data-trust]')"): await p2.click('[data-act=doReceiveToken]')
+            await p2.until("!!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 20000)
+            e7, t7 = await p2.err(), ''; await p2.ev("Nutcade.closeSheet()")
+            notes = await p2.ev(f"Nutcade.S.txs.filter(t=>t.mint==={J(AUP)}&&t.status==='done').map(t=>[t.type,t.amount,t.note||''])")
+            check('masked: a token whose coins are pending in a payment: refused as pending (as at a mint without login), nothing booked',
+                  set(pre) == {'PENDING'} and re.search('pending', e7 + t7, re.I) and 'Blind authentication failed' not in e7 and await bal(p2, AUP) == 0 and not notes, (pre, e7, t7[:200], notes[:3]))
+            for x in (p1, p2): errs.extend(x.errs); await x.pg.context.close()
+        await section('masked', masked)
 
         # ======================= storage: PIN vault, wallet sync, Reset =======================
         async def store():

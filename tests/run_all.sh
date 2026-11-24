@@ -34,7 +34,7 @@ ports_for() { case "$1" in
   backup_qa|remind_qa|nutzap_qa|p2bk_qa|sync_qa) echo "3339" ;;
   units_qa) echo "3339 3345 3346" ;;   # (units: the multi-unit mint, the USD-only mint, and 3339 as the far end of a payment)
   auto_move_qa) echo "3338 3339 3340 3341 3345" ;;   # (auto-move: a fee mint, a no-fee mint, the mints whose payments fail and stay pending, and the multi-unit mint)
-  auth_qa) echo "3338 3339 3347" ;;   # (mint login: the auth mint, whose login server mock_oidc.py on 3348 start_mints.sh starts first, Mint B without login, Mint A)
+  auth_qa) echo "3338 3339 3347 3349" ;;   # (mint login: the auth mint and its twin whose payments stay pending, whose login server mock_oidc.py on 3348 start_mints.sh starts first, Mint B without login, Mint A)
   *) echo "3338 3339 3340 3341" ;; esac; }
 if [ -n "$ONLY" ]; then PORTS=$(for s in $SUITES; do ports_for "$s"; done | tr ' ' '\n' | sort -u | tr '\n' ' '); else PORTS=""; fi
 HERE="$(cd "$(dirname "$0")" && pwd)"

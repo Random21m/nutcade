@@ -6,13 +6,14 @@
 #   3344 no fees and at most 128 items per request (NUTCADE's minimum),
 #   3345 no fees, three units (sat, usd and eur, each with its own fake Lightning), 3346 no fees, usd only (no sat at all),
 #   3347 no fees and a login (NUT-21/22: clear auth to get blind auth tokens, a blind auth token on every money endpoint,
-#        at most 3 tokens per request), whose login server is mock_oidc.py on 3348 (started here first)
-# With no arguments all ten start. Arguments (e.g. `start_mints.sh 3338 3339`) start only those ports.
+#        at most 3 tokens per request), whose login server is mock_oidc.py on 3348 (started here first),
+#   3349 the same with every payment staying pending (its coins PENDING at the mint while a payment waits)
+# With no arguments all eleven start. Arguments (e.g. `start_mints.sh 3338 3339`) start only those ports.
 set -euo pipefail
 PY=${MINT_PY:-python3}
 STUB="$(cd "$(dirname "$0")" && pwd)/stub"
 ROOT=${MINT_DIR:-/tmp/nutcade-mints}
-PORTS=("$@"); [ ${#PORTS[@]} -gt 0 ] || PORTS=(3338 3339 3340 3341 3342 3343 3344 3345 3346 3347)
+PORTS=("$@"); [ ${#PORTS[@]} -gt 0 ] || PORTS=(3338 3339 3340 3341 3342 3343 3344 3345 3346 3347 3349)
 want() { local p; for p in "${PORTS[@]}"; do [ "$p" = "$1" ] && return 0; done; return 1; }
 start() {
   local name=$1 port=$2; shift 2
@@ -22,7 +23,7 @@ start() {
       MINT_DATABASE=data/mint FAKEWALLET_BRR=TRUE FAKEWALLET_DELAY_INCOMING_PAYMENT=0.5 FAKEWALLET_DELAY_OUTGOING_PAYMENT=0.5 \
       MINT_INFO_NAME="$name" NUTCADE_PREIMAGE_DIR="$ROOT/preimages" "$@" PYTHONPATH="$STUB" nohup "$PY" -m uvicorn cashu.mint.app:app --host 127.0.0.1 --port $port > "$d/log" 2>&1 & )
 }
-if want 3347; then   # (the auth mint reads its login server's discovery document when it starts)
+if want 3347 || want 3349; then   # (the auth mint reads its login server's discovery document when it starts)
   mkdir -p "$ROOT/oidc"; ( nohup "$PY" "$(dirname "$STUB")/mock_oidc.py" 3348 > "$ROOT/oidc/log" 2>&1 & )
   for i in $(seq 1 60); do "$PY" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3348/test/state', timeout=1)" 2>/dev/null && break; sleep 0.25; done
 fi
@@ -37,6 +38,9 @@ start "Mid Mint" 3344 MINT_INPUT_FEE_PPK=0 MINT_MAX_REQUEST_LENGTH=128 NUTCADE_F
 start "Multi Mint" 3345 MINT_INPUT_FEE_PPK=0 MINT_BACKEND_BOLT11_USD=FakeWallet MINT_BACKEND_BOLT11_EUR=FakeWallet MINT_DERIVATION_PATH_LIST="[\"m/0'/0'/0'\",\"m/0'/2'/0'\",\"m/0'/3'/0'\"]"
 start "Dollar Mint" 3346 MINT_INPUT_FEE_PPK=0 MINT_BACKEND_BOLT11_SAT= MINT_BACKEND_BOLT11_USD=FakeWallet MINT_DERIVATION_PATH="m/0'/2'/0'"
 start "Auth Mint" 3347 MINT_INPUT_FEE_PPK=0 NUTCADE_FAKE_MPP=1 MINT_REQUIRE_AUTH=TRUE MINT_AUTH_OICD_DISCOVERY_URL=http://127.0.0.1:3348/.well-known/openid-configuration \
+  MINT_AUTH_OICD_CLIENT_ID=cashu-client MINT_AUTH_MAX_BLIND_TOKENS=3 MINT_AUTH_RATE_LIMIT_PER_MINUTE=10000 \
+  MINT_REQUIRE_BLIND_AUTH_PATHS='[["POST","/v1/swap"],["POST","/v1/mint/quote/bolt11"],["POST","/v1/mint/bolt11"],["POST","/v1/melt/quote/bolt11"],["POST","/v1/melt/bolt11"],["POST","/v1/checkstate"],["POST","/v1/restore"]]'
+start "Auth Pending Mint" 3349 MINT_INPUT_FEE_PPK=0 FAKEWALLET_PAY_INVOICE_STATE=PENDING FAKEWALLET_PAYMENT_STATE=PENDING MINT_REQUIRE_AUTH=TRUE MINT_AUTH_OICD_DISCOVERY_URL=http://127.0.0.1:3348/.well-known/openid-configuration \
   MINT_AUTH_OICD_CLIENT_ID=cashu-client MINT_AUTH_MAX_BLIND_TOKENS=3 MINT_AUTH_RATE_LIMIT_PER_MINUTE=10000 \
   MINT_REQUIRE_BLIND_AUTH_PATHS='[["POST","/v1/swap"],["POST","/v1/mint/quote/bolt11"],["POST","/v1/mint/bolt11"],["POST","/v1/melt/quote/bolt11"],["POST","/v1/melt/bolt11"],["POST","/v1/checkstate"],["POST","/v1/restore"]]'
 for p in "${PORTS[@]}"; do
