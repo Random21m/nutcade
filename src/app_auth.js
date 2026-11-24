@@ -200,11 +200,39 @@ const auReq = addr => async o0 => {
     try { return await auBase(Object.assign({}, o, { headers: Object.assign({}, h, { [k]: t2 }) })); }   // (the first BAT stays out: spent elsewhere or no longer good)
     catch (e2) {
       if (!auAnswered(e2)) await auGive(addr, [rec2]);
-      else if (num(e2.code) === 31002) { await auGive(addr, [rec, rec2]); e2.authMasked = true; }   // (a BAT minted a moment ago refused too: it is the request the mint turned down. Nutshell gives no reason then, so "outputs already signed", 11003, could be it: isDupOutputs lets the usual catch-up scan run once)
+      else if (num(e2.code) === 31002) { await auGive(addr, [rec, rec2]); await auTruth(addr, o, e2).catch(() => {}); }   // (a BAT minted a moment ago refused too: it is the request the mint turned down, and the mint is asked why)
       throw e2;
     }
   }
 };
+/* Nutshell answers a refused protected request with 31002 whatever the reason ("Blind authentication failed"). Every
+   place that acts on the mint's reason (spent coins pruned and tried again, a pending step left to wait, "already
+   claimed", a deposit already issued) would see only "the mint turned this down". So the mint is asked what is true,
+   and the refusal gets the answer a mint without login would have given: the request's coins SPENT (11001) or
+   PENDING (11002), else its quote (a deposit ISSUED, PENDING or UNPAID; a payment PAID or PENDING). Nothing found:
+   authMasked, so the usual catch-up scan may run once ("outputs already signed", 11003, the one reason left unseen). */
+async function auTruth(addr, o, e) {
+  const say = (code, detail) => { e.code = code; e.message = detail; e.detail = detail; delete e.authMasked; };
+  e.authMasked = true;
+  let path; try { path = new URL(o.endpoint).pathname; } catch (x) { return; }
+  const body = o.requestBody && typeof o.requestBody === 'object' ? o.requestBody : {};
+  const acct = (S.mints.find(m => acctUrl(m.url) === addr) || {}).url; if (!acct) return;
+  const w = await getWallet(acct);
+  const ins = Array.isArray(body.inputs) ? body.inputs.filter(p => p && typeof p.secret === 'string') : [];
+  if (ins.length) {
+    const st = await inTime(w.checkProofsStates(ins.map(p => ({ secret: p.secret }))), 20000);
+    if (st.some(x => x && x.state === 'SPENT')) return say(11001, 'proofs already spent');
+    if (st.some(x => x && x.state === 'PENDING')) return say(11002, 'proofs are pending');
+  }
+  const q = typeof body.quote === 'string' ? body.quote : '';
+  if (q && path === '/v1/mint/bolt11') {
+    const r = await inTime(w.checkMintQuoteBolt11(q), 20000), st = r && r.state;
+    if (st === 'ISSUED') say(20002, 'quote already issued'); else if (st === 'PENDING') say(20005, 'quote is pending'); else if (st === 'UNPAID') say(20001, 'quote not paid');
+  } else if (q && path === '/v1/melt/bolt11') {
+    const r = await inTime(w.checkMeltQuoteBolt11(q), 20000), st = r && r.state;
+    if (st === 'PAID') say(20006, 'invoice already paid'); else if (st === 'PENDING') say(20005, 'quote is pending');
+  }
+}
 /* The few requests cashu-ts sends without its auth step (NUT-09 restore): the headers the mint's info asks for are added
    here, the same way (one BAT; the CAT only where NUT-21 lists the endpoint). */
 async function auFill(addr, o) {
@@ -219,7 +247,12 @@ async function auFill(addr, o) {
 }
 const authProvider = addr => ({ getBlindAuthToken: () => auTake(addr), getCAT: () => (S.auth[addr] || {}).at, ensureCAT: () => authCAT(addr) });
 // a mint built with its login (any mint: one that asks for none never calls the provider)
-const authMint = addr => auBase ? new L.Mint(addr, { authProvider: authProvider(addr), customRequest: auReq(addr) }) : addr;
+function authMint(addr) {
+  if (!auBase) return addr;
+  const m = new L.Mint(addr, { authProvider: authProvider(addr), customRequest: auReq(addr) });
+  try { const mi = au.info.get(addr); if (mi) m.setMintInfo(mi); } catch (e) {}   // (the mint's info as last loaded: no second /v1/info for a wallet built here)
+  return m;
+}
 /* Before a step is written down (journaled, a payment): at a mint with a login, a BAT (or n, up to its stock) in hand,
    or the login error now, with nothing recorded. With BATs left but no login, the step goes ahead on those. */
 async function authGate(url, n = 1) {
