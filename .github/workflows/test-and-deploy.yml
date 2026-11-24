@@ -93,6 +93,8 @@ jobs:
             suites: auth
           - name: batch
             suites: batch
+          - name: lib
+            suites: lib
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out
