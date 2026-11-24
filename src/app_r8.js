@@ -271,6 +271,7 @@ function loadWalletState() {
   for (const k of WALLET_PREFS) delete S.prefs[k];
   Object.assign(S.prefs, d.prefs || {});
   for (const k of WALLET_PREFS) if (S.prefs[k] === undefined && PREF_DEFAULTS[k] !== undefined) S.prefs[k] = PREF_DEFAULTS[k];   // (as a new wallet has them: the same screens either way)
+  S.auth = d.auth || {}; try { au.mgr.clear(); au.out.clear(); au.cool.clear(); } catch (e) {}   // (each wallet its own mint logins: app_auth.js)
   S.piggy = d.piggy || { saved: 0 }; S.mintlog = d.mintlog || {}; S.mintkeys = d.mintkeys || {}; S.heirlooms = d.heirlooms || []; S.challenges = d.challenges || []; S.blocked = d.blocked || [];
   seenWraps.clear(); for (const x of d.dmseen || []) seenWraps.add(x);
   nwcSeen.clear(); for (const x of d.nwcseen || []) nwcSeen.add(x);
@@ -336,7 +337,7 @@ async function fundDecoyNow(dek, data, url, token) {
     async reserveAt(id, start, count) { ctrs[id] = start + count; return { start, count }; },
     async advanceToAtLeast(id, m) { if ((ctrs[id] || 0) < m) ctrs[id] = m; },
     async snapshot() { return Object.assign({}, ctrs); }, async setNext(id, n) { ctrs[id] = n; } };
-  const w = new L.Wallet(acctUrl(url), { unit: acctUnit(url), bip39seed: L.mnemonicToSeedSync(data.seed.mnemonic), counterSource: cs }); await w.loadMint();
+  const w = new L.Wallet(authMint(acctUrl(url)), { unit: acctUnit(url), bip39seed: L.mnemonicToSeedSync(data.seed.mnemonic), counterSource: cs }); await w.loadMint();   // (with this device's login at a mint that asks for one)
   const ps = (w.decodeToken(cleanToken(token)).proofs || []), m = mintMax(url);
   const wait = (data.txs || []).find(t => t.incoming === cleanToken(token) && t.status === 'pending');   // (the token's line in that wallet: settled with the step, if it comes to that)
   const op = { id: uid(), kind: 'receive', mint: url, inputs: ps.map(p => p.secret), amount: 0, note: '', locked: false, extra: false, txId: null, tx: null, follow: wait ? { k: 'incoming', txId: wait.id, reqId: null } : null, own: null, created: Date.now(), ctr: [], outs: [], mk: 1 };

@@ -61,7 +61,9 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.32.0, with the v1.31.2, v1.31.1 and v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+const WHATS_NEW = [   // (v1.33.0, with the v1.32.0 items, which carry the v1.31.2, v1.31.1 and v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+  'New: mints that ask for a login (NUT-21 and NUT-22) now work. Log in on the Mints tab; the login stays on this device and is never in your backups or wallet sync.',
+  'At such a mint each deposit, payment or swap shows a one-time pass, not your account. If your login ends, nothing is lost: log in again and anything waiting comes in.',
   'New, optional and off by default: Auto-move (Settings) moves the sats you receive at your other mints into the mint you pick, over Lightning, while NUTCADE is open, and catches up when you open it.',
   'It moves SAT only, only when a mint holds at least the amount you set (1,000 SAT to start) and only when the fees are 2% or less. Moves count toward your spending limit; one that needs your PIN waits for you.',
   'The support address has changed. The Support screen, its QR code and the tip button use the new one, an npub.cash address. Be wary of any other "NUTCADE support" address.',
@@ -245,6 +247,7 @@ const HELP = [
   { q: 'What does NUTCADE contact? (Privacy)', a: [
     'NUTCADE has no account, no tracking, no analytics and no ads. It contacts these services, and only for the reason given:'], ul: [
     'Your mints: for every payment, to check that they answer, and to read their name and contact details. A mint sees the coins you exchange with it.',
+    'The login server a mint names, only for a mint that asks for a login, when you log in and to renew the login. It sees your account there, not your coins.',
     'The mints in the Add mint list (Minibits, Cuba Bitcoin, 8333.space and two test mints), only while that list is open, to show whether they answer.',
     'Nostr relays (relay.damus.io, nos.lol and relay.primal.net): for game challenges and payments between contacts, apps you connect with Wallet Connect, your encrypted mint list, requests you made and ecash sent to your ecash address. A contact or a payment request can name relays of its own, which are used when you send to them.',
     'Two more relays (relay.nostr.band and relay.cashumints.space) are asked only when you tap Find mints people recommend.',
