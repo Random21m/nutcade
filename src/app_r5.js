@@ -177,14 +177,13 @@ async function startExtra(amount, heir, days, auto) {
   if (!(await mintCan(S.active, 11))) throw new Error(`${host(S.active)} can't lock ecash to a key (NUT-11). Pick another mint.`);
   piggyGuard(amount);
   const until = Date.now() + days * 86400e3;
-  internalMove = true;
   const ctx = {};
   try {
     const before = sum(S.proofs[S.active] || []);
     const proofs = await lockExtra(S.active, amount, heir.pubkey, until, { k: 'extra', heir, days, auto: auto !== false, until }, ctx);
     S.extra = { mint: S.active, amount, proofs, heir, until, days, auto: auto !== false, created: Date.now(), renewed: Date.now() }; saveExtra();
-    addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee: Math.max(0, before - sum(S.proofs[S.active] || []) - amount), mint: S.active, note: `Extra Life for ${heir.name}`, status: 'done', extraLife: true }, ctx.hold && ctx.hold.id ? { limId: ctx.hold.id } : {}));
-  } finally { internalMove = false; if (ctx.hold) ctx.hold.release(); }
+    addTx(Object.assign({ type: 'out', method: 'ecash', amount, fee: Math.max(0, before - sum(S.proofs[S.active] || []) - amount), mint: S.active, note: `Extra Life for ${heir.name}`, status: 'done', extraLife: true, move: true }, ctx.hold && ctx.hold.id ? { limId: ctx.hold.id } : {}));
+  } finally { if (ctx.hold) ctx.hold.release(); }
   await sendHeirCopy().catch(() => false);
   return S.extra;
 }

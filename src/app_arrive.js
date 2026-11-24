@@ -61,6 +61,7 @@ function arrKind(t) {
 }
 // called right after a history line is written (addTx) or changed (updTx)
 function arrivalSeen(t) {
+  try { if (arrQual(t)) amArrived(t); } catch (e) {}   // (auto-move into your mint: app_automove.js; it decides for itself whether to run)
   try {
     if (!t || !arrQual(t) || tabLocked || writeGuard.paused || (vault.on && !vault.open)) return;
     if (Date.now() - t.ts > 10 * 60e3) return;   // (an old line coming back changed, or one from another device's backup)
