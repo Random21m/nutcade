@@ -61,7 +61,8 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.34.0, with the v1.33.0 items, which carry the v1.32.0 items, which carry the v1.31.2, v1.31.1 and v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+const WHATS_NEW = [   // (v1.35.0, with the v1.34.0 item, which carries the v1.33.0 items, which carry the v1.32.0 items, which carry the v1.31.2, v1.31.1 and v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+  'Safer locks: a payment request asking for a lock NUTCADE can\'t make is now refused before anything is sent (it used to be paid unlocked), and locked ecash you receive is read exactly as the mint reads it.',
   'Several Lightning deposits paid at one mint now come in with one request when the mint supports it (NUT-29). Each still has its own line in your history; if the mint turns the batch down, each is collected on its own as before.',
   'New: mints that ask for a login (NUT-21 and NUT-22) now work. Log in on the Mints tab; the login stays on this device and is never in your backups or wallet sync.',
   'At such a mint each deposit, payment or swap shows a one-time pass, not your account. If your login ends, nothing is lost: log in again and anything waiting comes in.',

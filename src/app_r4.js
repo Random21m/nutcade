@@ -170,7 +170,8 @@ async function deliverToContact(c, tx) {
   return !!ok;
 }
 async function takeBackGift(t, hand) {
-  if (t.lockUntil && Date.now() < t.lockUntil) throw new Error(`This gift is locked to ${t.giftTo || 'them'} until ${fmtDay(t.lockUntil)}. After that you can take it back.`);
+  // (the refund path opens only AFTER the lock's second, as the mint and the library read a locktime: now > locktime in seconds)
+  if (t.lockUntil && Math.floor(Date.now() / 1000) <= Math.floor(t.lockUntil / 1000)) throw new Error(`This gift is locked to ${t.giftTo || 'them'} until ${fmtDay(t.lockUntil)}. After that you can take it back.`);
   if (await checkClaim(t).catch(() => false)) return 'claimed';
   reclaiming.add(t.id);
   try { await receiveToken(t.token, `Gift came back${t.giftTo ? ' from ' + t.giftTo : ''}`, { own: true, hand: !!hand }); }

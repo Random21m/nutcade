@@ -1011,7 +1011,7 @@ async function sendEcashNow(amount, note, lockTo, url, opts) {
   // here, where the lock is built: blindKeys blinds the receiver's key and our refund key together, never one of them alone
   const blind = !!(lockTo && opts.blind && p2bkOn());
   if (blind) opts = Object.assign({}, opts, { txx: Object.assign({}, opts.txx || {}, { blinded: true }) });   // (on the line and on its journal record)
-  const outCfg = lockTo ? { send: { type: 'p2pk', options: Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}, blind ? { blindKeys: true } : {}) }, keep: w.defaultOutputType() } : undefined;
+  const outCfg = lockTo ? { send: { type: 'p2pk', options: opts.p2pk && !blind ? opts.p2pk : Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}, blind ? { blindKeys: true } : {}) }, keep: w.defaultOutputType() } : undefined;
   // the spending limit, with the most this can take: the swap's own numbers, fees included
   if (belowMin(url) && !opts.noBatch) {   // (a mint that dropped below the minimum: its sats can still leave, in steps)
     if (opts.pick) throw minErr(url);   // (tokens: coins fixed by the caller at a cost already shown are never made another, dearer way: a printed token stops here)
@@ -2770,7 +2770,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.34.0';
+const APP_VERSION = '1.35.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -2913,6 +2913,39 @@ function newP2PK() {
 }
 const p2pkPrivs = () => S.p2pk.map(k => k.priv);
 const validPub = s => /^0[23][0-9a-f]{64}$/i.test(String(s || '').trim());
+/* A NUT-10 lock (P2PK, NUT-11; HTLC, NUT-14) read by the rules the bundled cashu-ts (4.13.1) spends and checks it by, for the
+   places NUTCADE reads a lock itself (an Extra Life copy, a bounty, a payment request's lock): null when the library would
+   refuse it. Kind P2PK or HTLC; tags are lists of non-empty texts, each NUT-11 tag at most once; sigflag, locktime, n_sigs
+   and n_sigs_refund carry one value; n_sigs and n_sigs_refund need a value and are whole numbers of at least 1 (#1413), at
+   most the keys they count; a P2PK lock's data is a key (#1393); every key is 33 bytes compressed (NUTCADE never takes an
+   x-only one: the test mints refuse it); at most 16 of each; refund keys need a locktime. locktime: a text of digits, else
+   the lock never expires (as the library reads it); "0" has expired (#1323). An HTLC hash is compared in lower case (#1415).
+   expired(now) is true only AFTER the locktime second: now > locktime, in seconds (#1323), as the mint decides it. */
+const LOCK_TAGS = ['locktime', 'pubkeys', 'n_sigs', 'refund', 'n_sigs_refund', 'sigflag'];
+function lockOf(secret) {
+  if (typeof secret !== 'string' || secret.length > 1024) return null;
+  let s; try { s = JSON.parse(secret); } catch (e) { return null; }
+  if (!Array.isArray(s) || s.length !== 2 || (s[0] !== 'P2PK' && s[0] !== 'HTLC') || !s[1] || typeof s[1] !== 'object' || typeof s[1].nonce !== 'string' || typeof s[1].data !== 'string') return null;
+  const tags = s[1].tags == null ? [] : s[1].tags;
+  if (!Array.isArray(tags) || tags.some(t => !Array.isArray(t) || !t.length || t.some(x => typeof x !== 'string' || !x.length))) return null;
+  const seen = new Set(); for (const t of tags) { if (LOCK_TAGS.includes(t[0])) { if (seen.has(t[0])) return null; seen.add(t[0]); } }
+  const vals = k => { const t = tags.find(x => x[0] === k); return t && t.length > 1 ? t.slice(1) : null; };
+  const one = k => { const v = vals(k); if (v && v.length !== 1) throw 0; return v ? v[0] : null; };
+  const int = k => { const v = one(k); if (v === null) { if (seen.has(k)) throw 0; return null; } const n = /^-?\d+$/.test(v) ? Number(v) : NaN; if (!Number.isSafeInteger(n) || n < 1) throw 0; return n; };
+  try {
+    const sigflag = one('sigflag') || 'SIG_INPUTS'; if (sigflag !== 'SIG_INPUTS' && sigflag !== 'SIG_ALL') return null;
+    const lt = one('locktime'), locktime = lt !== null && /^\d+$/.test(lt) && Number.isSafeInteger(Number(lt)) ? Number(lt) : null;
+    const nSigs = int('n_sigs'), nSigsRefund = int('n_sigs_refund');
+    const keys = (s[0] === 'P2PK' ? [s[1].data] : []).concat(vals('pubkeys') || []), refund = vals('refund') || [];
+    if (!keys.concat(refund).every(validPub) || keys.length > 17 || refund.length > 16) return null;
+    const lo = a => a.map(k => k.toLowerCase()), main = lo(keys), back = lo(refund);
+    if (new Set(main.map(k => k.slice(2))).size !== main.length || new Set(back.map(k => k.slice(2))).size !== back.length) return null;
+    if ((nSigs !== null && nSigs > main.length) || (nSigsRefund !== null && nSigsRefund > back.length) || (back.length && locktime === null)) return null;
+    if (s[0] === 'HTLC' && !/^[0-9a-f]{64}$/i.test(s[1].data)) return null;
+    return { kind: s[0], data: s[1].data, hash: s[0] === 'HTLC' ? s[1].data.toLowerCase() : null, keys: main, refund: back, nSigs: nSigs || 1, nSigsRefund: nSigsRefund || 1, sigflag, locktime,
+      expired: (now = Date.now()) => locktime !== null && Math.floor(now / 1000) > locktime };
+  } catch (e) { return null; }
+}
 
 /* ---------- Nostr keys from the recovery phrase (same derivation as cashu.me) ----------
    Lightning address (npub.cash): the first 32 bytes of the BIP39 seed.
@@ -3331,10 +3364,23 @@ function reqWrap(pr, payload) {
   const tr = (pr.transport || []).find(t => t.type === 'nostr'); if (!tr) return null;
   try { const d = L.nip19decode(tr.target); const to = d.type === 'nprofile' ? d.data.pubkey : d.type === 'npub' ? d.data : null; return to ? L.nip17.wrapEvent(rnd(32), { publicKey: to }, JSON.stringify(payload)) : null; } catch (e) { return null; }
 }
+// the lock a request asks for (nut10), as the library would make it (PaymentRequest.toP2PKOptions: the key in its data, and
+// its tags, so the payee's wallet finds exactly the lock it asked for), or null for a request without one. A lock NUTCADE
+// can't make exactly (another kind than P2PK, a key that isn't one, a tag the library refuses: lockOf) is refused before
+// anything is spent; before 1.35 such a request was paid with an unlocked token.
+const REQ_LOCK_ERR = "This request asks for a lock NUTCADE can't make, so it can't be paid from here. Nothing was sent.";
+function reqLock(pr) {
+  const n = pr && pr.nut10; if (!n) return null;
+  const lk = n.kind === 'P2PK' ? lockOf(JSON.stringify(['P2PK', { nonce: '0', data: String(n.data || ''), tags: n.tags || [] }])) : null;
+  let o = null; if (lk) { try { o = pr.toP2PKOptions(); } catch (e) { o = null; } }
+  if (!lk || !o || !validPub(lk.data)) throw new Error(REQ_LOCK_ERR);
+  for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
+  return { key: lk.data.toLowerCase(), options: Object.assign({}, o, { pubkey: Array.isArray(o.pubkey) ? o.pubkey.map(k => k.toLowerCase()) : String(o.pubkey).toLowerCase() }) };
+}
 async function payRequest(pr, amount, url, note, enc) {
-  const lock = pr.nut10 && pr.nut10.kind === 'P2PK' && validPub(pr.nut10.data) ? pr.nut10.data : null;
+  const lk = reqLock(pr), lock = lk ? lk.key : null;
   const rq = enc && (pr.transport || []).length ? { reqPay: { req: enc } } : {};
-  const tx = await sendEcash(amount, note, lock, url, rq.reqPay ? { txx: rq, follow: { k: 'reqpay' } } : {});
+  const tx = await sendEcash(amount, note, lock, url, Object.assign(rq.reqPay ? { txx: rq, follow: { k: 'reqpay' } } : {}, lk ? { p2pk: lk.options } : {}));
   const payload = reqPayload(pr, url, tx.sent), wrap = rq.reqPay ? reqWrap(pr, payload) : null;
   if (wrap) { updTx(tx.id, { reqPay: Object.assign({}, rq.reqPay, { ev: wrap }) }); await saveNow(); }   // (kept before it is sent)
   let sent = false, why = '';
@@ -3979,7 +4025,9 @@ function openPayRequest(enc) {
   const pick = usable.find(m => m.url === S.active) || usable.slice().sort((a, b) => balanceOf(b.url) - balanceOf(a.url))[0];
   let body = `<div class="label">${pr.description ? `<span data-noi18n>${esc(pr.description)}</span>` : 'Payment request'}</div>
     ${amount ? `<div class="credit-num" style="font-size:26px">${fmtU(amount, unitOk(pu) ? pu : 'sat')}<small>${unitTagU(unitOk(pu) ? pu : 'sat')}</small></div>` : `<div class="field">${amtField('amtIn', 'Amount ({U})', '1000', unitOk(pu) ? pu : 'sat')}</div>`}`;
+  let lockErr = ''; try { reqLock(pr); } catch (e) { lockErr = e.message; }
   if (!unitOk(pu)) body += `<div class="notice red">This request asks for ${esc(unitCode(pu))}. NUTCADE holds SAT, USD, EUR and CHF.</div>`;
+  else if (lockErr) body += `<div class="notice red">${esc(lockErr)}</div>`;
   else if (allowed && allowed.length && allowed.every(isBlocked)) body += errHTML(blockedErr(allowed[0], 'request'));
   else if (!usable.length) body += `<div class="notice red">${allowed && !allowed.length ? "This request names no mint address NUTCADE can use, so it can't be paid from here." : pu === 'sat' ? (allowed ? `This request only accepts ecash from ${allowed.map(u => esc(host(u))).join(', ')}, and you don't hold any there.` : "You don't have any sats to pay with yet.") : allowed ? `This request only accepts ${esc(unitCode(pu))} ecash from ${allowed.map(u => esc(host(u))).join(', ')}, and you don't hold any there.` : `You don't hold any ${esc(unitCode(pu))} ecash to pay with yet.`}</div>${allowed && allowed[0] ? `<button class="btn block gold" data-act="addMint" data-url="${esc(allowed[0])}">Add ${esc(host(allowed[0]))}${pu === 'sat' ? '' : ' · ' + esc(unitCode(pu))}</button>` : ''}`;
   else body += `<div class="field"><label for="reqMint">Pay from</label><select id="reqMint" class="inp">${usable.map(m => `<option value="${esc(m.url)}" ${m === pick ? 'selected' : ''}>${esc(acctName(m))} · ${fmtU(balanceOf(m.url), acctUnit(m.url))}</option>`).join('')}</select></div>
@@ -4809,6 +4857,7 @@ window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });
 window.Nutcade = { auth: authHooks, loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON }, storage: { health: () => ({ bad: saveBad(), keys: [...saveHealth.failed.keys()], told: saveHealth.told }), pct: () => usePct(), bytes: () => useBytes(), check: () => useCheck(), level: () => useLevel } };
 window.Nutcade.bk = { cap: () => phoneCapCheck(), rec: () => pbRec(), fetch: () => phoneFetch(), lock: (t, p) => lockBackup(t, p), unlock: (d, p) => unlockBackup(d, p), extras: d => importExtras(d) };
 window.Nutcade.dq = { check: t => offlineCheck(t), line: t => checkLine(t), ok: (p, A) => DQ.proofOk(p, A), h2c: m => DQ.unc(DQ.hashToCurve(new TextEncoder().encode(m))), ptText: t => ptText({ token: t }), slim: t => slimToken(t) };
+window.Nutcade.lk = { of: s => lockOf(s), req: pr => reqLock(pr), heir: (p, from) => onExtraLife(p, from), takeBack: t => takeBackGift(t) };   // (NUTCADE's own lock reading, tests/lib_qa.py)
 window.Nutcade.bt = { max: u => btMax(u), offClear: () => bt.off.clear(), skipped: id => bt.skip.has(id) };   // (batched deposits: src/app_batch.js)
 window.Nutcade.mr = { radar, parse: radarParse, ensure: radarEnsure, bkSent: () => Object.keys(bkSettings()), bkAllowed: () => Object.keys(BK_SET) };
 setLang();
