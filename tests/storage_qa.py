@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => { window.__toasts = []; new 
 DISK_SUM = "Object.values(JSON.parse(localStorage.getItem('nutcade:proofs')||'{}')).flat().reduce((t,p)=>t+p.amount,0)"
 FULL = "!!document.querySelector('.screen [data-storage=full]')"
 HEALTH = "Nutcade.storage.health()"
+SF_DONE = "Nutcade.S.txs.filter(t=>t.note==='still full' && t.status==='done').map(t=>t.amount)"
 SAVE_TOASTS = "(window.__toasts||[]).filter(t=>/couldn't save your wallet/.test(t)).length"
 
 
@@ -95,9 +96,13 @@ async def main():
             await w.ev("window.__quota=false")
             await w.receive_ln(100, 'space again'); await w.home(); await w.wait(500)
             check('plain: once a write works again the notice clears itself', not await w.ev(FULL) and not (await w.ev(HEALTH))['bad'], await w.ev(HEALTH))
-            check('plain: storage holds every coin on screen (1,600)', await w.ev(DISK_SUM) == await w.bal() == 1600, (await w.ev(DISK_SUM), await w.bal()))
+            # (the 200 that waited may be claimed by now, in one batch with the 100 at a NUT-29 mint: 1,600 while it still
+            # waits, 1,800 once claimed, and then booked exactly once)
+            disk, bal, waits, lines = await w.ev(DISK_SUM), await w.bal(), await w.ev("Nutcade.S.quotes.some(q=>q.amount===200)"), await w.ev(SF_DONE)
+            check('plain: storage holds every coin on screen, the waiting 200 booked at most once (1,600 while it waits, 1,800 with one line once claimed)',
+                  disk == bal and ((bal == 1600 and waits and lines == []) or (bal == 1800 and not waits and lines == [200])), (disk, bal, waits, lines))
             await w.pg.reload(); await w.wait(1200)
-            check('plain: after a reload nothing is lost: the waiting deposit is collected too (1,800), with the history', await until_bal(w, 1800) == 1800 and await w.ev("['while full','still full'].every(n=>Nutcade.S.txs.some(t=>t.note===n))"), await w.bal())
+            check('plain: after a reload nothing is lost: the waiting deposit is collected too (1,800), with the history (one line for the 200)', await until_bal(w, 1800) == 1800 and await w.ev("['while full','still full'].every(n=>Nutcade.S.txs.some(t=>t.note===n))") and await w.ev(SF_DONE) == [200], (await w.bal(), await w.ev(SF_DONE)))
             # a new episode toasts again
             await w.ev("window.__toasts=[]; window.__quota=true")
             await w.ev("document.querySelector('[data-act=hideToggle]').click()"); await w.wait(600)

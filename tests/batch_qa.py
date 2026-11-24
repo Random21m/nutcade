@@ -235,6 +235,15 @@ async def main():
             errs.extend(w.errs); await w.pg.context.close()
         await section('mixed', mixed)
 
+        def refuse(body, before=None, status=400):
+            async def no(route):
+                try:
+                    if route.request.method != 'POST': await route.continue_(); return
+                    if before: await before(route)
+                    await route.fulfill(status=status, headers={'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}, body=J(body))
+                except Exception: pass
+            return no
+
         # ======================= a batch refused -> each on its own, once =======================
         async def refused():
             for name, status, body, lang in (('not paid', 400, {'detail': 'quote not paid', 'code': 20001}, 'de'),
@@ -244,17 +253,14 @@ async def main():
                 amts = [999, 1000, 1234567]
                 ids, hold = await held_deposits(w, B, amts)
                 pat = re.compile(re.escape(B) + '/v1/mint/bolt11/batch$')
-                async def no(route, status=status, body=body):
-                    try:
-                        if route.request.method != 'POST': await route.continue_(); return
-                        await route.fulfill(status=status, headers={'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}, body=J(body))
-                    except Exception: pass
+                no = refuse(body, status=status)   # (a handler gets (route, request): never a default argument for the status)
                 await w.pg.route(pat, no)
                 m0 = log.mark(); await hold.off(); await reopen(w)
                 ok = await settled(w, B, ids)
                 pq = per_quote(log, ids, B, m0)
                 check(f'refused ({name}): the batch tried once, then each deposit claimed on its own, once', ok and len(log.posts(BATCH, B, m0)) == 1 and all(v == [1, 1] for v in pq.values()), (ok, pq))
                 check(f'refused ({name}): three lines, exact balance, nothing stranded', sorted(l[2] for l in await lines(w, B)) == sorted(amts) and await bal(w, B) == sum(amts) and (await ledger(w, B)) == [sum(amts)] * 2 and not await open_q(w, B), (await lines(w, B), await bal(w, B)))
+                check(f'refused ({name}): no batch at that mint for now (the page says so)', await w.ev(f"Nutcade.bt.max({J(B)})") == 0, await w.ev(f"Nutcade.bt.max({J(B)})"))
                 # more deposits paid while the refusal still holds: no second batch, each on its own
                 ids2, hold2 = await held_deposits(w, B, [10, 20])
                 m1 = log.mark(); await hold2.off()   # (the app stays open: its 8-second check finds them)
@@ -264,6 +270,55 @@ async def main():
                 ok, d = await shown(w, amts, lang); check(f'refused ({name}): {lang}: the amounts in its number format', ok, d)
                 errs.extend(w.errs); await w.pg.context.close()
         await section('refused', refused)
+
+        # ======================= a refusal that isn't about batching =======================
+        async def keyset():
+            # the mint's keys changed (a keyset error, 12000-12999): the keys are fetched again, batching stays on
+            w = await fresh(b, 'bt-ks', mints=(B,)); log = Log(w.pg)
+            amts = [999, 1000, 1234567]
+            ids, hold = await held_deposits(w, B, amts)
+            pat = re.compile(re.escape(B) + '/v1/mint/bolt11/batch$'); no = refuse({'detail': 'keyset is not active', 'code': 12002})
+            await w.pg.route(pat, no)
+            m0 = log.mark(); await hold.off(); await reopen(w)
+            ok = await settled(w, B, ids); await w.pg.unroute(pat, no)
+            pq = per_quote(log, ids, B, m0)
+            check('keyset: a batch refused for a keyset change: tried once, each deposit then claimed on its own, once, exact balance',
+                  ok and len(log.posts(BATCH, B, m0)) == 1 and all(v == [1, 1] for v in pq.values()) and await bal(w, B) == sum(amts) and (await ledger(w, B)) == [sum(amts)] * 2 and not await open_q(w, B), (ok, pq, await bal(w, B)))
+            # (in the same session: the open app claims fresh deposits one by one as each is seen paid, so the mint's batch
+            # state is read from the page)
+            check('keyset: batching stays on at that mint afterwards (a keyset change is not a batch refusal: no 30-minute pause)', await w.ev(f"Nutcade.bt.max({J(B)})") >= 2, await w.ev(f"Nutcade.bt.max({J(B)})"))
+            errs.extend(w.errs); await w.pg.context.close()
+        await section('keyset', keyset)
+
+        async def expired():
+            # one deposit of the batch past its expiry, refused by the mint (as Nutshell does for a paid but expired quote):
+            # that one is left out of later batches, the others still batch; it is never stranded
+            w = await fresh(b, 'bt-exp', mints=(B,)); log = Log(w.pg)
+            amts = [999, 1000, 1234567]
+            ids, hold = await held_deposits(w, B, amts)
+            async def late(route): await w.pg.evaluate(f"Nutcade.S.quotes.find(q=>q.quote==={J(ids[0])}).expiry = 1")   # (its expiry passed meanwhile)
+            pat = re.compile(re.escape(B) + '/v1/mint/bolt11/batch$'); no = refuse({'detail': 'quote expired', 'code': 20007}, late)
+            spat = re.compile(re.escape(B) + '/v1/mint/bolt11$')
+            async def one(route):   # (the mint keeps refusing that one on its own too, until let go below)
+                try:
+                    if route.request.method == 'POST' and (json.loads(route.request.post_data or '{}') or {}).get('quote') == ids[0]:
+                        await route.fulfill(status=400, headers={'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}, body=J({'detail': 'quote expired', 'code': 20007})); return
+                    await route.continue_()
+                except Exception: pass
+            await w.pg.route(pat, no); await w.pg.route(spat, one)
+            m0 = log.mark(); await hold.off(); await reopen(w)
+            ok = await settled(w, B, ids[1:]); await w.pg.unroute(pat, no)
+            pq = per_quote(log, ids, B, m0)
+            check('expired: the batch refused for one expired deposit: tried once, the others claimed on their own, the expired one still waiting (not lost)',
+                  ok and len(log.posts(BATCH, B, m0)) == 1 and pq[ids[1]] == [1, 1] and pq[ids[2]] == [1, 1] and pq[ids[0]][0] == 1 and ids[0] in await open_q(w, B) and await bal(w, B) == sum(amts[1:]), (ok, pq, await open_q(w, B), await bal(w, B)))
+            check('expired: that deposit is left out of later batches, and batching stays on at the mint (no 30-minute pause)',
+                  await w.ev(f"Nutcade.bt.skipped({J(ids[0])}) && !Nutcade.bt.skipped({J(ids[1])}) && Nutcade.bt.max({J(B)}) >= 2"), await w.ev(f"[Nutcade.bt.skipped({J(ids[0])}), Nutcade.bt.max({J(B)})]"))
+            await w.pg.unroute(spat, one)
+            ok = await settled(w, B, ids[:1], 40000)
+            check('expired: once the mint takes it, the expired one comes in on its own: one line each, exact balance, nothing left waiting',
+                  ok and per_quote(log, ids[:1], B, m0)[ids[0]][0] == 1 and sorted(l[2] for l in await lines(w, B)) == sorted(amts) and await bal(w, B) == sum(amts) and (await ledger(w, B)) == [sum(amts)] * 2 and not await open_q(w, B), (ok, await lines(w, B), await bal(w, B)))
+            errs.extend(w.errs); await w.pg.context.close()
+        await section('expired', expired)
 
         # ======================= the batch's answer lost =======================
         async def lost():

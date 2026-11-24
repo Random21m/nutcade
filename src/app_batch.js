@@ -16,12 +16,13 @@
    - Any batch failure: no answer -> the single checks that follow decide (ISSUED: credited from the batch's counters;
      PENDING: waits; PAID: claimed on its own). A refusal (not paid, already issued, unit, not supported, a login error,
      "Blind authentication failed" that auTruth can't explain) -> each claimed on its own in the same round, and no
-     batch at that mint for BT_OFF_MS (one fallback per round, never a loop). A login mint with no BAT to be had sends
+     batch at that mint for BT_OFF_MS (one fallback per round, never a loop); but a keyset change only refreshes the
+     keys, and an expired deposit is only left out of later batches (btRefused). A login mint with no BAT to be had sends
      no batch at all (authGate): the single checks give the usual login hint.
    - One at a time: every deposit in a batch is held with the same lock a single check takes ('quote:' + id, across
      tabs), taken in sorted order; a check of one of them started meanwhile in this tab joins the batch (flights). */
 const BT_GATHER = 250, BT_OFF_MS = 30 * 60e3, BT_CAP = 100;
-const bt = { rounds: new Map(), off: new Map() };
+const bt = { rounds: new Map(), off: new Map(), skip: new Set() };   // (skip: deposits a batch was refused for, each claimed on its own from then on)
 // the batch size the mint takes for Lightning deposits, or 0 (no NUT-29 for bolt11, its wallet not loaded, or turned off for now)
 function btMax(url) {
   if ((bt.off.get(url) || 0) > Date.now()) return 0;
@@ -88,7 +89,7 @@ async function btClaim(url, ids, res) {
     if (q.state !== r.state) { q.state = r.state; save(); }
     if ((r.state === 'UNPAID' || r.state === 'PAID') && !q.rec) { q.rec = 1; save(); }
     if (r.state === 'UNPAID' && !(q.expiry && Date.now() / 1000 > q.expiry)) res.set(q.quote, 'waiting');   // (what the single check would say: not asked again this round)
-    else if (r.state === 'PAID' && (!r.pubkey || quoteKey(r.pubkey))) paid.push(q);
+    else if (r.state === 'PAID' && !bt.skip.has(q.quote) && (!r.pubkey || quoteKey(r.pubkey))) paid.push(q);
   }
   if (paid.length < 2) return;
   try { await authGate(url); } catch (e) { return; }   // (a mint with a login and no BAT to be had: no batch; the single checks say "log in")
@@ -99,13 +100,13 @@ async function btClaim(url, ids, res) {
     cur.push(q); tot += num(q.amount);
   }
   groups.push(cur);
-  for (const g of groups) if (g.length >= 2 && btMax(url)) await btGroup(w, url, g, st, res);
+  for (const g of groups) if (g.length >= 2 && btMax(url) && await btGroup(w, url, g, st, res) === 'refused') break;   // (one fallback per round)
 }
 // held like single checks (the same locks, in sorted order), from the freshest record, then asked
 async function btGroup(w, url, g, st, res) {
   const ids = g.filter(q => !flights.has('quote:' + q.quote) && !busyQuotes.has(q.quote)).map(q => q.quote).sort();
   if (ids.length < 2) return;
-  const out = new Map(); let done; const all = new Promise(r => { done = r; });
+  const out = new Map(); let done, how; const all = new Promise(r => { done = r; });
   for (const id of ids) flights.set('quote:' + id, all.then(m => m.get(id) || 'waiting'));
   try {
     const go = ids.reduceRight((f, id) => () => withLock('nutcade:quote:' + id, f), async () => {
@@ -113,13 +114,26 @@ async function btGroup(w, url, g, st, res) {
       const qs = ids.map(id => S.quotes.find(x => x.quote === id)).filter(q => q && !busyQuotes.has(q.quote));
       if (qs.length < 2) return;
       qs.forEach(q => busyQuotes.add(q.quote));
-      try { await btMint(w, url, qs, st, out); } finally { qs.forEach(q => busyQuotes.delete(q.quote)); }
+      try { how = await btMint(w, url, qs, st, out); } finally { qs.forEach(q => busyQuotes.delete(q.quote)); }
     });
     await go();
   } finally {
     for (const id of ids) flights.delete('quote:' + id);
     done(out); for (const [k, v] of out) res.set(k, v);
   }
+  return how;
+}
+/* A refused batch: what it was refused for decides what happens next time (each deposit of it is claimed on its own now).
+   - The mint's keys changed (a keyset error): not about batching. The keys are fetched again (the library has done so
+     when it could, as for a single claim) and the next round batches as before.
+   - A deposit's request expired (the mint won't issue a paid deposit past its expiry): those of the batch past their
+     expiry are left out of later batches (their single checks decide), the others still batch.
+   - Anything else: no batch at that mint for BT_OFF_MS. */
+async function btRefused(w, url, qs, e) {
+  if (e && e.name === 'StaleKeysetError') { if (!e.repaired) await inTime(w.loadMint(true), MINT_MS).catch(() => {}); return; }
+  const m = String((e && (e.message || e.detail)) || ''), late = qs.filter(q => q.expiry && Date.now() / 1000 > q.expiry);
+  if ((num(e && e.code) === 20007 || (/expired/i.test(m) && !/keyset/i.test(m))) && late.length) { late.forEach(q => bt.skip.add(q.quote)); return; }
+  bt.off.set(url, Date.now() + BT_OFF_MS);
 }
 async function btMint(w, url, qs, st, out) {
   const keys = []; for (const q of qs) { const r = st.get(q.quote); if (r.pubkey) keys.push(quoteKey(r.pubkey)); }
@@ -132,7 +146,8 @@ async function btMint(w, url, qs, st, out) {
   let proofs;
   try { proofs = await w.completeBatchMint(prep); }
   catch (e) {
-    if ((isRefusal(e) || (e && e.authMasked)) && !pendingRefusal(e)) bt.off.set(url, Date.now() + BT_OFF_MS);   // (refused: each on its own now, and no batch here for a while)
+    // (an HTTP 4xx with no error code counts too: a mint without the batch endpoint answers 404; not 429, a "slow down")
+    if ((isRefusal(e) || (e && e.authMasked) || (e && e.status >= 400 && e.status < 500 && e.status !== 429)) && !pendingRefusal(e)) { await btRefused(w, url, qs, e); return 'refused'; }   // (refused: each on its own now)
     return;   // (each deposit's single check decides from what the mint says about it)
   }
   opMark(url, true);
@@ -150,15 +165,19 @@ async function btMint(w, url, qs, st, out) {
 function btBook(url, qs, found, away) {
   const held = new Set((S.proofs[url] || []).map(p => p.secret));
   found = found.filter(p => !held.has(p.secret)); away = away.filter(p => !held.has(p.secret));
-  let left = sum(found) + sum(away); const got = [], now = Date.now();
+  let left = sum(found) + sum(away), gone = sum(away); const got = [], now = Date.now(), out = new Map();
   S.proofs[url] = (S.proofs[url] || []).concat(found);
+  // (coins already spent elsewhere count toward the deposits in turn, each part on the line its own import wrote, as a
+  // single deposit's do: one "spent elsewhere" line per import line, any rest with the first deposit's)
+  const away1 = (k, v) => { if (v > 0) out.set(k, (out.get(k) || 0) + v); };
   for (const q of qs) {
-    const was = txById(q.txId), before = was && was.status === 'done' ? num(was.amount) : 0, a = Math.min(left, num(q.amount));
-    left -= a; got.push([q, a]);
+    const was = txById(q.txId), before = was && was.status === 'done' ? num(was.amount) : 0, a = Math.min(left, num(q.amount)), g = Math.min(gone, a);
+    left -= a; gone -= g; got.push([q, a]); away1(q.impLine || null, g);
     updTx(q.txId, { status: 'done', amount: before + a, ts: now });
   }
   if (left > 0) addTx({ type: 'in', method: 'ecash', amount: left, mint: url, note: 'Recovered with recovery phrase', self: true });
-  spentElsewhere(url, sum(away));
+  away1(qs.length && qs[0].impLine || null, gone);
+  for (const [k, v] of out) spentElsewhere(url, v, k);
   const ids = new Set(qs.map(q => q.quote)); S.quotes = S.quotes.filter(x => !ids.has(x.quote)); save();
   return got;
 }
