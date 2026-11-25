@@ -8,6 +8,9 @@ bundle:   src/lib.min.js is exactly the pinned build (cashu-ts 4.13.1 with the o
 derive:   the coins of a wallet are the NUT-13 coins of its 12 words: every secret NUTCADE got from the mint is the one
           Nutshell derives for that keyset at a counter below the wallet's counter; the same 12 words restored on a second
           device find exactly the same coins and balance.
+fixed:    fixed 12 words restored on a fresh test mint and paid 400 SAT hold exactly the coins (secret, signature, amount,
+          keyset) and counter NUTCADE 1.34 made with cashu-ts 4.13.1; a token that uses only some coins leaves the others held;
+          a second device restoring the words finds the same coins.
 reader:   NUTCADE's lock reader (lockOf, app.js) against the library's rules, edge by edge: locktime 0 has expired,
           a lock expires only after its locktime second, a malformed locktime never expires (#1323); an HTLC hash is
           compared in lower case (#1415); P2PK data must be a key (#1393); n_sigs / n_sigs_refund need a whole value (#1413);
@@ -48,6 +51,9 @@ REQ_ERR = "This request asks for a lock NUTCADE can't make, so it can't be paid 
 K1 = '02' + '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'   # (the generator: a valid key nobody here holds)
 K2 = '03' + 'c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5'
 H = 'ab' * 32
+FIXED = 'legal winner thank year wave sausage worth useful legal winner thank yellow'   # (a BIP-39 test vector)
+# what NUTCADE 1.34/1.35 with cashu-ts 4.13.1 (a014cbe..d3ac69e) holds after restoring FIXED on a fresh test mint 3339 and a 400 SAT deposit
+FIXED_PIN = {"ps": [{"id": "011e97640fd5b6c1b3e5a3111ff10d7983b7ca7833bedd2b55bf1da7eab178d446", "amount": 256, "secret": "750148f5000ddadbf9e813b7435697526d4f0a7cf1a59349febf6230f15ffd67", "C": "0352e58fd89a07a8190baf8b9a94a5c847a08caa5249b902784cc418cd7c67b3c0"}, {"id": "011e97640fd5b6c1b3e5a3111ff10d7983b7ca7833bedd2b55bf1da7eab178d446", "amount": 16, "secret": "8681f751bd95b19b93794328d43bfdd66f902a1b700d20ecbed39fecc6208d61", "C": "027d5cc8d8967054344fcaa527ed626856f9923dd9a8722b2e61030a91d1ab3378"}, {"id": "011e97640fd5b6c1b3e5a3111ff10d7983b7ca7833bedd2b55bf1da7eab178d446", "amount": 128, "secret": "e910905bc3028c580f07aead4940b7060859ab3995caa4d47fede70c6d43f91c", "C": "034033f96d1e06eb767dce41c7b45c746c922fa691badcbd89924ce7c71f30a37e"}], "ctr": {"011e97640fd5b6c1b3e5a3111ff10d7983b7ca7833bedd2b55bf1da7eab178d446": 3}}
 
 
 def py(*args, inp=None):
@@ -72,6 +78,12 @@ async def wallet(b, name, lang='en'):
     pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and not outside_net(m.text) and 'WebSocket' not in m.text else None)
     await pg.goto(URL); await pg.wait_for_timeout(700)
     return w
+
+
+async def leave_gate(w):   # (as in backup_qa.py: after a restore from the start screen, past PLAYER 1 READY to the wallet)
+    await w.ev("Nutcade.closeSheet()")
+    if await w.until("!!document.querySelector('[data-act=gateStart]')", 4000): await w.gate_step('gateStart', "!!document.querySelector('.tabbar')")
+    await w.wait(300); await w.ev("Nutcade.closeSheet()")
 
 
 async def section(name, fn):
@@ -106,6 +118,32 @@ async def main():
             names = await al.ev("Object.keys(CashuLib).sort()")
             check('bundle: the export list is exactly the names the app uses (AuthManager and OIDCAuth included)', names == sorted(EXPORTS), sorted(set(names) ^ set(EXPORTS)))
         await section('bundle', bundle)
+
+        async def fixed():
+            # the same 12 words on a fresh test mint (its keys fixed by start_mints.sh) give the same coins, byte for byte, as
+            # NUTCADE 1.34 (a07f282, cashu-ts 4.13.1) gave: secrets, signatures, amounts, keyset and counter
+            async def restored(name):
+                f = await wallet(b, name)
+                await f.gate_restore(); await f.fill('#phraseIn', FIXED); await f.ev("[...document.querySelectorAll('[data-rmint]')].forEach(i=>i.checked=false)"); await f.fill('#rmExtra', M)
+                await f.click('[data-act=doRestorePhrase]'); await f.until("!document.querySelector('[data-act=doRestorePhrase]')", 90000); await f.wait(600)
+                await leave_gate(f); await f.use(M); return f
+            f = await restored('lib-fixed')
+            ok = await f.receive_ln(400)
+            got = await f.ev(f"(() => {{ const ps = (Nutcade.S.proofs[{J(M)}]||[]).map(p => ({{id: p.id, amount: p.amount, secret: p.secret, C: p.C}})).sort((a, b) => a.secret < b.secret ? -1 : 1); return {{ps, ctr: Nutcade.S.counters}}; }})()")
+            if os.environ.get('LIB_PIN_PRINT'): print('PINNED', J(got), flush=True)
+            check('fixed: the fixed 12 words, restored and paid 400 SAT, hold exactly the coins and counter NUTCADE 1.34 (cashu-ts 4.13.1) made', ok and got == FIXED_PIN, got)
+            # a payment that uses only some coins: the ones it leaves out stay, untouched (cashu-ts 5 hands them back beside the swap)
+            before = {p['secret'] for p in got['ps']}
+            tok, e = await f.send_ecash(20)
+            left = await f.ev(f"(Nutcade.S.proofs[{J(M)}]||[]).map(p => p.secret)")
+            sent = await f.ev(f"CashuLib.getDecodedToken({J(tok)}, Object.keys(Nutcade.S.counters)).proofs.map(p => p.secret)") if tok else []
+            spent_in = before - set(left)
+            check('fixed: a 20 SAT token from 400 SAT: the balance is 380 and every coin the swap didn\'t take is still held, the same coin', not e and await f.bal() == 380 and len(spent_in) >= 1 and (before - spent_in) <= set(left) and len(sent) > 0, (e, await f.bal(), len(spent_in)))
+            g = await restored('lib-fixed2')
+            got2 = await g.ev(f"(Nutcade.S.proofs[{J(M)}]||[]).map(p => p.secret).sort()")
+            check('fixed: the same words restored on a second device find exactly the first device\'s coins and the unclaimed token\'s (400 SAT)', got2 == sorted(left + sent) and await g.bal() == 400, (len(got2), len(left), len(sent)))
+            await f.pg.context.close(); await g.pg.context.close()
+        await section('fixed', fixed)
 
         async def derive():
             ps = await al.ev(f"(Nutcade.S.proofs[{J(M)}]||[]).map(p=>({{id:p.id, secret:p.secret, amount:p.amount}}))")
