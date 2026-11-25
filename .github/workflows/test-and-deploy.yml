@@ -95,6 +95,8 @@ jobs:
             suites: batch
           - name: review
             suites: review
+          - name: signin
+            suites: signin
           - name: lib
             suites: lib
     env:
