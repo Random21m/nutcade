@@ -2805,7 +2805,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.35.0';
+const APP_VERSION = '1.36.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -3825,6 +3825,8 @@ function discoverMints(onUpdate) {
   setTimeout(done, 8000);
   return () => { finished = true; socks.forEach(s => { try { s.close(); } catch (e) {} }); };
 }
+// a review from a relay as the list shows it: its stars, then its text as plain text (one line, no control or direction characters)
+const rvQuote = c => { const p = rvParse(c); return ((p.stars ? rvStarsTxt(p.stars) + ' ' : '') + rvClean(p.text)).slice(0, 140); };
 function renderDiscovered(recs, final) {
   const el = $('#nostrList'); if (!el) return;
   const known = new Set(S.mints.map(m => m.url)); const curated = new Set(CURATED.map(c => c.url));
@@ -3835,7 +3837,7 @@ function renderDiscovered(recs, final) {
     <div class="tiny muted" data-noi18n style="overflow-wrap:anywhere">${esc(host(u))}</div></div>
     ${known.has(u) ? '<span class="chip ecash">ADDED</span>' : `<button class="btn sm lime" data-act="addMint" data-url="${esc(u)}">Add</button>`}</div>
     <div class="tiny" style="color:var(--pink)">★ ${r.pubs.size} recommendation${r.pubs.size === 1 ? '' : 's'}</div>
-    ${r.reviews[0] ? `<div class="tiny muted">"${esc(r.reviews[0].slice(0, 140))}"</div>` : ''}<div class="row" style="gap:6px;flex-wrap:wrap" data-chips></div></div>`).join('');
+    ${r.reviews[0] ? `<div class="tiny muted" data-noi18n data-rvquote style="overflow-wrap:anywhere">"${esc(rvQuote(r.reviews[0]))}"</div>` : ''}<div class="row" style="gap:6px;flex-wrap:wrap" data-chips></div></div>`).join('');
   if (final) probeAll(el);
 }
 
@@ -4170,6 +4172,7 @@ async function lnAddressInvoice(address, sats, comment) {
 /*@@app_automove.js@@*/
 /*@@app_auth.js@@*/
 /*@@app_batch.js@@*/
+/*@@app_review.js@@*/
 
 /* ---------- actions ---------- */
 /* Importing a backup never puts a coin into the balance, or a line into the history, without the mint's word: every
@@ -4760,6 +4763,7 @@ const A = {
 /*@@app_units_actions.js@@*/
 /*@@app_automove_actions.js@@*/
 /*@@app_auth_actions.js@@*/
+/*@@app_review_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && isSatAcct(dest.url) && meta.unit === 'sat' && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;   // (a swap is Lightning between SAT accounts)
@@ -4907,6 +4911,7 @@ window.Nutcade = { auth: authHooks, loadCard, render, refresh, S, toast, parseSa
 window.Nutcade.bk = { cap: () => phoneCapCheck(), rec: () => pbRec(), fetch: () => phoneFetch(), lock: (t, p) => lockBackup(t, p), unlock: (d, p) => unlockBackup(d, p), extras: d => importExtras(d) };
 window.Nutcade.dq = { check: t => offlineCheck(t), line: t => checkLine(t), ok: (p, A) => DQ.proofOk(p, A), h2c: m => DQ.unc(DQ.hashToCurve(new TextEncoder().encode(m))), ptText: t => ptText({ token: t }), slim: t => slimToken(t) };
 window.Nutcade.lk = { of: s => lockOf(s), req: pr => reqLock(pr), ys: (w, s, ids) => ysOf(w, s, ids), wallet: u => getWallet(u), heir: (p, from) => onExtraLife(p, from), takeBack: t => takeBackGift(t) };   // (NUTCADE's own lock reading, tests/lib_qa.py)
+window.Nutcade.rv = window.NutReview;   // (mint reviews: src/app_review.js)
 window.Nutcade.bt = { max: u => btMax(u), offClear: () => bt.off.clear(), skipped: id => bt.skip.has(id) };   // (batched deposits: src/app_batch.js)
 window.Nutcade.mr = { radar, parse: radarParse, ensure: radarEnsure, bkSent: () => Object.keys(bkSettings()), bkAllowed: () => Object.keys(BK_SET) };
 setLang();

@@ -129,6 +129,7 @@ textarea.inp{min-height:84px;resize:vertical;font-size:21px;line-height:1.1}
 .seg button{min-height:44px;padding:0 4px;border:0;background:transparent;color:var(--dim);font-family:var(--f-display);font-size:10px;letter-spacing:0;white-space:nowrap;min-width:0}
 .seg button[aria-pressed="true"]{background:var(--cyan);color:#0a0717}
 .seg.three{grid-template-columns:repeat(3,1fr)}
+.seg.rv-stars{grid-template-columns:repeat(5,1fr)}
 .code{font-family:ui-monospace,monospace;font-size:14px;line-height:1.35;word-break:break-all;padding:10px;border:1px solid var(--grid);border-radius:var(--r);background:var(--well);color:var(--cyan);max-height:120px;overflow:auto}
 .qr{display:grid;place-items:center;padding:14px;background:#fff;border-radius:var(--r);width:min(100%,280px,max(200px,100vh - 420px));margin:0 auto}
 /* short phones: a smaller QR and code box keep the sheet's main button above the fold */

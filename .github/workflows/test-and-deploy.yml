@@ -93,6 +93,8 @@ jobs:
             suites: auth
           - name: batch
             suites: batch
+          - name: review
+            suites: review
           - name: lib
             suites: lib
     env:
