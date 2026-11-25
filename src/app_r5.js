@@ -346,9 +346,10 @@ function openHeirCopy() {
    uptime and speed from health checks, its track record with your own payments, its age (first seen by you, or
    earliest mention on Nostr), its key history (a changed identity key is a red flag; frequent keyset changes are
    worth knowing) and recommendations on Nostr (NIP-87). */
-S.mintlog = store.get('mintlog', {});
+S.mintlog = keyMap(store.get('mintlog', {}), mintKeyOk);   // (no prototype; only mint addresses: app.js keyMap)
 const saveMlog = () => store.set('mintlog', S.mintlog);
-function mlog(url0) { const url = acctUrl(url0); if (!S.mintlog[url]) S.mintlog[url] = { first: Date.now(), pr: '', ms: [], ops: [0, 0], keysets: {}, changes: [] }; return S.mintlog[url]; }
+function mlog(url0) { const url = acctUrl(url0); if (!mintKeyOk(url)) return { first: Date.now(), pr: '', ms: [], ops: [0, 0], keysets: {}, changes: [] };   // (never stored under anything but a mint address)
+  if (!S.mintlog[url]) S.mintlog[url] = { first: Date.now(), pr: '', ms: [], ops: [0, 0], keysets: {}, changes: [] }; return S.mintlog[url]; }
 function logProbe(url, h) {
   const l = mlog(url); l.pr = (l.pr + (h.ok ? '1' : '0')).slice(-200);
   if (h.ok && h.ms != null) l.ms = l.ms.concat([h.ms]).slice(-30);
@@ -376,7 +377,7 @@ async function inspectMint(url0) {
     // first time has its keysets noted without a change, so adding USD at a mint never reads as "new keys"
     const held = new Set(S.mints.filter(m => acctUrl(m.url) === url).map(m => acctUnit(m.url))); if (!held.size) held.add('sat');
     const uOf = v => (v && v.unit) || 'sat', had = new Set(Object.values(l.keysets).map(uOf));
-    for (const k of ks.keysets.filter(k => held.has(k.unit || 'sat'))) {
+    for (const k of ks.keysets.filter(k => k && okKey(k.id) && held.has(k.unit || 'sat'))) {   // (a keyset id is the mint's string: never __proto__ and the like)
       const old = l.keysets[k.id], ku = k.unit || 'sat';
       if (!old) { l.keysets[k.id] = Object.assign({ first: now, active: !!k.active }, ku === 'sat' ? {} : { unit: ku }); if (had.has(ku)) l.changes.push({ at: now, kind: 'new', id: k.id }); }
       else if (old.active && !k.active) { old.active = false; l.changes.push({ at: now, kind: 'retired', id: k.id }); }

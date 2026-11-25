@@ -27,7 +27,7 @@
      ready) is settled by the journal once logged in again (authAfter runs the mint's background check and auto-move).
    - Nothing about the login is written to the console. */
 const AUTH_POOL = 5, AUTH_MS = 15000;
-S.auth = store.get('auth', {}) || {};
+S.auth = keyMap(store.get('auth', {}), mintKeyOk);   // (no prototype; only mint addresses: app.js keyMap)
 const au = { info: new Map(), mgr: new Map(), chain: new Map(), out: new Map(), cool: new Map(), refresh: new Map(), oidc: new Map(), live: null };
 const auQuiet = { error() {}, warn() {}, info() {}, debug() {}, trace() {}, log() {} };
 let auBase = null; try { const r = new L.Mint('https://localhost')._request; if (typeof r === 'function') auBase = r; } catch (e) {}   // (the library's own request function, wrapped by auReq)
@@ -57,6 +57,7 @@ const auDrop = e => { for (const k of ['at', 'rt', 'exp', 'who', 'tep', 'since']
 // the mint's info, each time its wallet is loaded: a login asked for (or no longer), its login server
 function authSeen(addr, w) {
   let i; try { const mi = w.getMintInfo(); au.info.set(addr, mi); i = auInfo(mi); } catch (e) { return; }
+  if (!mintKeyOk(addr)) return;   // (only a mint's own address is ever a key here)
   const e = S.auth[addr];
   if (!i.need) { if (e) { delete S.auth[addr]; au.mgr.delete(addr); saveAuth(); } return; }
   const x = e || (S.auth[addr] = { gen: 0, bats: [] });

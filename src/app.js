@@ -20,6 +20,14 @@ const $ = (s, r=document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num = a => a == null ? 0 : (typeof a === 'object' && typeof a.toNumber === 'function') ? a.toNumber() : Number(a) || 0;
 const sum = ps => (ps || []).reduce((t, p) => t + num(p.amount), 0);
+/* Maps keyed by a string from outside (a mint address, a keyset id): no prototype, so no key can reach Object.prototype.
+   keyMap copies a stored map into one, dropping "__proto__", "constructor" and "prototype" (no real key is ever one);
+   mintKeyOk is the check for maps keyed by a mint address (S.auth, S.mintlog, S.mintkeys): http(s) only. They are
+   saved as plain JSON as before. */
+const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const okKey = k => typeof k === 'string' && !BAD_KEYS.has(k);
+const mintKeyOk = k => okKey(k) && /^https?:\/\/\S+$/i.test(k);
+function keyMap(o, ok = okKey) { const m = Object.create(null); if (o && typeof o === 'object' && !Array.isArray(o)) for (const k of Object.keys(o)) if (ok(k)) m[k] = o[k]; return m; }
 // Amounts group digits the way the app's language does: 30,000 (English), 30.000 (es, pt, de), 30 000 (fr).
 // Only for showing numbers; amounts are always stored, sent and parsed as plain integers.
 const numLocale = () => { try { return ({ en: 'en-US', es: 'es-ES', pt: 'pt-BR', de: 'de-DE', fr: 'fr-FR' })[LANG] || 'en-US'; } catch (e) { return 'en-US'; } };
@@ -250,7 +258,7 @@ function notePinFail() { const f = pinFails(); f.n++; if (f.n >= 5) f.until = Da
 const S = {
   mints: store.get('mints', []),          // [{url,name,methods:{mint:[],melt:[]}}]
   active: store.get('active', null),
-  proofs: store.get('proofs', {}),        // url -> proofs
+  proofs: keyMap(store.get('proofs', {})),        // url -> proofs
   pending: store.get('pending', []),      // [{id,mint,proofs,quote,kind,txId}]
   txs: store.get('txs', []),              // newest first
   quotes: store.get('quotes', []),        // pending mint quotes
@@ -260,7 +268,7 @@ S.seed = store.get('seed', null);        // {mnemonic, backedUp, created}
 S.ops = store.get('ops', []);            // swaps written down before the mint is asked (see "the operation journal")
 S.oplate = store.get('oplate', []);      // steps closed with nothing signed whose request may still reach the mint (see lateCheck)
 S.opsdone = store.get('opsdone', []);    // ids of the last records settled here (an imported backup never settles one twice)
-S.counters = store.get('counters', {});  // keysetId -> next counter (NUT-13)
+S.counters = keyMap(store.get('counters', {}));  // keysetId -> next counter (NUT-13)
 /* Older versions kept a mint's URL as typed, so HTTP://Mint.example and http://mint.example could be saved as two
    mints. On load every saved URL is respelled with normUrl and such twins are merged into one: their ecash is
    combined (each coin once), and every stored record that names a mint points at the merged one: history,
@@ -274,7 +282,7 @@ function mergeMintSpellings() {
     seen.set(u, Object.assign(m, { url: u }));
   }
   S.mints = [...seen.values()];
-  const proofs = {};
+  const proofs = Object.create(null);
   for (const [u, ps] of Object.entries(S.proofs || {})) { const k = fix(u), have = proofs[k] || (proofs[k] = []), ids = new Set(have.map(p => p.secret)); for (const p of ps || []) if (!ids.has(p.secret)) { have.push(p); ids.add(p.secret); } }
   if (changed) S.proofs = proofs;
   S.active = fix(S.active);
@@ -296,7 +304,7 @@ function mergeMintSpellings() {
     S.mintlog[n] = !a ? b : Object.assign(a, { first: Math.min(a.first || Infinity, b.first || Infinity), ms: (a.ms || []).concat(b.ms || []).slice(-50), ops: [(a.ops || [0, 0])[0] + (b.ops || [0, 0])[0], (a.ops || [0, 0])[1] + (b.ops || [0, 0])[1]], keysets: Object.assign({}, b.keysets, a.keysets), changes: (b.changes || []).concat(a.changes || []) });
     delete S.mintlog[u];
   }
-  if (S.mintkeys) for (const u of Object.keys(S.mintkeys)) { const n = fix(u); if (n !== u) { S.mintkeys[n] = Object.assign({}, S.mintkeys[u], S.mintkeys[n]); delete S.mintkeys[u]; changed = true; } }
+  if (S.mintkeys) for (const u of Object.keys(S.mintkeys)) { const n = fix(u); if (n !== u) { S.mintkeys[n] = Object.assign(Object.create(null), S.mintkeys[u], S.mintkeys[n]); delete S.mintkeys[u]; changed = true; } }
   if (!changed) return;
   save();
   for (const k of ['mintkeys', 'requests', 'extra', 'heirlooms', 'challenges', 'hunts', 'found', 'mintlog']) if (S[k] !== undefined) store.set(k, S[k]);
@@ -332,12 +340,12 @@ async function syncIfStale() {
     if (!vault.open || !vault.dek) return;
     await vault.chain;
     if (vaultBad()) { try { c = (await readVault(vault.dek)).counters; } catch (e) {} }   // (the vault in memory is the newer one: only the counters of the one on disk are taken)
-    else { await openVault(vault.dek); const d = vault.data; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.txs = d.txs || []; S.quotes = d.quotes || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null; S.opsdone = raw.get('opsdone', []); S.auth = d.auth || {}; c = raw.get('counters', {}); }
+    else { await openVault(vault.dek); const d = vault.data; S.proofs = keyMap(d.proofs); S.pending = d.pending || []; S.txs = d.txs || []; S.quotes = d.quotes || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null; S.opsdone = raw.get('opsdone', []); S.auth = keyMap(d.auth, mintKeyOk); c = raw.get('counters', {}); }
   } else {
-    for (const [k, d] of [['proofs', {}], ['pending', []], ['txs', []], ['quotes', []], ['ops', []], ['oplate', []], ['extra', null], ['opsdone', []], ['auth', {}]]) if (!saveHealth.failed.has(k)) S[k] = raw.get(k, d);   // (auth: the mint logins and their BATs, app_auth.js)
+    for (const [k, d] of [['proofs', {}], ['pending', []], ['txs', []], ['quotes', []], ['ops', []], ['oplate', []], ['extra', null], ['opsdone', []], ['auth', {}]]) if (!saveHealth.failed.has(k)) S[k] = k === 'proofs' ? keyMap(raw.get(k, d)) : k === 'auth' ? keyMap(raw.get(k, d), mintKeyOk) : raw.get(k, d);   // (auth: the mint logins and their BATs, app_auth.js)
     c = raw.get('counters', {});
   }
-  for (const k in c || {}) S.counters[k] = Math.max(S.counters[k] || 0, c[k] || 0);
+  for (const k in c || {}) if (okKey(k)) S.counters[k] = Math.max(S.counters[k] || 0, c[k] || 0);
   myGen = raw.get('gen', 0) || 0;
 }
 
@@ -368,7 +376,7 @@ function setSeed(mnemonic, backedUp) {
   seedBytes = null;
   if (changed && S.prefs) { S.prefs.npc = false; S.prefs.npcSince = 0; S.prefs.npcName = ''; S.prefs.mintBackupAt = 0; S.prefs.mintBackupList = ''; S.prefs.sync = false; delete S.prefs.syncSt; S.prefs.syncOther = []; S.prefs.amOn = false; S.prefs.amMint = ''; S.prefs.amMin = AM_MIN_DEF; if (typeof npcSocketStop === 'function') npcSocketStop(); }
   for (const k in wallets) delete wallets[k];
-  if (changed && S.auth && Object.keys(S.auth).length) { S.auth = {}; store.set('auth', S.auth); }   // (other words: no mint login is kept, log in again)
+  if (changed && S.auth && Object.keys(S.auth).length) { S.auth = Object.create(null); store.set('auth', S.auth); }   // (other words: no mint login is kept, log in again)
   if (!store.set('seed', S.seed)) throw new Error("This browser won't save data. Open NUTCADE in a normal browser tab.");
   requestPersist();
 }
@@ -415,7 +423,7 @@ async function secureAll(onStep) {
 /* One scan at a time per mint. A caller that joins a scan already running doesn't lose what it asked for: the
    deposits it brings are added to the ones that scan credits (read when it credits, not when it started), and if
    it joined too late for that, it gets a scan of its own. */
-const restoreDeposits = {}, restoreRepairing = new Set();
+const restoreDeposits = Object.create(null), restoreRepairing = new Set();
 async function restoreFromMint(url, onStep, opts = {}) {
   url = normUrl(url);
   const mine = (opts.deposits || []).map(q => q.quote);
@@ -553,7 +561,7 @@ const CURATED = [
 const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://relay.nostr.band', 'wss://relay.cashumints.space'];
 
 /* ---------- wallet instances ---------- */
-const wallets = {};
+const wallets = Object.create(null);   // (keyed by mint address: no prototype)
 async function getWallet(url) {
   if (wallets[url]) return wallets[url];
   const p = (async () => {
@@ -2670,7 +2678,7 @@ function hydrateFromVault() {
   loadWalletState();
   S.limits = d.limits || null;
   S.hunts = d.hunts || []; S.found = Object.assign(Object.create(null), d.found || {}); S.imports = d.imports || [];
-  S.seed = d.seed || null; S.proofs = d.proofs || {}; S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || []; S.nwc = d.nwc || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null;
+  S.seed = d.seed || null; S.proofs = keyMap(d.proofs); S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || []; S.nwc = d.nwc || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null;
   seedBytes = null; raw.del('pinfails'); requestPersist(); mergeMintSpellings();
   nwcSince = Math.floor(Date.now() / 1000);   // Wallet Connect requests sent while it was locked are refused, not paid now
 }
@@ -4259,14 +4267,15 @@ async function importBackup(d) {
     ks.aside = uniqBy((ks.aside || []).concat(m.ks.aside.filter(p => p && typeof p.secret === 'string' && !held.has(p.secret)).map(p => Object.assign({}, p, { amount: num(p.amount) }))), 'secret');
   }
   // per mint: its coins, history lines, payments in flight and open steps (a backup's own waiting parts included)
-  const part = {}, P = u => part[u] || (part[u] = { proofs: [], txs: [], pending: [], ops: [], quotes: [] });
+  const part = Object.create(null), P = u =>   // (keyed by the backup file's mint addresses: no prototype)
+    part[u] || (part[u] = { proofs: [], txs: [], pending: [], ops: [], quotes: [] });
   for (const [u0, ps] of Object.entries(d.proofs || {})) P(normUrl(u0)).proofs.push(...(Array.isArray(ps) ? ps : []));
   for (const t of d.txs || []) if (t && t.id) P(normUrl(t.mint || '')).txs.push(Object.assign({}, t, t.mint ? { mint: normUrl(t.mint) } : {}));
   for (const p of d.pending || []) if (p && p.id && p.mint) P(normUrl(p.mint)).pending.push(p);
   for (const o of d.ops || []) if (o && o.mint) P(normUrl(o.mint)).ops.push(o);
   for (const x of Array.isArray(d.quotes) ? d.quotes : []) if (x && typeof x.mint === 'string') P(normUrl(x.mint)).quotes.push(x);
   for (const r of Array.isArray(d.imports) ? d.imports : []) if (r && r.mint) { const q = P(normUrl(r.mint)); q.proofs.push(...(r.proofs || [])); q.txs.push(...(r.txs || []).map(t => Object.assign({}, t, { mint: normUrl(r.mint) }))); q.pending.push(...(r.pending || [])); q.ops.push(...(r.ops || [])); q.quotes.push(...(r.quotes || [])); }
-  const checked = {}, waiting = [];
+  const checked = Object.create(null), waiting = [];
   for (const [u, q] of Object.entries(part)) {
     // each coin, line, payment, step and deposit once (a backup's waiting parts repeat what it holds itself)
     q.proofs = uniqBy(q.proofs, 'secret').map(p => Object.assign({}, p, { amount: num(p.amount) }));
