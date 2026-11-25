@@ -254,8 +254,9 @@ async function nzEvent(ev) {
   await nzClaim(t, true).catch(() => {});
   return 'ok';
 }
-// the coins of a waiting nutzap the mint doesn't say are spent, and the token they are saved in again
-const nzLeft = (ps, st) => ps.filter((p, i) => !(st[i] && st[i].state === 'SPENT')).map(p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq ? { dleq: p.dleq } : {}, p.p2pk_e ? { p2pk_e: p.p2pk_e } : {}));
+// the coins of a waiting nutzap the mint doesn't say are spent, and the token they are saved in again: each coin with
+// every field it had (spend_info, witness, p2pk_e, dleq and anything else: a field dropped here can make a coin unspendable)
+const nzLeft = (ps, st) => ps.filter((p, i) => !(st[i] && st[i].state === 'SPENT')).map(p => Object.assign({}, p, { amount: num(p.amount) }));
 const nzLeftToken = (mint, left) => tokEnc({ mint, proofs: left, unit: 'sat' });
 // a waiting nutzap claimed with the usual claim of a saved token; the mint down leaves it waiting, the mint refusing it
 // (its coins unspent) NZ_REJECT times marks it failed
