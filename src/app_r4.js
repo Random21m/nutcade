@@ -266,7 +266,7 @@ function splitPanels() {
 }
 
 /* ---------- mint health: spread, response times, warnings, moving sats ---------- */
-const health = {};   // url -> { ok, ms, at }
+const health = Object.create(null);   // url -> { ok, ms, at } (no prototype: keyed by mint address)
 let healthBusy = false;
 async function probeHealth(url0) {
   const url = acctUrl(url0), t0 = performance.now();   // (a mint's accounts share one health check)

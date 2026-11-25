@@ -61,7 +61,8 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.35.0, with the v1.34.0 item, which carries the v1.33.0 items, which carry the v1.32.0 items, which carry the v1.31.2, v1.31.1 and v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+const WHATS_NEW = [   // (v1.36.0, with the v1.35.0 item, which carries the v1.34.0 item, which carries the v1.33.0 items, which carry the v1.32.0 items, which carry the v1.31.2, v1.31.1 and v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+  'New: review a mint you use (report card or Mints, Details): 1 to 5 stars and a short text, published on Nostr (NIP-87) only when you tap Publish. It is public and linked to this wallet\'s Nostr identity; you can edit or delete it.',
   'Safer deposits and locks: each new Lightning deposit is locked to a key of its own (NUT-20), so its quote alone can\'t claim it; a payment request asking for a lock NUTCADE can\'t make is refused before anything is sent (it used to be paid unlocked); locked ecash you receive is read exactly as the mint reads it.',
   'Several Lightning deposits paid at one mint now come in with one request when the mint supports it (NUT-29). Each still has its own line in your history; if the mint turns the batch down, each is collected on its own as before.',
   'New: mints that ask for a login (NUT-21 and NUT-22) now work. Log in on the Mints tab; the login stays on this device and is never in your backups or wallet sync.',
@@ -251,7 +252,7 @@ const HELP = [
     'Your mints: for every payment, to check that they answer, and to read their name and contact details. A mint sees the coins you exchange with it.',
     'The login server a mint names, only for a mint that asks for a login, when you log in and to renew the login. It sees your account there, not your coins.',
     'The mints in the Add mint list (Minibits, Cuba Bitcoin, 8333.space and two test mints), only while that list is open, to show whether they answer.',
-    'Nostr relays (relay.damus.io, nos.lol and relay.primal.net): for game challenges and payments between contacts, apps you connect with Wallet Connect, your encrypted mint list, requests you made and ecash sent to your ecash address. A contact or a payment request can name relays of its own, which are used when you send to them.',
+    'Nostr relays (relay.damus.io, nos.lol and relay.primal.net): for game challenges and payments between contacts, apps you connect with Wallet Connect, your encrypted mint list, requests you made, ecash sent to your ecash address and mint reviews you publish. A contact or a payment request can name relays of its own, which are used when you send to them.',
     'Two more relays (relay.nostr.band and relay.cashumints.space) are asked only when you tap Find mints people recommend.',
     'Coinbase, for the price and the price chart, only while Show Bitcoin price is on.',
     'MintRadar (mintradar.org), only while Show mint reliability is on: it sees the internet address of your phone when NUTCADE downloads its public list of mint health. NUTCADE asks for the whole list, so MintRadar never learns which mints you use.',
@@ -311,7 +312,8 @@ function mintInfoHTML(url, state) {
 }
 function openMintInfo(key) {
   const url = acctUrl(key);   // (the mint's own address: its accounts, whatever their unit, say the same about the mint)
-  openSheet('Mint details', mintInfoHTML(url, mlog(url).info ? 'done' : 'busy') + '<button class="btn block" data-act="close">Done</button>', body => {
+  const foot = () => `<div class="row wrap">${rvBtn(url)}</div><button class="btn block" data-act="close">Done</button>`;   // (Review this mint: app_review.js)
+  openSheet('Mint details', mintInfoHTML(url, mlog(url).info ? 'done' : 'busy') + foot(), body => {
     let live = true;
     (async () => {
       try {
@@ -320,7 +322,7 @@ function openMintInfo(key) {
         const info = r.ok ? await r.json() : null;
         if (info && typeof info === 'object') { const l = mlog(url); l.info = mintInfoOf(info); saveMlog(); }
       } catch (e) {}
-      if (live && body.isConnected) body.innerHTML = mintInfoHTML(url, 'done') + '<button class="btn block" data-act="close">Done</button>';
+      if (live && body.isConnected) body.innerHTML = mintInfoHTML(url, 'done') + foot();
     })();
     return () => { live = false; };
   });

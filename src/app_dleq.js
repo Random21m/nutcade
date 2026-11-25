@@ -100,12 +100,13 @@ const DQ = (() => {
 /* ---------- the mints' public keys, saved for offline use ---------- */
 // url -> { keysetId: { amount: compressed public key } }, the sat keysets the mint served the last time it was loaded.
 // Kept with the wallet (inside the PIN vault when one is set, like the mint list); never in backup files (the mint serves them again).
-S.mintkeys = store.get('mintkeys', {});
+S.mintkeys = keyMap(store.get('mintkeys', {}), mintKeyOk);   // (no prototype; only mint addresses: app.js keyMap)
 // Not saved in the duress PIN's wallet: its part of the vault must stay the size of the filler an unused one has (app_r8.js).
 function saveMintKeys(url, w) {
   if (vault.decoy) return;
   try {
-    const got = {};
+    if (!mintKeyOk(url)) return;
+    const got = Object.create(null);
     for (const k of w.keyChain.getKeysets()) {   // (the account's own unit: the wallet is built for it)
       const kk = k.keys instanceof Map ? Object.fromEntries(k.keys) : (k.keys || {});
       const keys = {}; for (const [a, pub] of Object.entries(kk)) if (/^0[23][0-9a-f]{64}$/i.test(String(pub))) keys[a] = String(pub).toLowerCase();

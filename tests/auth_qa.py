@@ -444,6 +444,42 @@ async def main():
             errs.extend(w.errs); await w.pg.context.close()
         await section('store', store)
 
+        # ======================= stored maps with hostile keys (1.36.0: no prototype, mint addresses only) =======================
+        async def proto():
+            oidc('/test/reset')
+            w = await fresh(b, 'au-proto', mints=(AU,)); await login(w); await w.ev("Nutcade.closeSheet()")
+            ok, e = await deposit(w, 200)
+            b0 = await bal(w, AU)
+            # "__proto__", "constructor", "prototype" and a non-mint key written into each stored map, as raw JSON text
+            # (JSON.parse makes "__proto__" an own key: exactly what a hostile or corrupted store holds)
+            BAD = '"__proto__":{"polluted":"yes","need":1},"constructor":{"prototype":{"polluted":"yes"}},"prototype":{"polluted":"yes"}'
+            NOTMINT = ',"javascript:alert(1)":{"need":1,"polluted":"yes"}'
+            ctr0 = await w.ev("Object.assign({}, Nutcade.S.counters)")
+            # real-looking entries the filter must keep, with their values: a keyset id in the counters, a USD account key
+            KEEP = {'counters': ',"00ffeeddccbbaa99":7', 'proofs': f',{J(AU + "|usd")}:[]', 'mintkeys': f',{J(AU + "|usd")}:{{"00ffeeddccbbaa99":{{"1":"02{"ab" * 32}"}}}}'}
+            await w.ev("""((bad, nm, keep) => { for (const k of ['auth', 'mintlog', 'mintkeys', 'proofs', 'counters']) { const s = localStorage.getItem('nutcade:' + k) || '{}', x = bad + (['auth', 'mintlog', 'mintkeys'].includes(k) ? nm : '') + (keep[k] || '');
+                localStorage.setItem('nutcade:' + k, s.trim() === '{}' ? '{' + x + '}' : '{' + x + ',' + s.trim().slice(1)); } })""" + f"({J(BAD)}, {J(NOTMINT)}, {J(KEEP)})")
+            await w.pg.reload(); await w.wait(1200)
+            r = await w.ev("""(() => { const maps = { auth: Nutcade.S.auth, mintlog: Nutcade.S.mintlog, mintkeys: Nutcade.S.mintkeys, proofs: Nutcade.S.proofs, counters: Nutcade.S.counters };
+                const keys = {}; for (const [k, m] of Object.entries(maps)) keys[k] = Object.keys(m);
+                return { polluted: ({}).polluted === undefined && Object.prototype.polluted === undefined && ({}).need === undefined && Object.getPrototypeOf({}) === Object.prototype ? 0 : 1,
+                  noproto: Object.values(maps).every(m => Object.getPrototypeOf(m) === null), keys }; })()""")
+            bad_left = {k: [x for x in v if x in ('__proto__', 'constructor', 'prototype')] for k, v in r['keys'].items()}
+            check('proto: stored maps with "__proto__", "constructor" and "prototype" keys load without touching Object.prototype', r['polluted'] == 0, r)
+            check('proto: each map has no prototype, and none of those keys is kept', r['noproto'] and not any(bad_left.values()), bad_left)
+            check('proto: a key that is not a mint address is refused in the maps keyed by mint (auth, report log, mint keys)', not any('javascript:alert(1)' in r['keys'][k] for k in ('auth', 'mintlog', 'mintkeys')), r['keys'])
+            check('proto: the real entries are unchanged (the login, the coins)', (await w.ev(ST))['inn'] and await bal(w, AU) == b0 and AU in r['keys']['auth'] and AU in r['keys']['mintlog'], (await w.ev(ST), await bal(w, AU), b0))
+            kept = await w.ev(f"""({{ ctr: Object.assign({{}}, Nutcade.S.counters), usd: Object.keys(Nutcade.S.proofs).includes({J(AU + '|usd')}) && Array.isArray(Nutcade.S.proofs[{J(AU + '|usd')}]),
+                mk: (Nutcade.S.mintkeys[{J(AU + '|usd')}] || {{}})['00ffeeddccbbaa99'] || null }})""")
+            check('proto: real entries survive the filter with their values: every counter keyset id, a USD account key (url|usd) in the coins and the mint keys',
+                  ctr0 and all(kept['ctr'].get(k) == v for k, v in ctr0.items()) and kept['ctr'].get('00ffeeddccbbaa99') == 7 and kept['usd'] and kept['mk'] == {'1': '02' + 'ab' * 32}, (ctr0, kept))
+            ok2, e2 = await deposit(w, 100)
+            check('proto: the login mint works as before afterwards (a deposit with a BAT)', ok and ok2 and not e2 and await bal(w, AU) == b0 + 100, (e, e2))
+            txt = await w.ev("localStorage.getItem('nutcade:auth') || ''")
+            check('proto: saved again as plain JSON, without the hostile keys', txt.startswith('{') and AU in json.loads(txt) and '__proto__' not in txt and 'javascript:' not in txt, txt[:120])
+            errs.extend(w.errs); await w.pg.context.close()
+        await section('proto', proto)
+
         # ======================= auto-move into a mint with a login =======================
         async def move():
             oidc('/test/reset')

@@ -346,9 +346,10 @@ function openHeirCopy() {
    uptime and speed from health checks, its track record with your own payments, its age (first seen by you, or
    earliest mention on Nostr), its key history (a changed identity key is a red flag; frequent keyset changes are
    worth knowing) and recommendations on Nostr (NIP-87). */
-S.mintlog = store.get('mintlog', {});
+S.mintlog = keyMap(store.get('mintlog', {}), mintKeyOk);   // (no prototype; only mint addresses: app.js keyMap)
 const saveMlog = () => store.set('mintlog', S.mintlog);
-function mlog(url0) { const url = acctUrl(url0); if (!S.mintlog[url]) S.mintlog[url] = { first: Date.now(), pr: '', ms: [], ops: [0, 0], keysets: {}, changes: [] }; return S.mintlog[url]; }
+function mlog(url0) { const url = acctUrl(url0); if (!mintKeyOk(url)) return { first: Date.now(), pr: '', ms: [], ops: [0, 0], keysets: {}, changes: [] };   // (never stored under anything but a mint address)
+  if (!S.mintlog[url]) S.mintlog[url] = { first: Date.now(), pr: '', ms: [], ops: [0, 0], keysets: {}, changes: [] }; return S.mintlog[url]; }
 function logProbe(url, h) {
   const l = mlog(url); l.pr = (l.pr + (h.ok ? '1' : '0')).slice(-200);
   if (h.ok && h.ms != null) l.ms = l.ms.concat([h.ms]).slice(-30);
@@ -376,7 +377,7 @@ async function inspectMint(url0) {
     // first time has its keysets noted without a change, so adding USD at a mint never reads as "new keys"
     const held = new Set(S.mints.filter(m => acctUrl(m.url) === url).map(m => acctUnit(m.url))); if (!held.size) held.add('sat');
     const uOf = v => (v && v.unit) || 'sat', had = new Set(Object.values(l.keysets).map(uOf));
-    for (const k of ks.keysets.filter(k => held.has(k.unit || 'sat'))) {
+    for (const k of ks.keysets.filter(k => k && okKey(k.id) && held.has(k.unit || 'sat'))) {   // (a keyset id is the mint's string: never __proto__ and the like)
       const old = l.keysets[k.id], ku = k.unit || 'sat';
       if (!old) { l.keysets[k.id] = Object.assign({ first: now, active: !!k.active }, ku === 'sat' ? {} : { unit: ku }); if (had.has(ku)) l.changes.push({ at: now, kind: 'new', id: k.id }); }
       else if (old.active && !k.active) { old.active = false; l.changes.push({ at: now, kind: 'retired', id: k.id }); }
@@ -386,17 +387,23 @@ async function inspectMint(url0) {
     l.changes = l.changes.slice(-20);
   }
   l.checked = now; saveMlog();
-  if (!l.nostr || now - l.nostr.at > 86400e3) await nostrRecord(url).catch(() => {});
+  if (!l.nostr || l.nostr.v !== 2 || l.nostr.me !== rvMe() || now - l.nostr.at > 86400e3) await nostrRecord(url).catch(() => {});   // (v 2: 1.36, one rating per person, yours apart)
   return l;
 }
-// recommendations (kind 38000) and announcements (kind 38172) that name this mint
+// recommendations (kind 38000) and announcements (kind 38172) that name this mint. One rating per person (their newest
+// review; "[N/5]" with N from 1 to 5, as cashu.me reads it). Your own review (this wallet's Nostr key, its signature
+// checked) is kept apart, as `mine`, so the report card counts it once (app_review.js, rvMine); announcements with a good
+// signature are kept (at most 10) for the review's "a" tag.
 function nostrRecord(url) {
   return new Promise(resolve => {
-    const l = mlog(url), pubs = new Set(), stars = [], seen = new Set(); let since = 0, open = 0, finished = false;
+    const l = mlog(url), per = new Map(), anns = [], seen = new Set(); let since = 0, open = 0, finished = false, mine = null;
+    let me = null; try { me = S.seed ? L.nostrPub(nostrKey()) : null; } catch (e) {}
     const variants = [...new Set([url, url + '/', url.replace(/^https:/, 'http:')])];
     const socks = [];
     const done = () => { if (finished) return; finished = true; socks.forEach(s => { try { s.close(); } catch (e) {} });
-      l.nostr = { at: Date.now(), recs: pubs.size, stars: stars.slice(0, 50), since: since || null }; saveMlog(); resolve(l.nostr); };
+      const stars = [...per.values()].map(x => x.stars).filter(Boolean);
+      if (me !== rvMe()) { resolve(l.nostr); return; }   // (other 12 words meanwhile: this look was for the old key, nothing is kept)
+      l.nostr = { v: 2, at: Date.now(), recs: per.size, stars: stars.slice(0, 50), since: since || null, mine, anns, me }; saveMlog(); resolve(l.nostr); };
     for (const r of relays().slice(0, 4)) {
       let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
       socks.push(ws); open++;
@@ -404,7 +411,11 @@ function nostrRecord(url) {
       ws.onmessage = m => { let d; try { d = JSON.parse(m.data); } catch (e) { return; }
         if (d[0] === 'EVENT' && d[2] && !seen.has(d[2].id)) { const e = d[2]; seen.add(e.id);
           if (!since || e.created_at * 1000 < since) since = e.created_at * 1000;
-          if (e.kind === 38000) { pubs.add(e.pubkey); const s = /\[(\d)\/5\]/.exec(e.content || ''); if (s) stars.push(+s[1]); } }
+          const at = num(e.created_at);
+          if (e.kind === 38000 && typeof e.pubkey === 'string') {
+            if (e.pubkey === me) { if ((!mine || at > mine.at) && rvSig(e)) { const p = rvParse(e.content); mine = { stars: p.stars, text: rvClean(p.text).slice(0, RV_MAX), at, d: rvD(e), id: e.id, relay: true, pk: e.pubkey }; } }
+            else { const o = per.get(e.pubkey); if (!o || at > o.at) per.set(e.pubkey, { at, stars: rvParse(e.content).stars }); }
+          } else if (e.kind === 38172 && anns.length < 10 && typeof e.pubkey === 'string' && rvSig(e)) anns.push({ pubkey: e.pubkey, d: rvD(e), relay: r, at }); }
         else if (d[0] === 'EOSE') { try { ws.close(); } catch (e) {} if (--open <= 0) done(); } };
       ws.onerror = () => { if (--open <= 0) done(); };
     }
@@ -436,7 +447,9 @@ function reportCard(url) {
   const [ok, bad] = l.ops, tot = ok + bad;
   rows.push({ k: 'Track record', g: tot >= 5 ? band(ok / tot * 100, [99, 95, 90, 80]) : '?', d: tot ? [`${ok} of ${tot} of your payments and swaps went through`].concat(bad ? [`${bad} failed on the mint's side`] : []) : ['No payments with it yet'] });
   // community
-  const nr = l.nostr;
+  // (other people from the relays, one each, plus your own review once: app_review.js)
+  const own = l.nostr && l.nostr.v === 2 && l.nostr.me === rvMe() ? rvMine(url) : null;   // (read for another key: yours isn't apart, so not added)
+  const nr = l.nostr && { recs: l.nostr.recs + (own ? 1 : 0), stars: l.nostr.stars.concat(own && own.stars ? [own.stars] : []) };
   const avg = nr && nr.stars.length ? nr.stars.reduce((a, b) => a + b, 0) / nr.stars.length : null;
   rows.push({ k: 'Reviews', g: !nr ? '?' : nr.recs === 0 ? 'D' : avg != null && avg < 3 ? 'D' : band(nr.recs, [10, 5, 2, 1]), d: !nr ? ['Not checked yet'] : nr.recs ? [`Recommended by ${pl(nr.recs, 'Nostr user', 'Nostr users')}`].concat(avg != null ? [`${avg.toFixed(1)}/5 from ${pl(nr.stars.length, 'rating', 'ratings')}`] : []) : ['Nobody recommends it on Nostr yet'] });
   const known = rows.filter(r => r.g !== '?' && r.g !== 'NEW');
@@ -456,7 +469,7 @@ function openReport(url) {
       <div class="report-rows">${r.rows.map(x => `<div class="rrow ${x.warn ? 'warn' : ''}"><span class="rg ${gradeCls(x.g)}${x.g.length > 1 ? ' word' : ''}"${x.g.length > 1 ? '' : ' data-noi18n'}>${x.g}</span><span><b>${x.k}</b><span class="tiny muted">${x.d.map(p => `<span>${p}</span>`).join(' · ')}</span></span></div>`).join('')}</div>
       ${l.info && l.info.motd ? `<div class="notice">Message from the mint: <span data-noi18n>${esc(l.info.motd)}</span></div>` : ''}
       <div class="tiny muted">Graded on this phone from health checks, your own payments with this mint, its keys and Nostr recommendations. A good grade isn't a guarantee: only keep what you can afford to lose at any one mint.</div>
-      ${busy ? busyHTML('CHECKING THE MINT') : `<button class="btn sm" data-act="reportOpen" data-url="${esc(url)}" data-fresh="1">Check again</button>`}`;
+      ${busy ? busyHTML('CHECKING THE MINT') : `<div class="row wrap"><button class="btn sm" data-act="reportOpen" data-url="${esc(url)}" data-fresh="1">Check again</button>${rvBtn(url)}</div>`}`;
   };
   openSheet('Report card', draw(true), body => {
     let live = true;
