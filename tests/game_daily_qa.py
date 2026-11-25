@@ -3,7 +3,7 @@ zones, clock moved back or forward, playing over midnight UTC), sharing to Nostr
 five languages, and the layout. The clock is injected (Daily.setClock); Nostr is a stand-in WebSocket in the page."""
 import os, sys, asyncio, json, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wallet_qa import W, check, results, URL, OUT
+from wallet_qa import outside_net, W, check, results, URL, OUT
 from playwright.async_api import async_playwright
 
 SHOTS = os.environ.get('SHOTS', '')
@@ -42,7 +42,7 @@ async def wallet(b, name, width=390, height=844, tz=None, lang=None, mobile=True
     await ctx.add_init_script("if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs'," + json.dumps(json.dumps(prefs)) + ")")
     pg = await ctx.new_page(); w = W(pg, name); w.ctx = ctx
     pg.on('pageerror', lambda e: w.errs.append('PAGEERROR ' + str(e)))
-    pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and 'ERR_' not in m.text and 'Failed to load resource' not in m.text else None)
+    pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and not outside_net(m.text) and 'ERR_' not in m.text and 'Failed to load resource' not in m.text else None)
     await pg.goto(URL); await pg.wait_for_timeout(700)
     await w.create(); await w.ev(PATCH)
     return w

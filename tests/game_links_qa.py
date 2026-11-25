@@ -4,7 +4,7 @@ a high score at the end of a round, and every on-screen text in five languages f
 No mint is needed: only the page (NUTCADE_URL) is."""
 import os, sys, asyncio, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wallet_qa import W, check, results, URL
+from wallet_qa import outside_net, W, check, results, URL
 from playwright.async_api import async_playwright
 
 OUT = os.environ.get('QA_OUT', '/tmp/qa-out') + '/'
@@ -17,7 +17,7 @@ async def wallet(b, vw=390, vh=844, lang='en', mobile=True):
     await ctx.add_init_script("if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs'," + json.dumps(json.dumps(prefs)) + ")")
     pg = await ctx.new_page(); w = W(pg, 'links')
     pg.on('pageerror', lambda e: w.errs.append('PAGEERROR ' + str(e)))
-    pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and '127.0.0.1' not in m.text and 'Failed to load resource' not in m.text else None)
+    pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and not outside_net(m.text) and '127.0.0.1' not in m.text and 'Failed to load resource' not in m.text else None)
     await pg.goto(URL); await pg.wait_for_timeout(700)
     await w.create()
     return w
