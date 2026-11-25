@@ -454,8 +454,11 @@ async def main():
             # (JSON.parse makes "__proto__" an own key: exactly what a hostile or corrupted store holds)
             BAD = '"__proto__":{"polluted":"yes","need":1},"constructor":{"prototype":{"polluted":"yes"}},"prototype":{"polluted":"yes"}'
             NOTMINT = ',"javascript:alert(1)":{"need":1,"polluted":"yes"}'
-            await w.ev("""((bad, nm) => { for (const k of ['auth', 'mintlog', 'mintkeys', 'proofs', 'counters']) { const s = localStorage.getItem('nutcade:' + k) || '{}', x = bad + (['auth', 'mintlog', 'mintkeys'].includes(k) ? nm : '');
-                localStorage.setItem('nutcade:' + k, s.trim() === '{}' ? '{' + x + '}' : '{' + x + ',' + s.trim().slice(1)); } })""" + f"({J(BAD)}, {J(NOTMINT)})")
+            ctr0 = await w.ev("Object.assign({}, Nutcade.S.counters)")
+            # real-looking entries the filter must keep, with their values: a keyset id in the counters, a USD account key
+            KEEP = {'counters': ',"00ffeeddccbbaa99":7', 'proofs': f',{J(AU + "|usd")}:[]', 'mintkeys': f',{J(AU + "|usd")}:{{"00ffeeddccbbaa99":{{"1":"02{"ab" * 32}"}}}}'}
+            await w.ev("""((bad, nm, keep) => { for (const k of ['auth', 'mintlog', 'mintkeys', 'proofs', 'counters']) { const s = localStorage.getItem('nutcade:' + k) || '{}', x = bad + (['auth', 'mintlog', 'mintkeys'].includes(k) ? nm : '') + (keep[k] || '');
+                localStorage.setItem('nutcade:' + k, s.trim() === '{}' ? '{' + x + '}' : '{' + x + ',' + s.trim().slice(1)); } })""" + f"({J(BAD)}, {J(NOTMINT)}, {J(KEEP)})")
             await w.pg.reload(); await w.wait(1200)
             r = await w.ev("""(() => { const maps = { auth: Nutcade.S.auth, mintlog: Nutcade.S.mintlog, mintkeys: Nutcade.S.mintkeys, proofs: Nutcade.S.proofs, counters: Nutcade.S.counters };
                 const keys = {}; for (const [k, m] of Object.entries(maps)) keys[k] = Object.keys(m);
@@ -466,6 +469,10 @@ async def main():
             check('proto: each map has no prototype, and none of those keys is kept', r['noproto'] and not any(bad_left.values()), bad_left)
             check('proto: a key that is not a mint address is refused in the maps keyed by mint (auth, report log, mint keys)', not any('javascript:alert(1)' in r['keys'][k] for k in ('auth', 'mintlog', 'mintkeys')), r['keys'])
             check('proto: the real entries are unchanged (the login, the coins)', (await w.ev(ST))['inn'] and await bal(w, AU) == b0 and AU in r['keys']['auth'] and AU in r['keys']['mintlog'], (await w.ev(ST), await bal(w, AU), b0))
+            kept = await w.ev(f"""({{ ctr: Object.assign({{}}, Nutcade.S.counters), usd: Object.keys(Nutcade.S.proofs).includes({J(AU + '|usd')}) && Array.isArray(Nutcade.S.proofs[{J(AU + '|usd')}]),
+                mk: (Nutcade.S.mintkeys[{J(AU + '|usd')}] || {{}})['00ffeeddccbbaa99'] || null }})""")
+            check('proto: real entries survive the filter with their values: every counter keyset id, a USD account key (url|usd) in the coins and the mint keys',
+                  ctr0 and all(kept['ctr'].get(k) == v for k, v in ctr0.items()) and kept['ctr'].get('00ffeeddccbbaa99') == 7 and kept['usd'] and kept['mk'] == {'1': '02' + 'ab' * 32}, (ctr0, kept))
             ok2, e2 = await deposit(w, 100)
             check('proto: the login mint works as before afterwards (a deposit with a BAT)', ok and ok2 and not e2 and await bal(w, AU) == b0 + 100, (e, e2))
             txt = await w.ev("localStorage.getItem('nutcade:auth') || ''")

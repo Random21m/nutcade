@@ -58,7 +58,9 @@ async def section(name, fn):
     if only and not any(name.startswith(x) for x in only): return
     try: await fn()
     except Exception as e: check(f'{name}: ran to the end', False, repr(e)[:300])
-async def mints_tab(w): await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=mints]'); await w.wait(200)
+async def mints_tab(w):
+    await w.ev("Nutcade.closeSheet()")
+    if await w.ev("!!document.querySelector('[data-act=tab][data-tab=mints]')"): await w.click('[data-act=tab][data-tab=mints]'); await w.wait(200)
 async def settings(w): await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
 async def me(w): return await w.ev("CashuLib.nostrPub(window.__rvWordsKey(Nutcade.S.seed.mnemonic))")
 async def report(w, fresh=False):
@@ -281,6 +283,50 @@ async def main():
             await al.pg.context.set_offline(False); await al.wait(1500)
             check('offline: nothing goes out later on its own', pubs(PK, 38000) == n0)
         await section('offline', offline)
+
+        async def words():
+            # other 12 words (a restore, a new phrase): a review signed by the old key is no longer yours
+            x = await wallet(b, 'rv-words'); await x.create(); await x.add_mint(M); await x.use(M)
+            async def users():
+                t = await report(x, fresh=True); m = re.search(r'Recommended by (\d+) Nostr users?', t); r_ = re.search(r'from (\d+) ratings?', t)
+                return (int(m.group(1)) if m else -1, int(r_.group(1)) if r_ else 0), t
+            async def after(label, old_pk):
+                new_pk = await me(x)
+                check(f'{label}: the wallet now has another Nostr key', new_pk and new_pk != old_pk, (old_pk[:12], (new_pk or '')[:12]))
+                check(f'{label}: the old key\'s review is no longer "yours" (nothing remembered, no Your review)', await x.ev(f"Nutcade.rv.mine({J(M)})") is None)
+                await open_review(x)
+                check(f'{label}: the sheet shows the form, no Your review, no Edit or Delete', await x.ev("!!document.querySelector('#layer #rvForm') && !document.querySelector('#layer #rvMine') && !document.querySelector('#layer [data-act=rvDelAsk]')"))
+                n5 = pubs(new_pk, 5)
+                r = await x.ev(f"Nutcade.rv.del({J(M)}).then(v => v === null ? 'none' : 'sent', e => e.message)")
+                check(f'{label}: nothing can be deleted under the new key: no kind 5 is sent, the old review stays on the relay', r == 'none' and pubs(new_pk, 5) == n5 == 0 and len(evs(38000, old_pk)) == 1, (r, pubs(new_pk, 5)))
+                return new_pk
+            await open_review(x); await stars(x, 2); await write(x, 'under my first words'); await publish(x)
+            pk1 = await me(x)
+            check('words: setup: a review under the first words', len(evs(38000, pk1)) == 1)
+            u1, _ = await users()
+            # restore to other words (Settings -> Restore wallet), scanning only the test mint
+            phrase = await x.ev("CashuLib.generateMnemonic(CashuLib.wordlist, 128)")
+            await settings(x); await x.click('[data-act=seedRestore]'); await x.until("!!document.querySelector('#phraseIn')", 8000)
+            await x.ev("document.querySelectorAll('[data-rmint]').forEach(i => { i.checked = false; })")
+            await x.fill('#phraseIn', phrase); await x.fill('#rmExtra', M)
+            await x.click('#layer [data-act=doRestorePhrase]')
+            await x.until("/SCAN COMPLETE|CONTINUE!/.test((document.querySelector('.sheet-body')||{}).innerText||'')", 60000); await x.ev("Nutcade.closeSheet()")
+            pk2 = await after('restore', pk1)
+            u2, t2 = await users()
+            check('restore: the old review counts once, as someone else\'s (same people and ratings as before)', u2 == u1, (u1, u2, t2[-200:]))
+            # a review under the restored words, then Settings -> New recovery phrase
+            await open_review(x); await stars(x, 4); await write(x, 'under the restored words'); await publish(x)
+            check('words: setup: a review under the restored words', len(evs(38000, pk2)) == 1)
+            u3, _ = await users()
+            # (New recovery phrase has no button today: its action is pressed as pinguard_qa and backup_qa press it)
+            await settings(x); await x.ev("(()=>{const b=document.createElement('button'); b.dataset.act='newSeedAsk'; document.querySelector('#app').appendChild(b); b.click(); b.remove();})()")
+            await x.until("!!document.querySelector('#confirmWord')", 8000)
+            await x.fill('#confirmWord', 'NEW'); await x.click('#layer [data-act=doNewSeed]'); await x.wait(800)
+            await after('new phrase', pk2)
+            u4, t4 = await users()
+            check('new phrase: the old review counts once, as someone else\'s (same people and ratings as before)', u4 == u3, (u3, u4, t4[-200:]))
+            await x.pg.context.close()
+        await section('words', words)
 
         async def locked():
             e = await wallet(b, 'rv-lock'); ew = await e.create(); await e.add_mint(M); await e.use(M)

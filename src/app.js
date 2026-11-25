@@ -377,6 +377,7 @@ function setSeed(mnemonic, backedUp) {
   if (changed && S.prefs) { S.prefs.npc = false; S.prefs.npcSince = 0; S.prefs.npcName = ''; S.prefs.mintBackupAt = 0; S.prefs.mintBackupList = ''; S.prefs.sync = false; delete S.prefs.syncSt; S.prefs.syncOther = []; S.prefs.amOn = false; S.prefs.amMint = ''; S.prefs.amMin = AM_MIN_DEF; if (typeof npcSocketStop === 'function') npcSocketStop(); }
   for (const k in wallets) delete wallets[k];
   if (changed && S.auth && Object.keys(S.auth).length) { S.auth = Object.create(null); store.set('auth', S.auth); }   // (other words: no mint login is kept, log in again)
+  if (changed && typeof rvSeedChanged === 'function') rvSeedChanged();   // (other words: no mint review is yours any more: app_review.js)
   if (!store.set('seed', S.seed)) throw new Error("This browser won't save data. Open NUTCADE in a normal browser tab.");
   requestPersist();
 }

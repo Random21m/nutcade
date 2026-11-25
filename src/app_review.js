@@ -28,13 +28,39 @@ const rvStarsTxt = n => '★'.repeat(n) + '☆'.repeat(5 - n);
 const rvDecoy = () => !!(vault.on && vault.decoy);
 const rvD = e => ((Array.isArray(e.tags) ? e.tags : []).find(t => Array.isArray(t) && t[0] === 'd' && typeof t[1] === 'string') || [])[1] || '';
 const rvSig = e => { try { return !!L.verifyEvent(e); } catch (x) { return false; } };   // (a relay's event, whatever its shape)
+// this wallet's Nostr pubkey now (the key the current 12 words give), or null without words
+let rvMeC = null;
+function rvMe() {
+  if (!S.seed || !S.seed.mnemonic) return null;
+  if (!rvMeC || rvMeC.m !== S.seed.mnemonic) { let pk = null; try { pk = L.nostrPub(nostrKey()); } catch (e) {} rvMeC = { m: S.seed.mnemonic, pk }; }
+  return rvMeC.pk;
+}
 // your review of this mint: the one published from here, or one with your key found on your relays (another device or
-// app), whichever is newer; never one at or before a deletion you sent
+// app), whichever is newer; never one at or before a deletion you sent. Only what the current key signed is yours: a
+// review made under other 12 words (before a new phrase, a restore or an import) is someone else's (stored ones without
+// a pubkey too)
 function rvMine(url0) {
-  const l = S.mintlog[acctUrl(url0)]; if (!l) return null;
-  const del = num(l.revDel), seen = l.nostr && l.nostr.v === 2 && l.nostr.mine && num(l.nostr.mine.at) > del ? l.nostr.mine : null;
-  const here = l.rev && num(l.rev.at) > del ? l.rev : null;
+  const l = S.mintlog[acctUrl(url0)], me = rvMe(); if (!l || !me) return null;
+  const del = l.revDelPk === me ? num(l.revDel) : 0, n = l.nostr;
+  const seen = n && n.v === 2 && n.me === me && n.mine && n.mine.pk === me && num(n.mine.at) > del ? n.mine : null;
+  const here = l.rev && l.rev.pk === me && num(l.rev.at) > del ? l.rev : null;
   return here && (!seen || num(seen.at) <= num(here.at)) ? here : seen;
+}
+// other 12 words (setSeed): nothing reviewed under the old key is yours any more. Your published reviews and deletions
+// here are forgotten, and a review of yours the report card had read from relays becomes one person's like any other
+function rvSeedChanged() {
+  rvMeC = null;
+  let ch = false;
+  for (const l of Object.values(S.mintlog || {})) {
+    if (!l || typeof l !== 'object') continue;
+    if (l.rev || l.revDel || l.revDelPk) { delete l.rev; delete l.revDel; delete l.revDelPk; ch = true; }
+    const n = l.nostr;
+    if (n && n.v === 2) {
+      if (n.mine) { n.recs = num(n.recs) + 1; if (n.mine.stars) n.stars = (n.stars || []).concat([n.mine.stars]).slice(0, 50); n.mine = null; }
+      n.me = null; ch = true;   // (read again on the next check, with the new key)
+    }
+  }
+  if (ch) saveMlog();
 }
 // the mint's announcement (kind 38172) to point at: signed, its d the mint's pubkey; the newest if there are several
 const rvAnn = (l, pub) => ((l.nostr && l.nostr.anns) || []).filter(a => a && a.d === pub && /^[0-9a-f]{64}$/.test(a.pubkey || '')).sort((a, b) => num(b.at) - num(a.at))[0] || null;
@@ -77,7 +103,7 @@ async function rvPublish(url0, stars, text) {
   if (!n) throw rvNoRelay(list.length);
   // the mint's pubkey changed since your last review: that one had another d, so it is withdrawn (best effort)
   if (old && old.d && old.d !== pub) relayPublish(rvDelEvent(old.d, ts), 7000, list, 1500).catch(() => {});
-  l.rev = { stars, text: t, at: ts, d: pub, id: ev.id, n, of: list.length };
+  l.rev = { stars, text: t, at: ts, d: pub, id: ev.id, n, of: list.length, pk: ev.pubkey };   // (pk: the key that signed it; only that key's review is yours)
   saveMlog();
   return l.rev;
 }
@@ -90,7 +116,7 @@ async function rvDelete(url0) {
   const ts = Math.max(Math.floor(Date.now() / 1000), num(old.at));
   const n = await relayPublish(rvDelEvent(old.d || '', ts), 7000, list, 1500);
   if (!n) throw rvNoDel(list.length);
-  const l = mlog(url); delete l.rev; l.revDel = Math.max(num(l.revDel), ts);
+  const l = mlog(url); delete l.rev; l.revDel = Math.max(l.revDelPk === old.pk ? num(l.revDel) : 0, ts); l.revDelPk = old.pk;
   saveMlog();
   return { n, of: list.length };
 }
@@ -136,7 +162,7 @@ function openReview(url0) {
   openSheet('Review this mint', rvHTML(url), rvWire);
   // the mint's announcement and a review of yours from another device are read with the report card's Nostr look (daily)
   const l = mlog(url);
-  if (!rvDecoy() && (!l.nostr || l.nostr.v !== 2 || Date.now() - l.nostr.at > 86400e3)) nostrRecord(url).catch(() => {});
+  if (!rvDecoy() && (!l.nostr || l.nostr.v !== 2 || l.nostr.me !== rvMe() || Date.now() - l.nostr.at > 86400e3)) nostrRecord(url).catch(() => {});
 }
 // every text the review screens show (tests/review_qa.py checks each is translated)
 const rvTexts = () => ['Review this mint', 'Your review', 'Stars', 'Your review (optional)', 'What is it like to use? Plain text.', 'What goes out', 'Pick 1 to 5 stars.',

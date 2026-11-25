@@ -387,7 +387,7 @@ async function inspectMint(url0) {
     l.changes = l.changes.slice(-20);
   }
   l.checked = now; saveMlog();
-  if (!l.nostr || l.nostr.v !== 2 || now - l.nostr.at > 86400e3) await nostrRecord(url).catch(() => {});   // (v 2: 1.36, one rating per person, yours apart)
+  if (!l.nostr || l.nostr.v !== 2 || l.nostr.me !== rvMe() || now - l.nostr.at > 86400e3) await nostrRecord(url).catch(() => {});   // (v 2: 1.36, one rating per person, yours apart)
   return l;
 }
 // recommendations (kind 38000) and announcements (kind 38172) that name this mint. One rating per person (their newest
@@ -402,7 +402,8 @@ function nostrRecord(url) {
     const socks = [];
     const done = () => { if (finished) return; finished = true; socks.forEach(s => { try { s.close(); } catch (e) {} });
       const stars = [...per.values()].map(x => x.stars).filter(Boolean);
-      l.nostr = { v: 2, at: Date.now(), recs: per.size, stars: stars.slice(0, 50), since: since || null, mine, anns }; saveMlog(); resolve(l.nostr); };
+      if (me !== rvMe()) { resolve(l.nostr); return; }   // (other 12 words meanwhile: this look was for the old key, nothing is kept)
+      l.nostr = { v: 2, at: Date.now(), recs: per.size, stars: stars.slice(0, 50), since: since || null, mine, anns, me }; saveMlog(); resolve(l.nostr); };
     for (const r of relays().slice(0, 4)) {
       let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
       socks.push(ws); open++;
@@ -412,7 +413,7 @@ function nostrRecord(url) {
           if (!since || e.created_at * 1000 < since) since = e.created_at * 1000;
           const at = num(e.created_at);
           if (e.kind === 38000 && typeof e.pubkey === 'string') {
-            if (e.pubkey === me) { if ((!mine || at > mine.at) && rvSig(e)) { const p = rvParse(e.content); mine = { stars: p.stars, text: rvClean(p.text).slice(0, RV_MAX), at, d: rvD(e), id: e.id, relay: true }; } }
+            if (e.pubkey === me) { if ((!mine || at > mine.at) && rvSig(e)) { const p = rvParse(e.content); mine = { stars: p.stars, text: rvClean(p.text).slice(0, RV_MAX), at, d: rvD(e), id: e.id, relay: true, pk: e.pubkey }; } }
             else { const o = per.get(e.pubkey); if (!o || at > o.at) per.set(e.pubkey, { at, stars: rvParse(e.content).stars }); }
           } else if (e.kind === 38172 && anns.length < 10 && typeof e.pubkey === 'string' && rvSig(e)) anns.push({ pubkey: e.pubkey, d: rvD(e), relay: r, at }); }
         else if (d[0] === 'EOSE') { try { ws.close(); } catch (e) {} if (--open <= 0) done(); } };
@@ -447,7 +448,7 @@ function reportCard(url) {
   rows.push({ k: 'Track record', g: tot >= 5 ? band(ok / tot * 100, [99, 95, 90, 80]) : '?', d: tot ? [`${ok} of ${tot} of your payments and swaps went through`].concat(bad ? [`${bad} failed on the mint's side`] : []) : ['No payments with it yet'] });
   // community
   // (other people from the relays, one each, plus your own review once: app_review.js)
-  const own = l.nostr && l.nostr.v === 2 ? rvMine(url) : null;
+  const own = l.nostr && l.nostr.v === 2 && l.nostr.me === rvMe() ? rvMine(url) : null;   // (read for another key: yours isn't apart, so not added)
   const nr = l.nostr && { recs: l.nostr.recs + (own ? 1 : 0), stars: l.nostr.stars.concat(own && own.stars ? [own.stars] : []) };
   const avg = nr && nr.stars.length ? nr.stars.reduce((a, b) => a + b, 0) / nr.stars.length : null;
   rows.push({ k: 'Reviews', g: !nr ? '?' : nr.recs === 0 ? 'D' : avg != null && avg < 3 ? 'D' : band(nr.recs, [10, 5, 2, 1]), d: !nr ? ['Not checked yet'] : nr.recs ? [`Recommended by ${pl(nr.recs, 'Nostr user', 'Nostr users')}`].concat(avg != null ? [`${avg.toFixed(1)}/5 from ${pl(nr.stars.length, 'rating', 'ratings')}`] : []) : ['Nobody recommends it on Nostr yet'] });
