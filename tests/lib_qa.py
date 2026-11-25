@@ -298,9 +298,9 @@ async def main():
             async def mk(amount, v3=False):
                 for _ in range(8):
                     t = await al.ev(f"Nutcade.r8.sendEcash({amount}, 'b64', null, {J(M)}).then(x => x.token)")
-                    if v3:   # (cashu-ts 5 makes no cashuA: written here as NUT-00 V3, JSON in base64url as 4.13.1 wrote it)
+                    if v3:   # (cashu-ts 5 makes no cashuA: written here as NUT-00 V3, JSON in base64url as 4.13.1 wrote it; the memo makes '+' and '/')
                         t = await al.ev(f"""(() => {{ const d = CashuLib.getDecodedToken({J(t)}, Object.keys(Nutcade.S.counters));
-                            const j = JSON.stringify({{ token: [{{ mint: d.mint, proofs: d.proofs.map(p => ({{ id: p.id, amount: Number(String(p.amount)), secret: p.secret, C: p.C }})) }}], unit: d.unit }});
+                            const j = JSON.stringify({{ token: [{{ mint: d.mint, proofs: d.proofs.map(p => ({{ id: p.id, amount: Number(String(p.amount)), secret: p.secret, C: p.C }})) }}], unit: d.unit, memo: 'b64 >>> ??? ~~~' }});
                             return 'cashuA' + btoa(j).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); }})()""")
                     if re.search(r'[-_]', t[6:]): return std(t)
                     await al.receive_token(t)   # (no '-' or '_' in it: taken back, another one made)
@@ -308,7 +308,7 @@ async def main():
             for name, v3 in (('cashuB', False), ('cashuA', True)):
                 t = await mk(16, v3); b0 = await al.bal()
                 _, e, _ = await al.receive_token(t)
-                check(f'b64: a {name} token in standard base64 (+ / =) is received, all of it (on e9b0b98 "can\'t be read")', t and re.search(r'[+/]', t) and await al.bal() == b0 + 16, (e, await al.bal() - b0, (t or '')[:40]))
+                check(f'b64: a {name} token in standard base64 (+ / =) is received, all of it (on e9b0b98 refused as "doesn\'t look like a Cashu token")', t and re.search(r'[+/]', t) and await al.bal() == b0 + 16, (e, await al.bal() - b0, (t or '')[:40]))
             t = await mk(24); b0 = await al.bal()
             await al.ev(f"Nutcade.S.txs.unshift({{ id: 'b64old', ts: Date.now(), type: 'in', method: 'ecash', amount: 24, mint: {J(M)}, note: 'saved by 1.34', status: 'pending', incoming: {J(t)}, offline: true }})")
             await al.ev("window.dispatchEvent(new Event('online'))")

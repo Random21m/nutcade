@@ -62,7 +62,7 @@ function unpackToken(b) {
 function soundBytes(text, proof = true) {
   const c = classify(text);
   if (c.kind === 'token') {
-    try { const d = L.getDecodedToken(c.value, Object.keys(S.counters)); return packToken({ mint: d.mint, unit: d.unit, memo: d.memo, proofs: d.proofs }, proof); } catch (e) {}
+    try { const d = L.getDecodedToken(cleanToken(c.value), Object.keys(S.counters)); return packToken({ mint: d.mint, unit: d.unit, memo: d.memo, proofs: d.proofs }, proof); } catch (e) {}
   }
   return new TextEncoder().encode(String(text));
 }

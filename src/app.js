@@ -849,7 +849,11 @@ async function creditDepositRange(w, q) {
   return sum(found);
 }
 
-function cleanToken(t) { t = String(t || '').trim().replace(/^(web\+)?cashu:(\/\/)?/i, ''); const m = t.match(/cashu[AB][A-Za-z0-9_\-+/=]+/); return m ? m[0] : t; }
+// (a token in standard base64, '+' '/' and '=' padding, as some wallets write it and as tokens saved by 1.34 can be: cashu-ts
+// 4.13.1 read those, cashu-ts 5 reads base64url only, so the token is written in base64url here, before anything decodes it;
+// every token string read by the app, typed, scanned or saved, comes through here)
+const tokB64url = s => /^cashu[AB]/.test(s) ? s.slice(0, 6) + s.slice(6).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : s;
+function cleanToken(t) { t = String(t || '').trim().replace(/^(web\+)?cashu:(\/\/)?/i, ''); const m = t.match(/cashu[AB][A-Za-z0-9_\-+/=]+/); return tokB64url(m ? m[0] : t); }
 function peekToken(t) {
   const meta = L.getTokenMetadata(cleanToken(t));
   const unit = String(meta.unit || 'sat').toLowerCase();
@@ -2065,7 +2069,7 @@ function celebrate(dir, amount, unit) {
 /* ---------- QR ---------- */
 /* tokens: qrCanvas(text, mode, plain) is in app_tokens.js (the acorn in the middle, read back) */
 function slimToken(t) {
-  const d = L.getDecodedToken(t, Object.keys(S.counters));
+  const d = L.getDecodedToken(cleanToken(t), Object.keys(S.counters));
   return tokEnc({ mint: d.mint, unit: d.unit || 'sat', memo: d.memo, proofs: d.proofs.map(p => { const o = Object.assign({}, p); delete o.dleq; return o; }) });
 }
 // Above this many characters a single QR code gets too dense for most phone cameras, so it plays as an animated QR instead.
@@ -3484,7 +3488,7 @@ async function nfcWrite(text) {
   const w = new NDEFReader(); const ac = new AbortController(); nfcAbort = ac;
   let rec = { recordType: 'text', data: text, lang: 'en' };
   if (/^cashuB/.test(text) && text.length > 460) {   // small cards (NTAG215 ≈ 500 bytes): use the compact binary form cashu.me also reads
-    try { rec = { recordType: 'mime', mediaType: 'application/octet-stream', data: L.getEncodedTokenBinary(L.getDecodedToken(text, Object.keys(S.counters))) }; } catch (e) {}
+    try { rec = { recordType: 'mime', mediaType: 'application/octet-stream', data: L.getEncodedTokenBinary(L.getDecodedToken(cleanToken(text), Object.keys(S.counters))) }; } catch (e) {}
   }
   try { await w.write({ records: [rec] }, { overwrite: true, signal: ac.signal }); }
   finally { if (nfcAbort === ac) nfcAbort = null; }
@@ -3605,7 +3609,7 @@ function sendOffline(amount, note, url = S.active) {
 function holdIncoming(token, note, opts = {}) {
   const meta = peekToken(token);
   if (!unitOk(meta.unit)) throw unitErr(meta.unit);   // (a unit NUTCADE doesn't hold is never saved, as SAT or otherwise)
-  if (S.txs.some(t => t.incoming === cleanToken(token))) throw new Error('This token is already saved and waiting.');
+  if (S.txs.some(t => t.incoming && cleanToken(t.incoming) === cleanToken(token))) throw new Error('This token is already saved and waiting.');
   let dleq = null;
   if (opts.check) {
     dleq = offlineCheck(token).state; if (dleq === 'bad') throw forgedErr();

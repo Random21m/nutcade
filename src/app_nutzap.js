@@ -277,7 +277,7 @@ async function nzClaim(t0, force, hand) {
     const turnedDown = isRefusal(e) || isRefusal(e.cause);   // (the mint answered no: its step signed nothing)
     if (!netErr(e) && !e.blocked && (!e.asked || turnedDown)) {   // the mint turned it down: which of its coins are still good?
       try {
-        const w = await getWallet(cur.mint), ps = L.getDecodedToken(cur.incoming, Object.keys(S.mintkeys[cur.mint] || {}).concat(Object.keys(S.counters))).proofs || [];
+        const w = await getWallet(cur.mint), ps = L.getDecodedToken(cleanToken(cur.incoming), Object.keys(S.mintkeys[cur.mint] || {}).concat(Object.keys(S.counters))).proofs || [];
         const st = await inTime(w.checkProofsStates(ps), 20000);
         if (st.length === ps.length && st.every(x => x && x.state === 'UNSPENT')) refused = true;   // (every coin unspent, and the mint still says no)
         else if (st.length === ps.length && !S.ops.some(o => o.follow && o.follow.k === 'incoming' && o.follow.txId === cur.id)) {
