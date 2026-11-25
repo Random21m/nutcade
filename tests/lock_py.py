@@ -2,7 +2,8 @@
 implementation to check NUTCADE and its bundled cashu-ts against.
   lock_py.py derive              stdin {words, keyset, n}: Nutshell's NUT-13 secrets for counters 0..n-1 of that keyset
   lock_py.py send DIR MINT AMOUNT stdin {kind, data, tags}: a token of AMOUNT whose coins carry exactly that NUT-10 lock
-                                 (each coin its own nonce), made by a Nutshell wallet kept in DIR, with DLEQ proofs"""
+                                 (each coin its own nonce), made by a Nutshell wallet kept in DIR, with DLEQ proofs
+  lock_py.py y                   stdin [secret, ...]: Nutshell's NUT-00 hash_to_curve Y of each (secp256k1, compressed hex)"""
 import asyncio, json, sys
 
 
@@ -36,4 +37,7 @@ async def send(dir, mint, amount, lock):
 if __name__ == '__main__':
     a = sys.argv[1:]
     if a[0] == 'derive': print(json.dumps(asyncio.run(derive(json.load(sys.stdin)))))
+    elif a[0] == 'y':
+        from cashu.core.crypto.b_dhke import hash_to_curve
+        print(json.dumps([hash_to_curve(x.encode()).format().hex() for x in json.load(sys.stdin)]))
     elif a[0] == 'send': print(asyncio.run(send(a[1], a[2], int(a[3]), json.load(sys.stdin))))

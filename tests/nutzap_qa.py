@@ -484,6 +484,26 @@ async def main():
                 await x.pg.context.close()
         await section('langs', langs)
 
+        async def fields():
+            # a waiting nutzap whose mint turns it down because some of its coins are spent is saved again with the coins
+            # still good (NutZap.left, app_nutzap.js), each with every field it had (spend_info, witness, p2pk_e, dleq: on
+            # e9b0b98 spend_info and witness were dropped)
+            tok = await al.ev(f"Nutcade.r8.sendEcash(3, 'fields', null, {J(M)}).then(x => x.token)")
+            ps = await al.ev(f"CashuLib.getDecodedToken({J(tok)}, Object.keys(Nutcade.S.counters)).proofs.map(p => Object.assign({{}}, p, {{ amount: Number(String(p.amount)) }}))")
+            SI = {'k': '02' + 'cd' * 32, 'tree': ['00' * 8]}
+            extra = {'spend_info': SI, 'witness': J({'signatures': ['ee' * 64]}), 'p2pk_e': '02' + 'ef' * 32}
+            rest = [dict(p, **extra) for p in ps[1:]]
+            t2 = await al.ev(f"CashuLib.getEncodedToken({{ mint: {J(M)}, unit: 'sat', proofs: {J(ps[:1] + rest)}.map(p => Object.assign({{}}, p, {{ amount: CashuLib.Amount.from(p.amount) }})) }})")
+            got = await al.ev(f"""(() => {{ const d = CashuLib.getDecodedToken({J(t2)}, Object.keys(Nutcade.S.counters));
+                const left = NutZap.left(d.proofs, d.proofs.map((p, i) => ({{ state: i ? 'UNSPENT' : 'SPENT' }})));
+                const back = CashuLib.getDecodedToken(NutZap.leftToken({J(M)}, left), Object.keys(Nutcade.S.counters)).proofs;
+                return back.map(p => ({{ secret: p.secret, amount: Number(String(p.amount)), si: p.spend_info || null, w: p.witness || null, e: p.p2pk_e || null, dleq: !!(p.dleq && p.dleq.r) }})); }})()""")
+            check('fields: a waiting nutzap with a spent coin is saved again with only the good coins, each keeping spend_info, witness, p2pk_e and its DLEQ proof',
+                  [p['secret'] for p in got] == [p['secret'] for p in rest] and all(p['si'] == SI and p['w'] == extra['witness'] and p['e'] == extra['p2pk_e'] and p['dleq'] for p in got)
+                  and sum(p['amount'] for p in got) == sum(p['amount'] for p in rest), got)
+            await al.receive_token(tok)   # (the coins back)
+        await section('fields', fields)
+
         await al.pg.screenshot(path=os.path.join(OUT, 'nutzap.png'))
         await b.close()
     bad = [r for r in results if not r[1]]

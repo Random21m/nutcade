@@ -24,12 +24,16 @@ heir:     an Extra Life copy is held only when the library could spend it by its
           whose data is no key: not held.
 takeback: a gift is never taken back in its locktime's own second (the mint and the library still read it as locked).
 giftkey:  a gift to a key that is no point on the curve is refused before anything is spent.
+ys:       a journal record from before 1.35 (coins without keyset ids) asks the mint about its coins with the secp256k1 Y
+          that cashu-ts 4.13.1 computed (Nutshell's hash_to_curve), whatever keysets the wallet holds (a v3 "02" keyset, or none).
+b64:      a token in standard base64 ('+' '/' and '=' padding, which cashu-ts 4.13.1 read and 5 refuses) is read as before:
+          cashuB and cashuA, pasted, and one saved waiting by 1.34 claimed when the wallet is online.
 request:  a payment request asking for a lock NUTCADE can't make exactly (HTLC, another kind, data that isn't a key,
           an x-only key, an n_sigs without value) is refused before anything is spent (before 1.35 it was paid with an
           UNLOCKED token); a P2PK request with tags is paid with exactly the lock it asked for (library parity); a plain
           P2PK request is paid as before. The new text in five languages.
 LIB_ONLY=a,b runs some sections (their names start with those letters)."""
-import asyncio, hashlib, json, os, subprocess, sys, tempfile, time
+import asyncio, hashlib, json, os, re, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from playwright.async_api import async_playwright
 from wallet_qa import W, check, results, URL, outside_net, B as M
@@ -273,9 +277,49 @@ async def main():
             check('giftkey: a gift to a key that is not on the curve is refused with the usual "can\'t be read" and nothing is spent', "can't be read" in e and await al.bal() == b0, (e, b0, await al.bal()))
         await section('giftkey', giftkey)
 
+        async def ys():
+            ss = [os.urandom(32).hex() for _ in range(3)]
+            ref = json.loads(py('y', inp=ss))
+            V3 = '02' + 'ab' * 32
+            got = await al.ev(f"""(async () => {{ const w = await Nutcade.lk.wallet({J(M)}), ss = {J(ss)}, out = [];
+                const fakes = [w, {{ keyChain: {{ getKeysets: () => [{{ id: {J(V3)} }}] }}, keysetId: {J(V3)} }}, {{ keyChain: {{ getKeysets: () => [] }}, keysetId: undefined }}, {{}}];
+                for (const f of fakes) {{ try {{ out.push(Nutcade.lk.ys(f, ss, null).map(q => w.computeY(q.secret, q.id))); }} catch (e) {{ out.push('threw: ' + e.message); }} }}
+                const mixed = Nutcade.lk.ys(fakes[1], ss, {{ [ss[0]]: {J(kid)} }}).map(q => q.id);
+                return {{ out, mixed }}; }})()""")
+            names = ['the wallet\'s own keysets', 'a v3 ("02") keyset first', 'no keysets at all', 'no keychain']
+            for name, o in zip(names, got['out']):
+                check(f'ys: a record without keyset ids, {name}: each coin\'s Y is the 4.13.1 one (Nutshell hash_to_curve, secp256k1)', o == ref, (o, ref))
+            check('ys: a coin whose id the record has keeps that id', got['mixed'][0] == kid and got['mixed'][1] != V3, got['mixed'])
+        await section('ys', ys)
+
+        async def b64():
+            def std(t):
+                body = t[6:].replace('-', '+').replace('_', '/'); return t[:6] + body + '=' * (-len(body) % 4)
+            async def mk(amount, v3=False):
+                for _ in range(8):
+                    t = await al.ev(f"Nutcade.r8.sendEcash({amount}, 'b64', null, {J(M)}).then(x => x.token)")
+                    if v3:   # (cashu-ts 5 makes no cashuA: written here as NUT-00 V3, JSON in base64url as 4.13.1 wrote it)
+                        t = await al.ev(f"""(() => {{ const d = CashuLib.getDecodedToken({J(t)}, Object.keys(Nutcade.S.counters));
+                            const j = JSON.stringify({{ token: [{{ mint: d.mint, proofs: d.proofs.map(p => ({{ id: p.id, amount: Number(String(p.amount)), secret: p.secret, C: p.C }})) }}], unit: d.unit }});
+                            return 'cashuA' + btoa(j).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); }})()""")
+                    if re.search(r'[-_]', t[6:]): return std(t)
+                    await al.receive_token(t)   # (no '-' or '_' in it: taken back, another one made)
+                return None
+            for name, v3 in (('cashuB', False), ('cashuA', True)):
+                t = await mk(16, v3); b0 = await al.bal()
+                _, e, _ = await al.receive_token(t)
+                check(f'b64: a {name} token in standard base64 (+ / =) is received, all of it (on e9b0b98 "can\'t be read")', t and re.search(r'[+/]', t) and await al.bal() == b0 + 16, (e, await al.bal() - b0, (t or '')[:40]))
+            t = await mk(24); b0 = await al.bal()
+            await al.ev(f"Nutcade.S.txs.unshift({{ id: 'b64old', ts: Date.now(), type: 'in', method: 'ecash', amount: 24, mint: {J(M)}, note: 'saved by 1.34', status: 'pending', incoming: {J(t)}, offline: true }})")
+            await al.ev("window.dispatchEvent(new Event('online'))")
+            ok = await al.until(f"{TOTAL} >= {b0 + 24}", 20000); await al.wait(800)
+            st = await al.ev("(Nutcade.S.txs.find(t => t.id === 'b64old') || {}).status || 'gone'")
+            check('b64: a token saved waiting by 1.34 in standard base64 is claimed once online, all of it, its line not failed (on e9b0b98 marked "already claimed by someone else")', ok and await al.bal() == b0 + 24 and st != 'failed', (await al.bal() - b0, st))
+        await section('b64', b64)
+
         async def request():
-            async def pay(nut10, amount=20):
-                e = await al.ev(f"new CashuLib.PaymentRequest({{transport: [], id: 'r' + Math.random(), amount: {amount}, unit: 'sat', mints: [{J(M)}], description: 'lock test', singleUse: true, nut10: {J(nut10) if nut10 else 'undefined'}}}).toEncodedRequest()")
+            async def pay(nut10, amount=20, nutroot=None, creqb=False):
+                e = await al.ev(f"new CashuLib.PaymentRequest({{transport: [], id: 'r' + Math.random(), amount: {amount}, unit: 'sat', mints: [{J(M)}], description: 'lock test', singleUse: true, nut10: {J(nut10) if nut10 else 'undefined'}, nutroot: {J(nutroot) if nutroot else 'undefined'}}}).{'toEncodedCreqB' if creqb else 'toEncodedRequest'}()")
                 b0 = await al.bal(); n0 = await al.ev("Nutcade.S.txs.length")
                 await al.home(); await al.ev(f"Nutcade.handleScan({J(e)})"); await al.wait(400)
                 note = await al.sheet_text(); btn = await al.ev("!!document.querySelector('[data-act=payReq]')")
@@ -288,6 +332,17 @@ async def main():
                               ('an x-only key', {'kind': 'P2PK', 'data': K1[2:], 'tags': []}), ('n_sigs without a value', {'kind': 'P2PK', 'data': K1, 'tags': [['n_sigs']]})]:
                 r = await pay(n10)
                 check(f'request: {name}: refused before anything is spent, with the reason on the screen (before 1.35 paid UNLOCKED)', r['note'] and not r['btn'] and r['spent'] == 0 and not r['secrets'], r)
+            # cashu-ts 5: a request can carry its lock only in `nutroot` (the v3 lock); NUTCADE can't make that lock, so such a
+            # request is refused before anything is spent (on e9b0b98 it was paid with an UNLOCKED token)
+            for name, kw in [('a lock only in nutroot (creqA)', {'nutroot': {'receiverKey': K1}}), ('a lock only in nutroot (creqB)', {'nutroot': {'receiverKey': K1}, 'creqb': True}),
+                             ('a nutroot tree only (leaves)', {'nutroot': {'receiverKey': K1, 'leaves': ['00' * 8]}})]:
+                r = await pay(None, **kw)
+                check(f'request: {name}: refused before anything is spent, with the reason on the screen (on e9b0b98 paid UNLOCKED)', r['note'] and not r['btn'] and r['spent'] == 0 and not r['secrets'], r)
+            rd = await al.ev(f"""(() => {{ const t = x => {{ try {{ return Nutcade.lk.req(CashuLib.decodePaymentRequest(new CashuLib.PaymentRequest(Object.assign({{transport: [], id: 'x', amount: 5, unit: 'sat'}}, x)).toEncodedRequest())) ? 'lock' : 'none'; }} catch (e) {{ return e.message; }} }};
+                return [t({{nutroot: {{receiverKey: {J(K1)}}}}}), t({{nutroot: {{receiverKey: {J(K1)}}}, nut10: {{kind: 'P2PK', data: {J(K2)}, tags: []}}}}), t({{}})]; }})()""")
+            check('request: the lock reader: nutroot alone refused, nutroot with a P2PK nut10 read as that lock, no lock none', rd == [REQ_ERR, 'lock', 'none'], rd)
+            r = await pay({'kind': 'P2PK', 'data': K2, 'tags': []}, nutroot={'receiverKey': K2})
+            check('request: a request carrying both encodings (nut10 + nutroot) is paid with the nut10 lock, locked to its key', r['secrets'] and all(isinstance(s, list) and s[0] == 'P2PK' and s[1]['data'] == K2 for s in r['secrets']) and r['spent'] == 20, r)
             lt = str(int(time.time()) + 7200)
             r = await pay({'kind': 'P2PK', 'data': K1, 'tags': [['locktime', lt], ['refund', K2], ['sigflag', 'SIG_INPUTS']]})
             ok = r['secrets'] and all(isinstance(s, list) and s[0] == 'P2PK' and s[1]['data'] == K1 and dict((t[0], t[1:]) for t in s[1].get('tags', [])).get('locktime') == [lt]
