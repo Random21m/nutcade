@@ -5,7 +5,10 @@
              kind 38172 announcement is known (seen by the report card, its d = that pubkey, its signature checked),
              ["a", "38172:<announcer>:<d>", <the relay it was seen on>, "cashu"]
      content "[N/5]" or "[N/5] text" (cashu.me's format; the report card reads the stars back from it)
-   signed with the wallet's own Nostr key (nostrKey(): the same key as nutzaps, npub.cash and the mint-list backup).
+   signed with your Nostr identity when you are signed in (idSign, app_identity.js: never the 12-word key instead), else
+   with the wallet's own Nostr key (nostrKey(), as before 1.37). Your reviews are the ones signed by any key of yours
+   (idKeys: the 12-word key, your identity, former identities), counted once: the newest. A deletion is signed by the key
+   that published the review (one under an identity you're not signed in with can't be deleted from here).
    It is addressable (the d tag), so a new review of the same mint replaces the old one. Delete is a kind 5 with
    ["a", "38000:<you>:<d>"] (NIP-09), and the review is forgotten here; a copy a relay kept anyway is never counted again.
    Publishing is always a tap, after one plain warning line; nothing is queued: offline, it says it needs a connection.
@@ -28,22 +31,24 @@ const rvStarsTxt = n => '★'.repeat(n) + '☆'.repeat(5 - n);
 const rvDecoy = () => !!(vault.on && vault.decoy);
 const rvD = e => ((Array.isArray(e.tags) ? e.tags : []).find(t => Array.isArray(t) && t[0] === 'd' && typeof t[1] === 'string') || [])[1] || '';
 const rvSig = e => { try { return !!L.verifyEvent(e); } catch (x) { return false; } };   // (a relay's event, whatever its shape)
-// this wallet's Nostr pubkey now (the key the current 12 words give), or null without words
+// your keys now, as one text (the report card reads Nostr again when it changes), or null without words
 let rvMeC = null;
 function rvMe() {
   if (!S.seed || !S.seed.mnemonic) return null;
-  if (!rvMeC || rvMeC.m !== S.seed.mnemonic) { let pk = null; try { pk = L.nostrPub(nostrKey()); } catch (e) {} rvMeC = { m: S.seed.mnemonic, pk }; }
-  return rvMeC.pk;
+  const ks = idKeys(); return ks.length ? ks.join(',') : null;
 }
+const rvKeys = () => (S.seed && S.seed.mnemonic) ? idKeys() : [];
+// a switch of identity: the report card reads your reviews again with your keys now
+function rvIdChanged() { rvMeC = null; for (const l of Object.values(S.mintlog || {})) if (l && l.nostr && l.nostr.v === 2) l.nostr.me = null; }
 // your review of this mint: the one published from here, or one with your key found on your relays (another device or
 // app), whichever is newer; never one at or before a deletion you sent. Only what the current key signed is yours: a
 // review made under other 12 words (before a new phrase, a restore or an import) is someone else's (stored ones without
 // a pubkey too)
 function rvMine(url0) {
-  const l = S.mintlog[acctUrl(url0)], me = rvMe(); if (!l || !me) return null;
-  const del = l.revDelPk === me ? num(l.revDel) : 0, n = l.nostr;
-  const seen = n && n.v === 2 && n.me === me && n.mine && n.mine.pk === me && num(n.mine.at) > del ? n.mine : null;
-  const here = l.rev && l.rev.pk === me && num(l.rev.at) > del ? l.rev : null;
+  const l = S.mintlog[acctUrl(url0)], me = rvMe(), keys = rvKeys(); if (!l || !me) return null;
+  const del = pk => l.revDelPk === pk ? num(l.revDel) : 0, n = l.nostr;
+  const seen = n && n.v === 2 && n.me === me && n.mine && keys.includes(n.mine.pk) && num(n.mine.at) > del(n.mine.pk) ? n.mine : null;
+  const here = l.rev && keys.includes(l.rev.pk) && num(l.rev.at) > del(l.rev.pk) ? l.rev : null;
   return here && (!seen || num(seen.at) <= num(here.at)) ? here : seen;
 }
 // other 12 words (setSeed): nothing reviewed under the old key is yours any more. Your published reviews and deletions
@@ -84,9 +89,10 @@ async function rvMintPub(url) {
   if (!/^0[23][0-9a-f]{64}$/.test(pub)) throw keepErr(new Error(`Couldn't reach ${host(url)} to read its identity key. Nothing was sent. Try again in a moment.`));
   return pub;
 }
-const rvDelEvent = (d, ts) => L.finalizeEvent({ kind: 5, created_at: ts, tags: [['a', `38000:${L.nostrPub(nostrKey())}:${d}`], ['k', '38000']], content: '' }, nostrKey());
+// a deletion, signed by the key that published the review (pk; none before 1.37: the 12-word key)
+const rvDelEvent = (d, ts, pk) => idSignAs(pk, { kind: 5, created_at: ts, tags: [['a', `38000:${pk}:${d}`], ['k', '38000']], content: '' });
 async function rvPublish(url0, stars, text) {
-  const url = acctUrl(url0);
+  const url = acctUrl(url0), g = idNow();   // (the identity when you tapped: a switch meanwhile signs nothing)
   rvCan('pub');
   stars = Number(stars);
   if (!Number.isInteger(stars) || stars < 1 || stars > 5) throw keepErr(new Error('Pick 1 to 5 stars first.'));
@@ -98,11 +104,12 @@ async function rvPublish(url0, stars, text) {
   const l = mlog(url), old = rvMine(url), ann = rvAnn(l, pub);
   const tags = [['k', '38172'], ['d', pub], ['u', url, 'cashu']].concat(ann ? [['a', `38172:${ann.pubkey}:${pub}`, ann.relay || '', 'cashu']] : []);
   const ts = Math.max(Math.floor(Date.now() / 1000), (old ? num(old.at) : 0) + 1, num(l.revDel) + 1);
-  const ev = L.finalizeEvent({ kind: 38000, created_at: ts, tags, content: rvContent(stars, t) }, nostrKey());
+  const ev = await idSign({ kind: 38000, created_at: ts, tags, content: rvContent(stars, t) }, g);   // (your identity when signed in: app_identity.js)
+  if (isOffline()) throw keepErr(new Error("You're offline. Publishing a review needs a connection. Nothing was sent."));
   const n = await relayPublish(ev, 7000, list, 1500);
   if (!n) throw rvNoRelay(list.length);
   // the mint's pubkey changed since your last review: that one had another d, so it is withdrawn (best effort)
-  if (old && old.d && old.d !== pub) relayPublish(rvDelEvent(old.d, ts), 7000, list, 1500).catch(() => {});
+  if (old && old.d && old.d !== pub && old.pk === ev.pubkey) rvDelEvent(old.d, ts, old.pk).then(e => relayPublish(e, 7000, list, 1500)).catch(() => {});
   l.rev = { stars, text: t, at: ts, d: pub, id: ev.id, n, of: list.length, pk: ev.pubkey };   // (pk: the key that signed it; only that key's review is yours)
   saveMlog();
   return l.rev;
@@ -114,7 +121,7 @@ async function rvDelete(url0) {
   const list = relays();
   if (rvDecoy()) return rvDecoyWait(rvNoDel(list.length));
   const ts = Math.max(Math.floor(Date.now() / 1000), num(old.at));
-  const n = await relayPublish(rvDelEvent(old.d || '', ts), 7000, list, 1500);
+  const n = await relayPublish(await rvDelEvent(old.d || '', ts, idHex(old.pk) ? old.pk : seedPub()), 7000, list, 1500);
   if (!n) throw rvNoDel(list.length);
   const l = mlog(url); delete l.rev; l.revDel = Math.max(l.revDelPk === old.pk ? num(l.revDel) : 0, ts); l.revDelPk = old.pk;
   saveMlog();

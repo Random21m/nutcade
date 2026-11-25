@@ -101,7 +101,7 @@ function useScan() {
 }
 useScan();
 // the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
-const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'p2bk', 'sync', 'syncSt', 'syncOther', 'amOn', 'amMint', 'amMin'];
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'p2bk', 'sync', 'syncSt', 'syncOther', 'amOn', 'amMint', 'amMin', 'idOld', 'nzOld'];
 const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const walletPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const inVault = k => vault.on && !devKey(k);
@@ -119,7 +119,7 @@ const raw = {
   del(k) { if (inVault(k)) { if (vault.open && !writeGuard.paused) { delete vault.data[k]; queueVaultWrite(); } return; } lsDel(k); }
 };
 // everything that holds ecash, keys or anything that can spend: with a PIN, only inside the encrypted vault
-const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc', 'ops', 'oplate', 'extra', 'hunts', 'found', 'imports', 'limits', 'auth'];
+const VAULT_KEYS = ['seed', 'proofs', 'pending', 'quotes', 'txs', 'p2pk', 'requests', 'contacts', 'nwc', 'ops', 'oplate', 'extra', 'hunts', 'found', 'imports', 'limits', 'auth', 'nid'];   // (nid: your Nostr identity's connection, app_identity.js)
 const vault = { on: false, open: false, data: {}, dek: null, chain: Promise.resolve(), queued: false, decoy: false, sealing: false };
 vault.on = raw.get('vault', null) != null;
 // A tab paused because NUTCADE opened in another tab never writes the wallet again: work it still had in flight can't
@@ -378,6 +378,7 @@ function setSeed(mnemonic, backedUp) {
   for (const k in wallets) delete wallets[k];
   if (changed && S.auth && Object.keys(S.auth).length) { S.auth = Object.create(null); store.set('auth', S.auth); }   // (other words: no mint login is kept, log in again)
   if (changed && typeof rvSeedChanged === 'function') rvSeedChanged();   // (other words: no mint review is yours any more: app_review.js)
+  if (changed && typeof idSeedChanged === 'function') { try { idSeedChanged(); } catch (e) { S.nid = null; raw.del('nid'); } }   // (other words: signed out of your Nostr identity: app_identity.js)
   if (!store.set('seed', S.seed)) throw new Error("This browser won't save data. Open NUTCADE in a normal browser tab.");
   requestPersist();
 }
@@ -1998,6 +1999,8 @@ async function urSingle(text) {
 function handleScan(text) {
   // a NUTCADE link (a challenge or a treasure-hunt clue) scanned with the camera opens like a tapped link
   { const lk = /#((?:challenge|hunt)=[A-Za-z0-9_.&=-]+)/.exec(String(text || '')); if (lk && /^https?:\/\//i.test(String(text).trim())) { if (needSeed()) return; closeSheet(); openLink(lk[1]); return; } }
+  if (/^bunker:\/\//i.test(String(text || '').trim())) { closeSheet(); openIdBunker(String(text).trim()); return; }   // (a remote signer's link: filled in, connected only when you tap Connect)
+  if (/^(nostr:)?(nsec|ncryptsec)1/i.test(String(text || '').trim())) { closeSheet(); sfx('err'); toast(ID_E_NSEC, 'gold'); return; }   // (a private key is never taken)
   if (/^ur:bytes\//i.test(String(text || '').trim())) { urSingle(text).then(t => t ? handleScan(t) : toast("That's one frame of an animated QR code. Scan it live with the camera instead.", 'gold')); return; }
   const c = classify(text);
   if (c.kind === 'token') { closeSheet(); openReceive('ecash'); const box = $('#tokIn'); if (box) { box.value = c.value; box.dispatchEvent(new Event('input', { bubbles: true })); } return; }
@@ -2679,7 +2682,7 @@ function hydrateFromVault() {
   loadWalletState();
   S.limits = d.limits || null;
   S.hunts = d.hunts || []; S.found = Object.assign(Object.create(null), d.found || {}); S.imports = d.imports || [];
-  S.seed = d.seed || null; S.proofs = keyMap(d.proofs); S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || []; S.nwc = d.nwc || []; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null;
+  S.seed = d.seed || null; S.proofs = keyMap(d.proofs); S.pending = d.pending || []; S.quotes = d.quotes || []; S.txs = d.txs || []; S.p2pk = d.p2pk || []; S.requests = d.requests || []; S.contacts = d.contacts || []; S.nwc = d.nwc || []; S.nid = d.nid || null; S.ops = d.ops || []; S.oplate = d.oplate || []; S.extra = d.extra || null;
   seedBytes = null; raw.del('pinfails'); requestPersist(); mergeMintSpellings();
   nwcSince = Math.floor(Date.now() / 1000);   // Wallet Connect requests sent while it was locked are refused, not paid now
 }
@@ -2814,12 +2817,12 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.36.0';
+const APP_VERSION = '1.37.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
 const THEMES = [['neon', 'Neon arcade'], ['amber', 'Amber CRT'], ['phosphor', 'Green phosphor']];
-const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-help', 'Help'], ['set-about', 'About']];
+const SECTIONS = [['set-security', 'Security'], ['set-backup', 'Backup'], ['set-contacts', 'Contacts'], ['set-lnaddr', 'Lightning address'], ['set-nwc', 'Wallet Connect'], ['set-look', 'Look & sound'], ['set-privacy', 'Privacy'], ['set-identity', 'Nostr identity'], ['set-piggy', 'Piggy bank'], ['set-tools', 'Wallet tools'], ['set-help', 'Help'], ['set-about', 'About']];
 const toggle = (k, label, help) => `<label class="toggle set" for="p_${k}"><span><span class="tl">${label}</span>${help ? `<span class="th">${help}</span>` : ''}</span><input id="p_${k}" type="checkbox" data-act="pref" data-k="${k}" ${S.prefs[k] ? 'checked' : ''}></label>`;
 function viewSettings() {
   const inflight = S.pending.length;   // (a paid payment still waiting for its change counts: Check stuck payments retries it)
@@ -2903,6 +2906,8 @@ function viewSettings() {
       ${sySettingsHTML()}
       ${toggle('mintRadar', 'Show mint reliability', "Asks MintRadar (mintradar.org) for its public list of mint health, so MintRadar sees your phone's internet address. It does not learn which mints you use: NUTCADE downloads the whole list and compares it on this phone. It is an operational health signal, not a statement that a mint holds your sats or is safe to deposit into. Off by default.")}
     </div>
+
+    ${idSettingsHTML()}
 
     <div class="panel" id="set-piggy"><span class="h2">Piggy bank</span>
       ${toggle('piggy', 'Round up my payments', 'Each payment rounds up and the difference is set aside in your piggy bank. The sats stay in your wallet; NUTCADE makes you wait through a countdown before you spend them.')}
@@ -4160,6 +4165,7 @@ async function lnAddressInvoice(address, sats, comment) {
   return inv.pr;
 }
 
+/*@@app_identity.js@@*/
 /*@@app_r4.js@@*/
 /*@@app_r5.js@@*/
 /*@@app_r6.js@@*/
@@ -4362,7 +4368,7 @@ function wipeWallet() {
   // wallet goes, with the PIN, its tries and changes, and only the device's own settings and arcade tables stay
   vault.on = false; vault.open = false; vault.decoy = false; vault.dek = null; vault.data = {};
   try { for (const k of Object.keys(localStorage)) { if (!k.startsWith('nutcade:')) continue; const n = k.slice(8); if (n === 'prefs' || (devKey(n) && !/^(vault|pinfails|pinchg|gen|authwait|authcode)$/.test(n))) continue; localStorage.removeItem(k); } } catch (e) {}
-  try { npcSocketStop(); dmStop(); nzStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'amOn', 'amMint', 'amMin']) delete S.prefs[k]; store.set('prefs', S.prefs); } catch (e) {}
+  try { npcSocketStop(); dmStop(); nzStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'nzOld', 'idOld', 'amOn', 'amMint', 'amMin']) delete S.prefs[k]; store.set('prefs', S.prefs); S.nid = null; } catch (e) {}
   location.reload();
 }
 const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: bkTxs(), p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: bkImports(), quotes: S.quotes, requests: S.requests, contacts: S.contacts, settings: bkSettings(), trophies: bkTrophies(), plays: store.get('plays', null), arcade: bkArcade() }, null, 1);
@@ -4774,6 +4780,7 @@ const A = {
 /*@@app_automove_actions.js@@*/
 /*@@app_auth_actions.js@@*/
 /*@@app_review_actions.js@@*/
+/*@@app_identity_actions.js@@*/
 function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && isSatAcct(dest.url) && meta.unit === 'sat' && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;   // (a swap is Lightning between SAT accounts)

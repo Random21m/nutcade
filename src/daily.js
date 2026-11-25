@@ -232,13 +232,14 @@ function bind(root) {
 function share(date) {
   const n = N(); const nn = window.NutDailyNostr;
   const e = entryOn(date || info().date); if (!e || !n) return;
-  const can = !!(nn && nn.can()), text = noteFull(e), short = noteText(e);
+  const can = !!(nn && nn.can()), own = !!(can && nn.own && nn.own()), text = noteFull(e), short = noteText(e);   // (own: signed in with your own Nostr identity)
   const relays = can ? nn.relayCount() : 0;
   const rel = relays === 1 ? t('{n} relay', { n: num(1) }) : t('{n} relays', { n: num(relays) });
   const body = n.openSheet('Share my score', `
     <div class="chal-card"><span class="label">DAILY CHALLENGE</span><b data-noi18n>${esc(num(e.o))}</b><span data-noi18n>${esc(nameOf(e.g))} · ${esc(dateLabel(e.d))}</span></div>
     <div class="field"><label>Preview of your note</label><div class="code dy-note" data-noi18n id="dyText">${esc(text)}</div></div>
-    ${can ? `<p class="tiny muted" style="margin:0" data-noi18n>${esc(relays === 1 ? t('Posts a public note on Nostr, signed with your NUTCADE key ({k}), to your relay. Nothing is sent until you tap Post.', { k: shortNpub(nn.npub()) }) : t('Posts a public note on Nostr, signed with your NUTCADE key ({k}), to your {r}. Nothing is sent until you tap Post.', { k: shortNpub(nn.npub()), r: rel }))}</p>`
+    ${can ? `<p class="tiny muted" style="margin:0" data-noi18n>${esc(own ? (relays === 1 ? t('Posts a public note on Nostr, signed with your Nostr identity ({k}), to your relay. Nothing is sent until you tap Post.', { k: shortNpub(nn.npub()) }) : t('Posts a public note on Nostr, signed with your Nostr identity ({k}), to your {r}. Nothing is sent until you tap Post.', { k: shortNpub(nn.npub()), r: rel }))
+      : relays === 1 ? t('Posts a public note on Nostr, signed with your NUTCADE key ({k}), to your relay. Nothing is sent until you tap Post.', { k: shortNpub(nn.npub()) }) : t('Posts a public note on Nostr, signed with your NUTCADE key ({k}), to your {r}. Nothing is sent until you tap Post.', { k: shortNpub(nn.npub()), r: rel }))}</p>`
       : '<p class="tiny muted" style="margin:0">There is no Nostr key on this device yet, so posting is off. Copy the text and post it anywhere you like. Nothing is sent from here.</p>'}
     <div id="dyMsg"></div>
     ${can ? '<button class="btn solid gold block" id="dyPost">Post</button>' : ''}
@@ -249,10 +250,12 @@ function share(date) {
   const msg = (cls, key, o) => { const m = document.getElementById('dyMsg'); if (m) m.innerHTML = `<div class="notice ${cls}" data-noi18n role="status">${esc(t(key, o))}</div>`; };
   post.onclick = async () => {
     if (sending) return; sending = true; post.disabled = true; post.textContent = tr('POSTING…');
-    let ok = 0;
-    try { if (!ev) ev = nn.sign(text, [['t', 'nutcade']]); ok = await nn.publish(ev); } catch (x) { ok = 0; }
+    let ok = 0, signErr = null;
+    try { if (!ev) ev = await nn.sign(text, [['t', 'nutcade']]); } catch (x) { signErr = x; }   // (your signer said no, or didn't answer: said, never signed with another key)
+    if (!signErr) { try { ok = await nn.publish(ev); } catch (x) { ok = 0; } }
     sending = false;
     if (!post.isConnected) return;
+    if (signErr) { post.disabled = false; post.textContent = tr('Try again'); const m = document.getElementById('dyMsg'); if (m) m.innerHTML = `<div class="notice red" role="status">${esc(tr(String(signErr.message || signErr)))}${signErr.raw ? `<div class="tiny muted raw" data-noi18n>${esc(signErr.raw)}</div>` : ''}</div>`; n.sfx('err'); return; }
     if (ok > 0) { post.textContent = tr('POSTED'); msg('cyan', ok === 1 ? 'Posted to {n} relay.' : 'Posted to {n} relays.', { n: num(ok) }); n.sfx('coin'); }
     else { post.disabled = false; post.textContent = tr('Try again'); msg('red', "Couldn't reach any relay. You may be offline. Nothing was lost: your score is saved here. Try again, or copy the text."); n.sfx('err'); }
   };

@@ -244,12 +244,13 @@ async function openZap(target) {
     <div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
     <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="21" autocomplete="off"></div>
     ${max >= min ? `<div class="tiny muted">${min === max ? `Exactly ${money(max)}.` : `Any amount from ${money(min)} to ${money(max)}.`}</div>` : ''}
-    ${zapOk ? `<div class="notice">This zap is signed with this wallet's Nostr key, the same npub as your ecash address and your npub.cash Lightning address, so anyone can link it to you.</div>
+    ${zapOk ? `<div class="notice">${idActive() ? 'This zap is signed with your Nostr identity, so anyone can link it to you.' : "This zap is signed with this wallet's Nostr key, the same npub as your ecash address and your npub.cash Lightning address, so anyone can link it to you."}</div>
     <label class="toggle" for="zapAnon"><span><span class="tl">Anonymous zap</span><span class="th">Signed with a fresh one-time key instead: the zap still shows on Nostr, but not who sent it.</span></span><input id="zapAnon" type="checkbox"></label>` : ''}
     ${zapOk || num(base.commentAllowed) > 0 ? `<div class="field"><label for="zapComment">${zapOk ? 'Comment (optional, public on Nostr)' : 'Comment (optional, the receiver sees it)'}</label><input id="zapComment" class="inp" maxlength="${zapOk ? 280 : Math.min(280, num(base.commentAllowed))}" autocomplete="off"></div>` : ''}
     <button class="btn solid gold block" data-act="zapQuote">${zapOk ? 'Zap' : 'Pay as a plain Lightning payment'}</button><div id="sheetErr"></div>`);
 }
 async function zapInvoice(z, sats, comment, anon) {
+  const g = idNow();   // (the identity when you tapped: a switch meanwhile signs nothing)
   if (z.max < z.min) throw keepErr(new Error(`${z.addr} isn't accepting payments right now.`));
   if (sats < z.min || sats > z.max) throw keepErr(amtErr(z.min === z.max ? `${z.addr} takes exactly ${money(z.max)}.` : `${z.addr} takes ${money(z.min)} to ${money(z.max)}.`, 'range'));
   const msat = sats * 1000;
@@ -258,9 +259,10 @@ async function zapInvoice(z, sats, comment, anon) {
   if (z.zapOk) {
     const lnurl = lnurlEncode(z.url);
     const rl = [...new Set(z.relays.concat(relays()))].slice(0, 5);
-    // anonymous (NIP-57): a fresh one-time key signs, with an "anon" tag; otherwise the wallet's own Nostr key
+    // anonymous (NIP-57): a fresh one-time key signs, with an "anon" tag; otherwise your Nostr identity when signed in, else the wallet's own Nostr key
     const tags = [['relays', ...rl], ['amount', String(msat)], ['lnurl', lnurl], ['p', z.pubkey]]; if (anon) tags.push(['anon']);
-    zapReq = L.finalizeEvent({ kind: 9734, created_at: Math.floor(Date.now() / 1000), content: comment || '', tags }, anon ? rnd(32) : nostrKey());
+    const zt = { kind: 9734, created_at: Math.floor(Date.now() / 1000), content: comment || '', tags };
+    zapReq = anon ? L.finalizeEvent(zt, rnd(32)) : await idSign(zt, g);   // (your identity when signed in: app_identity.js)
     cb.searchParams.set('nostr', JSON.stringify(zapReq)); cb.searchParams.set('lnurl', lnurl);
   } else if (comment && num(z.base.commentAllowed) > 0) cb.searchParams.set('comment', comment.slice(0, num(z.base.commentAllowed)));
   let r;
