@@ -503,7 +503,7 @@ async def main():
                 except Exception: pass
             await w.pg.route(pat, strip)
             q1 = await deposit(w, 21, B)
-            locked = await w.ev(f"!!(Nutcade.S.quotes.find(q => q.quote === {J(q1)}) || {{}}).lockPriv")
+            locked = [bool((x['body'] or {}).get('pubkey')) for x in log.posts('/v1/mint/quote/bolt11', B)] == [True]   # (it was made locked: NUT-20)
             ok = await settled(w, B, [q1], 30000)
             check('nopub: a lone locked deposit whose quote check leaves out pubkey is claimed (signed with its own key), exact balance',
                   locked and ok and await bal(w, B) == 21 and len(log.posts(SINGLE, B)) >= 1, (locked, ok, await bal(w, B)))

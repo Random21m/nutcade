@@ -674,6 +674,10 @@ async function newDepositQuote(w, amount) {
   return Object.assign(await w.createMintQuoteBolt11(amount, lockPub), { lockPriv, lockPub });
 }
 const quoteLock = q => q && q.lockPriv ? { lockPriv: q.lockPriv, lockPub: q.lockPub } : {};
+// a deposit's check answer with the key it was locked to: a mint that leaves `pubkey` out of the answer (NUT-20 says it
+// echoes it) still issues a locked deposit only with its signature, so the record's own key (lockPub; an on-chain
+// deposit's privkey) fills it in, and the deposit is signed with that key, alone or in a batch (app_batch.js)
+const withLockPub = (r, pub) => r && !r.pubkey && pub ? Object.assign({}, r, { pubkey: pub }) : r;
 async function lnMintQuote(amount, note, url = S.active) {
   if (isBlocked(url)) throw blockedErr(url, 'ln');
   const w = await getWallet(url);
@@ -706,7 +710,7 @@ async function checkQuoteNow(id, txId) {
   try {
     const w = await getWallet(q.mint);
     if (q.kind === 'bolt11') {
-      const r = await w.checkMintQuoteBolt11(q.quote);
+      const r = withLockPub(await w.checkMintQuoteBolt11(q.quote), q.lockPub);
       if (q.state !== r.state) { q.state = r.state; save(); }   // a paid invoice is never offered for paying again
       if ((r.state === 'UNPAID' || r.state === 'PAID') && !q.rec) { q.rec = 1; save(); }   // seen not issued yet: if it is issued later, only from counters on its record
       if (r.state === 'PAID') {
@@ -778,7 +782,7 @@ async function checkQuoteNow(id, txId) {
       if (r.state !== 'PENDING' && q.expiry && Date.now() / 1000 > q.expiry) { dropQuote(q); updTx(q.txId, { status: 'expired' }); refresh(); return 'expired'; }
       return 'waiting';
     } else {
-      const r = await w.checkMintQuoteOnchain(q.quote);
+      const r = withLockPub(await w.checkMintQuoteOnchain(q.quote), q.privkey ? hex(L.getPubKeyFromPrivKey(L.hexToBytes(q.privkey))) : null);
       const avail = num(r.amount_paid) - num(r.amount_issued);
       if (avail > 0) {
         const t0 = txById(q.txId);

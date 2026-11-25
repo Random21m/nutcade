@@ -83,7 +83,7 @@ async function btClaim(url, ids, res) {
   if (cand.length < 2) return;
   // each one's state, asked as the single check asks it (and written down the same way)
   const st = new Map();
-  await Promise.all(cand.map(async q => { const r = await inTime(w.checkMintQuoteBolt11(q.quote), MINT_MS).catch(() => null); if (r && r.quote === q.quote) st.set(q.quote, r); }));
+  await Promise.all(cand.map(async q => { const r = await inTime(w.checkMintQuoteBolt11(q.quote), MINT_MS).catch(() => null); if (r && r.quote === q.quote) st.set(q.quote, withLockPub(r, q.lockPub)); }));   // (the record's own lock key when the mint leaves it out: app.js
   const paid = [];
   for (const q0 of cand) {
     const r = st.get(q0.quote), q = S.quotes.find(x => x.quote === q0.quote); if (!r || !q) continue;
