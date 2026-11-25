@@ -342,7 +342,7 @@ async def main():
             sheet = await A.sheet_text(); enc = await A.ev("(Nutcade.S.requests[0]||{}).encoded||''")
             r = await A.ev("Nutcade.S.requests[0]")
             await A.close()
-            pr = await A.ev(f"(()=>{{const p=CashuLib.decodePaymentRequest({J(enc)}); return {{unit:p.unit, amount:Number(p.amount), mints:p.mints}}}})()")
+            pr = await A.ev(f"(()=>{{const p=CashuLib.decodePaymentRequest({J(enc)}); return {{unit:p.unit, amount:Number(String(p.amount)), mints:p.mints}}}})()")
             check('request: a request made from the USD account asks for 50 cents in usd, from the mints that hold USD',
                   r.get('unit') == 'usd' and r['amount'] == 50 and pr['unit'] == 'usd' and pr['amount'] == 50 and pr['mints'] == [MULTI], (r.get('unit'), pr))
             check('request: its screen shows the amount in USD', '0.50' in sheet and 'USD' in sheet, sheet[:160])
@@ -373,7 +373,7 @@ async def main():
             wtok, we, _ = await send_token(Bw, USD, 40)
             if rq.get('unit') == 'sat' and wtok and not we:
                 kids = [k['id'] for k in json.loads(urllib.request.urlopen(MULTI + '/v1/keysets', timeout=10).read())['keysets']]
-                d = await A.ev(f"(()=>{{const t=CashuLib.getDecodedToken({J(wtok)}, {J(kids)}); return {{mint:t.mint, unit:t.unit, proofs:t.proofs.map(p=>({{id:p.id,amount:Number(p.amount),secret:p.secret,C:p.C}}))}}}})()")
+                d = await A.ev(f"(()=>{{const t=CashuLib.getDecodedToken({J(wtok)}, {J(kids)}); return {{mint:t.mint, unit:t.unit, proofs:t.proofs.map(p=>({{id:p.id,amount:Number(String(p.amount)),secret:p.secret,C:p.C}}))}}}})()")
                 a0 = await bal(A, USD)
                 await A.ev("(document.querySelector('#toast')||{}).innerText=''")
                 await A.ev(f"NutUnits.payload({J({'id': rq['id'], 'mint': d['mint'], 'unit': 'usd', 'proofs': d['proofs']})}, null)")
@@ -386,7 +386,7 @@ async def main():
             else:
                 check('request: a wrong-unit payment could be set up', False, (rq.get('unit'), we))
             # a request in a unit we do not hold: refused, in plain words, nothing spent
-            chf = await A.ev(f"""(()=>{{const pr=new CashuLib.PaymentRequest([], 'tst1', 500, 'chf', [{J(MULTI)}], 'swiss'); return pr.toEncodedRequest()}})()""")
+            chf = await A.ev(f"""(()=>{{const pr=new CashuLib.PaymentRequest({{transport: [], id: 'tst1', amount: 500, unit: 'chf', mints: [{J(MULTI)}], description: 'swiss'}}); return pr.toEncodedRequest()}})()""")
             n0 = await A.ev("Nutcade.S.txs.length")
             await A.ev(f"Nutcade.handleScan({J(chf)})"); await A.wait(900)
             txt = await A.sheet_text()
@@ -394,7 +394,7 @@ async def main():
                   'CHF' in txt and not await A.ev("!!document.querySelector('[data-act=payReq]')") and await A.ev("Nutcade.S.txs.length") == n0, txt[:220])
             await A.ev("Nutcade.closeSheet()")
             # a unit NUTCADE does not know at all
-            bad = await A.ev("""(()=>{const pr=new CashuLib.PaymentRequest([], 'tst2', 7, 'xau', undefined, 'gold'); return pr.toEncodedRequest()})()""")
+            bad = await A.ev("""(()=>{const pr=new CashuLib.PaymentRequest({transport: [], id: 'tst2', amount: 7, unit: 'xau', mints: undefined, description: 'gold'}); return pr.toEncodedRequest()})()""")
             await A.ev(f"Nutcade.handleScan({J(bad)})"); await A.wait(900)
             txt = await A.sheet_text()
             check('request: a unit NUTCADE does not hold at all (XAU) is refused and names what it does hold',
@@ -739,7 +739,7 @@ async def main():
             t = await A.toast(); mu = await A.ev("(document.querySelector('#mintUrl')||{}).value||''")
             await A.ev("Nutcade.closeSheet()")
             check("outside: a scanned mint address with '|usd' in it is not offered as a mint to add", '|' not in mu and "isn't something NUTCADE can use" in t, (t, mu))
-            enc = await A.ev(f"""(()=>{{const pr=new CashuLib.PaymentRequest([], 'tst3', 100, 'sat', [{J(USD)}], 'odd'); return pr.toEncodedRequest()}})()""")
+            enc = await A.ev(f"""(()=>{{const pr=new CashuLib.PaymentRequest({{transport: [], id: 'tst3', amount: 100, unit: 'sat', mints: [{J(USD)}], description: 'odd'}}); return pr.toEncodedRequest()}})()""")
             await A.ev(f"Nutcade.handleScan({J(enc)})"); await A.wait(800)
             txt = await A.sheet_text()
             check("request: one whose only mint address has '|' in it says it names no mint NUTCADE can use (no empty list, no Pay button)",

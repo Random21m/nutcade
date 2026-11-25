@@ -127,9 +127,9 @@ async def main():
 
             # sound
             tok5, _ = await fr.send_ecash(1500, 'for sound')
-            r = await fr.ev(f"""(()=>{{const t={J(tok5)}, ids=Object.keys(Nutcade.S.counters); const key=d=>JSON.stringify([d.mint, d.proofs.map(p=>[p.id, Number(p.amount), p.secret, p.C, p.dleq?[p.dleq.e,p.dleq.s,p.dleq.r]:null])]);
+            r = await fr.ev(f"""(()=>{{const t={J(tok5)}, ids=Object.keys(Nutcade.S.counters); const key=d=>JSON.stringify([d.mint, d.proofs.map(p=>[p.id, Number(String(p.amount)), p.secret, p.C, p.dleq?[p.dleq.e,p.dleq.s,p.dleq.r]:null])]);
                 const b1=Nutcade.soundBytes(t), b0=Nutcade.soundBytes(t,false); const d=CashuLib.getDecodedToken(t, ids), back1=CashuLib.getDecodedToken(Nutcade.soundText(b1), ids), back0=CashuLib.getDecodedToken(Nutcade.soundText(b0), ids);
-                const strip=x=>JSON.stringify([x.mint, x.proofs.map(p=>[p.id, Number(p.amount), p.secret, p.C])]);
+                const strip=x=>JSON.stringify([x.mint, x.proofs.map(p=>[p.id, Number(String(p.amount)), p.secret, p.C])]);
                 return {{full: key(d)===key(back1), dq: back1.proofs.every(p=>p.dleq&&p.dleq.e), slim: strip(d)===strip(back0) && back0.proofs.every(p=>!p.dleq), l1:b1.length, l0:b0.length, n:d.proofs.length}}}})()""")
             check('sound: a token comes back with every proof and its DLEQ proofs', r['full'] and r['dq'], r)
             check('sound: "Faster, no proof" leaves the proofs out (96 bytes a coin)', r['slim'] and r['l1'] - r['l0'] == 96 * r['n'], r)

@@ -39,7 +39,7 @@ def tags(e, k): return [t for t in e['tags'] if t and t[0] == k]
 
 HELPERS = """
 window.__nzEv = (proofs, x) => CashuLib.finalizeEvent({ kind: 9321, created_at: Math.floor(Date.now() / 1000) + (x.dt || 0), content: x.c || '',
-  tags: proofs.map(p => ['proof', JSON.stringify(Object.assign({ id: p.id, amount: Number(p.amount), secret: p.secret, C: p.C }, p.dleq && x.dleq !== false ? { dleq: p.dleq } : {}))]).concat([['u', x.u], ['unit', 'sat'], ['p', x.p]]) }, crypto.getRandomValues(new Uint8Array(32)));
+  tags: proofs.map(p => ['proof', JSON.stringify(Object.assign({ id: p.id, amount: Number(String(p.amount)), secret: p.secret, C: p.C }, p.dleq && x.dleq !== false ? { dleq: p.dleq } : {}))]).concat([['u', x.u], ['unit', 'sat'], ['p', x.p]]) }, crypto.getRandomValues(new Uint8Array(32)));
 window.__nzPublish = ev => new Promise(r => { const ws = new WebSocket(%s); ws.onopen = () => ws.send(JSON.stringify(['EVENT', ev]));
   ws.onmessage = m => { const d = JSON.parse(m.data); if (d[0] === 'OK') { try { ws.close(); } catch (e) {} r(d[2]); } }; setTimeout(() => r(false), 5000); });
 """ % J(RELAY)

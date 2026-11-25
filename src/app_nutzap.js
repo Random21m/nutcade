@@ -325,7 +325,7 @@ function nzPick(info, amount) {
   if (!ok.length) { const e = keepErr(new Error("You don't have that much at a mint they take nutzaps at. Nothing was sent.")); e.raw = mine.map(m => `${host(m.url)}: ${money(balanceOf(m.url))}`).join(', '); throw e; }
   return ok.find(m => m.url === S.active) || ok.sort((a, b) => balanceOf(b.url) - balanceOf(a.url))[0];
 }
-const nzProof = p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq && p.dleq.e && p.dleq.s && p.dleq.r ? { dleq: { e: String(p.dleq.e), s: String(p.dleq.s), r: String(p.dleq.r) } } : {}, p.p2pk_e ? { p2pk_e: String(p.p2pk_e) } : {});   // (p2pk_e: a blinded lock's E, NUT-28)
+const nzProof = p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq && p.dleq.e && p.dleq.s && p.dleq.r ? { dleq: { e: String(p.dleq.e), s: String(p.dleq.s), r: String(p.dleq.r) } } : {}, p.p2pk_e ? { p2pk_e: String(p.p2pk_e) } : {}, p.spend_info ? { spend_info: p.spend_info } : {});   // (p2pk_e: a blinded lock's E, NUT-28; spend_info: a v3 coin's, cashu-ts 5, never dropped)
 const nzRelaysFor = z => { const l = nzRelays(z.relays); return (l.length ? l : nzMyRelays()).slice(0, 8); };
 // the nutzap's event, made once and kept on its line before it is sent (sending it again is the same event)
 async function nzDeliverOne(id) {

@@ -216,12 +216,14 @@ async function auTruth(addr, o, e) {
   const say = (code, detail) => { e.code = code; e.message = detail; e.detail = detail; delete e.authMasked; };
   e.authMasked = true;
   let path; try { path = new URL(o.endpoint).pathname; } catch (x) { return; }
-  const body = o.requestBody && typeof o.requestBody === 'object' ? o.requestBody : {};
+  // (cashu-ts 5 hands the request body over as the very text sent, NUT-22 signs those bytes; an object before)
+  let body = {}; try { body = typeof o.requestBody === 'string' ? JSON.parse(o.requestBody) : o.requestBody && typeof o.requestBody === 'object' ? o.requestBody : {}; } catch (x) { body = {}; }
+  if (!body || typeof body !== 'object') body = {};
   const acct = (S.mints.find(m => acctUrl(m.url) === addr) || {}).url; if (!acct) return;
   const w = await getWallet(acct);
   const ins = Array.isArray(body.inputs) ? body.inputs.filter(p => p && typeof p.secret === 'string') : [];
   if (ins.length) {
-    const st = await inTime(w.checkProofsStates(ins.map(p => ({ secret: p.secret }))), 20000);
+    const st = await inTime(w.checkProofsStates(ins.map(p => ({ secret: p.secret, id: String(p.id || w.keysetId) }))), 20000);
     if (st.some(x => x && x.state === 'SPENT')) return say(11001, 'proofs already spent');
     if (st.some(x => x && x.state === 'PENDING')) return say(11002, 'proofs are pending');
   }
@@ -251,6 +253,12 @@ async function auFill(addr, o) {
 }
 const authProvider = addr => ({ getBlindAuthToken: () => auTake(addr), getCAT: () => (S.auth[addr] || {}).at, ensureCAT: () => authCAT(addr) });
 // a mint built with its login (any mint: one that asks for none never calls the provider)
+// a wallet loaded with the mint's info as the mint gives it now: cashu-ts 5's loadMint reuses the info its Mint holds (here
+// the last one seen, for the login), where 4.x fetched /v1/info for every new wallet; so it is fetched first, once, as before
+async function loadFresh(w) {
+  try { if (w.mint && typeof w.mint.fetchMintInfo === 'function') await w.mint.fetchMintInfo({ forceRefresh: true }); } catch (e) { throw e; }
+  await w.loadMint();
+}
 function authMint(addr) {
   if (!auBase) return addr;
   const m = new L.Mint(addr, { authProvider: authProvider(addr), customRequest: auReq(addr) });

@@ -448,7 +448,7 @@ async function restoreFromMintScan(url, onStep, opts, st) {
   let found = [];
   for (const k of keysets) {
     onStep && onStep(`Scanning ${host(url)} · keyset ${k.id.slice(0, 8)}…`);
-    const r = await w.batchRestore(300, undefined, 0, k.id);
+    const r = await w.batchRestore({ gapLimit: 300, counter: 0, keysetId: k.id });
     if (r.lastCounterWithSignature != null) await counterSource.advanceToAtLeast(k.id, r.lastCounterWithSignature + 1);
     if (r.proofs && r.proofs.length) {
       const st = await w.checkProofsStates(r.proofs);
@@ -559,7 +559,7 @@ async function getWallet(url) {
   const p = (async () => {
     const mint = authMint(acctUrl(url));   // (with its login, if it asks for one: app_auth.js)
     const w = new L.Wallet(mint, { unit: acctUnit(url), bip39seed: seedFor(), counterSource });   // (a unit account: the mint's address, that unit's keysets)
-    await w.loadMint();
+    await loadFresh(w);
     try { if (typeof mint === 'object') mint.setMintInfo(w.getMintInfo()); } catch (e) {}
     authSeen(acctUrl(url), w);
     saveMintKeys(url, w);   // (its public keys, for checking tokens taken while offline: app_dleq.js)
@@ -663,13 +663,24 @@ function addProofs(url, ps) {
 }
 
 /* ---------- RECEIVE ---------- */
+// A new Lightning deposit quote (NUT-04). cashu-ts 5 locks every new bolt11 quote (NUT-20) and keeps no key itself: each is
+// locked to a fresh random key of its own, kept on the deposit's record (lockPriv, lockPub; wherever the record goes:
+// the vault, backup files), and its coins are claimed with that key (quoteKey, app_batch.js). A mint whose info doesn't
+// list NUT-20 gets the plain quote it got before 1.35 (the library's generic call), so nothing new is asked of it.
+async function newDepositQuote(w, amount) {
+  let n20 = false; try { n20 = !!w.getMintInfo().isSupported(20).supported; } catch (e) {}
+  if (!n20) return await w.createMintQuote('bolt11', { amount });
+  const k = rnd(32), lockPriv = hex(k), lockPub = hex(L.getPubKeyFromPrivKey(k));
+  return Object.assign(await w.createMintQuoteBolt11(amount, lockPub), { lockPriv, lockPub });
+}
+const quoteLock = q => q && q.lockPriv ? { lockPriv: q.lockPriv, lockPub: q.lockPub } : {};
 async function lnMintQuote(amount, note, url = S.active) {
   if (isBlocked(url)) throw blockedErr(url, 'ln');
   const w = await getWallet(url);
   { const e = quoteFitErr(url, amount); if (e) throw e; }   // (one check before every mint quote: a deposit the mint can't issue is refused before anything is paid)
-  const q = await w.createMintQuoteBolt11(amount);
+  const q = await newDepositQuote(w, amount);
   const tx = addTx({ type: 'in', method: 'ln', amount, mint: url, note, status: 'pending', request: q.request, quote: q.quote });
-  S.quotes.push({ kind: 'bolt11', quote: q.quote, request: q.request, amount, mint: url, txId: tx.id, expiry: q.expiry || null, rec: 1 });
+  S.quotes.push(Object.assign({ kind: 'bolt11', quote: q.quote, request: q.request, amount, mint: url, txId: tx.id, expiry: q.expiry || null, rec: 1 }, quoteLock(q)));
   save();
   return tx;
 }
@@ -707,7 +718,7 @@ async function checkQuoteNow(id, txId) {
         }
         // the counters the new coins are signed for are on the deposit's record before the mint is asked (those of an
         // earlier try whose outcome isn't known stay on it too: that request may still be signed)
-        const onCountersReserved = u => { if (u && u.count > 0) { retireCtr(q); q.ctr = { id: u.keysetId, start: u.start, n: u.count }; save(); } };
+        const onCountersReserved = u => { if (u && u.count > 0) { retireCtr(q); q.ctr = { id: u.counterKey, start: u.start, n: u.count }; save(); } };
         /* Refused: what the mint did with this deposit decides.
            - ISSUED: an identical request got there first (the library resends one whose answer was lost, or another
              copy of it was sent): its coins are at its counters, at exactly its amount.
@@ -1011,7 +1022,8 @@ async function sendEcashNow(amount, note, lockTo, url, opts) {
   // here, where the lock is built: blindKeys blinds the receiver's key and our refund key together, never one of them alone
   const blind = !!(lockTo && opts.blind && p2bkOn());
   if (blind) opts = Object.assign({}, opts, { txx: Object.assign({}, opts.txx || {}, { blinded: true }) });   // (on the line and on its journal record)
-  const outCfg = lockTo ? { send: { type: 'p2pk', options: opts.p2pk && !blind ? opts.p2pk : Object.assign({ pubkey: lockTo }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}, blind ? { blindKeys: true } : {}) }, keep: w.defaultOutputType() } : undefined;
+  // (cashu-ts 5: a lock is written as LockOptions, mainKeys and the rest; the library encodes it for the keyset, NUT-11/14 tags here)
+  const outCfg = lockTo ? { send: { type: 'lock', options: opts.p2pk && !blind ? opts.p2pk : Object.assign({ mainKeys: [lockTo] }, opts.locktime ? { locktime: opts.locktime, refundKeys: [myLockPub()] } : {}, opts.hashlock ? { hashlock: opts.hashlock } : {}, blind ? { blindKeys: true } : {}) }, keep: w.defaultOutputType() } : undefined;
   // the spending limit, with the most this can take: the swap's own numbers, fees included
   if (belowMin(url) && !opts.noBatch) {   // (a mint that dropped below the minimum: its sats can still leave, in steps)
     if (opts.pick) throw minErr(url);   // (tokens: coins fixed by the caller at a cost already shown are never made another, dearer way: a printed token stops here)
@@ -1115,7 +1127,7 @@ async function payPrepSwap(w, kind, mq, note, dest, url, extra, amount, need, ho
   const over = BigInt(Math.max(0, sum(send) - amount));
   const pend = { id: uid(), mint: url, proofs: plain(send), quote: mq.quote, kind, txId: tx.id, spent, amount, change: 0, ctr: ksid ? { id: ksid, start: S.counters[ksid] || 0, n: Math.max(over <= 1n ? 0 : (over - 1n).toString(2).length, 1) } : null };
   { const sm = mintMax(url), over = sum(send) - amount; if (sm && Math.max(over <= 1 ? 0 : (over - 1).toString(2).length, 1) > sm) { if (kind === 'ln') pend.cap = sm; else { pend.noChange = true; pend.ctr = null; } } }   // (more change outputs than the mint takes: only as many as it takes; it returns the change in those, the most it can, and what it keeps is its fee)
-  const onCountersReserved = u => { if (u && u.count > 0) { pend.ctr = { id: u.keysetId, start: u.start, n: u.count }; save(); } };
+  const onCountersReserved = u => { if (u && u.count > 0) { pend.ctr = { id: u.counterKey, start: u.start, n: u.count }; save(); } };
   const used = new Set(inputs.map(p => p.secret));
   S.proofs[url] = (S.proofs[url] || []).filter(p => !used.has(p.secret)).concat(plain(keep)); S.pending.push(pend); if (op) closeOp(op); save();   // (the payment record takes over the coins from the swap's)
   return { tx, pend, spent, amount, onCountersReserved, hold };
@@ -1281,16 +1293,25 @@ async function recoverChange(pend) {
    an Extra Life that is set up or continued. The record, secrets included, is deleted once settled. */
 const opsRunning = new Set(), opRetry = new Set();
 const closeOp = op => { S.ops = S.ops.filter(o => o.id !== op.id); S.opsdone = [op.id].concat((S.opsdone || []).filter(x => x !== op.id)).slice(0, 300); };
+// a step's coins by secret, with each coin's keyset id beside it (since 1.35): cashu-ts 5 needs the id to ask the mint
+// about a coin (NUT-07: it picks the hash-to-curve of Y by the keyset's version). ysOf gives the mint's question back; a
+// record from before 1.35 has no ids, and takes a keyset of that mint from before v3 (02...): every one of those gives the
+// same Y, and no coin on such a record can be on a v3 keyset (NUTCADE before 1.35 had no v3 support)
+const inIds = ps => { const o = {}; for (const p of ps || []) if (p && p.secret && p.id) o[p.secret] = p.id; return o; };
+function ysOf(w, secrets, ids) {
+  let any = null; try { any = w.keyChain.getKeysets().map(k => k.id).find(id => /^0[01]/.test(id)) || w.keysetId; } catch (e) {}
+  return secrets.map(s => ({ secret: s, id: (ids && ids[s]) || any }));
+}
 async function journaled(url, kind, info, run) {
   await authGate(url);   // (a mint with a login and none to be had: refused here, before anything is written down)
-  const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, follow: info.follow || null, own: info.own || null, created: Date.now(), ctr: [], outs: [] };
+  const op = { id: uid(), kind, mint: url, inputs: (info.inputs || []).map(p => p.secret), ids: inIds(info.inputs), amount: info.amount || 0, note: info.note || '', locked: !!info.locked, extra: !!info.extra, txId: info.txId || null, tx: info.tx || null, follow: info.follow || null, own: info.own || null, created: Date.now(), ctr: [], outs: [] };
   if (info.lim && info.lim.id) op.lim = { id: info.lim.id, a: info.lim.a, at: Date.now() };
   op.mk = 1;   // (written by 1.16.0 or later: a claim of our own coins is marked below; see opMarks for older records)
   if (info.back) op.back = info.back;   // (a token of ours coming back: its line says so when it is settled from this record)
   if (info.self) op.self = 1;   // (your own coins found again, a sweep of another phrase: the same)
   if (info.dep) op.dep = 1;   // (a deposit's mint request: no coins go in)   // (counts toward the spending limit until it settles)
   S.ops.push(op); save();
-  const onCountersReserved = u => { if (u && u.count > 0) { op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); save(); } };
+  const onCountersReserved = u => { if (u && u.count > 0) { op.ctr.push({ id: u.counterKey, start: u.start, n: u.count }); save(); } };
   opsRunning.add(op.id);
   try {
     return await single('op:' + op.id, async () => {
@@ -1316,7 +1337,7 @@ async function journaled(url, kind, info, run) {
   } finally { opsRunning.delete(op.id); }
 }
 const saveNow = async () => { save(); if (vault.on) await vault.chain; };
-const outRec = (o, send) => ({ a: num(String(o.blindedMessage.amount)), id: o.blindedMessage.id, B: o.blindedMessage.B_, r: o.blindingFactor.toString(16), s: hex(o.secret), e: o.ephemeralE || null, send: send ? 1 : 0 });
+const outRec = (o, send) => Object.assign({ a: num(String(o.blindedMessage.amount)), id: o.blindedMessage.id, B: o.blindedMessage.B_, r: o.blindingFactor.toString(16), s: hex(o.secret), e: o.ephemeralE || null, send: send ? 1 : 0 }, o.spendInfo ? { si: o.spendInfo } : {});   // (si: a v3 output's spend_info, cashu-ts 5: the coin can't be spent without it)
 // a swap with its outputs on record: prepared (counters reserved), every output written down and stored, then asked
 async function askRecorded(w, op, prepared, privkey) {
   const p = await prepared;
@@ -1324,11 +1345,14 @@ async function askRecorded(w, op, prepared, privkey) {
   // so the step can be done in pieces that fit instead
   if (op) { const m = mintMax(op.mint), nOut = (p.sendOutputs || []).length + (p.keepOutputs || []).length; if (m && ((p.inputs || []).length > m || nOut > m)) throw Object.assign(new Error(`${host(op.mint)} takes at most ${m} coins per request, and this step would need more. Nothing was sent.`), { tooBig: true }); }
   if (op) {
-    if (p.inputs && p.inputs.length) op.inputs = p.inputs.map(x => x.secret);   // exactly the coins this swap spends (they are busy until it settles)
+    if (p.inputs && p.inputs.length) { op.inputs = p.inputs.map(x => x.secret); op.ids = inIds(p.inputs); }   // exactly the coins this swap spends (they are busy until it settles)
     op.outs = (p.sendOutputs || []).map(o => outRec(o, true)).concat((p.keepOutputs || []).map(o => outRec(o, false))); await saveNow();
   }
-  try { return await w.completeSwap(p, privkey); }
-  catch (e) { if (op && isRefusal(e)) { const done = await doneBefore(w, op, p).catch(() => null); if (done) return done; } throw e; }
+  // (cashu-ts 5: a send's coins left out of the swap come back beside the preview, never in it, and completeSwap's keep is
+  // only the swap's change; they go back with it here, so the caller's keep is again everything that stays with us)
+  const back = r => (p.unselected || []).length ? Object.assign({}, r, { keep: (r.keep || []).concat(p.unselected) }) : r;
+  try { return back(await w.completeSwap(p, privkey)); }
+  catch (e) { if (op && isRefusal(e)) { const done = await doneBefore(w, op, p).catch(() => null); if (done) return back(done); } throw e; }
 }
 /* A refusal ("already spent", "already signed") for a swap the mint did do: an identical request got there first. The
    library resends a request after a lost answer to an endpoint the mint caches (NUT-19), and a mint whose cache misses
@@ -1341,9 +1365,9 @@ async function doneBefore(w, op, p) {
   if (st.length !== ins.length || !st.every(x => x && x.state === 'SPENT')) return null;
   const got = await restoreRecorded(w, op.outs, op.mint); if (!got.all) return null;
   const send = got.filter(x => x._send), keep = got.filter(x => !x._send); for (const x of got) delete x._send;
-  return { keep: keep.concat(p.unselectedProofs || []), send };
+  return { keep, send };
 }
-const rSend = (op, w, amount, proofs, cfg, outCfg) => askRecorded(w, op, w.prepareSwapToSend(amount, proofs, cfg, outCfg), cfg && cfg.privkey);
+const rSend = (op, w, amount, proofs, cfg, outCfg) => askRecorded(w, op, w.prepareSwapToSend(amount, proofs, cfg, outCfg).then(r => Object.assign(r.preview, { unselected: r.unselected || [] })), cfg && cfg.privkey);
 const rRecv = async (op, w, token, cfg) => (await askRecorded(w, op, w.prepareSwapToReceive(token, cfg), cfg && cfg.privkey)).keep;
 // the mint's signatures for exactly these recorded outputs (NUT-09), unblinded with the saved blinding factors
 let OutputDataClass = null;
@@ -1359,7 +1383,9 @@ async function restoreRecorded(w, outs, url) {
   for (const o of outs) {
     const g = sig[o.B]; if (!g || g.amount.isZero()) continue;
     if (num(o.a) > 0) { n++; if (num(g.amount) !== num(o.a)) odd = true; }
-    const d = new OutputDataClass(bm(o), BigInt('0x' + o.r), L.hexToBytes(o.s), o.e || undefined);
+    // (cashu-ts 5's toProof refuses a signature for another amount or keyset than the output asked: the output is rebuilt
+    // as what the mint signed, the same blinded message, so a coin signed at our counters for another request is still read)
+    const d = new OutputDataClass(bm(Object.assign({}, o, { a: num(g.amount), id: g.id })), BigInt('0x' + o.r), L.hexToBytes(o.s), o.e || undefined, undefined, o.si || undefined);
     got.push(Object.assign(d.toProof(g, w.keysetForSignature(g.id)), { _send: o.send }));   // (toProof checks the DLEQ proof when the mint sent one)
   }
   // signed for another amount than this step asked, or only some of its outputs signed: the mint signed these for
@@ -1396,7 +1422,7 @@ async function settleOpNow(id) {
      under way there, so it stays open and is asked again later; signatures are only looked for after that, and looked
      for again when a coin turned spent while they were looked for (the mint signed meanwhile: a request that reached
      it late, from a tab that was closed). Nothing is booked from a look the mint's work could still change. */
-  const states = async () => op.inputs.length ? inTime(w.checkProofsStates(op.inputs.map(s => ({ secret: s }))), 30000) : [];
+  const states = async () => op.inputs.length ? inTime(w.checkProofsStates(ysOf(w, op.inputs, op.ids)), 30000) : [];
   const nSpent = st => st.filter(x => x && x.state === 'SPENT').length, busyAt = st => st.some(x => x && x.state === 'PENDING');
   const later = () => {
     op.waits = (op.waits || 0) + 1; const ms = Math.min(60e3, 5e3 * 2 ** Math.min(op.waits - 1, 4)); op.nextTry = Date.now() + ms; save();
@@ -1542,8 +1568,8 @@ async function lateCheck(url, force) {
   const busy = new Set(S.ops.flatMap(o => o.inputs).concat(S.pending.flatMap(p => (p.proofs || []).map(x => x.secret))));
   const rs = here.filter(r => !r.inputs.some(s => busy.has(s)) && !S.ops.some(o => o.id === r.id)); if (!rs.length) return;
   lateSeen.set(url, now);
-  const w = await getWallet(url), ys = [...new Set(rs.flatMap(r => r.inputs))];
-  const st = await inTime(w.checkProofsStates(ys.map(s => ({ secret: s }))), 30000), stOf = new Map(ys.map((s, i) => [s, st[i] && st[i].state]));
+  const w = await getWallet(url), ys = [...new Set(rs.flatMap(r => r.inputs))], ids = Object.assign({}, ...rs.map(r => r.ids || {}));
+  const st = await inTime(w.checkProofsStates(ysOf(w, ys, ids)), 30000), stOf = new Map(ys.map((s, i) => [s, st[i] && st[i].state]));
   { const ids = new Set(rs.map(r => r.id)); for (const r of S.oplate || []) if (ids.has(r.id)) r.looked = now; save(); }
   for (const r of rs) {
     if (!r.inputs.some(s => stOf.get(s) === 'SPENT' || stOf.get(s) === 'PENDING')) continue;
@@ -2913,12 +2939,12 @@ function newP2PK() {
 }
 const p2pkPrivs = () => S.p2pk.map(k => k.priv);
 const validPub = s => /^0[23][0-9a-f]{64}$/i.test(String(s || '').trim());
-/* A NUT-10 lock (P2PK, NUT-11; HTLC, NUT-14) read by the rules the bundled cashu-ts (4.13.1) spends and checks it by, for the
+/* A NUT-10 lock (P2PK, NUT-11; HTLC, NUT-14) read by the rules the bundled cashu-ts (5.0.0-rc.13; 4.13.1 had the same) spends and checks it by, for the
    places NUTCADE reads a lock itself (an Extra Life copy, a bounty, a payment request's lock): null when the library would
    refuse it. Kind P2PK or HTLC; tags are lists of non-empty texts, each NUT-11 tag at most once; sigflag, locktime, n_sigs
    and n_sigs_refund carry one value; n_sigs and n_sigs_refund need a value and are whole numbers of at least 1 (#1413), at
-   most the keys they count; a P2PK lock's data is a key (#1393); every key is 33 bytes compressed (NUTCADE never takes an
-   x-only one: the test mints refuse it); at most 16 of each; refund keys need a locktime. locktime: a text of digits, else
+   most the keys they count; a P2PK lock's data is a key (#1393); every key is 33 bytes compressed (an x-only one is
+   refused, as cashu-ts 5 and the test mints refuse it); at most 16 of each; refund keys need a locktime. locktime: a text of digits, else
    the lock never expires (as the library reads it); "0" has expired (#1323). An HTLC hash is compared in lower case (#1415).
    expired(now) is true only AFTER the locktime second: now > locktime, in seconds (#1323), as the mint decides it. */
 const LOCK_TAGS = ['locktime', 'pubkeys', 'n_sigs', 'refund', 'n_sigs_refund', 'sigflag'];
@@ -3250,7 +3276,7 @@ function newRequest(amount, memo, onlyMine, unit = acctUnit(S.active)) {
   const transport = [{ type: 'nostr', target: L.nprofileEncode({ pubkey: pub, relays: relays() }), tags: [['n', '17']] }];
   // the request asks for the active account's unit, and (when asked) only from the mints that hold it here
   const mine = S.mints.filter(m => acctUnit(m.url) === unit).map(m => acctUrl(m.url));
-  const pr = new L.PaymentRequest(transport, id, amount || undefined, unit, onlyMine && mine.length ? [...new Set(mine)] : undefined, memo || undefined);
+  const pr = new L.PaymentRequest(Object.assign({ transport, id, unit }, amount ? { amount } : {}, onlyMine && mine.length ? { mints: [...new Set(mine)] } : {}, memo ? { description: memo } : {}));   // (cashu-ts 5: one options object)
   const r = { id, encoded: pr.toEncodedRequest(), amount: amount || 0, memo: memo || '', unit, created: Date.now(), paid: [] };
   S.requests.unshift(r); S.requests = S.requests.slice(0, 30); store.set('requests', S.requests);
   dmListen();
@@ -3374,8 +3400,17 @@ function reqLock(pr) {
   const lk = n.kind === 'P2PK' ? lockOf(JSON.stringify(['P2PK', { nonce: '0', data: String(n.data || ''), tags: n.tags || [] }])) : null;
   let o = null; if (lk) { try { o = pr.toP2PKOptions(); } catch (e) { o = null; } }
   if (!lk || !o || !validPub(lk.data)) throw new Error(REQ_LOCK_ERR);
-  for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
-  return { key: lk.data.toLowerCase(), options: Object.assign({}, o, { pubkey: Array.isArray(o.pubkey) ? o.pubkey.map(k => k.toLowerCase()) : String(o.pubkey).toLowerCase() }) };
+  // (cashu-ts 5 answers with the NUT-10 option, kind + data + tags; the send takes the same lock as LockOptions, as the
+  // library's own p2pkToLockOptions converts it)
+  if (o.kind !== 'P2PK') throw new Error(REQ_LOCK_ERR);
+  const lo = k => String(k).toLowerCase(), opt = { mainKeys: [o.data].concat(o.pubkeys || []).map(lo) };
+  if (o.requiredSignatures !== undefined) opt.requiredMainSignatures = o.requiredSignatures;
+  if (o.locktime !== undefined) opt.locktime = o.locktime;
+  if (o.refundKeys && o.refundKeys.length) opt.refundKeys = o.refundKeys.map(lo);
+  if (o.requiredRefundSignatures !== undefined) opt.requiredRefundSignatures = o.requiredRefundSignatures;
+  if (o.additionalTags && o.additionalTags.length) opt.additionalTags = o.additionalTags;
+  if (o.sigFlag === 'SIG_ALL') opt.sigAll = true;
+  return { key: lk.data.toLowerCase(), options: opt };
 }
 async function payRequest(pr, amount, url, note, enc) {
   const lk = reqLock(pr), lock = lk ? lk.key : null;
@@ -3627,11 +3662,11 @@ async function sweepPhrase(phrase, urls, onStep) {
     try {
       if (isNew) await addMint(url, { dropped: true, sat: isSatAcct(url) });   // (sats of yours, found under another phrase: they come in even at a mint below the minimum)
       const other = new L.Wallet(authMint(acctUrl(url)), { unit: acctUnit(url), bip39seed: otherSeed });   // (with this device's login at a mint that asks for one)
-      await other.loadMint();
+      await loadFresh(other);
       let found = [];
       for (const k of other.keyChain.getKeysets()) {
         onStep && onStep(`Scanning ${host(url)} · keyset ${k.id.slice(0, 8)}…`);
-        const r = await other.batchRestore(300, undefined, 0, k.id);
+        const r = await other.batchRestore({ gapLimit: 300, counter: 0, keysetId: k.id });
         if (r.proofs && r.proofs.length) {
           const st = await other.checkProofsStates(r.proofs);
           found = found.concat(r.proofs.filter((p, i) => st[i] && st[i].state === 'UNSPENT'));
@@ -3677,7 +3712,7 @@ async function swapIn(token, note) {
   for (let i = 0; i < 4; i++) {
     if (amt < 1) throw new Error('This token is too small to cover Lightning fees for a swap. Claim it at its own mint instead.');
     { const e = quoteFitErr(dest.url, amt); if (e) { e.message += ` The token's ${money(total)} are in your balance at ${(S.mints.find(m => m.url === meta.mint) || {}).name || host(meta.mint)}.`; throw e; } }
-    mq = await dw.createMintQuoteBolt11(amt);
+    mq = await newDepositQuote(dw, amt);
     melt = await fw.createMeltQuoteBolt11(mq.request);
     const inFee = num(fw.getFeesForProofs(S.proofs[meta.mint]));
     need = num(melt.amount) + num(melt.fee_reserve) + inFee;
@@ -3686,7 +3721,7 @@ async function swapIn(token, note) {
   }
   if (!mq) throw new Error("Couldn't fit the swap fees into this token. Claim it at its own mint instead.");
   const tx = addTx({ type: 'in', method: 'ln', amount: amt, mint: dest.url, note: note || `Swapped from ${host(meta.mint)}`, status: 'pending', request: mq.request, quote: mq.quote });
-  S.quotes.push({ kind: 'bolt11', quote: mq.quote, request: mq.request, amount: amt, mint: dest.url, txId: tx.id }); save();
+  S.quotes.push(Object.assign({ kind: 'bolt11', quote: mq.quote, request: mq.request, amount: amt, mint: dest.url, txId: tx.id }, quoteLock(mq))); save();
   const prevActive = S.active; S.active = meta.mint;
   try { await payMelt('ln', melt, 0, `Swap to ${dest.name}`, mq.request, S.active, { noLimit: true }); }
   finally { S.active = prevActive; save(); }

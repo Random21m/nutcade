@@ -149,7 +149,7 @@ async def ask_panel(w, u):
 
 
 INJECT = """(async([u,n])=>{const w=new CashuLib.Wallet(u,{unit:'sat'}); await w.loadMint(); let all=[];
-  for(let left=n;left>0;){const c=Math.min(100,left); const q=await w.createMintQuoteBolt11(c);
+  for(let left=n;left>0;){const c=Math.min(100,left); const q=await w.createMintQuote('bolt11',{amount:c});
     for(let i=0;i<60;i++){await new Promise(r=>setTimeout(r,250)); const s=await w.checkMintQuoteBolt11(q.quote); if(s.state==='PAID')break;}
     const ps=await w.mintProofsBolt11(c,q.quote,undefined,{type:'random',denominations:Array(c).fill(1)}); all=all.concat(ps); left-=c;}
   const N=x=>typeof x==='object'&&x&&x.toNumber?x.toNumber():Number(x);
@@ -644,7 +644,7 @@ async def journal_followups(b, broken):
 
 # ---------------- the check-up never runs beside a deposit being collected (1.14.1) ----------------
 LEGACY = """(async([U,amt])=>{ const S=Nutcade.S; const ws=new CashuLib.Wallet(U,{unit:'sat',bip39seed:CashuLib.mnemonicToSeedSync(S.seed.mnemonic),counterInit:{...S.counters}}); await ws.loadMint();
-  const q=await ws.createMintQuoteBolt11(amt); const id='legacy'+Date.now();
+  const q=await ws.createMintQuote('bolt11',{amount:amt}); const id='legacy'+Date.now();
   S.txs.unshift({id,ts:Date.now(),note:'',status:'pending',fee:0,type:'in',method:'ln',amount:amt,mint:U,quote:q.quote,request:q.request});
   S.quotes.push({kind:'bolt11',quote:q.quote,request:q.request,amount:amt,mint:U,txId:id}); window.__legacy=id;
   localStorage.setItem('nutcade:txs',JSON.stringify(S.txs)); localStorage.setItem('nutcade:quotes',JSON.stringify(S.quotes));   // (as the app would have written it)
@@ -836,7 +836,7 @@ async def deposit_race(b, broken):
     waiting = await w.ev("Nutcade.S.ops.some(o=>o.id===window.__dep.op) && (Nutcade.S.txs.find(t=>t.id===window.__dep.id)||{}).status==='pending'")
     check('deposit step ("already pending", nothing at its counters yet): it waits, not closed with nothing', waiting)
     await w.ev(f"""(async([U])=>{{ const S=Nutcade.S, d=window.__dep; const ws=new CashuLib.Wallet(U,{{unit:'sat',bip39seed:CashuLib.mnemonicToSeedSync(S.seed.mnemonic),counterInit:{{[d.kid]:d.start}}}}); await ws.loadMint();
-      const q=await ws.createMintQuoteBolt11(640); for(let i=0;i<60;i++){{await new Promise(r=>setTimeout(r,250)); if((await ws.checkMintQuoteBolt11(q.quote)).state==='PAID')break;}}
+      const q=await ws.createMintQuote('bolt11',{{amount:640}}); for(let i=0;i<60;i++){{await new Promise(r=>setTimeout(r,250)); if((await ws.checkMintQuoteBolt11(q.quote)).state==='PAID')break;}}
       await ws.mintProofsBolt11(640,q.quote,{{keysetId:d.kid}}); window.dispatchEvent(new Event('online')); }})([{J(u)}])""")
     ok = await w.until("!Nutcade.S.ops.some(o=>o.id===window.__dep.op) && (Nutcade.S.txs.find(t=>t.id===window.__dep.id)||{}).status==='done'", 90000)
     t = await w.ev("Nutcade.S.txs.find(t=>t.id===window.__dep.id)")

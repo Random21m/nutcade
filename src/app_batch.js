@@ -73,7 +73,8 @@ async function depRun(url, ids) {
   return res;
 }
 // the key a NUT-20 locked deposit is signed with (npub.cash locks to your Nostr key), or null
-const quoteKey = pub => npcPrivFor(pub) || (S.p2pk.find(x => hex(L.getPubKeyFromPrivKey(L.hexToBytes(x.priv))) === String(pub).toLowerCase()) || {}).priv || null;
+// (a deposit's own lock key first: every quote NUTCADE makes since 1.35 is locked to one, app.js newDepositQuote)
+const quoteKey = pub => (S.quotes.find(q => q.lockPriv && q.lockPub === String(pub).toLowerCase()) || {}).lockPriv || npcPrivFor(pub) || (S.p2pk.find(x => hex(L.getPubKeyFromPrivKey(L.hexToBytes(x.priv))) === String(pub).toLowerCase()) || {}).priv || null;
 async function btClaim(url, ids, res) {
   await syncIfStale();
   const w = await getWallet(url), max = btMax(url); if (!max) return;
@@ -139,9 +140,9 @@ async function btMint(w, url, qs, st, out) {
   const keys = []; for (const q of qs) { const r = st.get(q.quote); if (r.pubkey) keys.push(quoteKey(r.pubkey)); }
   const b = uid(), total = qs.reduce((t, q) => t + num(q.amount), 0);
   // the counters its coins are signed for are on every deposit's record before the mint is asked
-  const onCountersReserved = u => { if (u && u.count > 0) { for (const q of qs) { retireCtr(q); q.ctr = { id: u.keysetId, start: u.start, n: u.count, b, t: total }; } save(); } };
+  const onCountersReserved = u => { if (u && u.count > 0) { for (const q of qs) { retireCtr(q); q.ctr = { id: u.counterKey, start: u.start, n: u.count, b, t: total }; } save(); } };
   const prep = await w.prepareBatchMint('bolt11', qs.map(q => ({ quote: st.get(q.quote), amount: num(q.amount) })), Object.assign({ onCountersReserved }, keys.length ? { privkey: keys } : {}));
-  const lim = mintMax(url); if (lim && (prep.payload.outputs || []).length > lim) return;   // (never sent; the counters stay on record, unused)
+  const lim = mintMax(url); if (lim && (prep.outputData || []).length > lim) return;   // (never sent; the counters stay on record, unused)
   await saveNow();
   let proofs;
   try { proofs = await w.completeBatchMint(prep); }

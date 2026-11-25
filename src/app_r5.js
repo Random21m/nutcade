@@ -148,7 +148,7 @@ const extraLeft = () => S.extra ? S.extra.until - Date.now() : 0;
 const daysLeft = ms => Math.max(0, Math.ceil(ms / 86400e3));
 // Lock sats of the balance for the Extra Life (setting it up): to your key, with your heir's key as the refund key
 // after the date. The journal has every output before the mint is asked, so an interrupted lock finishes as itself.
-const extraLockCfg = (w, until, heirPub) => ({ send: { type: 'p2pk', options: { pubkey: myLockPub(), locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() });
+const extraLockCfg = (w, until, heirPub) => ({ send: { type: 'lock', options: { mainKeys: [myLockPub()], locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() });
 async function lockExtra(url, amount, heirPub, until, follow, ctx = {}) {
   return mintLock(url, async () => {
     const w = await getWallet(url), inputs = [...(S.proofs[url] || [])];

@@ -2,7 +2,7 @@
 Uses the local test mint 3339 (no fees) and Nutshell's own wallet code (tests/lock_py.py, run with MINT_PY) as an
 independent implementation.
 
-bundle:   src/lib.min.js is exactly the pinned build (cashu-ts 4.13.1 with the other libraries as listed in src/README.md),
+bundle:   src/lib.min.js is exactly the pinned build (cashu-ts 5.0.0-rc.13 with the other libraries as listed in src/README.md),
           and its export list is exactly the names the app uses (AuthManager and OIDCAuth included). A library change is
           a deliberate change of this pin.
 derive:   the coins of a wallet are the NUT-13 coins of its 12 words: every secret NUTCADE got from the mint is the one
@@ -23,6 +23,7 @@ heir:     an Extra Life copy is held only when the library could spend it by its
           and a real one from Nutshell is claimed at once), a malformed locktime, a refund threshold without a value or a lock
           whose data is no key: not held.
 takeback: a gift is never taken back in its locktime's own second (the mint and the library still read it as locked).
+giftkey:  a gift to a key that is no point on the curve is refused before anything is spent.
 request:  a payment request asking for a lock NUTCADE can't make exactly (HTLC, another kind, data that isn't a key,
           an x-only key, an n_sigs without value) is refused before anything is spent (before 1.35 it was paid with an
           UNLOCKED token); a P2PK request with tags is paid with exactly the lock it asked for (library parity); a plain
@@ -39,9 +40,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PYW = os.environ.get('MINT_PY', 'python3')
 TMP = tempfile.mkdtemp(prefix='lib-')
 TOTAL = "Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0)"
-# sha256 of src/lib.min.js: cashu-ts 4.13.1, nostr-tools 2.26.0 (its @noble/curves and @noble/hashes deduplicated to 2.4.0),
+# sha256 of src/lib.min.js: cashu-ts 5.0.0-rc.13 (1.35.0; 4.13.1 before), nostr-tools 2.26.0 (its @noble/curves and @noble/hashes deduplicated to 2.4.0),
 # @scure/bip32, bip39, base 2.4.0, @noble/hashes, curves, ciphers 2.4.0, qrcode-generator 2.0.4, jsqr 1.4.0, zxing-wasm 3.1.6
-LIB_SHA = 'cc01f88b93bdd4dd906416df6c3b3c87f7dcd592f21ef5ddeee47639c6aa3fce'
+LIB_SHA = '431b4245e0db5e630e4fc20e9ec3a3156576502efedcc885552d4711781da68c'
 EXPORTS = ['Amount', 'AuthManager', 'HDKey', 'Mint', 'OIDCAuth', 'PaymentRequest', 'Wallet', 'bech32', 'bytesToHex', 'decodePaymentRequest',
            'finalizeEvent', 'generateMnemonic', 'getDecodedToken', 'getDecodedTokenBinary', 'getEncodedToken', 'getEncodedTokenBinary',
            'getPubKeyFromPrivKey', 'getTokenMetadata', 'hexToBytes', 'jsQR', 'mnemonicToSeedSync', 'nip17', 'nip19decode', 'nip44', 'nip59',
@@ -114,7 +115,7 @@ async def main():
 
         async def bundle():
             got = hashlib.sha256(open(os.path.join(HERE, '..', 'src', 'lib.min.js'), 'rb').read()).hexdigest()
-            check('bundle: src/lib.min.js is the pinned build (cashu-ts 4.13.1); a library change changes this pin on purpose', got == LIB_SHA, got)
+            check('bundle: src/lib.min.js is the pinned build (cashu-ts 5.0.0-rc.13); a library change changes this pin on purpose', got == LIB_SHA, got)
             names = await al.ev("Object.keys(CashuLib).sort()")
             check('bundle: the export list is exactly the names the app uses (AuthManager and OIDCAuth included)', names == sorted(EXPORTS), sorted(set(names) ^ set(EXPORTS)))
         await section('bundle', bundle)
@@ -199,7 +200,7 @@ async def main():
             edge = await al.ev(f"(() => {{ const l = Nutcade.lk.of({J(sec('P2PK', K1, [['locktime', str(lt)], ['refund', K2]]))}); return [l.expired({lt * 1000}), l.expired({lt * 1000 + 999}), l.expired({lt * 1000 + 1000})]; }})()")
             check('reader: a lock expires only AFTER its locktime second (not at it, not within it; from the next second on)', edge == [False, False, True], edge)
             # the library's own rules, where the bundle shows them: PaymentRequest.toP2PKOptions reads a request's lock as it would spend it
-            lib = await al.ev(f"""(() => {{ const t = n => {{ try {{ const o = new CashuLib.PaymentRequest([], 'x', 10, 'sat', undefined, 'd', true, n).toP2PKOptions(); return o ? 'ok' : 'none'; }} catch (e) {{ return 'refused'; }} }};
+            lib = await al.ev(f"""(() => {{ const t = n => {{ try {{ const o = new CashuLib.PaymentRequest({{transport: [], id: 'x', amount: 10, unit: 'sat', mints: undefined, description: 'd', singleUse: true, nut10: n}}).toP2PKOptions(); return o ? 'ok' : 'none'; }} catch (e) {{ return 'refused'; }} }};
                 return [t({{kind:'P2PK', data:{J(K1)}, tags:[['n_sigs']]}}), t({{kind:'P2PK', data:{J(K1)}, tags:[['n_sigs_refund']]}}), t({{kind:'P2PK', data:'', tags:[]}}),
                         t({{kind:'P2PK', data:{J(K1)}, tags:[['n_sigs','1.0']]}}), t({{kind:'P2PK', data:{J(K1)}, tags:[['locktime','1','2']]}}), t({{kind:'P2PK', data:{J(K1)}, tags:[['sigflag','SIG_NONE']]}}), t({{kind:'P2PK', data:{J(K1)}, tags:[['locktime','0']]}})]; }})()""")
             check('reader: the bundled library refuses the same: n_sigs or n_sigs_refund without a value, no data, n_sigs "1.0", two locktimes, an unknown sigflag; locktime 0 is read', lib == ['refused'] * 6 + ['ok'], lib)
@@ -262,9 +263,19 @@ async def main():
             check('takeback: never in the locktime\'s own second (the mint still reads it as locked); from the next second on it is tried', r == ['locked', 'went'], r)
         await section('takeback', takeback)
 
+        async def giftkey():
+            # a gift locked to a key that is no point on the curve: cashu-ts 5 refuses such a lock, and NUTCADE says so first
+            b0 = await al.bal()
+            await al.home(); await al.click('[data-act=send]'); await al.wait(150); await al.pg.check('#giftOn')
+            await al.ev("const s=document.querySelector('#giftTo'); if (s) { s.value=''; s.dispatchEvent(new Event('change',{bubbles:true})) }")
+            await al.fill('#giftKey', '02' + 'cd' * 32); await al.fill('#amtIn', '20'); await al.click('[data-act=doSendEcash]'); await al.wait(1500)
+            e = await al.err(); await al.close()
+            check('giftkey: a gift to a key that is not on the curve is refused with the usual "can\'t be read" and nothing is spent', "can't be read" in e and await al.bal() == b0, (e, b0, await al.bal()))
+        await section('giftkey', giftkey)
+
         async def request():
             async def pay(nut10, amount=20):
-                e = await al.ev(f"new CashuLib.PaymentRequest([], 'r' + Math.random(), {amount}, 'sat', [{J(M)}], 'lock test', true, {J(nut10) if nut10 else 'undefined'}).toEncodedRequest()")
+                e = await al.ev(f"new CashuLib.PaymentRequest({{transport: [], id: 'r' + Math.random(), amount: {amount}, unit: 'sat', mints: [{J(M)}], description: 'lock test', singleUse: true, nut10: {J(nut10) if nut10 else 'undefined'}}}).toEncodedRequest()")
                 b0 = await al.bal(); n0 = await al.ev("Nutcade.S.txs.length")
                 await al.home(); await al.ev(f"Nutcade.handleScan({J(e)})"); await al.wait(400)
                 note = await al.sheet_text(); btn = await al.ev("!!document.querySelector('[data-act=payReq]')")

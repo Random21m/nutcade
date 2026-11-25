@@ -54,7 +54,7 @@ async def main():
         tok, e = await w.send_ecash(1500, 'for the sound test')
         rt = await w.ev(f"""(()=>{{const t={json.dumps(tok)}; const b=Nutcade.soundBytes(t, false); const back=Nutcade.soundText(b);
             const d1=CashuLib.getDecodedToken(t, Object.keys(Nutcade.S.counters)), d2=CashuLib.getDecodedToken(back, Object.keys(Nutcade.S.counters));
-            const key=d=>JSON.stringify([d.mint, d.proofs.map(p=>[p.id, Number(p.amount), p.secret, p.C])]); return {{len:b.length, tlen:t.length, same: key(d1)===key(d2), magic: b[0]}}}})()""")
+            const key=d=>JSON.stringify([d.mint, d.proofs.map(p=>[p.id, Number(String(p.amount)), p.secret, p.C])]); return {{len:b.length, tlen:t.length, same: key(d1)===key(d2), magic: b[0]}}}})()""")
         check('sound: tokens travel in a compact form (Faster, no proof) and come back with every proof intact', rt['same'] and rt['magic'] == 0xC1 and rt['len'] * 2.5 < rt['tlen'], rt)
         await w.home(); await w.click('[data-act=tx]'); await w.wait(200)
         check('sound: a sent token offers Play as sound', await w.ev("!!document.querySelector('.sheet [data-act=ctPlay]')"))
@@ -71,9 +71,9 @@ async def main():
         await lis.home()
         check('sound: the wallet screen has a Listen button', await lis.ev("!!document.querySelector('[data-act=ctListen]')"))
         await lis.click('[data-act=ctListen]')
-        amt0 = await w.ev(f"Number(CashuLib.getTokenMetadata({json.dumps(tok)}).amount)")
-        ok = await lis.until(f"(()=>{{try{{const v=(document.querySelector('#tokIn')||{{}}).value; return !!v && Number(CashuLib.getTokenMetadata(v).amount)==={amt0}}}catch(e){{return false}}}})()", 75000)
-        check('sound: another phone hears the token through its microphone', ok, await lis.ev("(()=>{const v=(document.querySelector('#tokIn')||{}).value||''; let m=''; try{m=String(Number(CashuLib.getTokenMetadata(v).amount))}catch(e){m=e.message} return v.slice(0,30)+' '+m})()"))
+        amt0 = await w.ev(f"Number(String(CashuLib.getTokenMetadata({json.dumps(tok)}).amount))")
+        ok = await lis.until(f"(()=>{{try{{const v=(document.querySelector('#tokIn')||{{}}).value; return !!v && Number(String(CashuLib.getTokenMetadata(v).amount))==={amt0}}}catch(e){{return false}}}})()", 75000)
+        check('sound: another phone hears the token through its microphone', ok, await lis.ev("(()=>{const v=(document.querySelector('#tokIn')||{}).value||''; let m=''; try{m=String(Number(String(CashuLib.getTokenMetadata(v).amount)))}catch(e){m=e.message} return v.slice(0,30)+' '+m})()"))
         if ok:
             await lis.click('[data-act=doReceiveToken]'); await lis.wait(400)
             if await lis.ev("!!document.querySelector('[data-act=doReceiveToken][data-trust]')"): await lis.click('[data-act=doReceiveToken]')
@@ -151,7 +151,7 @@ async def main():
         txt = await w.sheet_text()
         check('split: summons a boss with the amount still to collect', 'BILL BOSS' in txt and '2,000' in txt and '1,000 SAT' in txt, txt[:200])
         enc = await w.ev("Nutcade.S.requests[0].encoded")
-        check('split: the request asks each friend for their share', await w.ev(f"CashuLib.decodePaymentRequest({json.dumps(enc)}).amount==1000"))
+        check('split: the request asks each friend for their share', await w.ev(f"String(CashuLib.decodePaymentRequest({json.dumps(enc)}).amount)==='1000'"))
         async def friend_pays():
             await fr.home(); await fr.ev(f"Nutcade.handleScan({json.dumps(enc)})"); await fr.wait(300)
             await fr.click('[data-act=payReq]'); await fr.until(SHEET_DONE, 15000); await fr.close()

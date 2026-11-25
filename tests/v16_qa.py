@@ -110,7 +110,7 @@ async def main():
 
         # a request limited to a mint the payer doesn't hold
         await r.close()
-        await r.ev(f"(()=>{{const pr=new CashuLib.PaymentRequest([{{type:'post',target:'http://127.0.0.1:3350/test/post'}}],'post1',200,'sat',[{json.dumps(A)}],'Arcade tokens'); window.__post=pr.toEncodedRequest()}})()")
+        await r.ev(f"(()=>{{const pr=new CashuLib.PaymentRequest({{transport: [{{type:'post',target:'http://127.0.0.1:3350/test/post'}}], id: 'post1', amount: 200, unit: 'sat', mints: [{json.dumps(A)}], description: 'Arcade tokens'}}); window.__post=pr.toEncodedRequest()}})()")
         post_req = await r.ev("window.__post")
         await payer.close(); await payer.ev(f"Nutcade.handleScan({json.dumps(post_req)})"); await payer.wait(300)
         txt = await payer.sheet_text()
@@ -131,8 +131,8 @@ async def main():
         rid = await r.ev("Nutcade.S.requests[0].id")
         sent = await xp.evaluate(f"""(async()=>{{
           const L=CashuLib; const w=new L.Wallet({json.dumps(A)},{{unit:'sat'}}); await w.loadMint();
-          const q=await w.createMintQuoteBolt11(150); for(let i=0;i<20;i++){{ const s=await w.checkMintQuoteBolt11(q.quote); if(s.state==='PAID') break; await new Promise(r=>setTimeout(r,300)); }}
-          const proofs=(await w.mintProofsBolt11(150,q.quote)).map(p=>({{...p, amount: Number(p.amount)}}));
+          const q=await w.createMintQuote('bolt11',{{amount:150}}); for(let i=0;i<20;i++){{ const s=await w.checkMintQuoteBolt11(q.quote); if(s.state==='PAID') break; await new Promise(r=>setTimeout(r,300)); }}
+          const proofs=(await w.mintProofsBolt11(150,q.quote)).map(p=>({{...p, amount: Number(String(p.amount))}}));
           const to=L.nip19decode({json.dumps(target)}).data.pubkey; const sk=crypto.getRandomValues(new Uint8Array(32));
           const ev=L.nip17.wrapEvent(sk,{{publicKey:to}},JSON.stringify({{id:{json.dumps(rid)},mint:{json.dumps(A)},unit:'sat',proofs}}));
           const ws=new WebSocket('ws://127.0.0.1:3350/relay'); await new Promise(r=>ws.onopen=r); ws.send(JSON.stringify(['EVENT',ev]));

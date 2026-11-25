@@ -25,7 +25,10 @@ const txUnit = t => (t && unitOk(t.unit) && t.unit) || acctUnit(t && t.mint);
 // one spelling per account: the address as normUrl1 spells it, then the unit (lowercase) for a non-SAT account
 const normUrl = u => { const s = String(u ?? '').trim(); const m = /\|(usd|eur|chf)$/i.exec(s); return m ? normUrl1(s.slice(0, m.index)) + '|' + m[1].toLowerCase() : normUrl1(s); };
 // a token for an account: the real address and the account's unit (any record's key works: SAT keys pass unchanged)
-const tokEnc = (t, ...r) => L.getEncodedToken(t && typeof t.mint === 'string' && UNIT_RE.test(t.mint) ? Object.assign({}, t, { mint: acctUrl(t.mint), unit: acctUnit(t.mint) }) : t, ...r);
+// (cashu-ts 5 refuses to encode a coin whose DLEQ lacks its r, NUT-12: such a DLEQ, which no receiver can check, is left off the
+// coin, as the library itself drops it when it decodes one; everything else on the coin goes as it is)
+const tokDleq = t => t && Array.isArray(t.proofs) && t.proofs.some(p => p && p.dleq && !p.dleq.r) ? Object.assign({}, t, { proofs: t.proofs.map(p => p && p.dleq && !p.dleq.r ? Object.assign({}, p, { dleq: undefined }) : p) }) : t;
+const tokEnc = (t, ...r) => L.getEncodedToken(tokDleq(t && typeof t.mint === 'string' && UNIT_RE.test(t.mint) ? Object.assign({}, t, { mint: acctUrl(t.mint), unit: acctUnit(t.mint) }) : t), ...r);
 
 /* ---------- showing amounts: one formatter that knows the unit ---------- */
 // "12.50" (12,50 in German): the whole part grouped as the language does, then exactly the unit's decimals; SAT as fmt()

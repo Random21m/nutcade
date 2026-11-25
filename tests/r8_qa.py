@@ -755,7 +755,7 @@ async def main():
             inv = invoice(990, B)
             e, txt = await q.pay_ln(inv, confirm=True)
             m = re.search(r'([\d,]+) SAT (?:including fees|plus)', e or '')
-            mq = await q.ev(f"(async()=>{{const w=new CashuLib.Wallet({json.dumps(A)},{{unit:'sat'}}); await w.loadMint(); const mq=await w.createMeltQuoteBolt11({json.dumps(inv)}); return [Number(mq.amount), Number(mq.fee_reserve)]}})()")
+            mq = await q.ev(f"(async()=>{{const w=new CashuLib.Wallet({json.dumps(A)},{{unit:'sat'}}); await w.loadMint(); const mq=await w.createMeltQuoteBolt11({json.dumps(inv)}); return [Number(String(mq.amount)), Number(String(mq.fee_reserve))]}})()")
             need = int(m.group(1).replace(',', '')) if m else 0
             check('fee mint: "Need X SAT including fees" counts the mint\'s fee to spend ecash too', need > mq[0] + mq[1], (e, mq))
             # a reclaim on a fee mint: one honest fee line

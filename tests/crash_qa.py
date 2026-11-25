@@ -9,7 +9,7 @@ async def main():
         w=await newwallet(b,'crash'); await w.create(); await w.add_mint(B); await w.receive_ln(100)
         # Simulate: wallet created an invoice (saved), the mint issued the ecash, but the app died before saving it.
         await w.ev(f"""(async()=>{{ const S=Nutcade.S; const ws=new CashuLib.Wallet('{B}',{{unit:'sat',bip39seed:CashuLib.mnemonicToSeedSync(S.seed.mnemonic),counterInit:{{...S.counters}}}}); await ws.loadMint();
-            const q=await ws.createMintQuoteBolt11(640);
+            const q=await ws.createMintQuote('bolt11',{{amount:640}});
             const id='crash'+Date.now(); S.txs.unshift({{id,ts:Date.now(),note:'',status:'pending',fee:0,type:'in',method:'ln',amount:640,mint:'{B}',quote:q.quote,request:q.request}});
             S.quotes.push({{kind:'bolt11',quote:q.quote,request:q.request,amount:640,mint:'{B}',txId:id}});
             localStorage.setItem('nutcade:txs',JSON.stringify(S.txs)); localStorage.setItem('nutcade:quotes',JSON.stringify(S.quotes));
