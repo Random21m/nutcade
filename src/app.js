@@ -3393,10 +3393,15 @@ function reqWrap(pr, payload) {
 // the lock a request asks for (nut10), as the library would make it (PaymentRequest.toP2PKOptions: the key in its data, and
 // its tags, so the payee's wallet finds exactly the lock it asked for), or null for a request without one. A lock NUTCADE
 // can't make exactly (another kind than P2PK, a key that isn't one, a tag the library refuses: lockOf) is refused before
-// anything is spent; before 1.35 such a request was paid with an unlocked token.
+// anything is spent; before 1.35 such a request was paid with an unlocked token. cashu-ts 5 requests carry a lock in two
+// fields: nut10 (NUT-10/11) and nutroot (the v3 lock, which NUTCADE can't make). A request with nutroot and no nut10 is
+// refused here too (paying it with a plain token would hand over unlocked coins); with both, the nut10 lock is paid, as the
+// library's own sendToRequest does for a keyset before v3. Every payment of a request goes through here (payRequest, and
+// the Pay button's check before it is shown).
 const REQ_LOCK_ERR = "This request asks for a lock NUTCADE can't make, so it can't be paid from here. Nothing was sent.";
 function reqLock(pr) {
-  const n = pr && pr.nut10; if (!n) return null;
+  const n = pr && pr.nut10;
+  if (!n) { if (pr && pr.nutroot != null) throw new Error(REQ_LOCK_ERR); return null; }
   const lk = n.kind === 'P2PK' ? lockOf(JSON.stringify(['P2PK', { nonce: '0', data: String(n.data || ''), tags: n.tags || [] }])) : null;
   let o = null; if (lk) { try { o = pr.toP2PKOptions(); } catch (e) { o = null; } }
   if (!lk || !o || !validPub(lk.data)) throw new Error(REQ_LOCK_ERR);
