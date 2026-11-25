@@ -1298,13 +1298,14 @@ async function recoverChange(pend) {
 const opsRunning = new Set(), opRetry = new Set();
 const closeOp = op => { S.ops = S.ops.filter(o => o.id !== op.id); S.opsdone = [op.id].concat((S.opsdone || []).filter(x => x !== op.id)).slice(0, 300); };
 // a step's coins by secret, with each coin's keyset id beside it (since 1.35): cashu-ts 5 needs the id to ask the mint
-// about a coin (NUT-07: it picks the hash-to-curve of Y by the keyset's version). ysOf gives the mint's question back; a
-// record from before 1.35 has no ids, and takes a keyset of that mint from before v3 (02...): every one of those gives the
-// same Y, and no coin on such a record can be on a v3 keyset (NUTCADE before 1.35 had no v3 support)
+// about a coin (NUT-07: it picks the hash-to-curve of Y by the keyset's version byte). ysOf gives the mint's question back;
+// a coin on a record from before 1.35 (no ids) is asked about with SECP_ID, a fixed id whose version byte (00) selects
+// secp256k1: cashu-ts 5's computeY then gives exactly the Y cashu-ts 4.13.1 gave (hash_to_curve of the secret), whatever
+// keysets the wallet holds (no coin on such a record can be on a v3 keyset: NUTCADE before 1.35 had no v3 support)
+const SECP_ID = '00' + '0'.repeat(14);
 const inIds = ps => { const o = {}; for (const p of ps || []) if (p && p.secret && p.id) o[p.secret] = p.id; return o; };
 function ysOf(w, secrets, ids) {
-  let any = null; try { any = w.keyChain.getKeysets().map(k => k.id).find(id => /^0[01]/.test(id)) || w.keysetId; } catch (e) {}
-  return secrets.map(s => ({ secret: s, id: (ids && ids[s]) || any }));
+  return secrets.map(s => ({ secret: s, id: (ids && ids[s]) || SECP_ID }));
 }
 async function journaled(url, kind, info, run) {
   await authGate(url);   // (a mint with a login and none to be had: refused here, before anything is written down)
