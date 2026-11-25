@@ -797,7 +797,7 @@ async def main():
             window.__crashTx=id; await new Promise(r=>setTimeout(r,1200));
             // the app's own quote watcher may claim the deposit during the wait (it then owns those counters): that is the case under test too
             try {{ await ws.mintProofsBolt11(640,q.quote,{{onCountersReserved:u=>{{tr.wsCtr=u.start+'+'+u.count;}}}}); tr.ws=[Date.now()-T0,'ok']; }}
-            catch (e) {{ tr.ws=[Date.now()-T0,String(e&&e.message||e).slice(0,80)]; if (!/already (signed|issued|pending)|issued|pending|11003|11004|20002|20003|20005/i.test(String(e&&e.message||e))) throw e; }} }})()""")   # (pending, 20005/11004: the app's identical request is at the mint that moment)
+            catch (e) {{ tr.ws=[Date.now()-T0,String(e&&e.message||e).slice(0,80)]; if (!/already (signed|issued|pending)|issued|pending|only 0 available to mint|11003|11004|20002|20003|20005/i.test(String(e&&e.message||e))) throw e; }} }})()""")   # (pending, 20005/11004: the app's identical request is at the mint that moment; 'only 0 available to mint': cashu-ts 5 sees the app already claimed it)
         ok = await w.until("(Nutcade.S.txs.find(t=>t.id===window.__crashTx)||{}).status==='done'", 40000); await w.pg.unroute(f'{B}/v1/restore')
         ct = await w.ev("Nutcade.S.txs.find(t=>t.id===window.__crashTx)")
         rec_line = await w.ev("Nutcade.S.txs.some(t=>t.note==='Recovered with recovery phrase'&&t.mint===" + json.dumps(B) + "&&t.ts>Date.now()-60000)")
