@@ -245,7 +245,7 @@ async def tour(b, pa, pb, pc, pd):
         await h.ev(f"document.querySelector('[data-act=blockMint][data-url=\"{B}\"]').click()"); await h.wait(250); await snap('block_sheet')
         await h.click('[data-act=blockMintGo]'); await h.wait(250); await snap('block_done')
         await h.ev("Nutcade.closeSheet()"); await h.click('[data-act=tab][data-tab=mints]'); await h.wait(200); await snap('mints_blocked')
-        req = await h.ev(f"new CashuLib.PaymentRequest([{{type:'post',target:'{MOCK}/test/post'}}],'r1',50,'sat',[{json.dumps(B)}],'Lunch').toEncodedRequest()")
+        req = await h.ev(f"new CashuLib.PaymentRequest({{transport: [{{type:'post',target:'{MOCK}/test/post'}}], id: 'r1', amount: 50, unit: 'sat', mints: [{json.dumps(B)}], description: 'Lunch'}}).toEncodedRequest()")
         await h.ev(f"Nutcade.handleScan({json.dumps(req)})"); await h.wait(400); await snap('block_request_refused')
         await h.ev("Nutcade.closeSheet()"); await h.use(B); await h.home(); await h.click('[data-act=receive]'); await h.wait(150)
         if await h.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await h.click('[data-act=recvMethod][data-m=ln]'); await h.wait(100)
@@ -450,7 +450,7 @@ async def main():
         check('block: ecash already at the blocked mint can still be sent', tok2 and not e2, e2)
         await books(w, 'blocked send', broken); await w.use(A)
         # a payment request that only takes the blocked mint
-        req = await w.ev(f"new CashuLib.PaymentRequest([{{type:'post',target:'{MOCK}/test/post'}}],'r1',50,'sat',[{json.dumps(B)}],'Lunch').toEncodedRequest()")
+        req = await w.ev(f"new CashuLib.PaymentRequest({{transport: [{{type:'post',target:'{MOCK}/test/post'}}], id: 'r1', amount: 50, unit: 'sat', mints: [{json.dumps(B)}], description: 'Lunch'}}).toEncodedRequest()")
         await w.ev(f"Nutcade.handleScan({json.dumps(req)})"); await w.wait(400); t = await w.sheet_text()
         check('block: a payment request that only takes a blocked mint is refused, naming it, with Unblock', 'only takes ecash from Mint B, which you blocked' in t and await w.ev("!!document.querySelector('#layer [data-act=unblockMint]')"), t[:200])
         # ecash over Nostr from the blocked mint: refused, said so, kept aside
@@ -787,7 +787,7 @@ async def main():
         w.pg.on('response', crash_cb)
         await w.ev(f"""(async()=>{{ const S=Nutcade.S; const ws=new CashuLib.Wallet('{B}',{{unit:'sat',bip39seed:CashuLib.mnemonicToSeedSync(S.seed.mnemonic),counterInit:{{...S.counters}}}}); await ws.loadMint();
             const kid=ws.keysetId, T0=Date.now(), tr=window.__crashTrace={{kid,ctr0:S.counters[kid]||0,ws:null,wsCtr:null,hist:[]}};
-            const q=await ws.createMintQuoteBolt11(640); const id='crash'+Date.now();
+            const q=await ws.createMintQuote('bolt11',{{amount:640}}); const id='crash'+Date.now();
             S.txs.unshift({{id,ts:Date.now(),note:'',status:'pending',fee:0,type:'in',method:'ln',amount:640,mint:'{B}',quote:q.quote,request:q.request}});
             S.quotes.push({{kind:'bolt11',quote:q.quote,request:q.request,amount:640,mint:'{B}',txId:id}});
             let last=''; const look=()=>{{ const r=Nutcade.S.quotes.find(x=>x.quote===q.quote), t=Nutcade.S.txs.find(x=>x.id===id)||{{}};
@@ -797,7 +797,7 @@ async def main():
             window.__crashTx=id; await new Promise(r=>setTimeout(r,1200));
             // the app's own quote watcher may claim the deposit during the wait (it then owns those counters): that is the case under test too
             try {{ await ws.mintProofsBolt11(640,q.quote,{{onCountersReserved:u=>{{tr.wsCtr=u.start+'+'+u.count;}}}}); tr.ws=[Date.now()-T0,'ok']; }}
-            catch (e) {{ tr.ws=[Date.now()-T0,String(e&&e.message||e).slice(0,80)]; if (!/already (signed|issued|pending)|issued|pending|11003|11004|20002|20003|20005/i.test(String(e&&e.message||e))) throw e; }} }})()""")   # (pending, 20005/11004: the app's identical request is at the mint that moment)
+            catch (e) {{ tr.ws=[Date.now()-T0,String(e&&e.message||e).slice(0,80)]; if (!/already (signed|issued|pending)|issued|pending|only 0 available to mint|11003|11004|20002|20003|20005/i.test(String(e&&e.message||e))) throw e; }} }})()""")   # (pending, 20005/11004: the app's identical request is at the mint that moment; 'only 0 available to mint': cashu-ts 5 sees the app already claimed it)
         ok = await w.until("(Nutcade.S.txs.find(t=>t.id===window.__crashTx)||{}).status==='done'", 40000); await w.pg.unroute(f'{B}/v1/restore')
         ct = await w.ev("Nutcade.S.txs.find(t=>t.id===window.__crashTx)")
         rec_line = await w.ev("Nutcade.S.txs.some(t=>t.note==='Recovered with recovery phrase'&&t.mint===" + json.dumps(B) + "&&t.ts>Date.now()-60000)")
@@ -975,7 +975,7 @@ async def main():
         tokS, _ = await w.send_ecash(200, 'r3 stale'); sp0 = await w.ev("Nutcade.S.txs.filter(t=>t.note==='Ecash already spent elsewhere').reduce((a,t)=>a+t.amount,0)")
         await fx.receive_token(tokS)
         # as if the wallet never noticed: a stored copy of coins it once received (its history has them), spent elsewhere since
-        await w.ev(f"(d=>{{const P=JSON.parse(localStorage.getItem('nutcade:proofs')); P[{json.dumps(B)}].push(...d.proofs.map(p=>Object.assign({{}},p,{{amount:Number(p.amount)}}))); localStorage.setItem('nutcade:proofs', JSON.stringify(P));"
+        await w.ev(f"(d=>{{const P=JSON.parse(localStorage.getItem('nutcade:proofs')); P[{json.dumps(B)}].push(...d.proofs.map(p=>Object.assign({{}},p,{{amount:Number(String(p.amount))}}))); localStorage.setItem('nutcade:proofs', JSON.stringify(P));"
                    f" const T=JSON.parse(localStorage.getItem('nutcade:txs')); T.unshift({{id:'stale1', type:'in', method:'ecash', amount:200, mint:{json.dumps(B)}, status:'done', ts:Date.now(), note:'stale copy'}}); localStorage.setItem('nutcade:txs', JSON.stringify(T));"
                    f" localStorage.setItem('nutcade:gen', String(+(localStorage.getItem('nutcade:gen')||0)+1))}})(CashuLib.getDecodedToken({json.dumps(tokS)}, Object.keys(Nutcade.S.counters)))")
         await w.pg.reload(); await w.wait(1500)

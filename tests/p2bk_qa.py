@@ -60,10 +60,10 @@ window.__seed = () => CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic);
 window.__lockPriv = () => __even(__seed().slice(0, 32));
 window.__nzPriv = () => __even(CashuLib.HDKey.fromMasterSeed(__seed()).derive("m/129372'/61'/0'/0'/0'").privateKey);
 window.__nzEv = (proofs, x) => CashuLib.finalizeEvent({ kind: 9321, created_at: Math.floor(Date.now() / 1000) + (x.dt || 0), content: x.c || '',
-  tags: proofs.map(p => ['proof', JSON.stringify(Object.assign({ id: p.id, amount: Number(p.amount), secret: p.secret, C: p.C }, p.dleq ? { dleq: p.dleq } : {}, x.noE ? {} : x.E !== undefined ? { p2pk_e: x.E } : p.p2pk_e ? { p2pk_e: p.p2pk_e } : {}))]).concat([['u', x.u], ['unit', 'sat'], ['p', x.p]]) }, crypto.getRandomValues(new Uint8Array(32)));
+  tags: proofs.map(p => ['proof', JSON.stringify(Object.assign({ id: p.id, amount: Number(String(p.amount)), secret: p.secret, C: p.C }, p.dleq ? { dleq: p.dleq } : {}, x.noE ? {} : x.E !== undefined ? { p2pk_e: x.E } : p.p2pk_e ? { p2pk_e: p.p2pk_e } : {}))]).concat([['u', x.u], ['unit', 'sat'], ['p', x.p]]) }, crypto.getRandomValues(new Uint8Array(32)));
 window.__nzPublish = ev => new Promise(r => { const ws = new WebSocket(%s); ws.onopen = () => ws.send(JSON.stringify(['EVENT', ev]));
   ws.onmessage = m => { const d = JSON.parse(m.data); if (d[0] === 'OK') { try { ws.close(); } catch (e) {} r(d[2]); } }; setTimeout(() => r(false), 5000); });
-window.__dec = t => CashuLib.getDecodedToken(t, Object.keys(Nutcade.S.counters).concat(...Object.values(Nutcade.S.mintkeys || {}).map(k => Object.keys(k)))).proofs.map(p => ({ id: p.id, amount: Number(p.amount), secret: p.secret, C: p.C, p2pk_e: p.p2pk_e, dleq: p.dleq }));
+window.__dec = t => CashuLib.getDecodedToken(t, Object.keys(Nutcade.S.counters).concat(...Object.values(Nutcade.S.mintkeys || {}).map(k => Object.keys(k)))).proofs.map(p => ({ id: p.id, amount: Number(String(p.amount)), secret: p.secret, C: p.C, p2pk_e: p.p2pk_e, dleq: p.dleq }));
 """ % J(RELAY)
 
 async def wallet(b, name, lang='en'):

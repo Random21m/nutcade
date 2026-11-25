@@ -39,7 +39,7 @@ def tags(e, k): return [t for t in e['tags'] if t and t[0] == k]
 
 HELPERS = """
 window.__nzEv = (proofs, x) => CashuLib.finalizeEvent({ kind: 9321, created_at: Math.floor(Date.now() / 1000) + (x.dt || 0), content: x.c || '',
-  tags: proofs.map(p => ['proof', JSON.stringify(Object.assign({ id: p.id, amount: Number(p.amount), secret: p.secret, C: p.C }, p.dleq && x.dleq !== false ? { dleq: p.dleq } : {}))]).concat([['u', x.u], ['unit', 'sat'], ['p', x.p]]) }, crypto.getRandomValues(new Uint8Array(32)));
+  tags: proofs.map(p => ['proof', JSON.stringify(Object.assign({ id: p.id, amount: Number(String(p.amount)), secret: p.secret, C: p.C }, p.dleq && x.dleq !== false ? { dleq: p.dleq } : {}))]).concat([['u', x.u], ['unit', 'sat'], ['p', x.p]]) }, crypto.getRandomValues(new Uint8Array(32)));
 window.__nzPublish = ev => new Promise(r => { const ws = new WebSocket(%s); ws.onopen = () => ws.send(JSON.stringify(['EVENT', ev]));
   ws.onmessage = m => { const d = JSON.parse(m.data); if (d[0] === 'OK') { try { ws.close(); } catch (e) {} r(d[2]); } }; setTimeout(() => r(false), 5000); });
 """ % J(RELAY)
@@ -483,6 +483,26 @@ async def main():
                 check(f'{lang}: the nutzap texts show translated, with no missing translation', "can't receive" not in txt and 'Receive nutzaps' not in await x.ev("document.querySelector('#set-privacy').innerText") and not miss, (txt[:120], miss))
                 await x.pg.context.close()
         await section('langs', langs)
+
+        async def fields():
+            # a waiting nutzap whose mint turns it down because some of its coins are spent is saved again with the coins
+            # still good (NutZap.left, app_nutzap.js), each with every field it had (spend_info, witness, p2pk_e, dleq: on
+            # e9b0b98 spend_info and witness were dropped)
+            tok = await al.ev(f"Nutcade.r8.sendEcash(3, 'fields', null, {J(M)}).then(x => x.token)")
+            ps = await al.ev(f"CashuLib.getDecodedToken({J(tok)}, Object.keys(Nutcade.S.counters)).proofs.map(p => Object.assign({{}}, p, {{ amount: Number(String(p.amount)) }}))")
+            SI = {'k': '02' + 'cd' * 32, 'tree': ['00' * 8]}
+            extra = {'spend_info': SI, 'witness': J({'signatures': ['ee' * 64]}), 'p2pk_e': '02' + 'ef' * 32}
+            rest = [dict(p, **extra) for p in ps[1:]]
+            t2 = await al.ev(f"CashuLib.getEncodedToken({{ mint: {J(M)}, unit: 'sat', proofs: {J(ps[:1] + rest)}.map(p => Object.assign({{}}, p, {{ amount: CashuLib.Amount.from(p.amount) }})) }})")
+            got = await al.ev(f"""(() => {{ const d = CashuLib.getDecodedToken({J(t2)}, Object.keys(Nutcade.S.counters));
+                const left = NutZap.left(d.proofs, d.proofs.map((p, i) => ({{ state: i ? 'UNSPENT' : 'SPENT' }})));
+                const back = CashuLib.getDecodedToken(NutZap.leftToken({J(M)}, left), Object.keys(Nutcade.S.counters)).proofs;
+                return back.map(p => ({{ secret: p.secret, amount: Number(String(p.amount)), si: p.spend_info || null, w: p.witness || null, e: p.p2pk_e || null, dleq: !!(p.dleq && p.dleq.r) }})); }})()""")
+            check('fields: a waiting nutzap with a spent coin is saved again with only the good coins, each keeping spend_info, witness, p2pk_e and its DLEQ proof',
+                  [p['secret'] for p in got] == [p['secret'] for p in rest] and all(p['si'] == SI and p['w'] == extra['witness'] and p['e'] == extra['p2pk_e'] and p['dleq'] for p in got)
+                  and sum(p['amount'] for p in got) == sum(p['amount'] for p in rest), got)
+            await al.receive_token(tok)   # (the coins back)
+        await section('fields', fields)
 
         await al.pg.screenshot(path=os.path.join(OUT, 'nutzap.png'))
         await b.close()

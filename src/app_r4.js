@@ -62,7 +62,7 @@ function unpackToken(b) {
 function soundBytes(text, proof = true) {
   const c = classify(text);
   if (c.kind === 'token') {
-    try { const d = L.getDecodedToken(c.value, Object.keys(S.counters)); return packToken({ mint: d.mint, unit: d.unit, memo: d.memo, proofs: d.proofs }, proof); } catch (e) {}
+    try { const d = L.getDecodedToken(cleanToken(c.value), Object.keys(S.counters)); return packToken({ mint: d.mint, unit: d.unit, memo: d.memo, proofs: d.proofs }, proof); } catch (e) {}
   }
   return new TextEncoder().encode(String(text));
 }
@@ -138,10 +138,12 @@ function evenPriv(privHex) {   // the private key whose public key starts with 0
 const myLockPub = () => '02' + L.nostrPub(nostrKey());
 const myLockPriv = () => evenPriv(hex(nostrKey()));
 const allPrivs = () => p2pkPrivs().concat(S.seed ? [myLockPriv(), nzPriv()] : []);   // (nzPriv: the nutzap receiving key, src/app_nutzap.js)
+// (a key that is a point on the curve: cashu-ts 5 refuses to lock to any other, and a lock to one nobody can hold would
+// only come back after its date)
 function lockPubFrom(v) {
   v = String(v || '').trim();
-  if (validPub(v)) return v.toLowerCase();
-  const n = parseNostrAddr(v); return n ? '02' + n.pubkey : null;
+  const k = validPub(v) ? v.toLowerCase() : (() => { const n = parseNostrAddr(v); return n ? '02' + String(n.pubkey).toLowerCase() : null; })();
+  return k && DQ.point(k) ? k : null;
 }
 const GIFT_DAYS = [[1, '1 DAY'], [7, '1 WEEK'], [30, '1 MONTH']];
 function giftFields() {
@@ -170,7 +172,8 @@ async function deliverToContact(c, tx) {
   return !!ok;
 }
 async function takeBackGift(t, hand) {
-  if (t.lockUntil && Date.now() < t.lockUntil) throw new Error(`This gift is locked to ${t.giftTo || 'them'} until ${fmtDay(t.lockUntil)}. After that you can take it back.`);
+  // (the refund path opens only AFTER the lock's second, as the mint and the library read a locktime: now > locktime in seconds)
+  if (t.lockUntil && Math.floor(Date.now() / 1000) <= Math.floor(t.lockUntil / 1000)) throw new Error(`This gift is locked to ${t.giftTo || 'them'} until ${fmtDay(t.lockUntil)}. After that you can take it back.`);
   if (await checkClaim(t).catch(() => false)) return 'claimed';
   reclaiming.add(t.id);
   try { await receiveToken(t.token, `Gift came back${t.giftTo ? ' from ' + t.giftTo : ''}`, { own: true, hand: !!hand }); }
@@ -347,7 +350,7 @@ async function moveQuotes(from, to, amount, tag = (s, p) => p) {
   if (from === to) throw new Error('Pick two different mints.');
   const wTo = await tag('to', getWallet(to)), wFrom = await tag('from', getWallet(from));
   { const e = quoteFitErr(to, amount); if (e) throw e; }   // (refused before anything is paid)
-  const mintQ = await tag('to', wTo.createMintQuoteBolt11(amount));
+  const mintQ = await tag('to', newDepositQuote(wTo, amount));   // (locked to a key of its own, kept on the deposit's record below)
   const mq = await tag('from', wFrom.createMeltQuoteBolt11(mintQ.request));
   return { from, to, amount, mintQ, mq };
 }
@@ -362,7 +365,7 @@ async function doMove(mv, o = {}) {
   const nm = u => (S.mints.find(m => m.url === u) || {}).name || host(u), auto = o.auto ? { autoMove: true } : {};
   // the receiving side is recorded first, so if NUTCADE closes mid-move the deposit is still claimed later
   const inTx = addTx(Object.assign({ type: 'in', method: 'ln', amount: mv.amount, mint: mv.to, note: `Moved from ${nm(mv.from)}`, status: 'pending', request: mv.mintQ.request, quote: mv.mintQ.quote, move: true }, auto));
-  const q = { kind: 'bolt11', quote: mv.mintQ.quote, request: mv.mintQ.request, amount: mv.amount, mint: mv.to, txId: inTx.id, expiry: mv.mintQ.expiry || null };
+  const q = Object.assign({ kind: 'bolt11', quote: mv.mintQ.quote, request: mv.mintQ.request, amount: mv.amount, mint: mv.to, txId: inTx.id, expiry: mv.mintQ.expiry || null }, quoteLock(mv.mintQ));
   S.quotes.push(q); save();
   // this payment's own line is marked a move (no round-up, not an arrival) and it doesn't stop at the piggy bank (the sats
   // stay yours); only this call: anything else paid or received meanwhile is treated as usual

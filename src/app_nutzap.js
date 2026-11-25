@@ -254,6 +254,10 @@ async function nzEvent(ev) {
   await nzClaim(t, true).catch(() => {});
   return 'ok';
 }
+// the coins of a waiting nutzap the mint doesn't say are spent, and the token they are saved in again: each coin with
+// every field it had (spend_info, witness, p2pk_e, dleq and anything else: a field dropped here can make a coin unspendable)
+const nzLeft = (ps, st) => ps.filter((p, i) => !(st[i] && st[i].state === 'SPENT')).map(p => Object.assign({}, p, { amount: num(p.amount) }));
+const nzLeftToken = (mint, left) => tokEnc({ mint, proofs: left, unit: 'sat' });
 // a waiting nutzap claimed with the usual claim of a saved token; the mint down leaves it waiting, the mint refusing it
 // (its coins unspent) NZ_REJECT times marks it failed
 async function nzClaim(t0, force, hand) {
@@ -274,13 +278,13 @@ async function nzClaim(t0, force, hand) {
     const turnedDown = isRefusal(e) || isRefusal(e.cause);   // (the mint answered no: its step signed nothing)
     if (!netErr(e) && !e.blocked && (!e.asked || turnedDown)) {   // the mint turned it down: which of its coins are still good?
       try {
-        const w = await getWallet(cur.mint), ps = L.getDecodedToken(cur.incoming, Object.keys(S.mintkeys[cur.mint] || {}).concat(Object.keys(S.counters))).proofs || [];
+        const w = await getWallet(cur.mint), ps = L.getDecodedToken(cleanToken(cur.incoming), Object.keys(S.mintkeys[cur.mint] || {}).concat(Object.keys(S.counters))).proofs || [];
         const st = await inTime(w.checkProofsStates(ps), 20000);
         if (st.length === ps.length && st.every(x => x && x.state === 'UNSPENT')) refused = true;   // (every coin unspent, and the mint still says no)
         else if (st.length === ps.length && !S.ops.some(o => o.follow && o.follow.k === 'incoming' && o.follow.txId === cur.id)) {
-          const left = ps.filter((p, i) => !(st[i] && st[i].state === 'SPENT')).map(p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq ? { dleq: p.dleq } : {}, p.p2pk_e ? { p2pk_e: p.p2pk_e } : {}));
+          const left = nzLeft(ps, st);
           if (!left.length) { S.txs = S.txs.filter(x => x.id !== cur.id); save(); refresh(); return null; }
-          if (left.length < ps.length) { updTx(cur.id, { incoming: tokEnc({ mint: cur.mint, proofs: left, unit: 'sat' }), amount: sum(left) }); await saveNow(); }
+          if (left.length < ps.length) { updTx(cur.id, { incoming: nzLeftToken(cur.mint, left), amount: sum(left) }); await saveNow(); }
         }
       } catch (x) {}
     }
@@ -325,7 +329,7 @@ function nzPick(info, amount) {
   if (!ok.length) { const e = keepErr(new Error("You don't have that much at a mint they take nutzaps at. Nothing was sent.")); e.raw = mine.map(m => `${host(m.url)}: ${money(balanceOf(m.url))}`).join(', '); throw e; }
   return ok.find(m => m.url === S.active) || ok.sort((a, b) => balanceOf(b.url) - balanceOf(a.url))[0];
 }
-const nzProof = p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq && p.dleq.e && p.dleq.s && p.dleq.r ? { dleq: { e: String(p.dleq.e), s: String(p.dleq.s), r: String(p.dleq.r) } } : {}, p.p2pk_e ? { p2pk_e: String(p.p2pk_e) } : {});   // (p2pk_e: a blinded lock's E, NUT-28)
+const nzProof = p => Object.assign({ id: p.id, amount: num(p.amount), secret: p.secret, C: p.C }, p.dleq && p.dleq.e && p.dleq.s && p.dleq.r ? { dleq: { e: String(p.dleq.e), s: String(p.dleq.s), r: String(p.dleq.r) } } : {}, p.p2pk_e ? { p2pk_e: String(p.p2pk_e) } : {}, p.spend_info ? { spend_info: p.spend_info } : {});   // (p2pk_e: a blinded lock's E, NUT-28; spend_info: a v3 coin's, cashu-ts 5, never dropped)
 const nzRelaysFor = z => { const l = nzRelays(z.relays); return (l.length ? l : nzMyRelays()).slice(0, 8); };
 // the nutzap's event, made once and kept on its line before it is sent (sending it again is the same event)
 async function nzDeliverOne(id) {
@@ -419,6 +423,6 @@ async function nzTickNow(force) {
 window.NutZap = {
   pub: () => nzPub(), me: () => L.nostrPub(nostrKey()), path: NZ_PATH, info: () => S.prefs.nzInfo || null, live: () => [...nzSocks.values()].filter(s => s.readyState <= 1).length,
   event: ev => nzQueue(ev), tick: force => nzTick(!!force), seen: () => [...nzSeen], find: (pk, rl) => nzFind(pk, rl || []), mints: () => nzMints(), waiting: () => nzWaiting().length,
-  claim: id => nzClaim({ id }, true, true), relay: u => nzRelay(u), lock: s => nzLock(s), socks: () => [...nzSocks.values()],
+  claim: id => nzClaim({ id }, true, true), left: (ps, st) => nzLeft(ps, st), leftToken: (m, l) => nzLeftToken(m, l), relay: u => nzRelay(u), lock: s => nzLock(s), socks: () => [...nzSocks.values()],
   send: (target, amount, comment) => nzSend(target, amount, comment), open: target => openNutzap(target), randomPub: () => hex(L.getPubKeyFromPrivKey(rnd(32)))
 };

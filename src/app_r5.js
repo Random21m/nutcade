@@ -92,11 +92,13 @@ async function readBounty(bo, rec) {
     if (!d.proofs.length || d.proofs.length > P2BK_MAX_COINS) return null;
     const locks = [];
     for (const p of d.proofs) {   // the cheap checks of every coin first
-      const sec = JSON.parse(p.secret); if (!Array.isArray(sec) || sec[0] !== 'HTLC' || !sec[1] || typeof sec[1].data !== 'string') return null;
-      const tg = k => ((sec[1].tags || []).find(t => Array.isArray(t) && t[0] === k) || []).slice(1);
-      const keys = tg('pubkeys'); if (!keys.length || keys.length > P2BK_MAX_KEYS || tg('refund').length > P2BK_MAX_KEYS) return null;
+      // (the lock as the library reads it, lockOf in app.js: a malformed one, or one needing more than one of its keys, is no bounty for us)
+      const lk = lockOf(p.secret); if (!lk || lk.kind !== 'HTLC' || lk.nSigs !== 1) return null;
+      const keys = lk.keys; if (!keys.length || keys.length > P2BK_MAX_KEYS || lk.refund.length > P2BK_MAX_KEYS) return null;
       if (p.p2pk_e !== undefined && !p2bkE(p.p2pk_e)) return null;
-      if (H && sec[1].data !== H) return null; H = sec[1].data;
+      // (a hash written in capitals: the library compares it in lower case (#1415), but the Nutshell mints refuse such a coin
+      // outright ("invalid HTLC hash"), so nobody can claim it there: no bounty for us)
+      if (lk.data !== lk.hash || (H && lk.hash !== H)) return null; H = lk.hash;
       locks.push(keys);
     }
     const pub = myLockPub(), priv = myLockPriv();
@@ -122,7 +124,7 @@ async function attachBounty(rec, bounty, signer, from) {
 function bountyWon(f) { const rec = S.challenges.find(x => x.id === f.rec && x.dir === 'in'); if (rec && rec.bounty && rec.bounty.state !== 'won') { rec.bounty.state = 'won'; saveChallenges(); } }
 async function claimBounty(rec, pre, from) {
   const b = rec.bounty; if (!b || b.state === 'won' || from !== rec.pubkey) return;
-  if (await sha256hex(L.hexToBytes(pre)) !== b.H) return;
+  if (!/^[0-9a-f]{64}$/i.test(String(pre || '')) || await sha256hex(L.hexToBytes(pre)) !== String(b.H).toLowerCase()) return;   // (in lower case, as the library compares it)
   const d = await decodeTok(b.token);
   const unlocked = tokEnc({ mint: d.mint, unit: 'sat', proofs: d.proofs.map(p => Object.assign({}, p, { witness: JSON.stringify({ preimage: pre }) })) });
   const who = nameFor(rec.pubkey) || rec.by, g = gameById(rec.game);
@@ -146,7 +148,7 @@ const extraLeft = () => S.extra ? S.extra.until - Date.now() : 0;
 const daysLeft = ms => Math.max(0, Math.ceil(ms / 86400e3));
 // Lock sats of the balance for the Extra Life (setting it up): to your key, with your heir's key as the refund key
 // after the date. The journal has every output before the mint is asked, so an interrupted lock finishes as itself.
-const extraLockCfg = (w, until, heirPub) => ({ send: { type: 'p2pk', options: { pubkey: myLockPub(), locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() });
+const extraLockCfg = (w, until, heirPub) => ({ send: { type: 'lock', options: { mainKeys: [myLockPub()], locktime: Math.floor(until / 1000), refundKeys: ['02' + heirPub] } }, keep: w.defaultOutputType() });
 async function lockExtra(url, amount, heirPub, until, follow, ctx = {}) {
   return mintLock(url, async () => {
     const w = await getWallet(url), inputs = [...(S.proofs[url] || [])];
@@ -260,11 +262,11 @@ async function onExtraLife(p, from) {
   if (String(d.unit || 'sat').toLowerCase() !== 'sat') return;   // (Extra Life is SAT only: a copy in another unit is not for us)
   let until = 0;
   for (const pr of d.proofs) {
-    let sec; try { sec = JSON.parse(pr.secret); } catch (e) { return; }
-    if (sec[0] !== 'P2PK') return;
-    const tags = sec[1].tags || [], refund = (tags.find(t => t[0] === 'refund') || []).slice(1), lt = num((tags.find(t => t[0] === 'locktime') || [])[1]);
-    if (!refund.includes(myLockPub()) || !lt) return;   // only copies we could actually claim
-    until = Math.max(until, lt * 1000);
+    // only copies we could actually claim, the lock read as the library reads it (lockOf, app.js): P2PK, our key among its
+    // refund keys with one signature enough, and a locktime that ends (digits; "0" has ended already: claimable now)
+    const lk = lockOf(pr.secret);
+    if (!lk || lk.kind !== 'P2PK' || !lk.refund.includes(myLockPub()) || lk.nSigsRefund !== 1 || lk.locktime === null) return;
+    until = Math.max(until, lk.locktime * 1000);
   }
   const who = nameFor(from);
   const h = { from, name: who || 'A friend', token: cleanToken(String(p.token)), amount: sum(d.proofs), mint: extUrl(d.mint), until, state: 'waiting', at: Date.now() };

@@ -7,14 +7,14 @@ copied exactly from the package as published on npm at the version shown (zxing-
 publish no licence file in their npm packages, from their source repositories). NUTCADE itself is under the MIT
 License (LICENSE).
 
-  @cashu/cashu-ts 4.13.1     MIT OR Apache-2.0 (both texts below)
+  @cashu/cashu-ts 5.0.0-rc.13 MIT OR Apache-2.0 (both texts below)
   @noble/curves 2.x          MIT      (the licence text is the same in every 2.x release; checked 2.0.0 and 2.4.0)
   @noble/hashes 2.x          MIT      (same)
   @noble/ciphers 2.x         MIT      (same)
   @scure/base 2.x            MIT      (same)
   @scure/bip32 2.x           MIT      (same)
   @scure/bip39 2.x           MIT      (same; includes its English word list)
-  nostr-tools 2.26.1         Unlicense
+  nostr-tools 2.26.0         Unlicense
   jsqr 1.4.0                 Apache-2.0
   qrcode-generator           MIT
   zxing-wasm 3.1.6           MIT      (the JavaScript loader in the bundle, with its Emscripten-generated glue)
@@ -26,7 +26,7 @@ Fonts embedded in public/index.html (licence texts copied exactly from the Googl
   VT323                      SIL Open Font License 1.1
 
 ===============================================================================
-@cashu/cashu-ts 4.13.1 — LICENSE.md
+@cashu/cashu-ts 5.0.0-rc.13 — LICENSE.md
 ===============================================================================
 
 This software is licensed under [Apache 2.0](./LICENSE-APACHE) or
@@ -45,7 +45,7 @@ sell copies of this software or any files in this repository except in
 accordance with one or both of these licenses.
 
 ===============================================================================
-@cashu/cashu-ts 4.13.1 — LICENSE-MIT
+@cashu/cashu-ts — LICENSE-MIT (5.0.0-rc.13 publishes only LICENSE.md, which names this file; the text as published with 4.13.1)
 ===============================================================================
 
 MIT License
@@ -71,7 +71,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ===============================================================================
-@cashu/cashu-ts 4.13.1 — LICENSE-APACHE
+@cashu/cashu-ts — LICENSE-APACHE (the same: as published with 4.13.1)
 ===============================================================================
 
 
@@ -435,7 +435,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ===============================================================================
-nostr-tools 2.26.1 — LICENSE
+nostr-tools 2.26.0 — LICENSE
 ===============================================================================
 
 This is free and unencumbered software released into the public domain.

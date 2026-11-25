@@ -337,11 +337,11 @@ async function fundDecoyNow(dek, data, url, token) {
     async reserveAt(id, start, count) { ctrs[id] = start + count; return { start, count }; },
     async advanceToAtLeast(id, m) { if ((ctrs[id] || 0) < m) ctrs[id] = m; },
     async snapshot() { return Object.assign({}, ctrs); }, async setNext(id, n) { ctrs[id] = n; } };
-  const w = new L.Wallet(authMint(acctUrl(url)), { unit: acctUnit(url), bip39seed: L.mnemonicToSeedSync(data.seed.mnemonic), counterSource: cs }); await w.loadMint();   // (with this device's login at a mint that asks for one)
+  const w = new L.Wallet(authMint(acctUrl(url)), { unit: acctUnit(url), bip39seed: L.mnemonicToSeedSync(data.seed.mnemonic), counterSource: cs }); await loadFresh(w);   // (with this device's login at a mint that asks for one)
   const ps = (w.decodeToken(cleanToken(token)).proofs || []), m = mintMax(url);
-  const wait = (data.txs || []).find(t => t.incoming === cleanToken(token) && t.status === 'pending');   // (the token's line in that wallet: settled with the step, if it comes to that)
+  const wait = (data.txs || []).find(t => t.incoming && cleanToken(t.incoming) === cleanToken(token) && t.status === 'pending');   // (the token's line in that wallet: settled with the step, if it comes to that)
   const op = { id: uid(), kind: 'receive', mint: url, inputs: ps.map(p => p.secret), amount: 0, note: '', locked: false, extra: false, txId: null, tx: null, follow: wait ? { k: 'incoming', txId: wait.id, reqId: null } : null, own: null, created: Date.now(), ctr: [], outs: [], mk: 1 };
-  const prepared = await w.prepareSwapToReceive(cleanToken(token), { onCountersReserved: u => { if (u && u.count > 0) op.ctr.push({ id: u.keysetId, start: u.start, n: u.count }); } });
+  const prepared = await w.prepareSwapToReceive(cleanToken(token), { onCountersReserved: u => { if (u && u.count > 0) op.ctr.push({ id: u.counterKey, start: u.start, n: u.count }); } });
   const outs = (prepared.keepOutputs || []).length + (prepared.sendOutputs || []).length;
   if (m && (ps.length > m || outs > m)) return;   // (more than the mint takes in one request: claimed in parts when that wallet opens)
   op.amount = (prepared.keepOutputs || []).reduce((t, o) => t + num(String(o.blindedMessage.amount)), 0);

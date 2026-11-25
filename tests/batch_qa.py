@@ -15,7 +15,8 @@ round without one; never twice); two devices with one seed (the same counters, a
 on either device, nothing lost between them; a mint without NUT-29 (single requests exactly as 1.33.0); a mint with a login,
 logged in (one BAT for the batch), logged out (no request, nothing lost, all in once after logging in) and refusing the
 batch behind "Blind authentication failed" (asked again with a fresh BAT, then each on its own); NUT-20 locked deposits
-(npub.cash) batched with their signatures; 999 / 1,000 / 1,234,567 and the amounts shown in all five languages.
+(npub.cash) batched with their signatures; a mint whose quote check leaves out the lock key (claimed with the deposit's
+own key, alone and batched); 999 / 1,000 / 1,234,567 and the amounts shown in all five languages.
 NOT proven here: a mint other than Nutshell 0.21 (CDK's NUT-29), bolt12 batches (NUTCADE has no bolt12 deposits), and the
 browser's Web Locks across real tabs (two contexts here are two devices). BT_ONLY=a,b runs some sections."""
 import asyncio, json, os, re, sys, urllib.parse, urllib.request
@@ -487,6 +488,34 @@ async def main():
             check('locked: three "Lightning address" lines, exact balance', sorted(l[2] for l in await lines(w, B) if l[3] == 'Lightning address') == sorted(amts) and await bal(w, B) == sum(amts) and (await ledger(w, B)) == [sum(amts)] * 2, await lines(w, B))
             errs.extend(w.errs); await w.pg.context.close()
         await section('locked', locked)
+
+        # ======================= a mint that leaves the lock key out of its answer =======================
+        # (every new deposit is locked to its own key, NUT-20; a mint whose quote check doesn't echo `pubkey` still gets the
+        # deposit signed with the record's own key: on e9b0b98 such a deposit was never claimed)
+        async def nopub():
+            w = await fresh(b, 'bt-nopub', mints=(B,)); log = Log(w.pg)
+            pat = re.compile(re.escape(B) + r'/v1/mint/quote/bolt11/[A-Za-z0-9_-]+$')
+            async def strip(route):
+                try:
+                    if route.request.method != 'GET': return await route.continue_()
+                    r = await route.fetch(); j = await r.json(); j.pop('pubkey', None)
+                    await route.fulfill(response=r, body=J(j))
+                except Exception: pass
+            await w.pg.route(pat, strip)
+            q1 = await deposit(w, 21, B)
+            locked = [bool((x['body'] or {}).get('pubkey')) for x in log.posts('/v1/mint/quote/bolt11', B)] == [True]   # (it was made locked: NUT-20)
+            ok = await settled(w, B, [q1], 30000)
+            check('nopub: a lone locked deposit whose quote check leaves out pubkey is claimed (signed with its own key), exact balance',
+                  locked and ok and await bal(w, B) == 21 and len(log.posts(SINGLE, B)) >= 1, (locked, ok, await bal(w, B)))
+            amts = [5, 6, 7]
+            ids, hold = await held_deposits(w, B, amts)
+            m0 = log.mark(); await hold.off(); await reopen(w)
+            ok = await settled(w, B, ids, 40000)
+            bat = log.posts(BATCH, B, m0); sig = bat and (bat[0]['body'] or {}).get('signatures')
+            check('nopub: three locked deposits whose quote checks leave out pubkey: one batch with a signature each, exact balance',
+                  ok and len(bat) == 1 and sig and len(sig) == 3 and all(sig) and await bal(w, B) == 21 + sum(amts), (ok, len(bat), sig, await bal(w, B)))
+            errs.extend(w.errs); await w.pg.context.close()
+        await section('nopub', nopub)
 
         check('end: no page errors', not errs, errs[:5])
         await b.close()

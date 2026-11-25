@@ -176,7 +176,7 @@ async def run_mint(b, M, O, which, pin_src):
                 async def start():
                     await a.home(); await a.click('[data-act=send]'); await a.wait(150); await a.pg.check('#giftOn')
                     await a.ev("const s=document.querySelector('#giftTo'); if (s) { s.value=''; s.dispatchEvent(new Event('change',{bubbles:true})) }")
-                    await a.fill('#giftKey', '02' + 'cd' * 32); await a.fill('#amtIn', '300'); await a.click('[data-act=doSendEcash]')
+                    await a.fill('#giftKey', '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'); await a.fill('#amtIn', '300'); await a.click('[data-act=doSendEcash]')
             elif k == 'bounty':
                 async def start():
                     await a.ev("Nutcade.closeSheet()"); await a.click('[data-act=tab][data-tab=arcade]'); await a.wait(200)
