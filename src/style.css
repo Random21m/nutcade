@@ -678,3 +678,37 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 /* your own Nostr identity (1.37): a remote signer's approval link (auth_url), shown at the top, opened only by you */
 .id-auth{position:fixed;left:8px;right:8px;top:8px;z-index:9999;display:grid;gap:8px;padding:12px;border:2px solid var(--gold);border-radius:10px;background:var(--deck);color:var(--ink);font-size:14px;max-width:560px;margin:0 auto;box-sizing:border-box;min-width:0}
 .id-auth a{justify-self:start}
+
+/* ---------- Readable text (Settings, off by default) ----------
+   html.readable is set by the page's first script, from the stored setting, before the first paint. Wallet screens
+   (balance, lists, buttons, sheets, forms, settings, help) switch to the plain system fonts, with sizes in rem so they
+   follow the browser's and the phone's text size. The pixel fonts stay for the logo, headings and the whole arcade
+   (the game screens, the cabinet list, the effects) and the printable tokens. Not a colour theme: every theme works. */
+html.readable{--f-sys:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--f-display:var(--f-sys);--f-body:var(--f-sys);--f-pixel:"Press Start 2P",ui-monospace,"Courier New",monospace;--f-pixel-body:"VT323",ui-monospace,"Courier New",monospace}
+html.readable .marquee,html.readable .h2,html.readable .sheet-head h3,html.readable .gate-h,html.readable .game-view,html.readable .cab,html.readable .fx-label,html.readable .scores,html.readable .trophy,html.readable .continue-box,html.readable .grade-big,html.readable .pt-preview,html.readable .pt-card,html.readable .stick,html.readable .dpad,html.readable .abtn,html.readable .initials,html.readable .boss-name,html.readable .tape-win{--f-display:var(--f-pixel);--f-body:var(--f-pixel-body)}
+html.readable :is(.marquee,.game-view,.cab,.continue-box,.pt-preview,.pt-card,.stick,.initials,.tape-win){font-family:var(--f-pixel-body)}
+/* text: a bigger size than the pixel fonts' tiny steps, a calmer line height, no letter spacing meant for pixel type */
+html.readable body{font-size:1.25rem;line-height:1.4}
+html.readable button,html.readable input,html.readable textarea,html.readable select{font-family:var(--f-sys)}
+html.readable .game-view button,html.readable .game-view input,html.readable .cab,html.readable .abtn,html.readable .dpad button,html.readable .initials input{font-family:var(--f-pixel)}
+html.readable :is(.label,.sub,.btn,.field label,.flabel,.seg button,.tab,.chip,.unitbtn,.tl,.empty-state b,.netbanner,.steps span,.pin-title,.linkbtn,.health,.cash-today,.cash-title,.ck){letter-spacing:0}
+/* the smallest pixel-font steps (9 to 11 px) */
+html.readable :is(.label,.sub,.btn,.btn.sm,.field label,.flabel,.seg button,.seg.three button,.unitbtn,.netbanner,.steps span,.pc-live,.pc-seg button,.pc-msg,.pc-tip b,.scan-msg,.hp,.hits,.pip,.health,.chip.grade,.rg.word,.ks-line .ks-h,.pt-row .pt-st,.push .t,.empty-state b,.cash-method button,.cash-charge,.cash-today,.chal-card span:last-child,.hunt-card .hc-top b,.hunt-card .hc-prize,.tx .amt,.pt-presets button,.x,.arr-total){font-size:.9375rem}
+html.readable .tab{font-size:min(.8125rem,3.3vw);gap:4px;padding-inline:0}
+html.readable .tx .ico{font-size:1rem}
+html.readable .btn,html.readable .cash-charge{font-weight:600}
+html.readable :is(.label,.sub){text-transform:none;font-weight:600}
+/* medium display sizes (12 to 16 px) and the body font's sizes (16 to 24 px) */
+html.readable :is(.tx .meta,.th,.tiny,.pad-keys,.legend,.hunt-card .hc-note,.hunt-card .hc-foot,.hunt-card .hc-top span,.pc-tip,.pc-src,.pc-chg,.cab-none,.notice .raw,.tag span,.pt-fiat,.arr-note,.arr-card,.arr-n,.sheet .pinpad .th,.lim-sheet .lim-msg,.lim-sheet .th,.toast,.mint-pill,.chip,.set-index .chip,.tag){font-size:1.0625rem}
+html.readable :is(.kv,.notice,.ack,.toggle,.pt-row,.help summary,.help-a,ol.steps,details.adv summary,.boss-memo,.split-share,.cash-label,.pin-err,.arr-x){font-size:1.125rem}
+html.readable :is(.inp,textarea.inp,select.inp,.inp.amount){font-size:1.25rem}
+html.readable .inp.amount::placeholder{font-size:1.125rem;font-family:var(--f-sys)}
+html.readable .pin-k{font-size:1.5rem}
+html.readable .pin-title{font-size:1.125rem}
+html.readable .push .cap{font-size:1.375rem}
+html.readable .credit-num{font-size:clamp(1.75rem,9vw,2.75rem);font-weight:700;font-variant-numeric:tabular-nums}
+html.readable .cash-amt{font-weight:700}
+html.readable .spinner{font-size:.9375rem!important}   /* (one has an inline 11px)  */
+html.readable .credit-num small{font-size:max(.45em,.875rem)}
+html.readable .seg button{white-space:normal;line-height:1.2;padding:6px 4px}
+html.readable :is(.btn,.seg button,.chip,.unitbtn,.linkbtn){overflow-wrap:anywhere;hyphens:auto;max-width:100%}

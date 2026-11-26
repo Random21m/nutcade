@@ -102,6 +102,8 @@ jobs:
             suites: bip321
           - name: gamepad
             suites: gamepad
+          - name: readable
+            suites: readable
           - name: lib
             suites: lib
     env:

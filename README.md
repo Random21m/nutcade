@@ -489,6 +489,14 @@ Posting the link on X and most social sites shows a large preview card automatic
 
 The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm`, the offline helper `public/sw.js` and the bundled libraries' licence texts `public/THIRD_PARTY_LICENSES.txt`. `public/index.html` is built from the files in [`src/`](src/README.md): edit those, run `python3 build.py`, and commit both. On every push to `main`, `.github/workflows/test-and-deploy.yml` checks that the page matches `src/`, runs the test suites, and then publishes `public/` to GitHub Pages with fresh checksums. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
 
+
+### Accessibility
+
+- **Readable text** (**Settings → Look & sound**, off by default): the wallet screens (balance, lists, buttons, sheets, forms, settings, help) use your device's plain system font at a larger size, in units that follow the browser's and the phone's text-size setting. The logo, headings and everything inside the games keep the pixel fonts. It is only a font change, not a colour theme, so it works with every theme, and nothing is downloaded for it. Off, the app looks as it always did.
+- **Reduced motion**: with your device's "reduce motion" setting on, blinking lights, spinners, shaking PIN dots and the other animations stop.
+- **Screen readers**: your balance is a live region, so a change is announced; amount previews are announced as you type.
+- **Zoom**: pinch-zoom and the browser's text zoom are never blocked.
+
 ### Cashu specs (NUTs): what NUTCADE uses and what it doesn't yet
 
 | NUT | Status |

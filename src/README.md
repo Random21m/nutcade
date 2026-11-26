@@ -5,7 +5,7 @@
 | File | What it is |
 |---|---|
 | `template.html` | The page shell: meta tags, link previews, and `/*@@file@@*/` markers where each file below is inlined |
-| `style.css` | All styles: the arcade-cabinet look, themes, and every screen |
+| `style.css` | All styles: the arcade-cabinet look, themes, and every screen. The last block is Readable text (Settings → Look & sound, off by default): under `html.readable` (the class is set by a tiny script in the page's `<head>` from the stored setting, `readable` in `nutcade:prefs`, before the first paint; `render()` keeps it in step) the wallet screens switch to the system font stack with rem sizes, and the logo, headings, games, cabinet list and printable tokens put the pixel fonts back (they redefine `--f-display`/`--f-body`). Its label and hint are translated in `tools/i18n_r4.py`. Tested by `tests/readable_qa.py` |
 | `fonts.css` | Press Start 2P and VT323, embedded so nothing loads from other servers |
 | `app.js` | The wallet: storage and PIN vault, recovery phrase, mints, sending and receiving, Nostr, contacts, settings, every screen |
 | `app_r4.js` | Round 4, inlined inside `app.js`: send by sound, refundable gifts, bill split, mint health, cashier mode, challenges, piggy bank |
