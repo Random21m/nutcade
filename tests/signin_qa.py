@@ -56,9 +56,10 @@ FAKE07 = """(() => { const md = () => localStorage.getItem('__f07') || ''; if (!
   const sk = () => CashuLib.hexToBytes(localStorage.getItem('__f07sk')); const wait = ms => new Promise(r => setTimeout(r, ms));
   window.__f07log = [];
   window.nostr = {
-    async getPublicKey() { window.__f07log.push('pk'); const m = md(); if (m === 'liarpk') return CashuLib.nostrPub(crypto.getRandomValues(new Uint8Array(32))); if (m === 'hang') return new Promise(() => {}); if (m === 'refuse') throw new Error('nope <b>pk</b>'); if (m === 'slow') await wait(2500); return CashuLib.nostrPub(sk()); },
+    async getPublicKey() { window.__f07log.push('pk'); const m = md(); if (m === 'liarpk') return CashuLib.nostrPub(crypto.getRandomValues(new Uint8Array(32))); if (m === 'nosign') return CashuLib.nostrPub(sk()); if (m === 'hang') return new Promise(() => {}); if (m === 'refuse') throw new Error('nope <b>pk</b>'); if (m === 'slow') await wait(2500); return CashuLib.nostrPub(sk()); },
     async signEvent(t) { window.__f07log.push('sign:' + t.kind); const m = md();
       if (m === 'refuse') throw new Error('User rejected <img src=x onerror="window.__pwned=1">');
+      if (m === 'nosign') throw new Error('Not now <i>' + 'x'.repeat(400) + '</i>');
       if (m === 'hang') return new Promise(() => {});
       if (m === 'slow') await wait(2500); if (m === 'slower') await wait(6000);
       const x = { kind: t.kind, created_at: t.created_at, tags: t.tags, content: t.content }; let key = sk();
@@ -641,6 +642,78 @@ async def main():
             check('off: turning nutzaps off while an identity publish is on its way withdraws once (2 signatures, not 4)', sorted(asked) == ['sign:10019', 'sign:5'], asked)
             await ox.pg.context.close()
         await section('offonce', offonce)
+
+        async def r3live():
+            lx = await wallet(b, 'si-r3live'); await lx.create(); await lx.add_mint(M); await lx.use(M)
+            await nz_on(lx); SP = await lx.ev("__seedPub()"); sk8, pk8 = await keypair(lx)
+            await ext_mode(lx, 'honest', sk8, reload=True)
+            await lx.until(f"NutZap.info() && NutZap.info().pk === {J(SP)}", 15000)
+            post('/test/relay_mode', {'evdelay': 3, 'kinds': [10019]})
+            await lx.ev("Nutcade.S.prefs.nzInfo.key = 'stale'"); await lx.ev("(()=>{ NutZap.publish(true); })()"); await lx.wait(500)
+            await lx.ev("NutId.ext()"); await lx.ev("NutId.out()")
+            await lx.wait(9000); post('/test/relay_mode', {})
+            await lx.until(f"NutZap.info() && NutZap.info().pk === {J(SP)}", 15000); await lx.wait(500)
+            old = await lx.ev("NutZap.old().map(x=>x.pk)"); await panel(lx)
+            offer = await lx.ev(f"!!document.querySelector('#set-identity [data-act=idRetract][data-pk=\"{SP}\"]')")
+            check('live: away and back to the same key during a publish: the key in use is never offered as old nutzap info', SP not in old and not offer, (old, offer))
+            await lx.ev(f"Nutcade.S.prefs.nzOld = [{{pk: {J(SP)}, relays: [{J(RELAY)}], at: Date.now()}}]"); await panel(lx)
+            n5 = len(evs(5, SP))
+            r = await lx.ev(f"NutZap.retractOld({J(SP)}).then(n=>'sent '+n, e=>e.message)")
+            offer = await lx.ev(f"!!document.querySelector('#set-identity [data-act=idRetract][data-pk=\"{SP}\"]')")
+            check('live: the nutzap info in use is never offered or withdrawn as old, even if listed so', not offer and not r.startswith('sent') and len(evs(5, SP)) == n5 and [x for x in evs(10019, SP) if x['tags']], (offer, r))
+            await lx.pg.context.close()
+        await section('r3live', r3live)
+
+        async def r3stay():
+            sx = await wallet(b, 'si-r3stay'); await sx.create(); await sx.add_mint(M); await sx.use(M)
+            await nz_on(sx); sk9, pk9 = await keypair(sx)
+            await ext_mode(sx, 'honest', sk9, reload=True); await sign_in_ext(sx)
+            await sx.until(f"NutZap.info() && NutZap.info().pk === {J(pk9)}", 15000)
+            await ext_mode(sx, 'hang'); await settings(sx); await sx.click('#p_nutzap'); await sx.wait(1500)
+            await ext_mode(sx, 'honest', reload=True); await sx.ev("NutZap.tick(true)"); await sx.wait(500)
+            await panel(sx)
+            old = await sx.ev("NutZap.old().map(x=>x.pk)")
+            offer = await sx.ev(f"!!document.querySelector('#set-identity [data-act=idRetract][data-pk=\"{pk9}\"]')")
+            check('stay: nutzaps turned off, the page reloaded while the signer was asked: the identity\'s nutzap info is offered for withdrawal', pk9 in old and offer and not await sx.ev("NutZap.info()"), (old, offer))
+            await sx.click(f'#set-identity [data-act=idRetract][data-pk="{pk9}"]')
+            ok = await sx.until(f"!document.querySelector('#set-identity [data-act=idRetract][data-pk=\"{pk9}\"]')", 12000); await sx.wait(400)
+            check('stay: ...and withdrawing it works (signed by the identity)', ok and not [x for x in evs(10019, pk9) if x['tags']])
+            await sx.pg.context.close()
+        await section('r3stay', r3stay)
+
+        async def r3polish():
+            S9 = post('/test/signer', {}); qx = await wallet(b, 'si-r3pol'); await qx.create(); await qx.add_mint(M); await qx.use(M)
+            await sign_in_bunker(qx, S9['bunker']); await qx.ev("Nutcade.closeSheet()")
+            perms = (get('/test/signer/log')['log'][0]['params'] + ['', '', ''])[2].split(',')
+            check('perms: connect asks for every kind NUTCADE signs (1, 5, 9734, 10019, 38000 and the sign-in check 27235)', all(f'sign_event:{k}' in perms for k in (1, 5, 9734, 10019, 38000, 27235)), perms)
+            await nz_on(qx); U = S9['user']
+            other = await qx.ev("NutZap.randomPub()")
+            tp = await qx.ev(f"__sign({J(S9['user_sk'])}, 10019, [['relay', {J(RELAY)}], ['pubkey', {J(other)}]], '', 5)")
+            await qx.ev(f"__pub({J(tp)})")
+            await qx.ev("Nutcade.S.prefs.nzInfo = null; NutZap.publish(true)"); await settings(qx)
+            check('backoff: (another wallet\'s nutzap info found)', await qx.ev("!!document.querySelector('#nzForeign')"))
+            await qx.ev("(()=>{ const n0 = Date.now; Date.now = () => n0() + 11 * 60e3; })()")   # (past the republish time, NZ_REPUB)
+            n = state()['req_count'].get(U, 0)
+            for _ in range(3): await qx.ev("NutZap.tick()"); await qx.wait(2500)
+            d = state()['req_count'].get(U, 0) - n
+            check('backoff: in that state the background round looks again once, not on every round', 0 < d <= 2, d)
+            await qx.ev("NutId.out()"); await qx.pg.context.close(); post('/test/signer', {})
+            px = await wallet(b, 'si-r3pol2'); await px.create(); await px.add_mint(M); await px.use(M)
+            skA, pkA = await keypair(px)
+            await ext_mode(px, 'nosign', skA, reload=True)
+            await settings(px); await px.click('#set-identity [data-act=idExt]'); await px.wait(1500)
+            t = (await px.toast()) + ' ' + (await px.sheet_text())
+            check('proof: a signer refusing the sign-in check shows its own refusal (as text, cut short)', not await px.ev("NutId.active()") and 'said no' in t.lower() and 'Not now' in t and '<i>' in t and len(t) < 400 and not await px.ev("!!document.querySelector('#toast i, #layer i')"), t[:300])
+            await px.ev("Nutcade.closeSheet()")
+            await ext_mode(px, 'honest'); await sign_in_ext(px); await nz_on(px)
+            await px.until(f"NutZap.info() && NutZap.info().pk === {J(pkA)}", 15000)
+            await px.ev(f"Nutcade.S.prefs.nzReplaceOk = {J(pkA)}"); await px.ctx.set_offline(True); await px.wait(300)
+            await px.ev("NutZap.publish(true)")
+            st = await px.ev("NutZap.state()")
+            await px.ctx.set_offline(False); await px.wait(300)
+            check('offline: being offline is not counted as the signer saying no', st != 'nosign', st)
+            await px.pg.context.close()
+        await section('r3polish', r3polish)
 
         async def proof():
             px = await wallet(b, 'si-proof'); await px.create(); await px.add_mint(M)
