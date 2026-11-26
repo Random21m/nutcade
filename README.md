@@ -666,6 +666,8 @@ The page bundles these libraries, unchanged. Their full licence texts, copied fr
 - [jsQR](https://github.com/cozmo/jsQR) (Apache-2.0), the fallback QR decoder
 - [nostr-tools](https://github.com/nbd-wtf/nostr-tools) (Unlicense) and [noble-ciphers](https://github.com/paulmillr/noble-ciphers) (MIT), for signing Nostr events and NIP-44 encryption
 
+The bundle `src/lib.min.js` can be rebuilt byte for byte from the committed recipe: `tools/build_lib.sh` (see [`tools/lib/`](tools/lib) and the `lib.min.js` row of [`src/README.md`](src/README.md); CI checks it).
+
 The animated QR codes (`src/ur.js`) are NUTCADE's own implementation of the Blockchain Commons BC-UR specs (BCR-2020-005, 006 and 012). Its frames were checked against [@gandlaf21/bc-ur](https://github.com/gandlaf21/bc-ur), the library cashu.me uses, and come out identical.
 
 Fonts: [Press Start 2P](https://fonts.google.com/specimen/Press+Start+2P) and [VT323](https://fonts.google.com/specimen/VT323), both under the SIL Open Font License (full text in [THIRD_PARTY_LICENSES.txt](public/THIRD_PARTY_LICENSES.txt)).

@@ -2,6 +2,7 @@
 #   page:    checks that public/index.html matches its sources
 #   test:    a matrix of parallel jobs, each running some of the test suites against only the local Nutshell test mints
 #            (fake Lightning) and the stand-in Nostr relay that it needs (tests/run_all.sh --only ...)
+#   lib-build: rebuilds src/lib.min.js from tools/lib and checks it is byte-identical (tests/lib_build_check.py)
 #   deploy:  publishes public/ with SHA-256 checksums. It runs ONLY on main, and only if the page check and every test job passed.
 # Pushes to other branches (and manual runs) run the checks but never deploy.
 name: Test and deploy
@@ -129,10 +130,21 @@ jobs:
           path: qa-out/
           retention-days: 7
 
+  lib-build:
+    # src/lib.min.js is rebuilt from tools/lib (npm ci from the lockfile, no install scripts) and must match byte for byte. No browser needed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rebuild src/lib.min.js and compare
+        run: python3 tests/lib_build_check.py
+
   deploy:
     # Only main deploys, and only when the page check and EVERY test job passed (needs: waits for all of the matrix).
     if: github.ref == 'refs/heads/main'
-    needs: [page, test]
+    needs: [page, test, lib-build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
