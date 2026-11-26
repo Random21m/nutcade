@@ -43,6 +43,11 @@ def evs(kind, author=None, p=None):
     return out
 def pubs(author, kind): return state()['pub_count'].get(f'{author}:{kind}', 0)
 def tg(e, k): return [t for t in e['tags'] if t and t[0] == k]
+def recs_by(mint, mine):
+    """how many people the report card should count for this mint: other people's reviews on the relay, plus 1 if yours counts"""
+    who = {e['pubkey'] for e in evs(38000) if ['u', mint, 'cashu'] in e['tags'] and e['pubkey'] not in mine}
+    return len(who)
+def recs_line(n): return 'Nobody recommends it on Nostr yet' if n == 0 else f"Recommended by {n} Nostr user{'s' if n != 1 else ''}"
 def methods(): return [x.get('method') for x in get('/test/signer/log')['log']]
 
 # a fake NIP-07 extension: present only while localStorage "__f07" names a mode (read on every call, so a mode can change
@@ -62,7 +67,9 @@ FAKE07 = """(() => { const md = () => localStorage.getItem('__f07') || ''; if (!
       if (m === 'tag') x.tags = t.tags.concat([['t', 'injected']]);
       if (m === 'content') x.content = t.content + ' (edited)';
       if (m === 'time') x.created_at = t.created_at - 1000;
-      return CashuLib.finalizeEvent(x, key); } };
+      const ev = CashuLib.finalizeEvent(x, key);
+      if (m === 'mutate') setTimeout(() => { ev.content = 'changed after'; ev.tags.push(['t', 'later']); }, 50);   // (the extension changes the object it handed back)
+      return ev; } };
 })();"""
 HELPERS = """
 window.__opened = 0; { const o = window.open; window.open = function () { window.__opened++; return null; }; }
@@ -364,6 +371,9 @@ async def main():
             await ext_mode(me, 'otherpub')
             e = await review(me, 3, 'swapped')
             check('fallback: ...and nothing is published from it', e and pubs(EXT, 38000) == n38 and pubs(SEED, 38000) == s38, e)
+            await ext_mode(me, 'mutate')
+            r = await me.ev("NutId.sign({kind: 1, created_at: Math.floor(Date.now()/1000), tags: [['t','nutcade']], content: 'exact'}).then(async e => { await new Promise(r => setTimeout(r, 300)); return [e.content, e.tags, CashuLib.verifyEvent(JSON.parse(JSON.stringify(e)))]; }, e=>'ERR '+e.message)")
+            check('fallback: what NUTCADE keeps is its own copy: an extension changing its object afterwards changes nothing', r == ['exact', [['t', 'nutcade']], True], r)
             await ext_mode(me, 'slow')
             t0 = time.time(); e = await review(me, 5, 'slow but fine'); dt = time.time() - t0
             r = (evs(38000, EXT) or [{}])[-1]
@@ -396,7 +406,7 @@ async def main():
             await me.ev(f"(()=>{{ window.__r = NutReview.publish({J(M)}, 3, 'sign out mid-sign').then(()=>'sent', e=>e.message) }})()")
             await me.until(f"window.__f07log.length > {n0}", 8000); await me.ev("NutId.out()")
             await me.until("typeof window.__r === 'string'", 12000); r = await me.ev("window.__r")
-            check('race: signing out while the extension signs: nothing is published under any key, it says why', r != 'sent' and 'signed out' in str(r).lower() and pubs(EXT, 38000) == n38 and pubs(SEED, 38000) == s38, (r, await me.ev("window.__f07log.slice(-4)"), pubs(EXT, 38000) - n38, pubs(SEED, 38000) - s38))
+            check('race: signing out while the extension signs: nothing is published under any key, it says why', r != 'sent' and 'identity changed' in str(r).lower() and pubs(EXT, 38000) == n38 and pubs(SEED, 38000) == s38, (r, await me.ev("window.__f07log.slice(-4)"), pubs(EXT, 38000) - n38, pubs(SEED, 38000) - s38))
             await ext_mode(me, 'honest'); await sign_in_ext(me)
             # signed out after the step started but before it was signed: not signed with the 12-word key instead
             await ext_mode(me, 'slower'); n0 = await me.ev("window.__f07log.length")
@@ -412,6 +422,8 @@ async def main():
             await t2.click('[data-act=takeover]')
             await me.until("typeof window.__r === 'string'", 12000); r = await me.ev("window.__r")
             check('race: another tab taking over while signing: nothing is published by the paused tab', r != 'sent' and pubs(EXT, 38000) == n38 and pubs(SEED, 38000) == s38, r)
+            r = await me.ev("NutId.out().then(()=>'out', e=>e.message)")
+            check('race: Sign out in the paused tab is refused with the other-tab message (nothing can be deleted there)', 'another tab' in r and await me.ev("!!localStorage.getItem('nutcade:nid')"), r)
             await t2.pg.close(); await me.pg.reload(); await me.wait(900); await ext_mode(me, 'honest')
         await section('race', race)
 
@@ -440,6 +452,134 @@ async def main():
             await me.ev(f"NutZap.event({J(e3)})"); await me.ev(f"NutZap.event({J(e2)})"); await me.wait(800)
             check('switch: each is credited once (one tagged with both keys, the same ones again)', len(await nz_in(me)) == n0 + 3 and await me.bal() - b0 == 36, len(await nz_in(me)) - n0)
         await section('switch', switch)
+
+        async def foreign():
+            fx = await wallet(b, 'si-foreign'); await fx.create(); await fx.add_mint(M); await fx.use(M)
+            await nz_on(fx)
+            sk2, pk2 = await keypair(fx); ctx['fx'] = (fx, sk2, pk2)
+            t = await panel(fx)
+            check('linknote: with nutzaps on, the identity section says signing in links your identity to this wallet\'s own key', await fx.ev("!!document.querySelector('#set-identity #idLinkNote')") and 'link' in t.lower(), t[:500])
+            await fx.click('#set-identity [data-act=idBunker]'); await fx.wait(250)
+            check('linknote: ...the remote signer sheet too', await fx.ev("!!document.querySelector('#layer #idLinkNote')"))
+            await fx.ev("Nutcade.closeSheet()")
+            other = await fx.ev("NutZap.randomPub()")
+            tp = await fx.ev(f"__sign({J(sk2)}, 10019, [['relay', {J(RELAY)}], ['mint', 'https://mint.minibits.cash/Bitcoin', 'sat'], ['pubkey', {J(other)}]], '', -600)")
+            await fx.ev(f"__pub({J(tp)})"); n0 = pubs(pk2, 10019)
+            await ext_mode(fx, 'honest', sk2, reload=True); await sign_in_ext(fx); await fx.wait(4000)
+            cur = [x for x in evs(10019, pk2) if x['tags']]
+            check('foreign: another wallet\'s nutzap info under that npub is not replaced on sign-in', pubs(pk2, 10019) == n0 and cur and tg(cur[0], 'pubkey') == [['pubkey', other]], (pubs(pk2, 10019) - n0, cur and tg(cur[0], 'pubkey')))
+            t = await panel(fx)
+            check('foreign: Settings asks first, with one plain sentence (nutzaps for this npub would come to NUTCADE instead)', await fx.ev("!!document.querySelector('#nzForeign') && !!document.querySelector('[data-act=nzReplace]')") and 'other wallet' in (await fx.ev("document.querySelector('#nzForeign').innerText")).lower(), t[:600])
+            await fx.click('[data-act=nzReplace]')
+            ok = await fx.until(f"NutZap.info() && NutZap.info().pk === {J(pk2)}", 15000)
+            cur = [x for x in evs(10019, pk2) if x['tags']]
+            check('foreign: after you say yes, NUTCADE\'s nutzap info replaces it', ok and cur and tg(cur[0], 'pubkey') == [['pubkey', await fx.ev("NutZap.pub()")]], cur and tg(cur[0], 'pubkey'))
+            tp2 = await fx.ev(f"__sign({J(sk2)}, 10019, [['relay', {J(RELAY)}], ['pubkey', {J(other)}]], '', 30)")
+            await fx.ev(f"__pub({J(tp2)})"); n5 = len(evs(5, pk2))
+            await settings(fx); await fx.click('#set-identity [data-act=idOut]'); await fx.until("!!document.querySelector('#layer [data-act=idOutGo]')", 5000)
+            await fx.ev("(()=>{const c=document.querySelector('#idOutWithdraw'); if(c&&!c.checked) c.click();})()"); await fx.click('#layer [data-act=idOutGo]')
+            await fx.until("!!((document.querySelector('#sheetErr')||{}).innerText||'').trim() || !NutId.active()", 15000)
+            e = await fx.err(); cur = [x for x in evs(10019, pk2) if x['tags']]
+            check('foreign: Sign out + withdraw leaves another wallet\'s nutzap info alone (says so, nothing sent)', 'another wallet' in e.lower() and len(evs(5, pk2)) == n5 and cur and tg(cur[0], 'pubkey') == [['pubkey', other]], (e, len(evs(5, pk2)) - n5))
+            await fx.ev("Nutcade.closeSheet()")
+        await section('foreign', foreign)
+
+        async def inflight():
+            ix = await wallet(b, 'si-flight'); await ix.create(); await ix.add_mint(M); await ix.use(M)
+            await nz_on(ix); SP = await ix.ev("__seedPub()")
+            sk3, pk3 = await keypair(ix); ctx['ix'] = (ix, sk3, pk3)
+            await ext_mode(ix, 'honest', sk3, reload=True); await sign_in_ext(ix)
+            await ix.until(f"NutZap.info() && NutZap.info().pk === {J(pk3)}", 15000)
+            await ext_mode(ix, 'slower'); n0 = await ix.ev("window.__f07log.length"); s0 = pubs(SP, 10019)
+            await ix.ev("(()=>{ NutZap.publish(true); })()")
+            await ix.until(f"window.__f07log.length > {n0}", 8000); await ix.ev("NutId.out()")
+            ok = await ix.until(f"NutZap.info() && NutZap.info().pk === {J(SP)}", 20000); await ix.wait(500)
+            st = await ix.ev("document.querySelector('#set-privacy') ? document.querySelector('#set-privacy').innerText : ''")
+            check('inflight: signing out while the identity signs the nutzap info: it is published under the 12-word key after', ok and pubs(SP, 10019) > s0, (ok, pubs(SP, 10019) - s0))
+            check('inflight: ...and that is not shown as the signer failing', "DIDN'T SIGN" not in st and await ix.ev("NutZap.state()") != 'nosign', st[-200:])
+            await ext_mode(ix, 'honest')
+            post('/test/relay_mode', {'evdelay': 3, 'kinds': [10019]})
+            await ix.ev("(()=>{ NutZap.publish(true); })()"); await ix.wait(600)
+            await sign_in_ext(ix)
+            ok = await ix.until(f"NutZap.info() && NutZap.info().pk === {J(pk3)}", 30000); await ix.wait(500)
+            post('/test/relay_mode', {})
+            old = await ix.ev("NutZap.old().map(x=>x.pk)")
+            check('inflight: a 12-word-key publish landing after the switch is recorded as old info, and the identity is asked after it', ok and SP in old, (ok, old, await ix.ev("NutZap.info()")))
+        await section('inflight', inflight)
+
+        async def retry():
+            if not ctx.get('ix'): return
+            ix, sk3, pk3 = ctx['ix']
+            await ext_mode(ix, 'refuse'); await ix.ev("NutZap.publish(true)")
+            await settings(ix)
+            st = await ix.ev("document.querySelector('#set-privacy').innerText")
+            check('retry: a signer that said no: the status says so, with Try again', "DIDN'T SIGN" in st and await ix.ev("!!document.querySelector('#set-privacy [data-act=nzRepub]')"), st[-200:])
+            await ext_mode(ix, 'honest'); n = pubs(pk3, 10019)
+            await ix.click('#set-privacy [data-act=nzRepub]')
+            check('retry: Try again publishes it', await ix.until(f"fetch('{MOCK}/test/state').then(r=>r.json()).then(s=>(s.pub_count['{pk3}:10019']||0) > {n})", 12000))
+            # the daily note: the identity when the sheet opened, or nothing
+            SP = await ix.ev("__seedPub()"); g = await ix.ev("NutDailyNostr.gen()")
+            await sign_out(ix); s1 = pubs(SP, 1)
+            r = await ix.ev(f"NutDailyNostr.sign('stale', [], {g}).then(e=>'SIGNED '+e.pubkey, e=>'ERR '+e.message)")
+            check('daily: a note prepared under one identity is not signed after a switch (not by the 12-word key either)', r.startswith('ERR') and pubs(SP, 1) == s1, r)
+            # connecting a second signer while signed in is refused
+            await sign_in_ext(ix); S0 = post('/test/signer', {})
+            r = await ix.ev(f"NutId.bunker({J(S0['bunker'])}).then(()=>'in', e=>e.message)")
+            check('twice: connecting another signer while signed in is refused: sign out first', 'sign out first' in r.lower() and not get('/test/signer/log')['log'] and await ix.ev(f"NutId.pub() === {J(pk3)}"), r)
+            await ix.ev(f"Nutcade.handleScan({J(S0['bunker'])})"); await ix.wait(300)
+            check('twice: a scanned bunker:// link says so too, and opens nothing', not await ix.ev("!!document.querySelector('#idLink')") and 'sign out first' in (await ix.toast()).lower(), await ix.toast())
+        await section('retry', retry)
+
+        async def cap():
+            bz = await wallet(b, 'si-cap'); await bz.create(); await bz.add_mint(M); await bz.use(M)
+            S6 = post('/test/signer', {})
+            check('cap: signed in with a remote signer', await sign_in_bunker(bz, S6['bunker']))
+            await bz.ev("Nutcade.closeSheet()"); await nz_on(bz)
+            post('/test/signer/mode', {'sign': 'authloop'}); await bz.ev("window.__nutcadeTest = {idMs: 3000}")
+            t0 = time.time(); e = await review(bz, 3, 'endless approvals', 40000); dt = time.time() - t0
+            check('cap: a signer asking for approval again and again is given up on (a total time limit), nothing published', e and dt < 20 and pubs(S6['user'], 38000) == 0, (e, round(dt, 1)))
+            await bz.ev("window.__nutcadeTest = null"); post('/test/signer/mode', {'sign': 'silent'})
+            await bz.ev("Nutcade.S.prefs.nzInfo.key = 'stale'")
+            t0 = time.time(); await bz.ev("NutZap.tick(true)"); dt = time.time() - t0
+            check('cap: a silent signer does not hold up the nutzap round (claims and deliveries)', dt < 5, round(dt, 1))
+            nzp = await bz.ev("NutZap.pub()"); b0 = await bz.bal()
+            pr = await al.ev(f"Nutcade.r8.sendEcash(17, 'nz cap', {J(nzp)}).then(t=>t.sent)")
+            e1 = await al.ev(f"__nz({J(pr)}, {J(M)}, [{J(S6['user'])}])"); await al.ev(f"__pub({J(e1)})")
+            ok = await bz.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {b0 + 17}", 15000)
+            check('cap: a nutzap arriving meanwhile is claimed at once', ok, await bz.bal() - b0)
+            await bz.pg.context.close(); post('/test/signer', {})
+        await section('cap', cap)
+
+        async def rv2():
+            rx = await wallet(b, 'si-rv2'); await rx.create(); await rx.add_mint(M); await rx.use(M)
+            sk4, pk4 = await keypair(rx); SP = await rx.ev("__seedPub()")
+            await ext_mode(rx, 'honest', sk4, reload=True)
+            e = await review(rx, 3, 'seed one'); A = (evs(38000, SP) or [None])[-1]
+            await sign_in_ext(rx); e2 = await review(rx, 4, 'identity one'); B = (evs(38000, pk4) or [None])[-1]
+            txt = await rx.sheet_text()
+            check('rv2: publishing under a new key offers to delete the earlier review under the 12-word key, saying it links the keys', not e and not e2 and A and B and await rx.ev("!!document.querySelector('#layer #rvOldOffer [data-act=rvDelOld]')") and 'link' in (await rx.ev("document.querySelector('#rvOldOffer').innerText")).lower(), txt[:400])
+            await report(rx)
+            await open_review(rx); await rx.click('#layer [data-act=rvDelAsk]'); await rx.wait(200)
+            q = await rx.sheet_text()
+            check('rv2: Delete says it covers your reviews under both keys (and that this links them)', 'both' in q.lower() and 'link' in q.lower(), q[:400])
+            await rx.click('#layer [data-act=rvDel]')
+            await rx.until("!!document.querySelector('#layer #rvGone') || !!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 15000)
+            d = tg(B, 'd')[0][1]
+            k5 = [x for x in evs(5, SP) if ['a', f'38000:{SP}:{d}'] in x['tags']], [x for x in evs(5, pk4) if ['a', f'38000:{pk4}:{d}'] in x['tags']]
+            await report(rx)
+            check('rv2: Delete deletes under every key of yours it can sign; the old review doesn\'t come back as yours', k5[0] and k5[1] and await rx.ev(f"NutReview.mine({J(M)})") is None, (len(k5[0]), len(k5[1]), await rx.ev(f"NutReview.mine({J(M)})")))
+            for x in (A, B): post('/test/inject', {'event': x, 'raw': True})
+            t = await report(rx)
+            check('rv2: copies a lax relay kept of both deleted reviews never count again (each key\'s deletion kept)', await rx.ev(f"NutReview.mine({J(M)})") is None and recs_line(recs_by(M, (SP, pk4))) in t, (recs_line(recs_by(M, (SP, pk4))), t[-300:]))
+            await sign_out(rx); e = await review(rx, 2, 'seed two'); D = (evs(38000, SP) or [None])[-1]
+            await sign_in_ext(rx); e2 = await review(rx, 5, 'identity two')
+            await rx.click('#layer #rvOldOffer [data-act=rvDelOld]')
+            await rx.until("!document.querySelector('#layer #rvOldOffer [data-act=rvDelOld]')", 12000); await rx.wait(400)
+            d5 = [x for x in evs(5, SP) if ['a', f'38000:{SP}:{d}'] in x['tags'] and x['created_at'] >= D['created_at']]
+            t = await report(rx); mine = await rx.ev(f"NutReview.mine({J(M)})")
+            check('rv2: accepting the offer deletes the 12-word-key review; yours is the identity\'s, counted once', not e and not e2 and d5 and mine and mine['pk'] == pk4 and recs_line(recs_by(M, (SP, pk4)) + 1) in t, (len(d5), mine, recs_line(recs_by(M, (SP, pk4)) + 1), t[-200:]))
+            await rx.pg.context.close()
+        await section('rv2', rv2)
 
         async def bunker():
             bk = await wallet(b, 'si-bunker'); ctx['bk'] = bk

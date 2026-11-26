@@ -10,7 +10,8 @@ Run: python mock_nostr.py [port]   (default 3350)
                                             are for ws://...:PORT/relay?r=NAME instead: r=liar answers every REQ at
                                             once with forged copies (same id and signature, other content) and keeps
                                             nothing; r=empty answers EOSE at once with nothing and keeps nothing;
-                                            "delay": seconds before any relay answers a REQ (main included)
+                                            "delay": seconds before any relay answers a REQ (main included);
+                                            "evdelay": seconds before it takes an EVENT (of "kinds", if given)
   POST /test/inject {event, raw}            store an event as a relay would serve it (raw: without checking its signature, as a lying relay)
   POST /test/forget {ids}                   the relay loses these events
   http://127.0.0.1:PORT/api/v2/...          npub.cash v2: user/info, user/mint, wallet/quotes (NIP-98 auth)
@@ -22,7 +23,7 @@ Run: python mock_nostr.py [port]   (default 3350)
   POST /test/nwc                            act as a Nostr Wallet Connect app (NIP-47, NIP-44 or NIP-04) talking to the wallet
   POST /test/signer {connect, sign, delay}  a NIP-46 remote signer (kind 24133, NIP-44): answers requests sent to it on this
                                             relay; returns its bunker:// link (relay wss://signer.test, which the tests point
-                                            here). connect: ok | badsecret | refuse | silent; sign: ok | slow | refuse | auth |
+                                            here). connect: ok | badsecret | refuse | silent; sign: ok | slow | refuse | auth | authloop |
                                             authjs | swap | wrongpub | wrongid | huge | silent. POST /test/signer/mode changes
                                             them; GET /test/signer/log lists the requests it got (method, params)
 The LNURL services are reached by the tests as https://lnurl.test/... (Playwright forwards those requests here).
@@ -102,6 +103,7 @@ async def relay(ws: WebSocket):
             if m[0] == 'EVENT':
                 e = m[1]
                 ck = f"{e.get('pubkey')}:{e.get('kind')}"; pub_count[ck] = pub_count.get(ck, 0) + 1
+                if rm.get('evdelay') and (not rm.get('kinds') or e.get('kind') in rm['kinds']): await asyncio.sleep(float(rm['evdelay']))   # (a slow relay: the OK comes late)
                 if name in ('liar', 'empty'):   # (keeps nothing)
                     await ws.send_text(json.dumps(['OK', e.get('id'), True, ''])); continue
                 ok = verify(e)
@@ -259,7 +261,7 @@ posted = []
 @app.post('/test/relay_mode')
 async def relay_mode(request: Request):
     b = await request.json(); md = mode if b.get('relay', 'main') == 'main' else rmodes.setdefault(b['relay'], {})
-    md.clear(); md.update({k: b[k] for k in ('drop', 'reorder', 'dup', 'refuse', 'kinds', 'delay') if k in b})
+    md.clear(); md.update({k: b[k] for k in ('drop', 'reorder', 'dup', 'refuse', 'kinds', 'delay', 'evdelay') if k in b})
     return {'mode': md}
 
 
@@ -555,6 +557,10 @@ async def signer_handle(e):
             await signer_send(client, {'id': rid, 'result': 'auth_url', 'error': url})
             if md == 'authjs': return
             await asyncio.sleep(4)
+        if md == 'authloop':   # (asks for approval again and again, never signs)
+            for i in range(40):
+                await signer_send(client, {'id': rid, 'result': 'auth_url', 'error': f'https://signer.test/approve?n={i}'}); await asyncio.sleep(1)
+            return
         if md == 'swap': return await signer_send(client, {'id': rid, 'result': json.dumps(signed(content='swapped by the signer')), 'error': ''})
         if md == 'wrongpub': return await signer_send(client, {'id': rid, 'result': json.dumps(signed(sk=os.urandom(32).hex())), 'error': ''})
         if md == 'wrongid': return await signer_send(client, {'id': 'x' + str(rid), 'result': json.dumps(signed()), 'error': ''})
