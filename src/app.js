@@ -101,7 +101,7 @@ function useScan() {
 }
 useScan();
 // the settings that belong to a wallet, not to the device (with a PIN they live in the vault)
-const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'p2bk', 'sync', 'syncSt', 'syncOther', 'amOn', 'amMint', 'amMin', 'idOld', 'nzOld'];
+const WALLET_PREFS = ['npc', 'npcMint', 'npcSince', 'npcName', 'mintBackupAt', 'mintBackupList', 'nostrBackup', 'nostrInbox', 'dmSince', 'checkSent', 'piggy', 'piggyStep', 'ksAuto', 'backupFileAt', 'phraseCheck', 'remind', 'rmLater', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'p2bk', 'sync', 'syncSt', 'syncOther', 'amOn', 'amMint', 'amMin', 'idOld', 'nzOld', 'nzForeign', 'nzReplaceOk'];
 const devPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (!WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const walletPrefs = p => { const o = {}; for (const k of Object.keys(p || {})) if (WALLET_PREFS.includes(k)) o[k] = p[k]; return o; };
 const inVault = k => vault.on && !devKey(k);
@@ -4368,7 +4368,7 @@ function wipeWallet() {
   // wallet goes, with the PIN, its tries and changes, and only the device's own settings and arcade tables stay
   vault.on = false; vault.open = false; vault.decoy = false; vault.dek = null; vault.data = {};
   try { for (const k of Object.keys(localStorage)) { if (!k.startsWith('nutcade:')) continue; const n = k.slice(8); if (n === 'prefs' || (devKey(n) && !/^(vault|pinfails|pinchg|gen|authwait|authcode)$/.test(n))) continue; localStorage.removeItem(k); } } catch (e) {}
-  try { npcSocketStop(); dmStop(); nzStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'nzOld', 'idOld', 'amOn', 'amMint', 'amMin']) delete S.prefs[k]; store.set('prefs', S.prefs); S.nid = null; } catch (e) {}
+  try { npcSocketStop(); dmStop(); nzStop(); for (const k of ['npc', 'npcSince', 'npcName', 'npcMint', 'mintBackupAt', 'mintBackupList', 'dmSince', 'nutzap', 'nzInfo', 'nzSince', 'nzTs', 'nzPubTry', 'nzUnpub', 'nzOld', 'idOld', 'nzForeign', 'nzReplaceOk', 'amOn', 'amMint', 'amMin']) delete S.prefs[k]; store.set('prefs', S.prefs); S.nid = null; } catch (e) {}
   location.reload();
 }
 const backupData = () => JSON.stringify({ app: 'nutcade', v: 2, at: new Date().toISOString(), seed: S.seed ? S.seed.mnemonic : null, counters: S.counters, mints: S.mints, proofs: S.proofs, pending: S.pending, txs: bkTxs(), p2pk: S.p2pk, extra: S.extra, heirlooms: S.heirlooms, challenges: S.challenges, hunts: S.hunts, found: S.found, blocked: S.blocked, ops: S.ops.filter(o => o.ctr.length || (o.outs || []).length), imports: bkImports(), quotes: S.quotes, requests: S.requests, contacts: S.contacts, settings: bkSettings(), trophies: bkTrophies(), plays: store.get('plays', null), arcade: bkArcade() }, null, 1);

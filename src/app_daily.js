@@ -8,6 +8,7 @@ window.NutDailyNostr = {
   npub: () => { try { return L.npubEncode(idPub()); } catch (e) { return ''; } },
   own: () => idActive(),   // (signed in with your own Nostr identity)
   relayCount: () => relays().length,
-  sign: (content, tags) => idSign({ kind: 1, created_at: Math.floor(Date.now() / 1000), tags: tags || [], content: String(content) }),   // (a promise)
+  gen: () => idNow(),   // (the identity now: taken when the share sheet opens)
+  sign: (content, tags, gen0) => idSign({ kind: 1, created_at: Math.floor(Date.now() / 1000), tags: tags || [], content: String(content) }, gen0),   // (a promise; another identity since gen0: nothing signed)
   publish: ev => (typeof navigator !== 'undefined' && navigator.onLine === false) ? Promise.resolve(0) : relayPublish(ev, 8000)
 };

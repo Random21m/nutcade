@@ -246,12 +246,13 @@ function share(date) {
     <button class="btn block ${can ? '' : 'solid gold'}" data-act="copy" data-text="${esc(text)}">Copy text</button>
     <button class="btn block" data-act="close">Close</button>`);
   const post = body.querySelector('#dyPost'); if (!post) return;
-  let ev = null, sending = false;
+  let ev = null, sending = false; const g0 = nn.gen ? nn.gen() : undefined;   // (the identity the sheet was opened with: another one since, and nothing is signed)
   const msg = (cls, key, o) => { const m = document.getElementById('dyMsg'); if (m) m.innerHTML = `<div class="notice ${cls}" data-noi18n role="status">${esc(t(key, o))}</div>`; };
   post.onclick = async () => {
     if (sending) return; sending = true; post.disabled = true; post.textContent = tr('POSTING…');
     let ok = 0, signErr = null;
-    try { if (!ev) ev = await nn.sign(text, [['t', 'nutcade']]); } catch (x) { signErr = x; }   // (your signer said no, or didn't answer: said, never signed with another key)
+    if (ev && nn.gen && nn.gen() !== g0) ev = null;   // (a note signed under an identity you have left is never sent)
+    try { if (!ev) ev = await nn.sign(text, [['t', 'nutcade']], g0); } catch (x) { signErr = x; }   // (your signer said no, or didn't answer: said, never signed with another key)
     if (!signErr) { try { ok = await nn.publish(ev); } catch (x) { ok = 0; } }
     sending = false;
     if (!post.isConnected) return;

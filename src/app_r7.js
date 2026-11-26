@@ -204,8 +204,9 @@ function showWithdrawWait(res) {
 
 /* ---------- zaps (NIP-57) ----------
    Their kind-0 profile gives a Lightning address (lud16, or an lud06 LNURL). If its LNURL-pay endpoint says
-   allowsNostr and names its nostrPubkey, a kind-9734 zap request signed with this wallet's Nostr key (the same key
-   cashu.me uses, from the 12 words) goes with the amount; the invoice must be for exactly that amount, and is then
+   allowsNostr and names its nostrPubkey, a kind-9734 zap request goes with the amount, signed with your Nostr identity when
+   you are signed in (idSign, app_identity.js; never the 12-word key instead), else with this wallet's Nostr key (the same
+   key cashu.me uses, from the 12 words), or a one-time key for an anonymous zap; the invoice must be for exactly that amount, and is then
    paid like any Lightning payment, with the fee shown first. Without zap support, a plain payment is offered. */
 let curZap = null;
 const zapByQuote = new Map();

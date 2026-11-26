@@ -17,6 +17,9 @@ Object.assign(A, {
     const nt = await nzClaim({ id: b.dataset.id }, true, true);
     if (nt) { sfx('coin'); showDone('in', nt.amount, 'Nutzap'); } else { closeSheet(); refresh(); }
   }),
+  nzRepub: b => run(b, 'SAVING…', async () => { nzSignFail = false; await nzPublish(true); refresh(); }),
+  // another wallet's nutzap info under your identity: replaced only after you say so here
+  nzReplace: b => run(b, 'SAVING…', async () => { if (!idActive()) return; S.prefs.nzReplaceOk = idPub(); delete S.prefs.nzForeign; save(); await nzPublish(true); refresh(); }),
   nzRetry: b => run(b, 'SENDING', async () => {
     const t = txById(b.dataset.id); if (!t || !t.nz) return;
     const ok = await single('nzsend:' + t.id, () => nzDeliverOne(t.id));
