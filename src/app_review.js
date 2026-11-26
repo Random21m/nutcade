@@ -32,14 +32,13 @@ const rvDecoy = () => !!(vault.on && vault.decoy);
 const rvD = e => ((Array.isArray(e.tags) ? e.tags : []).find(t => Array.isArray(t) && t[0] === 'd' && typeof t[1] === 'string') || [])[1] || '';
 const rvSig = e => { try { return !!L.verifyEvent(e); } catch (x) { return false; } };   // (a relay's event, whatever its shape)
 // your keys now, as one text (the report card reads Nostr again when it changes), or null without words
-let rvMeC = null;
 function rvMe() {
   if (!S.seed || !S.seed.mnemonic) return null;
   const ks = idKeys(); return ks.length ? ks.join(',') : null;
 }
 const rvKeys = () => (S.seed && S.seed.mnemonic) ? idKeys() : [];
 // a switch of identity: the report card reads your reviews again with your keys now
-function rvIdChanged() { rvMeC = null; for (const l of Object.values(S.mintlog || {})) if (l && l.nostr && l.nostr.v === 2) l.nostr.me = null; }
+function rvIdChanged() { for (const l of Object.values(S.mintlog || {})) if (l && l.nostr && l.nostr.v === 2) l.nostr.me = null; }
 // your review of this mint: the one published from here, or one with your key found on your relays (another device or
 // app), whichever is newer; never one at or before a deletion you sent. Only what the current key signed is yours: a
 // review made under other 12 words (before a new phrase, a restore or an import) is someone else's (stored ones without
@@ -72,7 +71,6 @@ const rvCanSign = pk => { try { if (pk === seedPub()) return true; } catch (e) {
 // other 12 words (setSeed): nothing reviewed under the old key is yours any more. Your published reviews and deletions
 // here are forgotten, and a review of yours the report card had read from relays becomes one person's like any other
 function rvSeedChanged() {
-  rvMeC = null;
   let ch = false;
   for (const l of Object.values(S.mintlog || {})) {
     if (!l || typeof l !== 'object') continue;
@@ -127,8 +125,18 @@ async function rvPublish(url0, stars, text) {
   if (isOffline()) throw keepErr(new Error("You're offline. Publishing a review needs a connection. Nothing was sent."));
   const n = await relayPublish(ev, 7000, list, 1500);
   if (!n) throw rvNoRelay(list.length);
-  // the mint's pubkey changed since your last review: that one had another d, so it is withdrawn (best effort), by the key that signed it
-  if (old && old.d && old.d !== pub && rvCanSign(old.pk)) rvDelEvent(old.d, ts, old.pk).then(e => relayPublish(e, 7000, list, 1500)).catch(() => {});
+  // the mint's pubkey changed since your last review: that one had another d, so it is withdrawn (best effort), but only
+  // when it was signed by this same key: a deletion by another key of yours next to this review would publicly link the
+  // two keys, so that one is left to the "Delete the earlier review" offer below (which says so). The deletion is dated
+  // one second before this review, so the deletion kept here (revDels) never covers the new one.
+  if (old && old.d && old.d !== pub && (idHex(old.pk) ? old.pk : seedPub()) === ev.pubkey) {
+    const dts = ts - 1, opk = ev.pubkey;
+    rvDelEvent(old.d, dts, opk).then(e => relayPublish(e, 7000, list, 1500)).then(k => {
+      if (!k) return;
+      const l2 = mlog(url), dels = rvDels(l2); dels[opk] = Math.max(num(dels[opk]), dts);
+      l2.revDels = Object.assign({}, dels); delete l2.revDel; delete l2.revDelPk; saveMlog();
+    }).catch(() => {});
+  }
   l.rev = { stars, text: t, at: ts, d: pub, id: ev.id, n, of: list.length, pk: ev.pubkey };   // (pk: the key that signed it; only that key's review is yours)
   l.revBy = Object.assign({}, l.revBy && typeof l.revBy === 'object' ? l.revBy : {}, { [ev.pubkey]: l.rev });
   saveMlog();

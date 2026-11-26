@@ -254,13 +254,17 @@ async function idSignInExt() {
   if (idDecoy()) return idDecoyWait();
   if (idActive()) throw idTwice();   // (another identity is never replaced silently: Sign out first)
   const n = id07(); if (!n) throw idNoExt();
+  const tok = {}; idSigning = tok;   // (other 12 words or a sign-out meanwhile end this sign-in: idSeedChanged / idSignOut)
   let pub; try { pub = await idTimed(n.getPublicKey(), idMs()); } catch (e) { if (e && e.idLate) throw e; throw idSaidNo(e); }
+  if (idSigning !== tok) throw idGone();
   if (!idHex(pub)) throw keepErr(new Error("Your browser extension gave a key NUTCADE can't read."));
   await idProve(t => id07Sign(t), pub);
+  if (idSigning !== tok) throw idGone();
   idGate();
   if (idDecoy()) throw idLate();   // (the duress PIN's wallet opened meanwhile: nothing is kept there)
   if (idActive()) throw idTwice();
   await idSetConn({ type: 'nip07', pub, at: Date.now() });
+  idSigning = null;
   return pub;
 }
 async function idSignInBunker(link) {
@@ -313,6 +317,7 @@ function idSwitched(oldPub, newPub) {
 
 /* ---------- Settings ---------- */
 const ID_NZ = "Nutzaps stay on this wallet's own key, made from your 12 words: signing in or out never changes your nutzap info.";
+const ID_E_ZAPWHO = 'Your Nostr identity changed since this sheet opened, so nothing was sent. Check which key signs this zap, then tap Zap again.';
 const idShort = pk => { try { const n = L.npubEncode(pk); return n.slice(0, 14) + '…' + n.slice(-6); } catch (e) { return ''; } };
 function idSettingsHTML() {
   const c = idConn();
@@ -365,7 +370,7 @@ const idTexts = () => ['Nostr identity', 'Your public Nostr posts (mint reviews,
   'This deletes your reviews of this mint under both of your keys. Deleting under both at once can publicly link the two keys.', ID_E_LINK, ID_E_RELAY, ID_E_NSEC, ID_E_NC, "Your browser extension gave a key NUTCADE can't read.",
   "Your signer's answer didn't match the secret in the link, so NUTCADE didn't connect. Make a new bunker:// link in your signer app and try again.",
   "That was published under a Nostr identity you're not signed in with, so NUTCADE can't sign for it.", 'Paste a bunker:// link first.',
-  'This zap is signed with your Nostr identity, so anyone can link it to you.'];
+  'This zap is signed with your Nostr identity, so anyone can link it to you.', ID_E_ZAPWHO];
 window.NutId = {
   active: () => idActive(), pub: () => idPub(), type: () => (idConn() || {}).type || null, keys: () => idKeys(), parse: v => { const r = idParse(v); return r.ok ? { ok: true, remote: r.remote, relays: r.relays, secret: r.secret } : { ok: false, error: r.error }; },
   sign: t => idSign(t), out: () => idSignOut(), ext: () => idSignInExt(), bunker: l => idSignInBunker(l), texts: () => idTexts(), ecashAddress: () => myEcashAddress()
