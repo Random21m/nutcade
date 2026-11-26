@@ -10,8 +10,7 @@ Run: python mock_nostr.py [port]   (default 3350)
                                             are for ws://...:PORT/relay?r=NAME instead: r=liar answers every REQ at
                                             once with forged copies (same id and signature, other content) and keeps
                                             nothing; r=empty answers EOSE at once with nothing and keeps nothing;
-                                            "delay": seconds before any relay answers a REQ (main included);
-                                            "evdelay": seconds before it takes an EVENT (of "kinds", if given)
+                                            "delay": seconds before any relay answers a REQ (main included)
   POST /test/inject {event, raw}            store an event as a relay would serve it (raw: without checking its signature, as a lying relay)
   POST /test/forget {ids}                   the relay loses these events
   http://127.0.0.1:PORT/api/v2/...          npub.cash v2: user/info, user/mint, wallet/quotes (NIP-98 auth)
@@ -103,7 +102,6 @@ async def relay(ws: WebSocket):
             if m[0] == 'EVENT':
                 e = m[1]
                 ck = f"{e.get('pubkey')}:{e.get('kind')}"; pub_count[ck] = pub_count.get(ck, 0) + 1
-                if rm.get('evdelay') and (not rm.get('kinds') or e.get('kind') in rm['kinds']): await asyncio.sleep(float(rm['evdelay']))   # (a slow relay: the OK comes late)
                 if name in ('liar', 'empty'):   # (keeps nothing)
                     await ws.send_text(json.dumps(['OK', e.get('id'), True, ''])); continue
                 ok = verify(e)
@@ -261,7 +259,7 @@ posted = []
 @app.post('/test/relay_mode')
 async def relay_mode(request: Request):
     b = await request.json(); md = mode if b.get('relay', 'main') == 'main' else rmodes.setdefault(b['relay'], {})
-    md.clear(); md.update({k: b[k] for k in ('drop', 'reorder', 'dup', 'refuse', 'kinds', 'delay', 'evdelay') if k in b})
+    md.clear(); md.update({k: b[k] for k in ('drop', 'reorder', 'dup', 'refuse', 'kinds', 'delay') if k in b})
     return {'mode': md}
 
 

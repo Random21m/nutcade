@@ -6,17 +6,20 @@ steered by localStorage "__f07" (honest, slow, hang, refuse, otherpub, kind, tag
 extension at all, as after a reload without it).
 
 Covered: Settings -> Nostr identity (the extension offered only when window.nostr exists; never a field that takes an
-nsec); strict bunker link parsing (hostile inputs); each action moved to the identity is signed by it (nutzap info 10019
-and its withdrawal, the nutzap listen, mint reviews and their deletion, the daily score note, the zap request) with the
-right kind, tags and content and a valid signature; every money key stays on the 12 words while signed in (a gift's
-refund key, Extra Life's lock and its message to the heir, ecash sent to your ecash address, npub.cash, the nutzap you
-send, wallet sync, the mint-list backup; the bounty wraps by a pin on the built page); no silent fallback to the 12-word
-key when the signer refuses, hangs, vanishes or returns another event; nutzaps to the old and the new key both arrive
-after a switch, never credited twice; the offer to withdraw the old nutzap info; your own reviews by either key counted
-once; the connection kept in the PIN vault, never in plain storage, the backup file or sync events, gone after Sign out
-and Reset; the duress PIN's wallet shows and uses no identity; a locked wallet signs nothing; offline it says it needs a
-connection; races (two signatures at once, Sign out while signing, another tab taking over while signing); everything
-from the signer shown as text (npub, error text, auth_url, never opened by the app); five languages at 320 px.
+nsec; the list of what uses it: mint reviews, the daily share post, zap requests; a line saying nutzaps stay on the
+wallet's own key); strict bunker link parsing (hostile inputs); each action moved to the identity is signed by it (mint
+reviews and their deletion, the daily score note, the zap request) with the right kind, tags and content and a valid
+signature; every money key stays on the 12 words while signed in (a gift's refund key, Extra Life's lock and its message
+to the heir, ecash sent to your ecash address, npub.cash, the nutzap you send, wallet sync, the mint-list backup; the
+bounty wraps by a pin on the built page); nutzaps stay on the 12-word key exactly as in 1.36.0 (nzstay, with the
+extension and with a remote signer: the nutzap info signed by the 12-word key, the listen on it only, a nutzap to it
+claimed, nothing about nutzap info published, withdrawn or asked of the signer at sign-in, sign-out or nutzaps off, and
+no withdraw option at sign-out); no silent fallback to the 12-word key when the signer refuses, hangs, vanishes or
+returns another event; signer waits ended at once by a sign-out (the rounds never wait); your own reviews by either key
+counted once; the connection kept in the PIN vault, never in plain storage, the backup file or sync events, gone after
+Sign out and Reset; the duress PIN's wallet shows and uses no identity; a locked wallet signs nothing; offline it says it
+needs a connection; races (two signatures at once, Sign out while signing, another tab taking over while signing);
+everything from the signer shown as text (npub, error text, auth_url, never opened by the app); five languages at 320 px.
 SI_ONLY=a,b runs some sections (their names start with those letters)."""
 import asyncio, json, os, re, sys, time, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -129,9 +132,8 @@ async def sign_in_bunker(w, link, wait=True):
     await w.ev(f"(()=>{{const i=document.querySelector('#idLink'); i.value={J(link)}; i.dispatchEvent(new Event('input',{{bubbles:true}}));}})()")
     await w.click('#layer [data-act=idConnect]')
     if wait: return await w.until("(window.NutId && NutId.active()) || !!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 20000) and await w.ev("NutId.active()")
-async def sign_out(w, withdraw=False):
+async def sign_out(w):
     await settings(w); await w.click('#set-identity [data-act=idOut]'); await w.until("!!document.querySelector('#layer [data-act=idOutGo]')", 5000)
-    if withdraw: await w.ev("(()=>{const c=document.querySelector('#idOutWithdraw'); if(c&&!c.checked) c.click();})()")
     await w.click('#layer [data-act=idOutGo]')
     return await w.until("!NutId.active() && !document.querySelector('#layer [data-act=idOutGo] .spinner')", 20000)
 async def nz_on(w):
@@ -223,6 +225,7 @@ async def main():
             await nz_on(me)
             old10019 = [e for e in evs(10019, SEED) if e['tags']]
             check('ext: (nutzaps on before signing in: nutzap info published under the 12-word key)', len(old10019) == 1)
+            s10 = pubs(SEED, 10019)
             await ext_mode(me, 'honest', EXT_SK, reload=True)
             t = await panel(me)
             check('ext: with window.nostr there, the extension is offered', await me.ev("!!document.querySelector('#set-identity [data-act=idExt]')"), t[:200])
@@ -231,21 +234,13 @@ async def main():
             t = await panel(me); npub = await me.ev(f"CashuLib.npubEncode({J(EXT)})")
             check('ext: Settings shows the npub you are signed in as', npub[:12] in t and npub[-4:] in t, t[:300])
             uses = await me.ev("[...document.querySelectorAll('#idUses li')].map(l=>l.innerText)")
-            check('ext: Settings lists what uses it (nutzap info, mint reviews, the daily note, zaps)', len(uses) == 4 and any('nutzap' in u.lower() for u in uses) and any('review' in u.lower() for u in uses) and any('daily' in u.lower() for u in uses) and any('zap' in u.lower() for u in uses[3:]), uses)
+            check('ext: Settings lists what uses it (mint reviews, the daily share post, zap requests), nutzaps not among them', len(uses) == 3 and any('review' in u.lower() for u in uses) and any('daily' in u.lower() for u in uses) and any('zap' in u.lower() for u in uses) and not any('nutzap' in u.lower() for u in uses), uses)
+            check('ext: Settings says nutzaps stay on the wallet\'s own key', await me.ev("!!document.querySelector('#set-identity #idNz')") and 'nutzap' in (await me.ev("document.querySelector('#idNz').innerText")).lower(), t[:500])
             check('ext: Settings says money stays on the 12 words', '12 words' in t, t[:400])
-            ok = await me.until(f"NutZap.info() && NutZap.info().pk === {J(EXT)}", 15000)
-            e = [x for x in evs(10019, EXT) if x['tags']]
-            check('ext: the nutzap info is republished under the identity (kind 10019, same relays, mints and receiving key)', ok and len(e) == 1 and tg(e[0], 'pubkey') == [['pubkey', await me.ev("NutZap.pub()")]] and tg(e[0], 'mint') == [['mint', M, 'sat']] and tg(e[0], 'relay') == [['relay', RELAY]], e)
-            check('ext: the receiving key is still the one from the 12 words (not the identity)', await me.ev("NutZap.pub()") != '02' + EXT and await me.ev("NutZap.pub()") == tg(old10019[0], 'pubkey')[0][1])
-            keys = await me.ev("NutZap.keys()")
-            check('ext: nutzaps are listened for on both keys', sorted(keys) == sorted([SEED, EXT]), keys)
-            t = await panel(me)
-            check('ext: Settings offers to withdraw the old nutzap info, with one plain sentence', await me.ev("!!document.querySelector('#set-identity [data-act=idRetract]')") and 'withdraw' in t.lower(), t[:600])
-            await me.click('#set-identity [data-act=idRetract]')
-            ok = await me.until(f"!document.querySelector('#set-identity [data-act=idRetract]')", 12000); await me.wait(500)
-            dels = [x for x in evs(5, SEED) if ['a', f'10019:{SEED}:'] in x['tags']]
-            check('ext: withdrawing sends a kind 5 for the old 10019 and an empty one, both by the 12-word key', ok and dels and not [x for x in evs(10019, SEED) if x['tags']], (len(dels), [x['tags'] for x in evs(10019, SEED)]))
-            check('ext: the identity\'s nutzap info stays', [x for x in evs(10019, EXT) if x['tags']])
+            await me.wait(1500)
+            check('ext: signing in publishes no nutzap info (none under the identity, none again under the 12-word key)', pubs(EXT, 10019) == 0 and pubs(SEED, 10019) == s10, (pubs(EXT, 10019), pubs(SEED, 10019) - s10))
+            check('ext: the extension was never asked for kind 10019 or 5', not [x for x in await me.ev("window.__f07log") if x in ('sign:10019', 'sign:5')], await me.ev("window.__f07log"))
+            check('ext: no offer to withdraw nutzap info anywhere', not await me.ev("!!document.querySelector('[data-act=idRetract]')") and 'withdraw' not in t.lower(), t[:600])
             ctx['ext'] = True
         await section('ext', ext)
 
@@ -391,8 +386,8 @@ async def main():
             n38, s10 = pubs(EXT, 38000), pubs(SEED, 10019)
             e = await review(me, 1, 'no extension')
             check('fallback: without the extension nothing is signed (a clear message, nothing under the 12-word key)', 'extension' in e.lower() and pubs(EXT, 38000) == n38 and pubs(SEED, 38000) == s38, e)
-            await me.ev("NutZap.tick(true)"); await me.wait(1500)
-            check('fallback: the nutzap info is not republished under the 12-word key', pubs(SEED, 10019) == s10)
+            await me.ev("Nutcade.S.prefs.nzInfo.key = 'stale'; NutZap.tick(true)"); await me.wait(1500)
+            check('fallback: without the extension the nutzap info is still published, under the 12-word key as always (never the identity)', pubs(SEED, 10019) > s10 and pubs(EXT, 10019) == 0, (pubs(SEED, 10019) - s10, pubs(EXT, 10019)))
             await ext_mode(me, 'honest', reload=True)
         await section('nofallback', nofallback)
 
@@ -430,94 +425,95 @@ async def main():
 
         async def switch():
             if not ctx.get('ext'): return
-            s10 = pubs(SEED, 10019)
-            await me.ev("NutZap.tick(true)"); await me.wait(1000)
-            n5 = len(evs(5, EXT))
-            ok = await sign_out(me, withdraw=True)
+            s10, s5 = pubs(SEED, 10019), pubs(SEED, 5)
+            await settings(me); await me.click('#set-identity [data-act=idOut]'); await me.until("!!document.querySelector('#layer [data-act=idOutGo]')", 5000)
+            t = await me.sheet_text()
+            check('switch: the sign-out sheet offers no nutzap withdrawal and says nothing of nutzap info', not await me.ev("!!document.querySelector('#idOutWithdraw')") and 'nutzap' not in t.lower(), t[:400])
+            await me.click('#layer [data-act=idOutGo]')
+            ok = await me.until("!NutId.active() && !document.querySelector('#layer [data-act=idOutGo] .spinner')", 20000)
             check('switch: Sign out', ok and await me.ev("NutId.pub() === __seedPub()"))
-            ok = await me.until(f"NutZap.info() && NutZap.info().pk === {J(SEED)}", 15000)
-            check('switch: the nutzap info is republished under the 12-word key', ok and pubs(SEED, 10019) > s10 and [x for x in evs(10019, SEED) if x['tags']])
-            check('switch: the identity\'s nutzap info was withdrawn (asked on Sign out, signed by the identity)', len(evs(5, EXT)) > n5 and not [x for x in evs(10019, EXT) if x['tags']])
-            keys = await me.ev("NutZap.keys()")
-            check('switch: nutzaps are still listened for on both keys', sorted(keys) == sorted([SEED, EXT]), keys)
-            await me.ev("Nutcade.closeSheet()"); await me.wait(1500)
+            await me.ev("NutZap.tick(true)"); await me.wait(1500)
+            check('switch: signing out publishes, withdraws and retracts no nutzap info under any key', pubs(SEED, 10019) == s10 and pubs(SEED, 5) == s5 and pubs(EXT, 10019) == 0 and not [x for x in evs(5, EXT) if any(t[0] == 'a' and t[1].startswith('10019:') for t in x['tags'])], (pubs(SEED, 10019) - s10, pubs(SEED, 5) - s5, pubs(EXT, 10019)))
+            check('switch: the nutzap info under the 12-word key is still the one in use', await me.ev(f"NutZap.info() && NutZap.me() === {J(SEED)}") and [x for x in evs(10019, SEED) if x['tags']])
+            await me.ev("Nutcade.closeSheet()"); await me.wait(1000)
             nzp = await me.ev("NutZap.pub()"); b0 = await me.bal(); n0 = len(await nz_in(me))
-            p1 = await al.ev(f"Nutcade.r8.sendEcash(11, 'nz old', {J(nzp)}).then(t=>t.sent)")
-            p2 = await al.ev(f"Nutcade.r8.sendEcash(12, 'nz new', {J(nzp)}).then(t=>t.sent)")
-            p3 = await al.ev(f"Nutcade.r8.sendEcash(13, 'nz both', {J(nzp)}).then(t=>t.sent)")
-            e1 = await al.ev(f"__nz({J(p1)}, {J(M)}, [{J(SEED)}])"); e2 = await al.ev(f"__nz({J(p2)}, {J(M)}, [{J(EXT)}])"); e3 = await al.ev(f"__nz({J(p3)}, {J(M)}, [{J(SEED)}, {J(EXT)}])")
-            for e in (e1, e2, e3, e2, e3): await al.ev(f"__pub({J(e)})")
-            ok = await me.until(f"Nutcade.S.txs.filter(t=>t.type==='in'&&t.nz&&t.status==='done').length >= {n0 + 3}", 25000); await me.wait(2000)
-            got = await nz_in(me)
-            check('switch: nutzaps to the 12-word key and to the former identity both arrive', ok and await me.bal() - b0 == 36, (await me.bal() - b0, got[n0:]))
-            await me.ev(f"NutZap.event({J(e3)})"); await me.ev(f"NutZap.event({J(e2)})"); await me.wait(800)
-            check('switch: each is credited once (one tagged with both keys, the same ones again)', len(await nz_in(me)) == n0 + 3 and await me.bal() - b0 == 36, len(await nz_in(me)) - n0)
+            p1 = await al.ev(f"Nutcade.r8.sendEcash(11, 'nz seed', {J(nzp)}).then(t=>t.sent)")
+            e1 = await al.ev(f"__nz({J(p1)}, {J(M)}, [{J(SEED)}])")
+            for e in (e1, e1): await al.ev(f"__pub({J(e)})")
+            ok = await me.until(f"Nutcade.S.txs.filter(t=>t.type==='in'&&t.nz&&t.status==='done').length >= {n0 + 1}", 25000); await me.wait(1500)
+            await me.ev(f"NutZap.event({J(e1)})"); await me.wait(800)
+            check('switch: after signing out, a nutzap to the 12-word key arrives, credited once', ok and await me.bal() - b0 == 11 and len(await nz_in(me)) == n0 + 1, (await me.bal() - b0, len(await nz_in(me)) - n0))
         await section('switch', switch)
 
-        async def foreign():
-            fx = await wallet(b, 'si-foreign'); await fx.create(); await fx.add_mint(M); await fx.use(M)
-            await nz_on(fx)
-            sk2, pk2 = await keypair(fx); ctx['fx'] = (fx, sk2, pk2)
-            t = await panel(fx)
-            check('linknote: with nutzaps on, the identity section says signing in links your identity to this wallet\'s own key', await fx.ev("!!document.querySelector('#set-identity #idLinkNote')") and 'link' in t.lower(), t[:500])
-            await fx.click('#set-identity [data-act=idBunker]'); await fx.wait(250)
-            check('linknote: ...the remote signer sheet too', await fx.ev("!!document.querySelector('#layer #idLinkNote')"))
-            await fx.ev("Nutcade.closeSheet()")
-            other = await fx.ev("NutZap.randomPub()")
-            tp = await fx.ev(f"__sign({J(sk2)}, 10019, [['relay', {J(RELAY)}], ['mint', 'https://mint.minibits.cash/Bitcoin', 'sat'], ['pubkey', {J(other)}]], '', -600)")
-            await fx.ev(f"__pub({J(tp)})"); n0 = pubs(pk2, 10019)
-            await ext_mode(fx, 'honest', sk2, reload=True); await sign_in_ext(fx); await fx.wait(4000)
-            cur = [x for x in evs(10019, pk2) if x['tags']]
-            check('foreign: another wallet\'s nutzap info under that npub is not replaced on sign-in', pubs(pk2, 10019) == n0 and cur and tg(cur[0], 'pubkey') == [['pubkey', other]], (pubs(pk2, 10019) - n0, cur and tg(cur[0], 'pubkey')))
-            t = await panel(fx)
-            check('foreign: Settings asks first, with one plain sentence (nutzaps for this npub would come to NUTCADE instead)', await fx.ev("!!document.querySelector('#nzForeign') && !!document.querySelector('[data-act=nzReplace]')") and 'other wallet' in (await fx.ev("document.querySelector('#nzForeign').innerText")).lower(), t[:600])
-            await fx.click('[data-act=nzReplace]')
-            ok = await fx.until(f"NutZap.info() && NutZap.info().pk === {J(pk2)}", 15000)
-            cur = [x for x in evs(10019, pk2) if x['tags']]
-            check('foreign: after you say yes, NUTCADE\'s nutzap info replaces it', ok and cur and tg(cur[0], 'pubkey') == [['pubkey', await fx.ev("NutZap.pub()")]], cur and tg(cur[0], 'pubkey'))
-            tp2 = await fx.ev(f"__sign({J(sk2)}, 10019, [['relay', {J(RELAY)}], ['pubkey', {J(other)}]], '', 30)")
-            await fx.ev(f"__pub({J(tp2)})"); n5 = len(evs(5, pk2))
-            await settings(fx); await fx.click('#set-identity [data-act=idOut]'); await fx.until("!!document.querySelector('#layer [data-act=idOutGo]')", 5000)
-            await fx.ev("(()=>{const c=document.querySelector('#idOutWithdraw'); if(c&&!c.checked) c.click();})()"); await fx.click('#layer [data-act=idOutGo]')
-            await fx.until("!!((document.querySelector('#sheetErr')||{}).innerText||'').trim() || !NutId.active()", 15000)
-            e = await fx.err(); cur = [x for x in evs(10019, pk2) if x['tags']]
-            check('foreign: Sign out + withdraw leaves another wallet\'s nutzap info alone (says so, nothing sent)', 'another wallet' in e.lower() and len(evs(5, pk2)) == n5 and cur and tg(cur[0], 'pubkey') == [['pubkey', other]], (e, len(evs(5, pk2)) - n5))
-            await fx.ev("Nutcade.closeSheet()")
-        await section('foreign', foreign)
-
-        async def inflight():
-            ix = await wallet(b, 'si-flight'); await ix.create(); await ix.add_mint(M); await ix.use(M)
-            await nz_on(ix); SP = await ix.ev("__seedPub()")
-            sk3, pk3 = await keypair(ix); ctx['ix'] = (ix, sk3, pk3)
-            await ext_mode(ix, 'honest', sk3, reload=True); await sign_in_ext(ix)
-            await ix.until(f"NutZap.info() && NutZap.info().pk === {J(pk3)}", 15000)
-            await ext_mode(ix, 'slower'); n0 = await ix.ev("window.__f07log.length"); s0 = pubs(SP, 10019)
-            await ix.ev("(()=>{ NutZap.publish(true); })()")
-            await ix.until(f"window.__f07log.length > {n0}", 8000); await ix.ev("NutId.out()")
-            ok = await ix.until(f"NutZap.info() && NutZap.info().pk === {J(SP)}", 20000); await ix.wait(500)
-            st = await ix.ev("document.querySelector('#set-privacy') ? document.querySelector('#set-privacy').innerText : ''")
-            check('inflight: signing out while the identity signs the nutzap info: it is published under the 12-word key after', ok and pubs(SP, 10019) > s0, (ok, pubs(SP, 10019) - s0))
-            check('inflight: ...and that is not shown as the signer failing', "DIDN'T SIGN" not in st and await ix.ev("NutZap.state()") != 'nosign', st[-200:])
-            await ext_mode(ix, 'honest')
-            post('/test/relay_mode', {'evdelay': 3, 'kinds': [10019]})
-            await ix.ev("(()=>{ NutZap.publish(true); })()"); await ix.wait(600)
-            await sign_in_ext(ix)
-            ok = await ix.until(f"NutZap.info() && NutZap.info().pk === {J(pk3)}", 30000); await ix.wait(500)
-            post('/test/relay_mode', {})
-            old = await ix.ev("NutZap.old().map(x=>x.pk)")
-            check('inflight: a 12-word-key publish landing after the switch is recorded as old info, and the identity is asked after it', ok and SP in old, (ok, old, await ix.ev("NutZap.info()")))
-        await section('inflight', inflight)
+        async def nzstay():
+            # nutzaps stay on the 12-word key whatever identity you sign in with (1.37 replan: exactly as 1.36.0)
+            def nz_asked(kinds): return [k for k in kinds if k in (10019, 5)]
+            for how in ('ext', 'bunker'):
+                zx = await wallet(b, 'si-nzstay-' + how); await zx.create(); await zx.add_mint(M); await zx.use(M)
+                SP = await zx.ev("__seedPub()")
+                if how == 'ext':
+                    skZ, U = await keypair(zx); await ext_mode(zx, 'honest', skZ, reload=True)
+                    asked = lambda: zx.ev("window.__f07log.filter(x=>x.startsWith('sign:')).map(x=>Number(x.slice(5)))")
+                else:
+                    SZ = post('/test/signer', {}); U = SZ['user']
+                    def asked_b():
+                        out = []
+                        for x in get('/test/signer/log')['log']:
+                            if x.get('method') == 'sign_event':
+                                try: out.append(json.loads(x['params'][0])['kind'])
+                                except Exception: out.append(None)
+                        return out
+                    async def asked(): return asked_b()
+                ok = await nz_on(zx); s10 = pubs(SP, 10019)
+                first = [x for x in evs(10019, SP) if x['tags']]
+                check(f'nzstay {how}: (nutzap info published under the 12-word key before signing in)', ok and len(first) == 1)
+                if how == 'ext': ok = await sign_in_ext(zx)
+                else: ok = await sign_in_bunker(zx, SZ['bunker']); await zx.ev("Nutcade.closeSheet()")
+                await zx.wait(1500); await zx.ev("NutZap.tick(true)"); await zx.wait(1000)
+                check(f'nzstay {how}: signed in with the identity', ok and await zx.ev(f"NutId.active() && NutId.pub() === {J(U)}"))
+                check(f'nzstay {how}: signing in publishes, withdraws and retracts no nutzap info', pubs(SP, 10019) == s10 and pubs(U, 10019) == 0 and pubs(U, 5) == 0 and not [x for x in evs(5, SP) if any(t[0] == 'a' and t[1].startswith('10019:') for t in x['tags'])], (pubs(SP, 10019) - s10, pubs(U, 10019), pubs(U, 5)))
+                check(f'nzstay {how}: the signer is never asked for kind 10019 or 5 at sign-in', not nz_asked(await asked()), await asked())
+                check(f'nzstay {how}: the nutzap key of yours is the 12-word key, not the identity', await zx.ev(f"NutZap.me() === {J(SP)} && NutZap.me() !== {J(U)}"))
+                # a change that republishes the nutzap info (another relay): signed by the 12-word key, the signer asked nothing
+                await zx.ev(f"Nutcade.S.prefs.relays = [{J(RELAY)}, {J(RELAY + '?r=second')}]; NutZap.tick(true)")
+                ok = await zx.until(f"fetch('{MOCK}/test/state').then(r=>r.json()).then(s=>(s.pub_count['{SP}:10019']||0) > {s10})", 12000)
+                e = [x for x in evs(10019, SP) if x['tags']]
+                check(f'nzstay {how}: while signed in, the nutzap info (kind 10019) is signed by the 12-word key', ok and e and e[-1]['pubkey'] == SP and await zx.ev(f"CashuLib.verifyEvent({J(e[-1])})") and pubs(U, 10019) == 0 and tg(e[-1], 'pubkey') == [['pubkey', await zx.ev("NutZap.pub()")]], (ok, len(e)))
+                check(f'nzstay {how}: ...and the signer was not asked for it', not nz_asked(await asked()), await asked())
+                await zx.ev(f"Nutcade.S.prefs.relays = [{J(RELAY)}]")
+                lst = [f for fs in state()['reqs'] for f in fs if f.get('kinds') == [9321] and (SP in (f.get('#p') or []) or U in (f.get('#p') or []))]
+                check(f'nzstay {how}: nutzaps are listened for on the 12-word key only', lst and all(f.get('#p') == [SP] for f in lst), lst[-2:])
+                # a nutzap to the 12-word key's npub is claimed; one tagged only with the identity is not this wallet's
+                nzp = await zx.ev("NutZap.pub()"); b0 = await zx.bal(); n0 = len(await nz_in(zx))
+                pr = await al.ev(f"Nutcade.r8.sendEcash(14, 'nz stay', {J(nzp)}).then(t=>t.sent)")
+                e1 = await al.ev(f"__nz({J(pr)}, {J(M)}, [{J(SP)}])"); await al.ev(f"__pub({J(e1)})")
+                ok = await zx.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {b0 + 14}", 20000); await zx.wait(800)
+                check(f'nzstay {how}: a nutzap to the 12-word key\'s npub is claimed while signed in, once', ok and await zx.bal() - b0 == 14 and len(await nz_in(zx)) == n0 + 1, (await zx.bal() - b0, len(await nz_in(zx)) - n0))
+                pr2 = await al.ev(f"Nutcade.r8.sendEcash(15, 'nz id', {J(nzp)}).then(t=>t.sent)")
+                e2 = await al.ev(f"__nz({J(pr2)}, {J(M)}, [{J(U)}])")
+                r = await zx.ev(f"NutZap.event({J(e2)})")
+                check(f'nzstay {how}: a nutzap tagged only with the identity is not taken as this wallet\'s (as 1.36.0)', r == 'bad' and len(await nz_in(zx)) == n0 + 1, r)
+                # turning nutzaps off while signed in: withdrawn under the 12-word key, the signer asked nothing
+                n5 = len([x for x in evs(5, SP) if ['a', f'10019:{SP}:'] in x['tags']])
+                await settings(zx); await zx.click('#p_nutzap')
+                ok = await zx.until(f"fetch('{MOCK}/test/state').then(r=>r.json()).then(s=>s.events.filter(e=>e.kind===5&&e.pubkey==={J(SP)}&&e.tags.some(t=>t[0]==='a'&&t[1]==='10019:{SP}:')).length > {n5})", 15000); await zx.wait(800)
+                check(f'nzstay {how}: turning nutzaps off while signed in withdraws under the 12-word key (an empty 10019 and a kind 5)', ok and not [x for x in evs(10019, SP) if x['tags']] and pubs(U, 10019) == 0 and pubs(U, 5) == 0, ok)
+                check(f'nzstay {how}: ...with no signer request', not nz_asked(await asked()), await asked())
+                await settings(zx); await zx.click('#p_nutzap'); await zx.until("NutZap.info() && NutZap.info().pub === NutZap.pub()", 15000); s10 = pubs(SP, 10019)
+                # signing out: the sheet has no withdraw option, and nothing about nutzaps is sent
+                await settings(zx); await zx.click('#set-identity [data-act=idOut]'); await zx.until("!!document.querySelector('#layer [data-act=idOutGo]')", 5000)
+                t = await zx.sheet_text()
+                check(f'nzstay {how}: the sign-out sheet has no withdraw option', not await zx.ev("!!document.querySelector('#idOutWithdraw')") and 'withdraw' not in t.lower() and 'nutzap' not in t.lower(), t[:300])
+                await zx.click('#layer [data-act=idOutGo]'); await zx.until("!NutId.active()", 15000); await zx.wait(1000); await zx.ev("NutZap.tick(true)"); await zx.wait(800)
+                check(f'nzstay {how}: signing out publishes, withdraws and retracts no nutzap info', pubs(SP, 10019) == s10 and pubs(U, 10019) == 0 and pubs(U, 5) == 0 and await zx.ev("!!NutZap.info()"), (pubs(SP, 10019) - s10, pubs(U, 10019), pubs(U, 5)))
+                check(f'nzstay {how}: ...and never asked the signer for kind 10019 or 5', not nz_asked(await asked()), await asked())
+                await zx.pg.context.close()
+            post('/test/signer', {})
+        await section('nzstay', nzstay)
 
         async def retry():
-            if not ctx.get('ix'): return
-            ix, sk3, pk3 = ctx['ix']
-            await ext_mode(ix, 'refuse'); await ix.ev("NutZap.publish(true)")
-            await settings(ix)
-            st = await ix.ev("document.querySelector('#set-privacy').innerText")
-            check('retry: a signer that said no: the status says so, with Try again', "DIDN'T SIGN" in st and await ix.ev("!!document.querySelector('#set-privacy [data-act=nzRepub]')"), st[-200:])
-            await ext_mode(ix, 'honest'); n = pubs(pk3, 10019)
-            await ix.click('#set-privacy [data-act=nzRepub]')
-            check('retry: Try again publishes it', await ix.until(f"fetch('{MOCK}/test/state').then(r=>r.json()).then(s=>(s.pub_count['{pk3}:10019']||0) > {n})", 12000))
+            ix = await wallet(b, 'si-retry'); await ix.create(); await ix.add_mint(M); await ix.use(M)
+            sk3, pk3 = await keypair(ix); await ext_mode(ix, 'honest', sk3, reload=True); await sign_in_ext(ix)
             # the daily note: the identity when the sheet opened, or nothing
             SP = await ix.ev("__seedPub()"); g = await ix.ev("NutDailyNostr.gen()")
             await sign_out(ix); s1 = pubs(SP, 1)
@@ -529,6 +525,7 @@ async def main():
             check('twice: connecting another signer while signed in is refused: sign out first', 'sign out first' in r.lower() and not get('/test/signer/log')['log'] and await ix.ev(f"NutId.pub() === {J(pk3)}"), r)
             await ix.ev(f"Nutcade.handleScan({J(S0['bunker'])})"); await ix.wait(300)
             check('twice: a scanned bunker:// link says so too, and opens nothing', not await ix.ev("!!document.querySelector('#idLink')") and 'sign out first' in (await ix.toast()).lower(), await ix.toast())
+            await ix.pg.context.close()
         await section('retry', retry)
 
         async def cap():
@@ -543,9 +540,9 @@ async def main():
             await bz.ev("Nutcade.S.prefs.nzInfo.key = 'stale'")
             t0 = time.time(); await bz.ev("NutZap.tick(true)"); dt = time.time() - t0
             check('cap: a silent signer does not hold up the nutzap round (claims and deliveries)', dt < 5, round(dt, 1))
-            nzp = await bz.ev("NutZap.pub()"); b0 = await bz.bal()
+            SP = await bz.ev("__seedPub()"); nzp = await bz.ev("NutZap.pub()"); b0 = await bz.bal()
             pr = await al.ev(f"Nutcade.r8.sendEcash(17, 'nz cap', {J(nzp)}).then(t=>t.sent)")
-            e1 = await al.ev(f"__nz({J(pr)}, {J(M)}, [{J(S6['user'])}])"); await al.ev(f"__pub({J(e1)})")
+            e1 = await al.ev(f"__nz({J(pr)}, {J(M)}, [{J(SP)}])"); await al.ev(f"__pub({J(e1)})")
             ok = await bz.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {b0 + 17}", 15000)
             check('cap: a nutzap arriving meanwhile is claimed at once', ok, await bz.bal() - b0)
             await bz.pg.context.close(); post('/test/signer', {})
@@ -586,10 +583,9 @@ async def main():
             ab = await wallet(b, 'si-abort'); await ab.create(); await ab.add_mint(M); await ab.use(M)
             await nz_on(ab); SP = await ab.ev("__seedPub()"); sk5, pk5 = await keypair(ab)
             await ext_mode(ab, 'honest', sk5, reload=True); await sign_in_ext(ab)
-            await ab.until(f"NutZap.info() && NutZap.info().pk === {J(pk5)}", 15000)
             await ab.ev("window.__nutcadeTest = {idMs: 20000}")
             await ext_mode(ab, 'hang'); n0 = await ab.ev("window.__f07log.length")
-            await ab.ev("Nutcade.S.prefs.nzInfo.key = 'stale'"); await ab.ev("(()=>{ NutZap.publish(); })()")
+            await ab.ev(f"(()=>{{ window.__r = null; NutReview.publish({J(M)}, 3, 'hangs').then(()=>'sent', e=>e.message).then(v=>{{ window.__r = v; }}) }})()")
             await ab.until(f"window.__f07log.length > {n0}", 8000)
             await ab.ev("NutId.out()")
             t0 = time.time(); await ab.ev("NutZap.tick(true)"); dt = time.time() - t0
@@ -597,106 +593,31 @@ async def main():
             has = await ab.ev("typeof Nutcade.tick === 'function'")
             t0 = time.time(); await ab.ev("typeof Nutcade.tick === 'function' && Nutcade.tick()"); dt2 = time.time() - t0
             check('abort: ...nor the background round (deposits, payments, refunds, Extra Life)', has and dt2 < 10, (has, round(dt2, 1)))
-            ok = await ab.until(f"NutZap.info() && NutZap.info().pk === {J(SP)}", 10000)
-            check('abort: the pending signature ends at once and the nutzap info goes back to the 12-word key', ok, await ab.ev("NutZap.info()"))
+            ok = await ab.until("typeof window.__r === 'string'", 3000)
+            check('abort: the pending signature ends at once with sign-out, nothing published under any key', ok and await ab.ev("window.__r") != 'sent' and pubs(pk5, 38000) == 0 and pubs(SP, 38000) == 0, (ok, await ab.ev("window.__r"), pubs(pk5, 38000), pubs(SP, 38000)))
             nzp = await ab.ev("NutZap.pub()"); b0 = await ab.bal()
             pr = await al.ev(f"Nutcade.r8.sendEcash(19, 'nz abort', {J(nzp)}).then(t=>t.sent)")
             e1 = await al.ev(f"__nz({J(pr)}, {J(M)}, [{J(SP)}])"); await al.ev(f"__pub({J(e1)})")
             check('abort: a nutzap arriving meanwhile is claimed', await ab.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {b0 + 19}", 15000), await ab.bal() - b0)
             S7 = post('/test/signer', {}); await ab.ev("window.__nutcadeTest = {idMs: 20000}")
             ok = await sign_in_bunker(ab, S7['bunker']); await ab.ev("Nutcade.closeSheet()")
-            await ab.until(f"NutZap.info() && NutZap.info().pk === {J(S7['user'])}", 15000)
             post('/test/signer/mode', {'sign': 'silent'}); n1 = methods().count('sign_event')
-            await ab.ev("Nutcade.S.prefs.nzInfo.key = 'stale'"); await ab.ev("(()=>{ NutZap.publish(); })()")
+            await ab.ev(f"(()=>{{ window.__r = null; NutReview.publish({J(M)}, 3, 'silent').then(()=>'sent', e=>e.message).then(v=>{{ window.__r = v; }}) }})()")
             await ab.until(f"fetch('{MOCK}/test/signer/log').then(r=>r.json()).then(s=>s.log.filter(x=>x.method==='sign_event').length > {n1})", 8000)
             await ab.ev("NutId.out()")
             t0 = time.time(); await ab.ev("NutZap.tick(true)"); dt = time.time() - t0
             check('abort: right after sign-out, a silent remote signer does not hold up the nutzap round either', ok and dt < 5, (ok, round(dt, 1)))
+            ok2 = await ab.until("typeof window.__r === 'string'", 3000)
+            check('abort: ...and its pending signature ends at once too', ok2 and await ab.ev("window.__r") != 'sent' and pubs(S7['user'], 38000) == 0, (ok2, await ab.ev("window.__r"), pubs(S7['user'], 38000)))
             await ab.ev("window.__nutcadeTest = null"); post('/test/signer', {})
-            # the foreign check before every publish under an identity, not only the first
-            await ext_mode(ab, 'honest'); await sign_in_ext(ab)
-            await ab.until(f"NutZap.info() && NutZap.info().pk === {J(pk5)}", 15000)
-            other = await ab.ev("NutZap.randomPub()")
-            tp = await ab.ev(f"__sign({J(sk5)}, 10019, [['relay', {J(RELAY)}], ['pubkey', {J(other)}]], '', 5)")
-            await ab.ev(f"__pub({J(tp)})"); n10 = pubs(pk5, 10019)
-            await ab.ev(f"Nutcade.S.prefs.relays = [{J(RELAY)}, {J(RELAY + '?r=second')}]; NutZap.tick(true)"); await ab.wait(5000)
-            cur = [x for x in evs(10019, pk5) if x['tags']]
-            await settings(ab)
-            check('foreign: a later republish (relays changed) does not replace another wallet\'s nutzap info that appeared since; it asks', pubs(pk5, 10019) == n10 and cur and tg(cur[0], 'pubkey') == [['pubkey', other]] and await ab.ev("!!document.querySelector('#nzForeign')"), (pubs(pk5, 10019) - n10, cur and tg(cur[0], 'pubkey')))
-            check("foreign: the identity's own relay list (kind 10002) is read for the check", any(any(f.get('kinds') == [10002] and pk5 in (f.get('authors') or []) for f in fs) for fs in state()['reqs']))
             await ab.pg.context.close()
         await section('abort', abort)
-
-        async def offonce():
-            ox = await wallet(b, 'si-offonce'); await ox.create(); await ox.add_mint(M); await ox.use(M)
-            await nz_on(ox); sk7, pk7 = await keypair(ox)
-            await ext_mode(ox, 'honest', sk7, reload=True); await sign_in_ext(ox)
-            await ox.until(f"NutZap.info() && NutZap.info().pk === {J(pk7)}", 15000)
-            await ox.ev("Nutcade.S.prefs.nzInfo.key = 'stale'")
-            post('/test/relay_mode', {'evdelay': 3, 'kinds': [10019]})
-            await ox.ev("(()=>{ NutZap.publish(true); })()"); await ox.wait(700)
-            await ext_mode(ox, 'slow'); n0 = await ox.ev("window.__f07log.length")
-            await settings(ox); await ox.click('#p_nutzap'); await ox.wait(12000)
-            post('/test/relay_mode', {})
-            asked = await ox.ev(f"window.__f07log.slice({n0})")
-            check('off: turning nutzaps off while an identity publish is on its way withdraws once (2 signatures, not 4)', sorted(asked) == ['sign:10019', 'sign:5'], asked)
-            await ox.pg.context.close()
-        await section('offonce', offonce)
-
-        async def r3live():
-            lx = await wallet(b, 'si-r3live'); await lx.create(); await lx.add_mint(M); await lx.use(M)
-            await nz_on(lx); SP = await lx.ev("__seedPub()"); sk8, pk8 = await keypair(lx)
-            await ext_mode(lx, 'honest', sk8, reload=True)
-            await lx.until(f"NutZap.info() && NutZap.info().pk === {J(SP)}", 15000)
-            post('/test/relay_mode', {'evdelay': 3, 'kinds': [10019]})
-            await lx.ev("Nutcade.S.prefs.nzInfo.key = 'stale'"); await lx.ev("(()=>{ NutZap.publish(true); })()"); await lx.wait(500)
-            await lx.ev("NutId.ext()"); await lx.ev("NutId.out()")
-            await lx.wait(9000); post('/test/relay_mode', {})
-            await lx.until(f"NutZap.info() && NutZap.info().pk === {J(SP)}", 15000); await lx.wait(500)
-            old = await lx.ev("NutZap.old().map(x=>x.pk)"); await panel(lx)
-            offer = await lx.ev(f"!!document.querySelector('#set-identity [data-act=idRetract][data-pk=\"{SP}\"]')")
-            check('live: away and back to the same key during a publish: the key in use is never offered as old nutzap info', SP not in old and not offer, (old, offer))
-            await lx.ev(f"Nutcade.S.prefs.nzOld = [{{pk: {J(SP)}, relays: [{J(RELAY)}], at: Date.now()}}]"); await panel(lx)
-            n5 = len(evs(5, SP))
-            r = await lx.ev(f"NutZap.retractOld({J(SP)}).then(n=>'sent '+n, e=>e.message)")
-            offer = await lx.ev(f"!!document.querySelector('#set-identity [data-act=idRetract][data-pk=\"{SP}\"]')")
-            check('live: the nutzap info in use is never offered or withdrawn as old, even if listed so', not offer and not r.startswith('sent') and len(evs(5, SP)) == n5 and [x for x in evs(10019, SP) if x['tags']], (offer, r))
-            await lx.pg.context.close()
-        await section('r3live', r3live)
-
-        async def r3stay():
-            sx = await wallet(b, 'si-r3stay'); await sx.create(); await sx.add_mint(M); await sx.use(M)
-            await nz_on(sx); sk9, pk9 = await keypair(sx)
-            await ext_mode(sx, 'honest', sk9, reload=True); await sign_in_ext(sx)
-            await sx.until(f"NutZap.info() && NutZap.info().pk === {J(pk9)}", 15000)
-            await ext_mode(sx, 'hang'); await settings(sx); await sx.click('#p_nutzap'); await sx.wait(1500)
-            await ext_mode(sx, 'honest', reload=True); await sx.ev("NutZap.tick(true)"); await sx.wait(500)
-            await panel(sx)
-            old = await sx.ev("NutZap.old().map(x=>x.pk)")
-            offer = await sx.ev(f"!!document.querySelector('#set-identity [data-act=idRetract][data-pk=\"{pk9}\"]')")
-            check('stay: nutzaps turned off, the page reloaded while the signer was asked: the identity\'s nutzap info is offered for withdrawal', pk9 in old and offer and not await sx.ev("NutZap.info()"), (old, offer))
-            await sx.click(f'#set-identity [data-act=idRetract][data-pk="{pk9}"]')
-            ok = await sx.until(f"!document.querySelector('#set-identity [data-act=idRetract][data-pk=\"{pk9}\"]')", 12000); await sx.wait(400)
-            check('stay: ...and withdrawing it works (signed by the identity)', ok and not [x for x in evs(10019, pk9) if x['tags']])
-            await sx.pg.context.close()
-        await section('r3stay', r3stay)
 
         async def r3polish():
             S9 = post('/test/signer', {}); qx = await wallet(b, 'si-r3pol'); await qx.create(); await qx.add_mint(M); await qx.use(M)
             await sign_in_bunker(qx, S9['bunker']); await qx.ev("Nutcade.closeSheet()")
             perms = (get('/test/signer/log')['log'][0]['params'] + ['', '', ''])[2].split(',')
-            check('perms: connect asks for every kind NUTCADE signs (1, 5, 9734, 10019, 38000 and the sign-in check 27235)', all(f'sign_event:{k}' in perms for k in (1, 5, 9734, 10019, 38000, 27235)), perms)
-            await nz_on(qx); U = S9['user']
-            other = await qx.ev("NutZap.randomPub()")
-            tp = await qx.ev(f"__sign({J(S9['user_sk'])}, 10019, [['relay', {J(RELAY)}], ['pubkey', {J(other)}]], '', 5)")
-            await qx.ev(f"__pub({J(tp)})")
-            await qx.ev("Nutcade.S.prefs.nzInfo = null; NutZap.publish(true)"); await settings(qx)
-            check('backoff: (another wallet\'s nutzap info found)', await qx.ev("!!document.querySelector('#nzForeign')"))
-            await qx.ev("(()=>{ const n0 = Date.now; Date.now = () => n0() + 11 * 60e3; })()")   # (past the republish time, NZ_REPUB)
-            n = state()['req_count'].get(U, 0)
-            for _ in range(3): await qx.ev("NutZap.tick()"); await qx.wait(2500)
-            d = state()['req_count'].get(U, 0) - n
-            check('backoff: in that state the background round looks again once, not on every round', 0 < d <= 2, d)
+            check('perms: connect asks for exactly the kinds NUTCADE signs with the identity (1, 5, 9734, 38000 and the sign-in check 27235), not 10019', sorted(perms) == sorted(f'sign_event:{k}' for k in (1, 5, 9734, 27235, 38000)), perms)
             await qx.ev("NutId.out()"); await qx.pg.context.close(); post('/test/signer', {})
             px = await wallet(b, 'si-r3pol2'); await px.create(); await px.add_mint(M); await px.use(M)
             skA, pkA = await keypair(px)
@@ -704,14 +625,6 @@ async def main():
             await settings(px); await px.click('#set-identity [data-act=idExt]'); await px.wait(1500)
             t = (await px.toast()) + ' ' + (await px.sheet_text())
             check('proof: a signer refusing the sign-in check shows its own refusal (as text, cut short)', not await px.ev("NutId.active()") and 'said no' in t.lower() and 'Not now' in t and '<i>' in t and len(t) < 400 and not await px.ev("!!document.querySelector('#toast i, #layer i')"), t[:300])
-            await px.ev("Nutcade.closeSheet()")
-            await ext_mode(px, 'honest'); await sign_in_ext(px); await nz_on(px)
-            await px.until(f"NutZap.info() && NutZap.info().pk === {J(pkA)}", 15000)
-            await px.ev(f"Nutcade.S.prefs.nzReplaceOk = {J(pkA)}"); await px.ctx.set_offline(True); await px.wait(300)
-            await px.ev("NutZap.publish(true)")
-            st = await px.ev("NutZap.state()")
-            await px.ctx.set_offline(False); await px.wait(300)
-            check('offline: being offline is not counted as the signer saying no', st != 'nosign', st)
             await px.pg.context.close()
         await section('r3polish', r3polish)
 
