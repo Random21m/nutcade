@@ -1,11 +1,13 @@
 /* ===================== Your own Nostr identity (1.37: NIP-07, NIP-46) ===================== */
 /* Settings → Nostr identity: "Use my own Nostr identity", optional, off by default. Not signed in, everything is exactly
    as before 1.37: every Nostr event is signed with nostrKey() (the first 32 bytes of the 12 words' seed).
-   Signed in, the PUBLIC actions use your identity, and nothing else:
-     - your nutzap info (kind 10019) and its withdrawal, and the nutzaps you are listened for on ('#p'; app_nutzap.js)
+   Signed in, these PUBLIC actions use your identity, and nothing else:
      - mint reviews (kind 38000) and their deletion (kind 5; app_review.js), and which reviews the report card calls yours
      - the daily score note (kind 1; app_daily.js)
      - zap requests (kind 9734, not the anonymous ones; app_r7.js)
+   Nutzaps stay on the 12-word key exactly as before 1.37 (app_nutzap.js does not use this layer): your nutzap info (kind
+   10019), its withdrawal and the nutzaps you are listened for ('#p') are signed and read with nostrKey() whether you are
+   signed in or not, so signing in or out publishes, withdraws and asks the signer nothing about them.
    Money never depends on the signer: P2PK locks (gifts' refund key, Extra Life), ecash sent to your ecash address (gift
    wraps), the ecash address itself, npub.cash, Extra Life's and bounties' messages, the nutzaps you send (kind 9321: it
    carries the locked coins), wallet sync and the mint-list backup all stay on the 12 words (each one's reason is in
@@ -28,11 +30,11 @@
    keys): {type, pub} for an extension, plus the signer's key, relays and the app's client key for a remote signer (the
    link's secret is used once by connect and never kept). Never in the backup file, NIP-60 sync or the mint-list backup.
    Sign out, Reset and other 12 words delete it. Former identities' public keys are kept (S.prefs.idOld, at most
-   ID_OLD_MAX) so nutzaps sent to them still arrive and your reviews under them stay yours.
+   ID_OLD_MAX) so your reviews under them stay yours.
    The duress PIN's wallet has no identity: nothing shown or used, and signing in there answers like a signer that doesn't
    answer, keeps nothing and asks no signer. */
 const ID_MS = 45000, ID_AUTH_MS = 180000, ID_AUTH_MAX = 3, ID_REPLY_MAX = 100000, ID_OLD_MAX = 3, ID_LINK_MAX = 1000;
-const ID_PERMS = 'sign_event:1,sign_event:5,sign_event:9734,sign_event:10019,sign_event:27235,sign_event:38000';   // (every kind idSign / idProve asks for: the daily note, deletions, zap requests, nutzap info, the sign-in check, reviews)
+const ID_PERMS = 'sign_event:1,sign_event:5,sign_event:9734,sign_event:27235,sign_event:38000';   // (every kind idSign / idProve asks for: the daily note, review deletions, zap requests, the sign-in check, reviews; never 10019: nutzaps stay on the 12-word key)
 const idMs = () => { const t = window.__nutcadeTest; return t && Number(t.idMs) > 0 ? Number(t.idMs) : ID_MS; };
 const idAuthMs = () => { const t = window.__nutcadeTest; return t && Number(t.idMs) > 0 ? 2 * Number(t.idMs) : ID_AUTH_MS; };   // (also the most one request may take in all, from when it was first sent)
 const idHex = v => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
@@ -127,7 +129,7 @@ async function idSign(tpl, gen0) {
   if (gen !== idGen || !now || now.pub !== c.pub) throw idGone();   // (signed out or switched while it was being signed: dropped)
   return idCheck(ev, t, c.pub);
 }
-// a key of yours by its pubkey, for an event that key published before (its withdrawal): the 12-word key, or the identity
+// a key of yours by its pubkey, for an event that key published before (a review's deletion): the 12-word key, or the identity
 // you are signed in with; another key can't be used
 async function idSignAs(pk, t) {
   if (pk === seedPub()) return L.finalizeEvent(t, nostrKey());
@@ -282,13 +284,11 @@ async function idSignInBunker(link) {
   idSigning = null;
   return pub;
 }
-// sign out (withdraw: first take back the nutzap info published under this identity, signed by it)
-async function idSignOut(withdraw) {
+// sign out: the connection goes, every signer request still waiting ends at once (nothing about nutzaps: they never used it)
+async function idSignOut() {
   if (writeGuard.paused || tabLocked) throw pausedErr();   // (a paused tab can't delete anything: said, never "Signed out")
   const c = idConn(); idSigning = null;
   if (!c) { if (S.nid) { S.nid = null; raw.del('nid'); idNext(); } return; }
-  if (withdraw) await nzWithdrawUnder(c.pub);
-  if (writeGuard.paused || tabLocked) throw pausedErr();
   S.nid = null; raw.del('nid'); idNext();
   idSwitched(c.pub, seedPub());
 }
@@ -297,9 +297,9 @@ function idSeedChanged() {
   idSigning = null; idSeedC = null;
   if (S.nid) { S.nid = null; raw.del('nid'); }
   idNext();
-  if (S.prefs) { delete S.prefs.idOld; delete S.prefs.nzOld; delete S.prefs.nzForeign; delete S.prefs.nzReplaceOk; }
+  if (S.prefs) delete S.prefs.idOld;
 }
-// after a switch (on, off, or another identity): your former key is remembered, reviews read again, nutzap info follows
+// after a switch (on, off, or another identity): your former key is remembered and your reviews are read again
 function idSwitched(oldPub, newPub) {
   if (oldPub && newPub && oldPub !== newPub) {
     let sp = null; try { sp = seedPub(); } catch (e) {}
@@ -308,76 +308,65 @@ function idSwitched(oldPub, newPub) {
     save();
   }
   try { rvIdChanged(); } catch (e) {}
-  try { nzIdChanged(oldPub, newPub); } catch (e) {}
   refresh();
 }
 
 /* ---------- Settings ---------- */
+const ID_NZ = "Nutzaps stay on this wallet's own key, made from your 12 words: signing in or out never changes your nutzap info.";
 const idShort = pk => { try { const n = L.npubEncode(pk); return n.slice(0, 14) + '…' + n.slice(-6); } catch (e) { return ''; } };
 function idSettingsHTML() {
   const c = idConn();
-  const old = nzOldOffer();
-  const oldHTML = old ? `<div class="notice" id="idOld"><div>Your nutzap info is still published under your previous key too. Withdraw it? NUTCADE asks your relays to delete it, so people who look up that key won't find where to send you nutzaps. Nutzaps already sent to it still arrive.</div><div class="tiny muted" data-noi18n style="overflow-wrap:anywhere">${esc(idShort(old.pk))}</div></div>
-      <button class="btn sm" data-act="idRetract" data-pk="${esc(old.pk)}">Withdraw old nutzap info</button>` : '';
   if (!c) return `<div class="panel" id="set-identity"><span class="h2">Nostr identity</span>
-      <p class="th" style="margin:0">Your public Nostr posts (your nutzap info, mint reviews, the daily score note and zaps) are signed with a key made from your 12 words. You can use your own Nostr identity for them instead.</p>
+      <p class="th" style="margin:0">Your public Nostr posts (mint reviews, the daily share post and zap requests) are signed with a key made from your 12 words. You can use your own Nostr identity for them instead.</p>
       <div class="row wrap">${id07() ? '<button class="btn sm violet" data-act="idExt">Use my browser extension</button>' : ''}<button class="btn sm violet" data-act="idBunker">Use a remote signer</button></div>
-      <p class="th" style="margin:0">NUTCADE never asks for your private key (nsec). Your ecash always stays on your 12 words.</p>${idLinkNote()}${oldHTML}</div>`;
+      <p class="th" style="margin:0">NUTCADE never asks for your private key (nsec). Your ecash always stays on your 12 words.</p>
+      <p class="th" style="margin:0" id="idNz">${ID_NZ}</p></div>`;
   return `<div class="panel" id="set-identity"><span class="h2">Nostr identity</span>
       <div class="row between tiny"><span>Signed in as</span><span id="idWho" data-noi18n style="color:var(--lime);overflow-wrap:anywhere">${esc(idShort(c.pub))}</span></div>
       <div class="tiny muted">${c.type === 'nip07' ? 'With your browser extension' : 'With a remote signer'}</div>
       ${c.type === 'nip07' && !id07() ? `<div class="notice red" id="idWarn">Your browser extension isn't available here, so nothing can be signed with your Nostr identity. Open NUTCADE where the extension is installed, or sign out.</div>` : ''}
       <div class="th">Used for:</div>
-      <ul id="idUses" class="tiny" style="margin:0;padding-left:18px"><li>Your nutzap info, and nutzaps sent to you</li><li>Mint reviews</li><li>The daily score note</li><li>Zaps you send</li></ul>
+      <ul id="idUses" class="tiny" style="margin:0;padding-left:18px"><li>Mint reviews</li><li>The daily share post</li><li>Zap requests</li></ul>
+      <p class="th" style="margin:0" id="idNz">${ID_NZ}</p>
       <p class="th" style="margin:0">Your ecash, ecash address, Lightning address, Extra Life and wallet sync stay on your 12 words, so restoring them brings everything back.</p>
-      ${oldHTML}
       <button class="btn sm red" data-act="idOut">Sign out</button></div>`;
 }
-// with nutzaps on, signing in publishes your nutzap info under your identity with the same receiving key: said first
-const idLinkNote = () => nzOn() && !nzDecoy() ? '<div class="notice" id="idLinkNote">Your nutzaps are on: signing in publishes your nutzap info under your identity with the same receiving key as now, so anyone can link your identity to this wallet\'s own Nostr key.</div>' : '';
 function openIdBunker(link) {
   if (needSeed()) return;
   if (idActive()) { sfx('err'); toast(idTwice().message, 'gold'); return; }
   openSheet('Remote signer', `<p style="margin:0">Paste the bunker:// link from your signer app (Amber, nsec.bunker and others), or scan its QR code.</p>
     <div class="field"><label for="idLink">Bunker link</label><input id="idLink" class="inp" placeholder="bunker://…" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="${ID_LINK_MAX}"></div>
     <div class="btngrid"><button class="btn violet" data-act="idScan">Scan QR code</button><button class="btn solid gold" data-act="idConnect">Connect</button></div>
-    ${idLinkNote()}<div class="notice">NUTCADE makes its own key for this connection and keeps it with your other secrets (encrypted with your PIN). Never paste your private key (nsec) here.</div>
+    <div class="notice">NUTCADE makes its own key for this connection and keeps it with your other secrets (encrypted with your PIN). Never paste your private key (nsec) here.</div>
     <div id="sheetErr"></div>`);
   const i = $('#idLink'); if (i && link) i.value = String(link).slice(0, ID_LINK_MAX);
 }
 function openIdOut() {
   const c = idConn(); if (!c) return;
-  const nz = nzPublishedUnder(c.pub);
   openSheet('Sign out', `<p style="margin:0">Sign out of this Nostr identity?</p><div class="code" style="color:var(--ink)" data-noi18n>${esc(idShort(c.pub))}</div>
-    <p style="margin:0">Your public Nostr posts go back to the key made from your 12 words.</p>${nzOn() ? '<p style="margin:0">Your nutzap info is published again under that key.</p>' : ''}
-    ${nz ? `<label class="toggle" for="idOutWithdraw"><span><span class="tl">Also withdraw the nutzap info published under this identity</span><span class="th">Signed by your identity, so your signer is asked once more. Nutzaps already sent to it still arrive.</span></span><input id="idOutWithdraw" type="checkbox"></label>` : ''}
+    <p style="margin:0">Your public Nostr posts go back to the key made from your 12 words.</p>
     <button class="btn solid red block" data-act="idOutGo">Sign out</button><button class="btn block" data-act="close">Cancel</button><div id="sheetErr"></div>`);
 }
 // every English text of this feature, for the translation check (tests/signin_qa.py)
-const idTexts = () => ['Nostr identity', 'Your public Nostr posts (your nutzap info, mint reviews, the daily score note and zaps) are signed with a key made from your 12 words. You can use your own Nostr identity for them instead.',
+const idTexts = () => ['Nostr identity', 'Your public Nostr posts (mint reviews, the daily share post and zap requests) are signed with a key made from your 12 words. You can use your own Nostr identity for them instead.', ID_NZ,
   'Use my browser extension', 'Use a remote signer', 'NUTCADE never asks for your private key (nsec). Your ecash always stays on your 12 words.', 'Signed in as', 'With your browser extension', 'With a remote signer',
-  "Your browser extension isn't available here, so nothing can be signed with your Nostr identity. Open NUTCADE where the extension is installed, or sign out.", 'Used for:', 'Your nutzap info, and nutzaps sent to you', 'Mint reviews', 'The daily score note', 'Zaps you send',
-  'Your ecash, ecash address, Lightning address, Extra Life and wallet sync stay on your 12 words, so restoring them brings everything back.', 'Sign out', 'Withdraw old nutzap info', 'Remote signer',
+  "Your browser extension isn't available here, so nothing can be signed with your Nostr identity. Open NUTCADE where the extension is installed, or sign out.", 'Used for:', 'Mint reviews', 'The daily share post', 'Zap requests',
+  'Your ecash, ecash address, Lightning address, Extra Life and wallet sync stay on your 12 words, so restoring them brings everything back.', 'Sign out', 'Remote signer',
   'Paste the bunker:// link from your signer app (Amber, nsec.bunker and others), or scan its QR code.', 'Bunker link', 'Scan QR code', 'Connect',
   'NUTCADE makes its own key for this connection and keeps it with your other secrets (encrypted with your PIN). Never paste your private key (nsec) here.',
   'Sign out of this Nostr identity?', 'Your public Nostr posts go back to the key made from your 12 words.',
-  "Your nutzap info is still published under your previous key too. Withdraw it? NUTCADE asks your relays to delete it, so people who look up that key won't find where to send you nutzaps. Nutzaps already sent to it still arrive.",
-  "Point at your signer's bunker:// QR code.", 'Your nutzap info is published again under that key.', 'Also withdraw the nutzap info published under this identity',
-  'Signed by your identity, so your signer is asked once more. Nutzaps already sent to it still arrive.', 'Your signer asks you to approve this first. Open its page, approve, then come back here.',
-  'Your signer asks you to approve this first, in its own app. NUTCADE did not open the link it sent.', "Open the signer's page", 'Signed in', 'Signed out', 'Old nutzap info withdrawn', 'WAITING FOR YOUR SIGNER', 'WITHDRAWING',
+  "Point at your signer's bunker:// QR code.", 'Your signer asks you to approve this first. Open its page, approve, then come back here.',
+  'Your signer asks you to approve this first, in its own app. NUTCADE did not open the link it sent.', "Open the signer's page", 'Signed in', 'Signed out', 'WAITING FOR YOUR SIGNER',
   "Your signer didn't answer in time. Nothing was sent. Check it and try again.", 'Your signer said no. Nothing was sent.', 'Your signer returned a different event from the one NUTCADE asked it to sign, so it was not used. Nothing was sent.',
   "Your signer's answer can't be read. Nothing was sent.", "Couldn't reach your signer's relays. Nothing was sent. Check your connection and try again.", "You're offline. Your Nostr identity needs a connection. Nothing was sent.",
   "Your browser extension isn't available here, so nothing can be signed with your Nostr identity. Nothing was sent. Open NUTCADE where the extension is installed, or sign out in Settings.",
   'Your Nostr identity changed while it was being signed. Nothing was sent.', "Your signer couldn't prove it holds the key it named, so NUTCADE didn't sign in.", "You're already signed in with a Nostr identity. Sign out first, then connect another one.",
-  "Your nutzaps are on: signing in publishes your nutzap info under your identity with the same receiving key as now, so anyone can link your identity to this wallet's own Nostr key.",
-  "Another wallet already published nutzap info for your Nostr identity. Replace it with NUTCADE's? Nutzaps sent to this npub would then come to NUTCADE instead of the other wallet.",
-  "Replace with NUTCADE's", 'That is the nutzap info in use now, so NUTCADE left it published.', 'NOT PUBLISHED', 'Try again', "The nutzap info under this identity now belongs to another wallet, so NUTCADE left it as it is. Nothing was sent.",
   'You also have an earlier review of this mint under your other key. Delete it? Deleting reviews under both keys at about the same time can publicly link the two keys.', 'Delete the earlier review', 'Earlier review deleted',
   'This deletes your reviews of this mint under both of your keys. Deleting under both at once can publicly link the two keys.', ID_E_LINK, ID_E_RELAY, ID_E_NSEC, ID_E_NC, "Your browser extension gave a key NUTCADE can't read.",
   "Your signer's answer didn't match the secret in the link, so NUTCADE didn't connect. Make a new bunker:// link in your signer app and try again.",
-  "That was published under a Nostr identity you're not signed in with, so NUTCADE can't sign for it.", 'Paste a bunker:// link first.', 'No relay accepted the withdrawal. Try again in a moment.',
-  "YOUR SIGNER DIDN'T SIGN", 'This zap is signed with your Nostr identity, so anyone can link it to you.'];
+  "That was published under a Nostr identity you're not signed in with, so NUTCADE can't sign for it.", 'Paste a bunker:// link first.',
+  'This zap is signed with your Nostr identity, so anyone can link it to you.'];
 window.NutId = {
   active: () => idActive(), pub: () => idPub(), type: () => (idConn() || {}).type || null, keys: () => idKeys(), parse: v => { const r = idParse(v); return r.ok ? { ok: true, remote: r.remote, relays: r.relays, secret: r.secret } : { ok: false, error: r.error }; },
-  sign: t => idSign(t), out: w => idSignOut(!!w), ext: () => idSignInExt(), bunker: l => idSignInBunker(l), texts: () => idTexts(), ecashAddress: () => myEcashAddress()
+  sign: t => idSign(t), out: () => idSignOut(), ext: () => idSignInExt(), bunker: l => idSignInBunker(l), texts: () => idTexts(), ecashAddress: () => myEcashAddress()
 };

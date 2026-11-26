@@ -18,14 +18,8 @@ Object.assign(A, {
     sfx('coin'); closeSheet(); toast('Signed in', 'lime'); refresh();
   }),
   idOut: () => { sfx('select'); openIdOut(); },
-  idOutGo: b => run(b, 'WAITING FOR YOUR SIGNER', async () => {
-    const w = !!($('#idOutWithdraw') || {}).checked;
-    await idSignOut(w);
+  idOutGo: b => run(b, 'SIGNING OUT', async () => {
+    await idSignOut();
     closeSheet(); toast('Signed out', 'cyan'); refresh();
-  }),
-  idRetract: b => run(b, 'WITHDRAWING', async () => {
-    const pk = b.dataset.pk; if (!idHex(pk)) return;
-    await nzRetractOld(pk);
-    toast('Old nutzap info withdrawn', 'lime'); refresh();
   })
 });
