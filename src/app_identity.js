@@ -39,6 +39,9 @@ const idHex = v => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 const idDecoy = () => !!(vault.on && vault.decoy);
 S.nid = store.get('nid', null);
 let idGen = 0, idSeedC = null, idChain = Promise.resolve();
+// every request to a signer that is still waiting: ended at once (with the .gone error) by a sign-out or a switch
+const idAborts = new Set();
+function idNext() { idGen++; const a = [...idAborts]; idAborts.clear(); for (const f of a) { try { f(); } catch (e) {} } }
 // the 12-word key's public key (cached per seed)
 function seedPub() { const s = seedFor(); if (!idSeedC || idSeedC.s !== s) idSeedC = { s, pk: L.nostrPub(s.slice(0, 32)) }; return idSeedC.pk; }
 // THE check for a signer's relay: wss:// only, a host, no user name or password, no fragment, nothing odd, at most 200 characters
@@ -136,8 +139,17 @@ async function idSignAs(pk, t) {
 const id07 = () => { const n = window.nostr; return n && typeof n === 'object' && typeof n.signEvent === 'function' && typeof n.getPublicKey === 'function' ? n : null; };
 async function id07Sign(t) {
   const n = id07(); if (!n) throw idNoExt();
-  try { return await idTimed(n.signEvent(JSON.parse(JSON.stringify(t))), idMs()); }
-  catch (e) { if (e && e.idLate) throw e; throw idSaidNo(e); }
+  let abort; const gone = new Promise((_, rej) => { abort = () => rej(idGone()); idAborts.add(abort); });   // (a sign-out or switch ends the wait at once)
+  try { return await Promise.race([idTimed(n.signEvent(JSON.parse(JSON.stringify(t))), idMs()), gone]); }
+  catch (e) { if (e && (e.idLate || e.gone)) throw e; throw idSaidNo(e); }
+  finally { idAborts.delete(abort); }
+}
+// at sign-in: one throwaway event signed by the key the signer named (never published), so a signer can't name a key it can't sign for
+const idNoProof = () => keepErr(new Error("Your signer couldn't prove it holds the key it named, so NUTCADE didn't sign in."));
+async function idProve(signFn, pub) {
+  const t = { kind: 27235, created_at: Math.floor(Date.now() / 1000), tags: [], content: 'nutcade sign-in check ' + hex(rnd(16)) };   // (no "u" tag: useless as a NIP-98 login anywhere)
+  let ev; try { ev = await signFn(t); } catch (e) { if (e && (e.idLate || e.gone)) throw e; throw idNoProof(); }
+  try { idCheck(ev, t, pub); } catch (e) { throw idNoProof(); }
 }
 
 /* ---------- NIP-46: a remote signer ---------- */
@@ -176,7 +188,8 @@ function id46Rpc(c, method, params) {
       ev = L.finalizeEvent({ kind: 24133, created_at: now, tags: [['p', c.remote]], content: L.nip44.v2.encrypt(JSON.stringify({ id, method, params }), ck) }, sk);
     } catch (e) { rej(keepErr(new Error(ID_E_LINK))); return; }
     const socks = [], shown = new Set(), until = Date.now() + idAuthMs(); let done = false, timer = 0, open = 0;   // (until: the whole request, auth_urls included)
-    const end = (err, v) => { if (done) return; done = true; clearTimeout(timer); socks.forEach(s => { try { s.close(); } catch (e) {} }); idAuthHide(id); if (err) rej(err); else res(v); };
+    const end = (err, v) => { if (done) return; done = true; idAborts.delete(abort); clearTimeout(timer); socks.forEach(s => { try { s.close(); } catch (e) {} }); idAuthHide(id); if (err) rej(err); else res(v); };
+    const abort = () => end(idGone()); idAborts.add(abort);   // (a sign-out or switch ends it at once)
     const arm = ms => { clearTimeout(timer); timer = setTimeout(() => end(idLate()), Math.max(0, Math.min(ms, until - Date.now()))); };
     arm(idMs());
     for (const r of c.relays) {
@@ -230,7 +243,7 @@ async function idSetConn(c) {
   const prev = S.nid, old = idActive() ? idPub() : seedPub();
   S.nid = c;
   if (!store.set('nid', c)) { S.nid = prev; throw new Error("This browser won't save data. Open NUTCADE in a normal browser tab."); }
-  idGen++;
+  idNext();
   idSwitched(old, c.pub);
 }
 async function idSignInExt() {
@@ -241,6 +254,7 @@ async function idSignInExt() {
   const n = id07(); if (!n) throw idNoExt();
   let pub; try { pub = await idTimed(n.getPublicKey(), idMs()); } catch (e) { if (e && e.idLate) throw e; throw idSaidNo(e); }
   if (!idHex(pub)) throw keepErr(new Error("Your browser extension gave a key NUTCADE can't read."));
+  await idProve(t => id07Sign(t), pub);
   idGate();
   if (idDecoy()) throw idLate();   // (the duress PIN's wallet opened meanwhile: nothing is kept there)
   if (idActive()) throw idTwice();
@@ -259,6 +273,7 @@ async function idSignInBunker(link) {
   if (ack !== 'ack' && !(p.secret && ack === p.secret)) throw keepErr(new Error("Your signer's answer didn't match the secret in the link, so NUTCADE didn't connect. Make a new bunker:// link in your signer app and try again."));
   const pub = await id46Rpc(c, 'get_public_key', []);
   if (!idHex(pub)) throw idBadReply();
+  await idProve(t => id46Sign(c, t), pub);
   if (idSigning !== tok) throw idGone();
   idGate();
   if (idDecoy()) throw idLate();   // (the duress PIN's wallet opened meanwhile: nothing is kept there)
@@ -271,17 +286,17 @@ async function idSignInBunker(link) {
 async function idSignOut(withdraw) {
   if (writeGuard.paused || tabLocked) throw pausedErr();   // (a paused tab can't delete anything: said, never "Signed out")
   const c = idConn(); idSigning = null;
-  if (!c) { if (S.nid) { S.nid = null; raw.del('nid'); idGen++; } return; }
+  if (!c) { if (S.nid) { S.nid = null; raw.del('nid'); idNext(); } return; }
   if (withdraw) await nzWithdrawUnder(c.pub);
   if (writeGuard.paused || tabLocked) throw pausedErr();
-  S.nid = null; raw.del('nid'); idGen++;
+  S.nid = null; raw.del('nid'); idNext();
   idSwitched(c.pub, seedPub());
 }
 // other 12 words (setSeed) and Reset: the connection and the former identities go
 function idSeedChanged() {
   idSigning = null; idSeedC = null;
   if (S.nid) { S.nid = null; raw.del('nid'); }
-  idGen++;
+  idNext();
   if (S.prefs) { delete S.prefs.idOld; delete S.prefs.nzOld; delete S.prefs.nzForeign; delete S.prefs.nzReplaceOk; }
 }
 // after a switch (on, off, or another identity): your former key is remembered, reviews read again, nutzap info follows
@@ -353,7 +368,7 @@ const idTexts = () => ['Nostr identity', 'Your public Nostr posts (your nutzap i
   "Your signer didn't answer in time. Nothing was sent. Check it and try again.", 'Your signer said no. Nothing was sent.', 'Your signer returned a different event from the one NUTCADE asked it to sign, so it was not used. Nothing was sent.',
   "Your signer's answer can't be read. Nothing was sent.", "Couldn't reach your signer's relays. Nothing was sent. Check your connection and try again.", "You're offline. Your Nostr identity needs a connection. Nothing was sent.",
   "Your browser extension isn't available here, so nothing can be signed with your Nostr identity. Nothing was sent. Open NUTCADE where the extension is installed, or sign out in Settings.",
-  'Your Nostr identity changed while it was being signed. Nothing was sent.', "You're already signed in with a Nostr identity. Sign out first, then connect another one.",
+  'Your Nostr identity changed while it was being signed. Nothing was sent.', "Your signer couldn't prove it holds the key it named, so NUTCADE didn't sign in.", "You're already signed in with a Nostr identity. Sign out first, then connect another one.",
   "Your nutzaps are on: signing in publishes your nutzap info under your identity with the same receiving key as now, so anyone can link your identity to this wallet's own Nostr key.",
   "Another wallet already published nutzap info for your Nostr identity. Replace it with NUTCADE's? Nutzaps sent to this npub would then come to NUTCADE instead of the other wallet.",
   "Replace with NUTCADE's", 'NOT PUBLISHED', 'Try again', "The nutzap info under this identity now belongs to another wallet, so NUTCADE left it as it is. Nothing was sent.",

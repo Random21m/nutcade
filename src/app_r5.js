@@ -392,7 +392,8 @@ async function inspectMint(url0) {
 }
 // recommendations (kind 38000) and announcements (kind 38172) that name this mint. One rating per person (their newest
 // review; "[N/5]" with N from 1 to 5, as cashu.me reads it). Your own review (this wallet's Nostr key, its signature
-// checked) is kept apart, as `mine`, so the report card counts it once (app_review.js, rvMine); announcements with a good
+// checked; any key of yours: app_identity.js idKeys) is kept apart, one per key, as `mines` (`mine` its newest), never one at or before
+// that key's deletion, so the report card counts yours once (app_review.js, rvAllMine/rvMine); announcements with a good
 // signature are kept (at most 10) for the review's "a" tag.
 function nostrRecord(url) {
   return new Promise(resolve => {

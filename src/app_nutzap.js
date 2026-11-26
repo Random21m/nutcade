@@ -118,7 +118,14 @@ let nzState = null, nzTry = 0, nzDecoyT = 0, nzSignFail = false;
 const nzKeyOfRec = r => (r && idHex(r.pk)) ? r.pk : seedPub();
 // the nutzap info on the relays under a key now: { ev } (the newest, signature checked; null: none), or null when no relay answered
 async function nzCurrent(pk, rl) {
-  const evs = await relayQuery({ kinds: [10019], authors: [pk], limit: 5 }, 7000, nzRelays((rl || []).concat(nzMyRelays())).slice(0, 8), 1500);
+  // an identity's own relay list (NIP-65, kind 10002) is read too, when it has one: its other wallet publishes there
+  let own = [];
+  if (pk !== seedPub()) {
+    const ls = await relayQuery({ kinds: [10002], authors: [pk], limit: 2 }, 5000, nzMyRelays(), 1500);
+    const l = ls.filter(e => e && e.kind === 10002 && e.pubkey === pk && Array.isArray(e.tags) && rvSig(e)).sort((a, b) => num(b.created_at) - num(a.created_at))[0];
+    if (l) own = nzRelays(l.tags.filter(t => Array.isArray(t) && t[0] === 'r' && typeof t[1] === 'string' && (!t[2] || t[2] === 'write')).map(t => t[1])).slice(0, 4);
+  }
+  const evs = await relayQuery({ kinds: [10019], authors: [pk], limit: 5 }, 7000, nzRelays((rl || []).concat(nzMyRelays(), own)).slice(0, 12), 1500);
   if (!evs.answered) return null;
   const ev = evs.filter(e => e && e.kind === 10019 && e.pubkey === pk && Array.isArray(e.tags) && rvSig(e)).sort((a, b) => num(b.created_at) - num(a.created_at))[0] || null;
   return { ev };
@@ -127,14 +134,16 @@ async function nzCurrent(pk, rl) {
 const nzOursOrNone = cur => { const e = cur && cur.ev; if (!e || !e.tags.length) return true; const t = e.tags.find(x => Array.isArray(x) && x[0] === 'pubkey'); return !!t && String(t[1] || '').toLowerCase() === nzPub(); };
 const nzForeignErr = () => keepErr(new Error("The nutzap info under this identity now belongs to another wallet, so NUTCADE left it as it is. Nothing was sent."));
 function nzPublish(hand) { return single('nzpub', () => nzPublishNow(hand)); }
+// the one withdrawal at a time (turning nutzaps off, a publish that ends after that, the background round all join it)
+function nzUnpublish(hand) { return single('nzunpub', () => nzUnpublishStart(hand)); }
 async function nzPublishNow(hand) {
   if (!nzOn()) return 0;
   if (nzSignFail && !hand && idActive()) return 0;   // (your signer said no or didn't answer: asked again only when you act)
   const rl = nzMyRelays(), mints = nzMints(), pub = nzPub(), key = nzWant(), signer = idPub(), g = idNow();
   // the first publish under an identity: another wallet's nutzap info there (cashu.me, Minibits...) is never replaced
   // without asking (nutzaps sent to this npub would then come to NUTCADE instead of that wallet)
-  const ours = S.prefs.nzInfo && nzKeyOfRec(S.prefs.nzInfo) === signer;
-  if (idActive() && !ours && S.prefs.nzReplaceOk !== signer) {
+  // (before EVERY publish under an identity: another wallet's info may have appeared there since our last one)
+  if (idActive() && S.prefs.nzReplaceOk !== signer) {
     const cur = await nzCurrent(signer, rl);
     if (idNow() !== g || !nzOn()) return 0;
     if (!cur) { nzState = 'failed'; refresh(); return 0; }   // (no relay answered: we can't tell, so nothing is published)
@@ -161,7 +170,7 @@ async function nzPublishNow(hand) {
     if (S.prefs.nzInfo && nzKeyOfRec(S.prefs.nzInfo) === pk) delete S.prefs.nzInfo;
     save(); nzState = null; return 0;
   }
-  if (!nzOn()) { nzState = null; if (nzAllowed()) await nzUnpublishStart(true).catch(() => {}); return 0; }   // (turned off while it was on its way)
+  if (!nzOn()) { nzState = null; if (nzAllowed()) await nzUnpublish(hand).catch(() => {}); return 0; }   // (turned off while it was on its way: the one withdrawal, with this publish's own hand)
   nzState = ok ? 'ok' : 'failed';
   if (ok) { S.prefs.nzInfo = { at: ts, mints, relays: rl, pub, key, pk }; if (S.prefs.nzReplaceOk === pk) delete S.prefs.nzReplaceOk; save(); }
   return ok;
@@ -213,7 +222,7 @@ function nzToggled(on) {
   if (on && !nzAllowed()) { S.prefs.nutzap = false; save(); return; }
   nzState = null;
   if (on) { nzSignFail = false; nzRepublish(); setTimeout(nzListen, 0); }
-  else { nzStop(); nzUnpublishStart(true).then(() => refresh()).catch(() => {}); }
+  else { nzStop(); nzUnpublish(true).then(() => refresh()).catch(() => {}); }
 }
 function nzSettingsHTML() {
   const on = S.prefs.nutzap === true && !!S.seed;
@@ -537,12 +546,14 @@ async function nzTickNow(force) {
   await nzDeliver(force).catch(() => {});
   const due = force || Date.now() - nzTry > NZ_REPUB;
   if (nzOn()) {
-    if ((S.prefs.nzInfo || {}).key !== nzWant() && due) {   // (with a signer: never awaited here, so a slow signer can't hold up claims and deliveries)
-      if (idActive()) { if (!flights.has('nzpub')) nzPublish().catch(() => {}); } else await nzPublish().catch(() => {});
+    // never waits on a signer: a publish already on its way (perhaps one waiting for your signer) is never joined here;
+    // one under your identity is not awaited; only a new one under the 12-word key (signed at once) is
+    if ((S.prefs.nzInfo || {}).key !== nzWant() && due && !flights.has('nzpub')) {
+      if (idActive()) nzPublish().catch(() => {}); else await nzPublish().catch(() => {});
     }
   }
-  else if (S.prefs.nzUnpub) { if (force || Date.now() >= num(S.prefs.nzUnpub.next)) await nzUnpublishRun().catch(() => {}); }
-  else if (S.prefs.nzInfo || S.prefs.nzPubTry) await nzUnpublishStart().catch(() => {});
+  else if (S.prefs.nzUnpub) { if (force || Date.now() >= num(S.prefs.nzUnpub.next)) await nzUnpublishRun().catch(() => {}); }   // (signed already: relays only)
+  else if ((S.prefs.nzInfo || S.prefs.nzPubTry) && !flights.has('nzunpub')) await nzUnpublish(false).catch(() => {});   // (hand false: the 12-word key only, never a signer)
   nzListen();
 }
 window.NutZap = {
