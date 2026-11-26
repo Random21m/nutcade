@@ -2161,7 +2161,10 @@ function clearToasts() { for (let i = toastQ.length - 1; i >= 0; i--) if (toastQ
 async function copy(text, el) {
   try { await navigator.clipboard.writeText(text); toast('Copied', 'cyan'); sfx('blip'); }
   catch (e) {
-    const box = el && el.closest('.sheet') && el.closest('.sheet').querySelector('.code');
+    // select the box that shows exactly this text; if none does (e.g. a payment link only in a button), show it in a new box under the button
+    const sh = el && el.closest('.sheet'), same = b => b.textContent.trim() === String(text).trim();
+    let box = sh && [...sh.querySelectorAll('.code')].find(same);
+    if (!box && el) { box = el.parentNode.querySelector(':scope > .code.copyhand'); if (!box || !same(box)) { if (box) box.remove(); box = document.createElement('div'); box.className = 'code copyhand'; box.textContent = text; el.after(box); } }
     if (box) { const r = document.createRange(); r.selectNodeContents(box); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
     toast('Copy blocked here. The text is selected, copy it by hand.', 'gold');
   }
