@@ -750,6 +750,38 @@ window.addEventListener('keydown', e => { if (!view || e.target.tagName === 'INP
 window.addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) release(k); });
 window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; if (mode === 'play') mode = 'pause'; });
 document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'play') mode = 'pause'; });
+/* ---------- game controllers (Gamepad API, standard mapping) ----------
+   Polled once per 60 Hz step, at the top of tick() and so only while a game is open, before the step reads its inputs: a
+   pad press goes through press()/release() like the same key, so Replay.code() records it and a replay verifies the same.
+   D-pad (buttons 12 to 15) or left stick (axes 0 and 1, dead zone 0.5): up, down, left, right. A (0): 'a'. B (1) and
+   Start (9): 'b', the pause key. Back (8): exit, like Escape. Edge detection: a held button presses once. Several pads
+   are merged. A pad that goes away, no API, or getGamepads throwing releases what the pad held and changes nothing else. */
+const PAD_DEAD = 0.5, padHeld = {};
+let padPrimed = false, padBack = false;
+function padRead() {
+  const n = { up: 0, down: 0, left: 0, right: 0, a: 0, b: 0, back: 0 };
+  let list = null; try { list = navigator.getGamepads ? navigator.getGamepads() : null; } catch (e) { list = null; }
+  if (!list || (document.activeElement && document.activeElement.tagName === 'INPUT')) return n;
+  for (let i = 0; i < list.length; i++) {
+    try {
+      const p = list[i]; if (!p || !p.connected || p.mapping !== 'standard') continue;
+      const b = j => !!(p.buttons && p.buttons[j] && (p.buttons[j].pressed || p.buttons[j].value > 0.5));
+      const x = +(p.axes && p.axes[0]) || 0, y = +(p.axes && p.axes[1]) || 0;
+      if (b(12) || y < -PAD_DEAD) n.up = 1; if (b(13) || y > PAD_DEAD) n.down = 1;
+      if (b(14) || x < -PAD_DEAD) n.left = 1; if (b(15) || x > PAD_DEAD) n.right = 1;
+      if (b(0)) n.a = 1; if (b(1) || b(9)) n.b = 1; if (b(8)) n.back = 1;
+    } catch (e) {}
+  }
+  return n;
+}
+function padPoll() {
+  const n = padRead();
+  if (!padPrimed) { padPrimed = true; for (const k in n) padHeld[k] = !!n[k]; return; }   // a button already down as the game opened is not a press
+  for (const k of RK) { const d = !!n[k]; if (d && !padHeld[k]) press(k); else if (!d && padHeld[k]) release(k); padHeld[k] = d; }
+  const back = !!n.back, was = padBack; padBack = back; padHeld.back = back;
+  if (back && !was) closeGame();
+}
+function padReset() { padPrimed = false; padBack = false; for (const k in padHeld) padHeld[k] = false; }
 
 const ptr = { x: W / 2, y: H / 2, down: false, over: false, cancel: false, sx: 0, sy: 0, st: 0 };   // cancel: the system took the touch away (pointercancel); true for one step, so a cabinet drops a drag instead of treating it as a release
 let tap = null, swipe = null;
@@ -945,7 +977,7 @@ function closeGame(silent) {
   cancelAnimationFrame(raf); raf = 0; RNG = Math.random; ghost = null; rec = null;
   if (fitObs) { fitObs.disconnect(); fitObs = null; }
   if (view) { view.remove(); view = null; window.removeEventListener('resize', fit); document.body.style.overflow = ''; }
-  for (const k in keys) keys[k] = false;
+  for (const k in keys) keys[k] = false; padReset();
   if (!silent) { mode = 'title'; A().music('title'); if (window.Nutcade) window.Nutcade.refresh(); }
 }
 function startGame() {
@@ -1082,6 +1114,7 @@ const STEP = 1000 / 60, MAXCATCH = 5;
 let lastT = 0, acc = 0;
 function tick() {   // one 60 Hz step of the logic (nothing is drawn here); taps, key presses and swipes are consumed by the first step that sees them
   frame++;
+  padPoll(); if (!view) return;
   if (mode === 'title') {
     if (pressed.has('a') || pressed.has('b') || tap) startGame();
   } else if (mode === 'play') {
