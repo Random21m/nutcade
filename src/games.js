@@ -745,11 +745,53 @@ let rec = null, lastReplay = null, ghost = null;   // this game's inputs, frame 
 const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', Space: 'a', KeyZ: 'a', KeyX: 'a', KeyJ: 'a', Enter: 'b', KeyP: 'b', Escape: 'esc' };
 function press(k) { if (!keys[k]) pressed.add(k); keys[k] = true; }
 function release(k) { keys[k] = false; }
-window.addEventListener('keydown', e => { if (!view || e.target.tagName === 'INPUT') return; if (cur && cur.onKey && cur.onKey(e.code, st, mode, e)) { e.preventDefault(); return; }   // a cabinet may take a key for itself (poker: D and Enter deal)
+const kbDown = new Set(), tHeld = new Set();   // keyboard codes and touch keys now down: a pad release never lets go of a key they still hold
+const kbHas = k => { for (const c of kbDown) if (KEYMAP[c] === k) return true; return tHeld.has(k); };
+window.addEventListener('keydown', e => { if (!view || e.target.tagName === 'INPUT') return; if (KEYMAP[e.code]) kbDown.add(e.code); if (cur && cur.onKey && cur.onKey(e.code, st, mode, e)) { e.preventDefault(); return; }   // a cabinet may take a key for itself (poker: D and Enter deal)
   const k = KEYMAP[e.code]; if (!k) return; e.preventDefault(); if (k === 'esc') { closeGame(); return; } press(k); });
-window.addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) release(k); });
-window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; if (mode === 'play') mode = 'pause'; });
+window.addEventListener('keyup', e => { const k = KEYMAP[e.code]; kbDown.delete(e.code); if (k) release(k); });
+window.addEventListener('blur', () => { kbDown.clear(); tHeld.clear(); for (const k in keys) keys[k] = false; if (mode === 'play') mode = 'pause'; });
 document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'play') mode = 'pause'; });
+/* ---------- game controllers (Gamepad API, standard mapping) ----------
+   Polled once per 60 Hz step, at the top of tick() and so only while a game is open, before the step reads its inputs: a
+   pad press goes through press()/release() like the same key, so Replay.code() records it and a replay verifies the same.
+   D-pad (buttons 12 to 15) or left stick (axes 0 and 1, dead zone 0.5): up, down, left, right. A (0): 'a'. B (1) and
+   Start (9): 'b', the pause key. Back (8): exit, like Escape. Edge detection: a held button presses once. Several pads
+   are merged. A pad that goes away, no API, or getGamepads throwing releases what the pad held and changes nothing else. */
+const PAD_DEAD = 0.5, padHeld = {};
+let padPrimed = false, padBack = false, padAct = false;
+function padRead() {
+  const n = { up: 0, down: 0, left: 0, right: 0, a: 0, b: 0, back: 0, start: 0 };
+  let list = null; try { list = navigator.getGamepads ? navigator.getGamepads() : null; } catch (e) { list = null; }
+  if (!list) return n;
+  for (let i = 0; i < list.length; i++) {
+    try {
+      const p = list[i]; if (!p || !p.connected || p.mapping !== 'standard') continue;
+      const b = j => !!(p.buttons && p.buttons[j] && (p.buttons[j].pressed || p.buttons[j].value > 0.5));
+      const x = +(p.axes && p.axes[0]) || 0, y = +(p.axes && p.axes[1]) || 0;
+      if (b(12) || y < -PAD_DEAD) n.up = 1; if (b(13) || y > PAD_DEAD) n.down = 1;
+      if (b(14) || x < -PAD_DEAD) n.left = 1; if (b(15) || x > PAD_DEAD) n.right = 1;
+      if (b(0)) n.a = 1; if (b(1) || b(9)) n.b = 1; if (b(9)) n.start = 1; if (b(8)) n.back = 1;
+    } catch (e) {}
+  }
+  return n;
+}
+function padPoll() {
+  const n = padRead(), typing = !!(document.activeElement && document.activeElement.tagName === 'INPUT');
+  if (!padPrimed) { padPrimed = true; for (const k in n) padHeld[k] = !!n[k]; padBack = !!n.back; padAct = !!(n.a || n.start); return; }   // a button already down as the game opened (Back too) is not a press
+  const back = !!n.back && padBack === false, act = !!(n.a || n.start) && !padAct;
+  padBack = !!n.back; padAct = !!(n.a || n.start);
+  if (mode === 'entry') {   // the DOM screens after a game (game over, results, the initials form): A or Start take the main button, Back closes like Escape; nothing else, even with the initials field focused
+    for (const k of RK) { if (padHeld[k] && !kbHas(k)) release(k); padHeld[k] = !!n[k]; }   // (what was held lets go; nothing new is pressed here)
+    if (back) { closeGame(); return; }
+    if (act) { const box = view && view.querySelector('#entry'); const f = box && box.querySelector('form'); const bt = f ? null : box && (box.querySelector('[data-g=again],[data-g=rematch]') || box.querySelector('.btn.solid') || box.querySelector('.btn')); if (f) { if (f.requestSubmit) f.requestSubmit(); else f.dispatchEvent(new Event('submit', { cancelable: true })); } else if (bt) bt.click(); }
+    return;
+  }
+  if (typing) return;
+  if (back) { closeGame(); return; }   // Back first: nothing else of this step is pressed, so no 'a' can outlive the game
+  for (const k of RK) { const d = !!n[k]; if (d && !padHeld[k]) press(k); else if (!d && padHeld[k] && !kbHas(k)) release(k); padHeld[k] = d; }
+}
+function padReset() { padPrimed = false; padBack = false; padAct = false; for (const k in padHeld) padHeld[k] = false; }
 
 const ptr = { x: W / 2, y: H / 2, down: false, over: false, cancel: false, sx: 0, sy: 0, st: 0 };   // cancel: the system took the touch away (pointercancel); true for one step, so a cabinet drops a drag instead of treating it as a release
 let tap = null, swipe = null;
@@ -862,7 +904,7 @@ function bindStick(root) {
   const knob = el.querySelector('.stick-knob'); const on = new Set(); let pid = null, cx = 0, cy = 0, R = 50;
   const set = dirs => {
     let changed = false;
-    for (const k of ['up', 'down', 'left', 'right']) { if (dirs.has(k) && !on.has(k)) { press(k); on.add(k); changed = true; } else if (!dirs.has(k) && on.has(k)) { release(k); on.delete(k); } }
+    for (const k of ['up', 'down', 'left', 'right']) { if (dirs.has(k) && !on.has(k)) { press(k); tHeld.add(k); on.add(k); changed = true; } else if (!dirs.has(k) && on.has(k)) { release(k); tHeld.delete(k); on.delete(k); } }
     if (changed && navigator.vibrate) try { navigator.vibrate(6); } catch (e) {}
   };
   const move = e => {
@@ -888,7 +930,7 @@ function bindStick(root) {
 }
 function openGame(id, opts) {
   cur = GAMES.find(g => g.id === id); if (!cur) return;
-  closeGame(true);
+  closeGame(true); pressed.clear(); tap = null; swipe = null;
   chal = opts && opts.challenge && !cur.noChallenge ? opts.challenge : null;   // (free-credit cabinets have no replays, so no challenges)
   dly = !chal && !!(opts && opts.daily && window.Daily); dlyRun = null;
   view = document.createElement('div'); view.className = 'game-view'; view.setAttribute('role', 'dialog'); view.setAttribute('aria-label', cur.name);
@@ -904,7 +946,7 @@ function openGame(id, opts) {
   bindStick(view);
   view.querySelector('[data-g="pad"]').onclick = e => {   // switch between the joystick and the D-pad, remembered for next time
     const next = store.get('pad', 'stick') === 'stick' ? 'dpad' : 'stick'; store.set('pad', next);
-    for (const k of ['up', 'down', 'left', 'right']) release(k);
+    for (const k of ['up', 'down', 'left', 'right']) { release(k); tHeld.delete(k); }
     const old = view.querySelector('.stick, .dpad'); old.insertAdjacentHTML('afterend', padHTML()); old.remove();
     e.currentTarget.textContent = next === 'stick' ? 'Use D-pad' : 'Use joystick';
     bindStick(view); bindKeys(view.querySelector('.dpad')); A().sfx('blip');
@@ -912,8 +954,8 @@ function openGame(id, opts) {
   bindKeys(view);
   function bindKeys(root) { if (!root) return; root.querySelectorAll('[data-k]').forEach(b => {
     const k = b.dataset.k;
-    const down = e => { e.preventDefault(); b.setPointerCapture && b.setPointerCapture(e.pointerId); b.classList.add('on'); press(k); if (navigator.vibrate) try { navigator.vibrate(8); } catch (x) {} };
-    const up = e => { b.classList.remove('on'); release(k); };
+    const down = e => { e.preventDefault(); b.setPointerCapture && b.setPointerCapture(e.pointerId); b.classList.add('on'); tHeld.add(k); press(k); if (navigator.vibrate) try { navigator.vibrate(8); } catch (x) {} };
+    const up = e => { b.classList.remove('on'); tHeld.delete(k); release(k); };
     b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
     b.addEventListener('contextmenu', e => e.preventDefault());
   }); }
@@ -945,7 +987,7 @@ function closeGame(silent) {
   cancelAnimationFrame(raf); raf = 0; RNG = Math.random; ghost = null; rec = null;
   if (fitObs) { fitObs.disconnect(); fitObs = null; }
   if (view) { view.remove(); view = null; window.removeEventListener('resize', fit); document.body.style.overflow = ''; }
-  for (const k in keys) keys[k] = false;
+  for (const k in keys) keys[k] = false; pressed.clear(); tap = null; swipe = null; kbDown.clear(); tHeld.clear(); padReset();
   if (!silent) { mode = 'title'; A().music('title'); if (window.Nutcade) window.Nutcade.refresh(); }
 }
 function startGame() {
@@ -1082,6 +1124,7 @@ const STEP = 1000 / 60, MAXCATCH = 5;
 let lastT = 0, acc = 0;
 function tick() {   // one 60 Hz step of the logic (nothing is drawn here); taps, key presses and swipes are consumed by the first step that sees them
   frame++;
+  padPoll(); if (!view) return;
   if (mode === 'title') {
     if (pressed.has('a') || pressed.has('b') || tap) startGame();
   } else if (mode === 'play') {

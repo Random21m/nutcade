@@ -27,7 +27,7 @@
 | `arrive.css` | The notices' styles |
 | `ur.js` | Animated QR codes: a BC-UR encoder and decoder (`ur:bytes`, multipart fountain codes), compatible with cashu.me |
 | `chiptune.js` | The sound modem used by Send by sound (encoder, decoder, microphone and speaker) |
-| `games.js` | The arcade engine (a fixed 60 steps a second clock, replays, challenges, the lobby), the eight original cabinets, and the shared kit it hands to every cabinet in a `game_*.js` file |
+| `games.js` | The arcade engine (a fixed 60 steps a second clock, replays, challenges, the lobby), the eight original cabinets, and the shared kit it hands to every cabinet in a `game_*.js` file. Inputs: the keyboard (`KEYMAP`) and, since 1.39, game controllers (`padPoll`, once at the top of each 60 Hz `tick()`, calling the same `press()`/`release()`, so replays record pad input like keys; standard mapping only) |
 | `game_poker.js` | Nut Poker: free-credit video poker, a cabinet in its own file (its rules are unit-tested in `tests/game_poker_unit.js`) |
 | `game_neonroad.js` | Neon Road: a pseudo-3D racer, a cabinet in its own file |
 | `app_trust.js` | Trust & help, inlined inside `app.js`: the check of your 12 words, "Updated to vX" and "new version ready", Help & FAQ (the topic texts), a mint's contact, terms and description (NUT-06), Hide amounts. Nothing in it moves money |
