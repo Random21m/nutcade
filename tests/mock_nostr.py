@@ -500,7 +500,7 @@ async def signer_new(request: Request):
     b = await request.json()
     signer.clear()
     signer.update({'remote_sk': os.urandom(32).hex(), 'user_sk': os.urandom(32).hex(), 'secret': os.urandom(8).hex(), 'connect': b.get('connect', 'ok'),
-                   'sign': b.get('sign', 'ok'), 'delay': float(b.get('delay', 0)), 'log': [], 'clients': []})
+                   'sign': b.get('sign', 'ok'), 'delay': float(b.get('delay', 0)), 'getpk': b.get('getpk', ''), 'log': [], 'clients': []})
     rp = xonly(signer['remote_sk'])
     return {'bunker': f"bunker://{rp}?relay=wss://signer.test&secret={signer['secret']}", 'remote': rp, 'user': xonly(signer['user_sk']),
             'user_sk': signer['user_sk'], 'secret': signer['secret']}
@@ -508,7 +508,7 @@ async def signer_new(request: Request):
 @app.post('/test/signer/mode')
 async def signer_mode(request: Request):
     b = await request.json()
-    for k in ('connect', 'sign', 'delay'):
+    for k in ('connect', 'sign', 'delay', 'getpk'):
         if k in b: signer[k] = float(b[k]) if k == 'delay' else b[k]
     return {k: signer.get(k) for k in ('connect', 'sign', 'delay')}
 
@@ -538,8 +538,8 @@ async def signer_handle(e):
         if md == 'badsecret': return await signer_send(client, {'id': rid, 'result': 'not-the-secret-123', 'error': ''})
         ok = len(params) >= 2 and params[0] == xonly(signer['remote_sk']) and params[1] == signer['secret']
         return await signer_send(client, {'id': rid, 'result': 'ack' if ok else '', 'error': '' if ok else 'invalid secret'})
-    if method == 'get_public_key':
-        return await signer_send(client, {'id': rid, 'result': xonly(signer['user_sk']), 'error': ''})
+    if method == 'get_public_key':   # (getpk "liar": names another npub than the one it signs with)
+        return await signer_send(client, {'id': rid, 'result': xonly(os.urandom(32).hex()) if signer.get('getpk') == 'liar' else xonly(signer['user_sk']), 'error': ''})
     if method == 'ping':
         return await signer_send(client, {'id': rid, 'result': 'pong', 'error': ''})
     if method == 'sign_event':

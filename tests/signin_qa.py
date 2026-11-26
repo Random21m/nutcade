@@ -56,7 +56,7 @@ FAKE07 = """(() => { const md = () => localStorage.getItem('__f07') || ''; if (!
   const sk = () => CashuLib.hexToBytes(localStorage.getItem('__f07sk')); const wait = ms => new Promise(r => setTimeout(r, ms));
   window.__f07log = [];
   window.nostr = {
-    async getPublicKey() { window.__f07log.push('pk'); const m = md(); if (m === 'hang') return new Promise(() => {}); if (m === 'refuse') throw new Error('nope <b>pk</b>'); if (m === 'slow') await wait(2500); return CashuLib.nostrPub(sk()); },
+    async getPublicKey() { window.__f07log.push('pk'); const m = md(); if (m === 'liarpk') return CashuLib.nostrPub(crypto.getRandomValues(new Uint8Array(32))); if (m === 'hang') return new Promise(() => {}); if (m === 'refuse') throw new Error('nope <b>pk</b>'); if (m === 'slow') await wait(2500); return CashuLib.nostrPub(sk()); },
     async signEvent(t) { window.__f07log.push('sign:' + t.kind); const m = md();
       if (m === 'refuse') throw new Error('User rejected <img src=x onerror="window.__pwned=1">');
       if (m === 'hang') return new Promise(() => {});
@@ -580,6 +580,82 @@ async def main():
             check('rv2: accepting the offer deletes the 12-word-key review; yours is the identity\'s, counted once', not e and not e2 and d5 and mine and mine['pk'] == pk4 and recs_line(recs_by(M, (SP, pk4)) + 1) in t, (len(d5), mine, recs_line(recs_by(M, (SP, pk4)) + 1), t[-200:]))
             await rx.pg.context.close()
         await section('rv2', rv2)
+
+        async def abort():
+            ab = await wallet(b, 'si-abort'); await ab.create(); await ab.add_mint(M); await ab.use(M)
+            await nz_on(ab); SP = await ab.ev("__seedPub()"); sk5, pk5 = await keypair(ab)
+            await ext_mode(ab, 'honest', sk5, reload=True); await sign_in_ext(ab)
+            await ab.until(f"NutZap.info() && NutZap.info().pk === {J(pk5)}", 15000)
+            await ab.ev("window.__nutcadeTest = {idMs: 20000}")
+            await ext_mode(ab, 'hang'); n0 = await ab.ev("window.__f07log.length")
+            await ab.ev("Nutcade.S.prefs.nzInfo.key = 'stale'"); await ab.ev("(()=>{ NutZap.publish(); })()")
+            await ab.until(f"window.__f07log.length > {n0}", 8000)
+            await ab.ev("NutId.out()")
+            t0 = time.time(); await ab.ev("NutZap.tick(true)"); dt = time.time() - t0
+            check('abort: right after sign-out, a hanging extension does not hold up the nutzap round', dt < 5, round(dt, 1))
+            has = await ab.ev("typeof Nutcade.tick === 'function'")
+            t0 = time.time(); await ab.ev("typeof Nutcade.tick === 'function' && Nutcade.tick()"); dt2 = time.time() - t0
+            check('abort: ...nor the background round (deposits, payments, refunds, Extra Life)', has and dt2 < 10, (has, round(dt2, 1)))
+            ok = await ab.until(f"NutZap.info() && NutZap.info().pk === {J(SP)}", 10000)
+            check('abort: the pending signature ends at once and the nutzap info goes back to the 12-word key', ok, await ab.ev("NutZap.info()"))
+            nzp = await ab.ev("NutZap.pub()"); b0 = await ab.bal()
+            pr = await al.ev(f"Nutcade.r8.sendEcash(19, 'nz abort', {J(nzp)}).then(t=>t.sent)")
+            e1 = await al.ev(f"__nz({J(pr)}, {J(M)}, [{J(SP)}])"); await al.ev(f"__pub({J(e1)})")
+            check('abort: a nutzap arriving meanwhile is claimed', await ab.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {b0 + 19}", 15000), await ab.bal() - b0)
+            S7 = post('/test/signer', {}); await ab.ev("window.__nutcadeTest = {idMs: 20000}")
+            ok = await sign_in_bunker(ab, S7['bunker']); await ab.ev("Nutcade.closeSheet()")
+            await ab.until(f"NutZap.info() && NutZap.info().pk === {J(S7['user'])}", 15000)
+            post('/test/signer/mode', {'sign': 'silent'}); n1 = methods().count('sign_event')
+            await ab.ev("Nutcade.S.prefs.nzInfo.key = 'stale'"); await ab.ev("(()=>{ NutZap.publish(); })()")
+            await ab.until(f"fetch('{MOCK}/test/signer/log').then(r=>r.json()).then(s=>s.log.filter(x=>x.method==='sign_event').length > {n1})", 8000)
+            await ab.ev("NutId.out()")
+            t0 = time.time(); await ab.ev("NutZap.tick(true)"); dt = time.time() - t0
+            check('abort: right after sign-out, a silent remote signer does not hold up the nutzap round either', ok and dt < 5, (ok, round(dt, 1)))
+            await ab.ev("window.__nutcadeTest = null"); post('/test/signer', {})
+            # the foreign check before every publish under an identity, not only the first
+            await ext_mode(ab, 'honest'); await sign_in_ext(ab)
+            await ab.until(f"NutZap.info() && NutZap.info().pk === {J(pk5)}", 15000)
+            other = await ab.ev("NutZap.randomPub()")
+            tp = await ab.ev(f"__sign({J(sk5)}, 10019, [['relay', {J(RELAY)}], ['pubkey', {J(other)}]], '', 5)")
+            await ab.ev(f"__pub({J(tp)})"); n10 = pubs(pk5, 10019)
+            await ab.ev(f"Nutcade.S.prefs.relays = [{J(RELAY)}, {J(RELAY + '?r=second')}]; NutZap.tick(true)"); await ab.wait(5000)
+            cur = [x for x in evs(10019, pk5) if x['tags']]
+            await settings(ab)
+            check('foreign: a later republish (relays changed) does not replace another wallet\'s nutzap info that appeared since; it asks', pubs(pk5, 10019) == n10 and cur and tg(cur[0], 'pubkey') == [['pubkey', other]] and await ab.ev("!!document.querySelector('#nzForeign')"), (pubs(pk5, 10019) - n10, cur and tg(cur[0], 'pubkey')))
+            check("foreign: the identity's own relay list (kind 10002) is read for the check", any(any(f.get('kinds') == [10002] and pk5 in (f.get('authors') or []) for f in fs) for fs in state()['reqs']))
+            await ab.pg.context.close()
+        await section('abort', abort)
+
+        async def offonce():
+            ox = await wallet(b, 'si-offonce'); await ox.create(); await ox.add_mint(M); await ox.use(M)
+            await nz_on(ox); sk7, pk7 = await keypair(ox)
+            await ext_mode(ox, 'honest', sk7, reload=True); await sign_in_ext(ox)
+            await ox.until(f"NutZap.info() && NutZap.info().pk === {J(pk7)}", 15000)
+            await ox.ev("Nutcade.S.prefs.nzInfo.key = 'stale'")
+            post('/test/relay_mode', {'evdelay': 3, 'kinds': [10019]})
+            await ox.ev("(()=>{ NutZap.publish(true); })()"); await ox.wait(700)
+            await ext_mode(ox, 'slow'); n0 = await ox.ev("window.__f07log.length")
+            await settings(ox); await ox.click('#p_nutzap'); await ox.wait(12000)
+            post('/test/relay_mode', {})
+            asked = await ox.ev(f"window.__f07log.slice({n0})")
+            check('off: turning nutzaps off while an identity publish is on its way withdraws once (2 signatures, not 4)', sorted(asked) == ['sign:10019', 'sign:5'], asked)
+            await ox.pg.context.close()
+        await section('offonce', offonce)
+
+        async def proof():
+            px = await wallet(b, 'si-proof'); await px.create(); await px.add_mint(M)
+            sk6, pk6 = await keypair(px)
+            await ext_mode(px, 'liarpk', sk6, reload=True)
+            await settings(px); await px.click('#set-identity [data-act=idExt]'); await px.wait(1500)
+            t = (await px.err()) + (await px.toast())
+            check('proof: an extension naming an npub it can\'t sign for is refused at sign-in', not await px.ev("NutId.active()") and 'prove' in t.lower(), t)
+            check('proof: the sign-in check event is never published', not evs(27235, pk6) and not [e for e in state()['events'] if 'sign-in check' in e.get('content', '')])
+            if await px.ev("NutId.active()"): await px.ev("NutId.out()")
+            S8 = post('/test/signer', {'getpk': 'liar'})
+            ok = await sign_in_bunker(px, S8['bunker']); e = await px.err()
+            check('proof: a remote signer naming another npub is refused at sign-in, nothing kept', not ok and 'prove' in e.lower() and 'nutcade:nid' not in await px.ev("JSON.stringify(localStorage)"), e)
+            await px.pg.context.close(); post('/test/signer', {})
+        await section('proof', proof)
 
         async def bunker():
             bk = await wallet(b, 'si-bunker'); ctx['bk'] = bk
