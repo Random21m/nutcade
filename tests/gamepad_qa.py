@@ -28,7 +28,7 @@ FAKE = """(() => {
   F.pump = n => { for (let i = 0; i < n; i++) { F.t += 1000 / 60; const cbs = [...F.q.values()]; F.q.clear(); cbs.forEach(cb => cb(F.t)); } };
   F.key = (code, down) => window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code, bubbles: true, cancelable: true }));
   F.watch = id => { const g = Arcade.games.find(x => x.id === id); if (g.__w) return; g.__w = 1; const u = g.update;
-    g.update = function (s, G) { F.n++; F.S = s; if (G.hit('a')) F.hits++; const c = (F.seen.get(s) || 0) + 1; F.seen.set(s, c); if (F.cap && c === F.cap) G.over(); return u.apply(this, arguments); }; };
+    g.update = function (s, G) { F.n++; F.S = s; if (F.add && !F.seen.get(s)) G.addScore(F.add); if (G.hit('a')) F.hits++; const c = (F.seen.get(s) || 0) + 1; F.seen.set(s, c); if (F.cap && c === F.cap) G.over(); return u.apply(this, arguments); }; };
 })()"""
 
 async def main():
@@ -167,6 +167,63 @@ async def main():
         n0 = await w.ev("__F.n"); await pad({'b': [9]}); await pump(2); await pad(); await pump(15)
         check('poker: Start pauses', await w.ev("__F.n") - n0 <= 1, await w.ev("__F.n") - n0)
         await leave()
+
+
+        # --- fix round 1
+        # F1: A and Back down in the same step: nothing of that step outlives the game (no stale 'a' starting the next cabinet / the Daily run)
+        await open_game()
+        await pad({'b': [0, 8]}); await pump(3); await pad(); await pump(3)
+        check('F1: A + Back in one step closes the game', await w.ev("!Arcade.playing()"))
+        await w.ev("Arcade.open('swarm', { daily: true }); __F.watch('swarm'); __F.n = 0"); await pump(15)
+        check('F1: reopening (as a Daily Challenge) stays on the title: no run started, no update', await w.ev("__F.n") == 0 and await w.ev("Arcade.daily().run") is None, (await w.ev("__F.n"), await w.ev("Arcade.daily().run")))
+        await leave()
+        await w.ev("__F.key('Space', true); __F.key('Space', false)")   # a key press queued while no game is open must not survive an open either
+        await w.ev("Arcade.open('swarm'); __F.watch('swarm'); __F.n = 0"); await pump(15)
+        check('F1: a press made before the game opened does not start it', await w.ev("__F.n") == 0, await w.ev("__F.n"))
+        await leave()
+        # F2: Back already down as the game opens is not a press
+        await pad({'b': [8]})
+        await w.ev("Arcade.open('swarm'); __F.watch('swarm'); __F.n = 0"); await pump(10)
+        check('F2: Back held while a game opens does not close it', await w.ev("Arcade.playing()"))
+        await pad(); await pump(2); await pad({'b': [8]}); await pump(3)
+        check('F2: ...a fresh Back press does', await w.ev("!Arcade.playing()"))
+        await pad(); await pump(2)
+        # F3: a pad release never lets go of a key the keyboard still holds
+        await open_game()
+        await w.ev("__F.key('ArrowLeft', true)"); await pump(3)
+        await pad({'b': [14]}); await pump(3); await pad(); await pump(3)
+        check('F3: keyboard left held + pad left tapped and released: still held', await held() == ['left'], await held())
+        await w.ev("__F.key('ArrowLeft', false)"); await pump(2)
+        check('F3: ...and the keyboard release lets go', await held() == [], await held())
+        await pad({'b': [14]}); await pump(3); await w.ev("__F.key('ArrowLeft', true); __F.key('ArrowLeft', false)"); await pump(2)
+        await pad(); await pump(2)
+        check('F3: pad alone still releases (no key left behind)', await held() == [], await held())
+        await leave()
+        # F4: the screens after a game: a qualifying score gives the initials form (its input is focused)
+        async def finish_run():
+            await w.ev("Arcade.open('swarm'); __F.watch('swarm'); __F.n = 0; __F.add = 100; __F.cap = 20"); await pump(3)
+            await pad({'b': [0]}); await pump(3); await pad(); await pump(40); await w.wait(2200); await pump(2)
+            await w.ev("__F.add = 0; __F.cap = 0")
+        await finish_run()
+        check('F4: the initials form is shown with its field focused', await w.ev("!!document.querySelector('#entry #ini') && document.activeElement.id === 'ini'"))
+        await pad({'b': [14, 13]}); await pump(3); await pad(); await pump(2)
+        check('F4: other pad input is ignored on the entry screen (still there, nothing held)', await w.ev("!!document.querySelector('#entry #ini')") and await held() == [])
+        await pad({'b': [0]}); await pump(3); await pad(); await pump(2)
+        check('F4: A submits the initials (the saved screen shows)', await w.ev("!!document.querySelector('#entry [data-g=card]') && !document.querySelector('#entry #ini')"))
+        await pad({'b': [0]}); await pump(3); await pad(); await pump(2)
+        check('F4: A on the saved screen takes its Continue (back to the title)', await w.ev("!document.querySelector('#entry .btn') && Arcade.playing()"))
+        await pad({'b': [0]}); await pump(3); await pad(); await pump(3)
+        check('F4: ...and the next A starts a new game from the title (no stale press)', await w.ev("__F.n") > 0)
+        await leave()
+        await finish_run()
+        await pad({'b': [8]}); await pump(3); await pad(); await pump(2)
+        check('F4: Back cancels the initials form and closes the game', await w.ev("!Arcade.playing()"))
+        await finish_run()
+        await pad({'b': [9]}); await pump(3); await pad(); await pump(2)
+        check('F4: Start submits the initials too', await w.ev("!!document.querySelector('#entry [data-g=card]')"))
+        await pad({'b': [8]}); await pump(3); await pad(); await pump(2)
+        check('F4: Back closes the saved screen like Escape', await w.ev("!Arcade.playing()"))
+        await pad(); await pump(2)
 
         # --- replays: pad input is recorded exactly like the keyboard's
         async def run(kind):

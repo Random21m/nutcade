@@ -31,7 +31,7 @@ ports_for() { case "$1" in
   sendall_qa) echo "3338 3339 3340 3342" ;;
   r8_qa) echo "3338 3339 3340 3342 3343 3344" ;;
   r9_qa) echo "3338" ;;   # (r9 starts and restarts mints of its own, R9_PORT 3438-3441, to rotate their keys)
-  backup_qa|remind_qa|nutzap_qa|p2bk_qa|sync_qa|review_qa|signin_qa|bip321_qa|lib_qa) echo "3339" ;;
+  backup_qa|remind_qa|nutzap_qa|p2bk_qa|sync_qa|review_qa|signin_qa|bip321_qa|gamepad_qa|lib_qa) echo "3339" ;;
   units_qa) echo "3339 3345 3346" ;;   # (units: the multi-unit mint, the USD-only mint, and 3339 as the far end of a payment)
   auto_move_qa) echo "3338 3339 3340 3341 3345" ;;   # (auto-move: a fee mint, a no-fee mint, the mints whose payments fail and stay pending, and the multi-unit mint)
   auth_qa) echo "3338 3339 3347 3349" ;;   # (mint login: the auth mint and its twin whose payments stay pending, whose login server mock_oidc.py on 3348 start_mints.sh starts first, Mint B without login, Mint A)
