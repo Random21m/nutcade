@@ -10,8 +10,15 @@ Object.assign(A, {
     const r = await rvPublish(st.url, st.stars, val('rvText'));
     sfx('coin'); refresh();
     if (rvSt !== st) return;
-    Object.assign(st, { edit: false, ask: false, stars: 0, done: { pub: true, n: r.n, of: r.of } }); rvDraw(st.url);
+    Object.assign(st, { edit: false, ask: false, stars: 0, done: { pub: true, n: r.n, of: r.of, other: r.other || null } }); rvDraw(st.url);
     toast('Review published', 'lime');
+  }),
+  rvDelOld: b => run(b, 'DELETING', async () => {
+    const st = rvSt; if (!st || !idHex(b.dataset.pk)) return;
+    await rvDelete(st.url, b.dataset.pk);
+    refresh(); if (rvSt !== st) return;
+    if (st.done) st.done = Object.assign({}, st.done, { other: null }); rvDraw(st.url);
+    toast('Earlier review deleted', 'lime');
   }),
   rvDel: b => run(b, 'DELETING', async () => {
     const st = rvSt; if (!st) return;

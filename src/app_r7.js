@@ -204,8 +204,9 @@ function showWithdrawWait(res) {
 
 /* ---------- zaps (NIP-57) ----------
    Their kind-0 profile gives a Lightning address (lud16, or an lud06 LNURL). If its LNURL-pay endpoint says
-   allowsNostr and names its nostrPubkey, a kind-9734 zap request signed with this wallet's Nostr key (the same key
-   cashu.me uses, from the 12 words) goes with the amount; the invoice must be for exactly that amount, and is then
+   allowsNostr and names its nostrPubkey, a kind-9734 zap request goes with the amount, signed with your Nostr identity when
+   you are signed in (idSign, app_identity.js; never the 12-word key instead), else with this wallet's Nostr key (the same
+   key cashu.me uses, from the 12 words), or a one-time key for an anonymous zap; the invoice must be for exactly that amount, and is then
    paid like any Lightning payment, with the fee shown first. Without zap support, a plain payment is offered. */
 let curZap = null;
 const zapByQuote = new Map();
@@ -217,6 +218,8 @@ async function nostrProfile(pubkey, extra = []) {
   try { const p = JSON.parse(ev.content); return p && typeof p === 'object' ? p : null; } catch (e) { return null; }
 }
 const shortNpub = pk => { try { const n = L.npubEncode(pk); return n.slice(0, 12) + '…' + n.slice(-4); } catch (e) { return pk.slice(0, 8) + '…'; } };
+// which key signs a (not anonymous) zap: said on the sheet, for the identity it was opened with
+const zapWhoText = () => idActive() ? 'This zap is signed with your Nostr identity, so anyone can link it to you.' : "This zap is signed with this wallet's Nostr key, the same npub as your ecash address and your npub.cash Lightning address, so anyone can link it to you.";
 async function openZap(target) {
   if (needMint()) return;
   const pk = target.pubkey;
@@ -237,19 +240,20 @@ async function openZap(target) {
   if (base.tag !== 'payRequest' || !base.callback) return fail(`${addr} isn't set up to receive payments.`);
   const zapOk = base.allowsNostr === true && /^[0-9a-f]{64}$/i.test(String(base.nostrPubkey || ''));
   const min = Math.max(1, Math.ceil(num(base.minSendable) / 1000)), max = Math.floor(num(base.maxSendable) / 1000);
-  curZap = { pubkey: pk, name, addr, base, zapOk, min, max, url: lnurlToUrl(addr), relays: (target.relays || []).slice(0, 3) };
+  curZap = { pubkey: pk, name, addr, base, zapOk, min, max, url: lnurlToUrl(addr), relays: (target.relays || []).slice(0, 3), g: idNow() };   // (g: the identity the sheet's text was written for)
   const m = activeMint();
   setBody(`<div class="label">To</div><div class="code" style="color:var(--ink)"><span data-noi18n>${esc(name)}</span><br><span class="tiny muted" data-noi18n>${esc(addr)}</span></div>
     ${zapOk ? '' : `<div class="notice">${esc(addr)} doesn't support zaps. You can pay it as a plain Lightning payment instead; it won't show as a zap on Nostr.</div>`}
     <div class="tiny muted">From <b style="color:var(--ink)" data-noi18n>${esc(m.name)}</b> · ${money(balanceOf(m.url))} available</div>
     <div class="field"><label for="amtIn">Amount (SAT)</label><input id="amtIn" class="inp amount" inputmode="numeric" placeholder="21" autocomplete="off"></div>
     ${max >= min ? `<div class="tiny muted">${min === max ? `Exactly ${money(max)}.` : `Any amount from ${money(min)} to ${money(max)}.`}</div>` : ''}
-    ${zapOk ? `<div class="notice">This zap is signed with this wallet's Nostr key, the same npub as your ecash address and your npub.cash Lightning address, so anyone can link it to you.</div>
+    ${zapOk ? `<div class="notice" id="zapWho">${zapWhoText()}</div>
     <label class="toggle" for="zapAnon"><span><span class="tl">Anonymous zap</span><span class="th">Signed with a fresh one-time key instead: the zap still shows on Nostr, but not who sent it.</span></span><input id="zapAnon" type="checkbox"></label>` : ''}
     ${zapOk || num(base.commentAllowed) > 0 ? `<div class="field"><label for="zapComment">${zapOk ? 'Comment (optional, public on Nostr)' : 'Comment (optional, the receiver sees it)'}</label><input id="zapComment" class="inp" maxlength="${zapOk ? 280 : Math.min(280, num(base.commentAllowed))}" autocomplete="off"></div>` : ''}
     <button class="btn solid gold block" data-act="zapQuote">${zapOk ? 'Zap' : 'Pay as a plain Lightning payment'}</button><div id="sheetErr"></div>`);
 }
 async function zapInvoice(z, sats, comment, anon) {
+  const g = z.g !== undefined ? z.g : idNow();   // (the identity the sheet was opened with: a switch since then signs nothing)
   if (z.max < z.min) throw keepErr(new Error(`${z.addr} isn't accepting payments right now.`));
   if (sats < z.min || sats > z.max) throw keepErr(amtErr(z.min === z.max ? `${z.addr} takes exactly ${money(z.max)}.` : `${z.addr} takes ${money(z.min)} to ${money(z.max)}.`, 'range'));
   const msat = sats * 1000;
@@ -258,9 +262,10 @@ async function zapInvoice(z, sats, comment, anon) {
   if (z.zapOk) {
     const lnurl = lnurlEncode(z.url);
     const rl = [...new Set(z.relays.concat(relays()))].slice(0, 5);
-    // anonymous (NIP-57): a fresh one-time key signs, with an "anon" tag; otherwise the wallet's own Nostr key
+    // anonymous (NIP-57): a fresh one-time key signs, with an "anon" tag; otherwise your Nostr identity when signed in, else the wallet's own Nostr key
     const tags = [['relays', ...rl], ['amount', String(msat)], ['lnurl', lnurl], ['p', z.pubkey]]; if (anon) tags.push(['anon']);
-    zapReq = L.finalizeEvent({ kind: 9734, created_at: Math.floor(Date.now() / 1000), content: comment || '', tags }, anon ? rnd(32) : nostrKey());
+    const zt = { kind: 9734, created_at: Math.floor(Date.now() / 1000), content: comment || '', tags };
+    zapReq = anon ? L.finalizeEvent(zt, rnd(32)) : await idSign(zt, g);   // (your identity when signed in: app_identity.js)
     cb.searchParams.set('nostr', JSON.stringify(zapReq)); cb.searchParams.set('lnurl', lnurl);
   } else if (comment && num(z.base.commentAllowed) > 0) cb.searchParams.set('comment', comment.slice(0, num(z.base.commentAllowed)));
   let r;

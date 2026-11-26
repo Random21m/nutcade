@@ -30,6 +30,10 @@ Object.assign(A, {
     const z = curZap; if (!z) return;
     const sats = amt(), comment = val('zapComment').trim();
     const anon = !!($('#zapAnon') || {}).checked;
+    if (z.zapOk && !anon && z.g !== idNow()) {   // (signed in or out since the sheet opened: its text named another key; said again, nothing sent)
+      z.g = idNow(); const w = $('#zapWho'); if (w) w.innerHTML = esc(tr(zapWhoText()));
+      throw keepErr(new Error(ID_E_ZAPWHO));
+    }
     const { pr, zapReq } = await zapInvoice(z, sats, comment, anon);
     const mq = await meltQuote('ln', pr);
     if (num(mq.amount) !== sats) throw serviceErr(`The invoice asked for ${money(num(mq.amount))} instead of ${money(sats)}. Nothing was sent.`);

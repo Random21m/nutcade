@@ -5,7 +5,10 @@
              kind 38172 announcement is known (seen by the report card, its d = that pubkey, its signature checked),
              ["a", "38172:<announcer>:<d>", <the relay it was seen on>, "cashu"]
      content "[N/5]" or "[N/5] text" (cashu.me's format; the report card reads the stars back from it)
-   signed with the wallet's own Nostr key (nostrKey(): the same key as nutzaps, npub.cash and the mint-list backup).
+   signed with your Nostr identity when you are signed in (idSign, app_identity.js: never the 12-word key instead), else
+   with the wallet's own Nostr key (nostrKey(), as before 1.37). Your reviews are the ones signed by any key of yours
+   (idKeys: the 12-word key, your identity, former identities), counted once: the newest. A deletion is signed by the key
+   that published the review (one under an identity you're not signed in with can't be deleted from here).
    It is addressable (the d tag), so a new review of the same mint replaces the old one. Delete is a kind 5 with
    ["a", "38000:<you>:<d>"] (NIP-09), and the review is forgotten here; a copy a relay kept anyway is never counted again.
    Publishing is always a tap, after one plain warning line; nothing is queued: offline, it says it needs a connection.
@@ -28,35 +31,54 @@ const rvStarsTxt = n => '★'.repeat(n) + '☆'.repeat(5 - n);
 const rvDecoy = () => !!(vault.on && vault.decoy);
 const rvD = e => ((Array.isArray(e.tags) ? e.tags : []).find(t => Array.isArray(t) && t[0] === 'd' && typeof t[1] === 'string') || [])[1] || '';
 const rvSig = e => { try { return !!L.verifyEvent(e); } catch (x) { return false; } };   // (a relay's event, whatever its shape)
-// this wallet's Nostr pubkey now (the key the current 12 words give), or null without words
-let rvMeC = null;
+// your keys now, as one text (the report card reads Nostr again when it changes), or null without words
 function rvMe() {
   if (!S.seed || !S.seed.mnemonic) return null;
-  if (!rvMeC || rvMeC.m !== S.seed.mnemonic) { let pk = null; try { pk = L.nostrPub(nostrKey()); } catch (e) {} rvMeC = { m: S.seed.mnemonic, pk }; }
-  return rvMeC.pk;
+  const ks = idKeys(); return ks.length ? ks.join(',') : null;
 }
+const rvKeys = () => (S.seed && S.seed.mnemonic) ? idKeys() : [];
+// a switch of identity: the report card reads your reviews again with your keys now
+function rvIdChanged() { for (const l of Object.values(S.mintlog || {})) if (l && l.nostr && l.nostr.v === 2) l.nostr.me = null; }
 // your review of this mint: the one published from here, or one with your key found on your relays (another device or
 // app), whichever is newer; never one at or before a deletion you sent. Only what the current key signed is yours: a
 // review made under other 12 words (before a new phrase, a restore or an import) is someone else's (stored ones without
 // a pubkey too)
-function rvMine(url0) {
-  const l = S.mintlog[acctUrl(url0)], me = rvMe(); if (!l || !me) return null;
-  const del = l.revDelPk === me ? num(l.revDel) : 0, n = l.nostr;
-  const seen = n && n.v === 2 && n.me === me && n.mine && n.mine.pk === me && num(n.mine.at) > del ? n.mine : null;
-  const here = l.rev && l.rev.pk === me && num(l.rev.at) > del ? l.rev : null;
-  return here && (!seen || num(seen.at) <= num(here.at)) ? here : seen;
+// deletions you sent, per key ({ pubkey: time }; 1.37: one per key, so a later deletion never undoes an earlier one;
+// revDel/revDelPk before 1.37: one slot, read as that key's)
+function rvDels(l) {
+  const m = Object.create(null);
+  if (l.revDels && typeof l.revDels === 'object') for (const k of Object.keys(l.revDels)) if (idHex(k)) m[k] = num(l.revDels[k]);
+  if (idHex(l.revDelPk || '') && num(l.revDel) > num(m[l.revDelPk])) m[l.revDelPk] = num(l.revDel);
+  return m;
 }
+const rvDelOf = (l, pk) => num(rvDels(l)[pk]);
+// every review of yours of this mint, one per key (its newest), never one at or before that key's deletion: the ones
+// published from here (l.rev, l.revBy) and the ones the report card found on your relays (nostr.mines)
+function rvAllMine(url0) {
+  const l = S.mintlog[acctUrl(url0)], me = rvMe(), keys = rvKeys(); if (!l || !me) return [];
+  const n = l.nostr, by = new Map();
+  const cands = [l.rev].concat(Object.values(l.revBy && typeof l.revBy === 'object' ? l.revBy : {}), n && n.v === 2 && n.me === me ? (Array.isArray(n.mines) ? n.mines : [n.mine]) : []);
+  for (const r of cands) {
+    if (!r || !keys.includes(r.pk) || num(r.at) <= rvDelOf(l, r.pk)) continue;
+    const o = by.get(r.pk); if (!o || num(r.at) > num(o.at) || (num(r.at) === num(o.at) && !r.relay)) by.set(r.pk, r);
+  }
+  return [...by.values()].sort((a, b) => num(b.at) - num(a.at));
+}
+// your review of this mint: the newest of yours under any key of yours (counted once)
+const rvMine = url0 => rvAllMine(url0)[0] || null;
+// a key of yours NUTCADE can sign with now (the 12-word key, or the identity you are signed in with)
+const rvCanSign = pk => { try { if (pk === seedPub()) return true; } catch (e) { return false; } const c = idConn(); return !!(c && c.pub === pk); };
 // other 12 words (setSeed): nothing reviewed under the old key is yours any more. Your published reviews and deletions
 // here are forgotten, and a review of yours the report card had read from relays becomes one person's like any other
 function rvSeedChanged() {
-  rvMeC = null;
   let ch = false;
   for (const l of Object.values(S.mintlog || {})) {
     if (!l || typeof l !== 'object') continue;
-    if (l.rev || l.revDel || l.revDelPk) { delete l.rev; delete l.revDel; delete l.revDelPk; ch = true; }
+    if (l.rev || l.revDel || l.revDelPk || l.revDels || l.revBy) { delete l.rev; delete l.revDel; delete l.revDelPk; delete l.revDels; delete l.revBy; ch = true; }
     const n = l.nostr;
     if (n && n.v === 2) {
       if (n.mine) { n.recs = num(n.recs) + 1; if (n.mine.stars) n.stars = (n.stars || []).concat([n.mine.stars]).slice(0, 50); n.mine = null; }
+      n.mines = [];
       n.me = null; ch = true;   // (read again on the next check, with the new key)
     }
   }
@@ -84,9 +106,10 @@ async function rvMintPub(url) {
   if (!/^0[23][0-9a-f]{64}$/.test(pub)) throw keepErr(new Error(`Couldn't reach ${host(url)} to read its identity key. Nothing was sent. Try again in a moment.`));
   return pub;
 }
-const rvDelEvent = (d, ts) => L.finalizeEvent({ kind: 5, created_at: ts, tags: [['a', `38000:${L.nostrPub(nostrKey())}:${d}`], ['k', '38000']], content: '' }, nostrKey());
+// a deletion, signed by the key that published the review (pk; none before 1.37: the 12-word key)
+const rvDelEvent = (d, ts, pk) => idSignAs(pk, { kind: 5, created_at: ts, tags: [['a', `38000:${pk}:${d}`], ['k', '38000']], content: '' });
 async function rvPublish(url0, stars, text) {
-  const url = acctUrl(url0);
+  const url = acctUrl(url0), g = idNow();   // (the identity when you tapped: a switch meanwhile signs nothing)
   rvCan('pub');
   stars = Number(stars);
   if (!Number.isInteger(stars) || stars < 1 || stars > 5) throw keepErr(new Error('Pick 1 to 5 stars first.'));
@@ -97,29 +120,54 @@ async function rvPublish(url0, stars, text) {
   const pub = await rvMintPub(url);
   const l = mlog(url), old = rvMine(url), ann = rvAnn(l, pub);
   const tags = [['k', '38172'], ['d', pub], ['u', url, 'cashu']].concat(ann ? [['a', `38172:${ann.pubkey}:${pub}`, ann.relay || '', 'cashu']] : []);
-  const ts = Math.max(Math.floor(Date.now() / 1000), (old ? num(old.at) : 0) + 1, num(l.revDel) + 1);
-  const ev = L.finalizeEvent({ kind: 38000, created_at: ts, tags, content: rvContent(stars, t) }, nostrKey());
+  const ts = Math.max(Math.floor(Date.now() / 1000), (old ? num(old.at) : 0) + 1, ...Object.values(rvDels(l)).map(x => x + 1));
+  const ev = await idSign({ kind: 38000, created_at: ts, tags, content: rvContent(stars, t) }, g);   // (your identity when signed in: app_identity.js)
+  if (isOffline()) throw keepErr(new Error("You're offline. Publishing a review needs a connection. Nothing was sent."));
   const n = await relayPublish(ev, 7000, list, 1500);
   if (!n) throw rvNoRelay(list.length);
-  // the mint's pubkey changed since your last review: that one had another d, so it is withdrawn (best effort)
-  if (old && old.d && old.d !== pub) relayPublish(rvDelEvent(old.d, ts), 7000, list, 1500).catch(() => {});
+  // the mint's pubkey changed since your last review: that one had another d, so it is withdrawn (best effort), but only
+  // when it was signed by this same key: a deletion by another key of yours next to this review would publicly link the
+  // two keys, so that one is left to the "Delete the earlier review" offer below (which says so). The deletion is dated
+  // one second before this review, so the deletion kept here (revDels) never covers the new one.
+  if (old && old.d && old.d !== pub && (idHex(old.pk) ? old.pk : seedPub()) === ev.pubkey) {
+    const dts = ts - 1, opk = ev.pubkey;
+    rvDelEvent(old.d, dts, opk).then(e => relayPublish(e, 7000, list, 1500)).then(k => {
+      if (!k) return;
+      const l2 = mlog(url), dels = rvDels(l2); dels[opk] = Math.max(num(dels[opk]), dts);
+      l2.revDels = Object.assign({}, dels); delete l2.revDel; delete l2.revDelPk; saveMlog();
+    }).catch(() => {});
+  }
   l.rev = { stars, text: t, at: ts, d: pub, id: ev.id, n, of: list.length, pk: ev.pubkey };   // (pk: the key that signed it; only that key's review is yours)
+  l.revBy = Object.assign({}, l.revBy && typeof l.revBy === 'object' ? l.revBy : {}, { [ev.pubkey]: l.rev });
   saveMlog();
-  return l.rev;
+  // an earlier review of yours under another key you can sign with: offered for deletion (it would read as a second person)
+  const other = rvAllMine(url).find(r => r.pk !== ev.pubkey && rvCanSign(r.pk));
+  return Object.assign({}, l.rev, { other: other ? other.pk : null });
 }
-async function rvDelete(url0) {
+// Delete: your reviews of this mint under every key of yours NUTCADE can sign with (only = one key: the offer after a publish)
+async function rvDelete(url0, only) {
   const url = acctUrl(url0);
   rvCan('del');
-  const old = rvMine(url); if (!old) return null;
+  const all = rvAllMine(url).map(r => Object.assign({}, r, { pk: idHex(r.pk) ? r.pk : seedPub() }));
+  const mine = all.filter(r => (only ? r.pk === only : true) && rvCanSign(r.pk)); if (!mine.length) { if (all.length && !only) throw keepErr(new Error("That was published under a Nostr identity you're not signed in with, so NUTCADE can't sign for it.")); return null; }
   const list = relays();
   if (rvDecoy()) return rvDecoyWait(rvNoDel(list.length));
-  const ts = Math.max(Math.floor(Date.now() / 1000), num(old.at));
-  const n = await relayPublish(rvDelEvent(old.d || '', ts), 7000, list, 1500);
-  if (!n) throw rvNoDel(list.length);
-  const l = mlog(url); delete l.rev; l.revDel = Math.max(l.revDelPk === old.pk ? num(l.revDel) : 0, ts); l.revDelPk = old.pk;
-  saveMlog();
-  return { n, of: list.length };
+  const ts = Math.max(Math.floor(Date.now() / 1000), ...mine.map(r => num(r.at)));
+  let first = 0;
+  for (const r of mine) {
+    const n = await relayPublish(await rvDelEvent(r.d || '', ts, r.pk), 7000, list, 1500);
+    if (!n) throw rvNoDel(list.length);
+    if (!first) first = n;
+    const l = mlog(url), dels = rvDels(l); dels[r.pk] = Math.max(num(dels[r.pk]), ts);   // (each key its own deletion)
+    l.revDels = Object.assign({}, dels); delete l.revDel; delete l.revDelPk;
+    if (l.rev && l.rev.pk === r.pk) delete l.rev;
+    if (l.revBy && l.revBy[r.pk]) { const b = Object.assign({}, l.revBy); delete b[r.pk]; l.revBy = b; }
+    saveMlog();
+  }
+  return { n: first, of: list.length, keys: mine.length };
 }
+// how many keys a Delete would cover now (the question says so when it is more than one)
+const rvDelKeys = url => rvAllMine(url).filter(r => rvCanSign(idHex(r.pk) ? r.pk : seedPub())).length;
 
 /* ---------- the review sheet ---------- */
 let rvSt = null;   // { url, stars, edit, ask, done }
@@ -128,9 +176,10 @@ function rvHTML(url) {
   const st = rvSt, own = rvMine(url), m = S.mints.find(x => acctUrl(x.url) === url) || { name: host(url) };
   const U = `data-url="${esc(url)}"`;
   const head = `<div><div class="h2 uname" data-noi18n>${esc(m.name)}</div><div class="tiny muted" data-noi18n style="overflow-wrap:anywhere">${esc(host(url))}</div></div>`;
-  if (st.ask && own) return head + `<div class="notice">Delete your review? NUTCADE asks your relays to delete it (NIP-09). A relay that ignores deletions may keep a copy.</div>
+  if (st.ask && own) return head + `<div class="notice">Delete your review? NUTCADE asks your relays to delete it (NIP-09). A relay that ignores deletions may keep a copy.</div>${rvDelKeys(url) > 1 ? '<div class="notice" id="rvBoth">This deletes your reviews of this mint under both of your keys. Deleting under both at once can publicly link the two keys.</div>' : ''}
     <button class="btn solid red block" data-act="rvDel" ${U}>Delete review</button><button class="btn block" data-act="rvBack" ${U}>Back</button><div id="sheetErr"></div>`;
-  const done = st.done && st.done.pub ? `<div class="notice cyan" id="rvResult">Published: ${st.done.n} of ${st.done.of} relays accepted it.</div>`
+  const offer = st.done && st.done.pub && st.done.other && rvAllMine(url).some(r => r.pk === st.done.other) ? `<div class="notice" id="rvOldOffer"><div>You also have an earlier review of this mint under your other key. Delete it? Deleting reviews under both keys at about the same time can publicly link the two keys.</div><button class="btn sm red" data-act="rvDelOld" data-pk="${esc(st.done.other)}" ${U}>Delete the earlier review</button></div>` : '';
+  const done = st.done && st.done.pub ? `<div class="notice cyan" id="rvResult">Published: ${st.done.n} of ${st.done.of} relays accepted it.</div>${offer}`
     : st.done && st.done.del ? `<div class="notice cyan" id="rvGone">Review deleted: ${st.done.n} of ${st.done.of} relays accepted the deletion.</div>` : '';
   const mine = own ? `<div class="panel" id="rvMine" style="gap:8px"><div class="row between"><span class="label">Your review</span><span data-noi18n data-rvstars style="color:var(--gold)" aria-label="${own.stars || 0}/5">${own.stars ? rvStarsTxt(own.stars) : ''}</span></div>
     ${own.text ? `<div data-noi18n data-rvtext style="overflow-wrap:anywhere">${esc(own.text)}</div>` : ''}

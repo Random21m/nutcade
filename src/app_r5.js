@@ -392,18 +392,20 @@ async function inspectMint(url0) {
 }
 // recommendations (kind 38000) and announcements (kind 38172) that name this mint. One rating per person (their newest
 // review; "[N/5]" with N from 1 to 5, as cashu.me reads it). Your own review (this wallet's Nostr key, its signature
-// checked) is kept apart, as `mine`, so the report card counts it once (app_review.js, rvMine); announcements with a good
+// checked; any key of yours: app_identity.js idKeys) is kept apart, one per key, as `mines` (`mine` its newest), never one at or before
+// that key's deletion, so the report card counts yours once (app_review.js, rvAllMine/rvMine); announcements with a good
 // signature are kept (at most 10) for the review's "a" tag.
 function nostrRecord(url) {
   return new Promise(resolve => {
-    const l = mlog(url), per = new Map(), anns = [], seen = new Set(); let since = 0, open = 0, finished = false, mine = null;
-    let me = null; try { me = S.seed ? L.nostrPub(nostrKey()) : null; } catch (e) {}
+    const l = mlog(url), per = new Map(), anns = [], seen = new Set(), mines = new Map(); let since = 0, open = 0, finished = false;
+    let me = null, keys = []; try { me = rvMe(); keys = rvKeys(); } catch (e) {}   // (every key of yours: app_identity.js)
     const variants = [...new Set([url, url + '/', url.replace(/^https:/, 'http:')])];
     const socks = [];
     const done = () => { if (finished) return; finished = true; socks.forEach(s => { try { s.close(); } catch (e) {} });
       const stars = [...per.values()].map(x => x.stars).filter(Boolean);
-      if (me !== rvMe()) { resolve(l.nostr); return; }   // (other 12 words meanwhile: this look was for the old key, nothing is kept)
-      l.nostr = { v: 2, at: Date.now(), recs: per.size, stars: stars.slice(0, 50), since: since || null, mine, anns, me }; saveMlog(); resolve(l.nostr); };
+      if (me !== rvMe()) { resolve(l.nostr); return; }   // (other 12 words or another identity meanwhile: this look was for the old keys, nothing is kept)
+      const ms = [...mines.values()].sort((a, b) => b.at - a.at);
+      l.nostr = { v: 2, at: Date.now(), recs: per.size, stars: stars.slice(0, 50), since: since || null, mine: ms[0] || null, mines: ms, anns, me }; saveMlog(); resolve(l.nostr); };
     for (const r of relays().slice(0, 4)) {
       let ws; try { ws = new WebSocket(r); } catch (e) { continue; }
       socks.push(ws); open++;
@@ -413,7 +415,9 @@ function nostrRecord(url) {
           if (!since || e.created_at * 1000 < since) since = e.created_at * 1000;
           const at = num(e.created_at);
           if (e.kind === 38000 && typeof e.pubkey === 'string') {
-            if (e.pubkey === me) { if ((!mine || at > mine.at) && rvSig(e)) { const p = rvParse(e.content); mine = { stars: p.stars, text: rvClean(p.text).slice(0, RV_MAX), at, d: rvD(e), id: e.id, relay: true, pk: e.pubkey }; } }
+            if (keys.includes(e.pubkey)) {   // (yours, under any key of yours: kept apart, one per key, never one at or before that key's deletion)
+              if (at > rvDelOf(l, e.pubkey) && (!mines.has(e.pubkey) || at > mines.get(e.pubkey).at) && rvSig(e)) { const p = rvParse(e.content); mines.set(e.pubkey, { stars: p.stars, text: rvClean(p.text).slice(0, RV_MAX), at, d: rvD(e), id: e.id, relay: true, pk: e.pubkey }); }
+            }
             else { const o = per.get(e.pubkey); if (!o || at > o.at) per.set(e.pubkey, { at, stars: rvParse(e.content).stars }); }
           } else if (e.kind === 38172 && anns.length < 10 && typeof e.pubkey === 'string' && rvSig(e)) anns.push({ pubkey: e.pubkey, d: rvD(e), relay: r, at }); }
         else if (d[0] === 'EOSE') { try { ws.close(); } catch (e) {} if (--open <= 0) done(); } };

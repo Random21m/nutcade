@@ -20,6 +20,11 @@ Run: python mock_nostr.py [port]   (default 3350)
   /.well-known/lnurlp/NAME, /lnurlp/NAME/cb LNURL-pay with zaps (LUD-06/16, NIP-57), set up with POST /test/lnurlp
   POST /test/profile                        publish a kind-0 profile (with lud16 / lud06) signed by a fresh key
   POST /test/nwc                            act as a Nostr Wallet Connect app (NIP-47, NIP-44 or NIP-04) talking to the wallet
+  POST /test/signer {connect, sign, delay}  a NIP-46 remote signer (kind 24133, NIP-44): answers requests sent to it on this
+                                            relay; returns its bunker:// link (relay wss://signer.test, which the tests point
+                                            here). connect: ok | badsecret | refuse | silent; sign: ok | slow | refuse | auth | authloop |
+                                            authjs | swap | wrongpub | wrongid | huge | silent. POST /test/signer/mode changes
+                                            them; GET /test/signer/log lists the requests it got (method, params)
 The LNURL services are reached by the tests as https://lnurl.test/... (Playwright forwards those requests here).
 Signatures are checked for real (BIP-340 via coincurve), so a wallet that signs wrongly fails.
 """
@@ -123,6 +128,7 @@ async def relay(ws: WebSocket):
                 log.append(('event', e['kind'], ok))
                 await ws.send_text(json.dumps(['OK', e.get('id'), ok, '' if ok else 'invalid: bad signature or older']))
                 if ok: await fanout(e)
+                if ok and e['kind'] == 24133: asyncio.create_task(signer_handle(e))
             elif m[0] == 'REQ':
                 sub, fs = m[1], m[2:]
                 reqs.append(fs); del reqs[:-300]
@@ -481,6 +487,84 @@ async def nwc_notes(request: Request):
             except Exception as x: out.append({'kind': r['kind'], 'error': str(x)})
     info = [r for r in events.values() if r['kind'] == 13194 and r['pubkey'] == wallet]
     return {'notes': out, 'info': info[-1] if info else None, 'client': me}
+
+
+
+# ---------------- a NIP-46 remote signer (bunker) ----------------
+signer = {}   # remote_sk, user_sk, secret, connect, sign, delay, log, clients
+
+@app.post('/test/signer')
+async def signer_new(request: Request):
+    b = await request.json()
+    signer.clear()
+    signer.update({'remote_sk': os.urandom(32).hex(), 'user_sk': os.urandom(32).hex(), 'secret': os.urandom(8).hex(), 'connect': b.get('connect', 'ok'),
+                   'sign': b.get('sign', 'ok'), 'delay': float(b.get('delay', 0)), 'getpk': b.get('getpk', ''), 'log': [], 'clients': []})
+    rp = xonly(signer['remote_sk'])
+    return {'bunker': f"bunker://{rp}?relay=wss://signer.test&secret={signer['secret']}", 'remote': rp, 'user': xonly(signer['user_sk']),
+            'user_sk': signer['user_sk'], 'secret': signer['secret']}
+
+@app.post('/test/signer/mode')
+async def signer_mode(request: Request):
+    b = await request.json()
+    for k in ('connect', 'sign', 'delay', 'getpk'):
+        if k in b: signer[k] = float(b[k]) if k == 'delay' else b[k]
+    return {k: signer.get(k) for k in ('connect', 'sign', 'delay')}
+
+@app.get('/test/signer/log')
+async def signer_log():
+    return {'log': signer.get('log', []), 'clients': signer.get('clients', [])}
+
+async def signer_send(client, body, created_at=None, sk=None):
+    sk = sk or signer['remote_sk']
+    e = sign_event(sk, 24133, [['p', client]], nip44_enc(json.dumps(body), conv_key(signer['remote_sk'], client)), created_at)
+    events[e['id']] = e; await fanout(e)
+
+async def signer_handle(e):
+    if not signer or not any(t[0] == 'p' and len(t) > 1 and t[1] == xonly(signer['remote_sk']) for t in e['tags']): return
+    client = e['pubkey']
+    try: req = json.loads(nip44_dec(e['content'], conv_key(signer['remote_sk'], client)))
+    except Exception as x:
+        signer['log'].append({'error': str(x)}); return
+    rid, method, params = req.get('id'), req.get('method'), req.get('params') or []
+    signer['log'].append({'method': method, 'params': params, 'client': client, 'id': rid})
+    if client not in signer['clients']: signer['clients'].append(client)
+    if signer['delay']: await asyncio.sleep(signer['delay'])
+    if method == 'connect':
+        md = signer['connect']
+        if md == 'silent': return
+        if md == 'refuse': return await signer_send(client, {'id': rid, 'result': '', 'error': 'connection <b>refused</b> by policy'})
+        if md == 'badsecret': return await signer_send(client, {'id': rid, 'result': 'not-the-secret-123', 'error': ''})
+        ok = len(params) >= 2 and params[0] == xonly(signer['remote_sk']) and params[1] == signer['secret']
+        return await signer_send(client, {'id': rid, 'result': 'ack' if ok else '', 'error': '' if ok else 'invalid secret'})
+    if method == 'get_public_key':   # (getpk "liar": names another npub than the one it signs with)
+        return await signer_send(client, {'id': rid, 'result': xonly(os.urandom(32).hex()) if signer.get('getpk') == 'liar' else xonly(signer['user_sk']), 'error': ''})
+    if method == 'ping':
+        return await signer_send(client, {'id': rid, 'result': 'pong', 'error': ''})
+    if method == 'sign_event':
+        md = signer['sign']
+        try: t = json.loads(params[0])
+        except Exception: return await signer_send(client, {'id': rid, 'result': '', 'error': 'bad event'})
+        def signed(sk=None, **over):
+            x = dict(kind=t['kind'], tags=t['tags'], content=t['content'], created_at=t['created_at']); x.update(over)
+            return sign_event(sk or signer['user_sk'], x['kind'], x['tags'], x['content'], x['created_at'])
+        if md == 'silent': return
+        if md == 'refuse': return await signer_send(client, {'id': rid, 'result': '', 'error': 'User said no <img src=x onerror="window.__pwned=1">'})
+        if md == 'slow': await asyncio.sleep(3)
+        if md in ('auth', 'authjs'):
+            url = 'https://signer.test/approve?req=1&x=<b>' if md == 'auth' else 'javascript:window.__pwned=1'
+            await signer_send(client, {'id': rid, 'result': 'auth_url', 'error': url})
+            if md == 'authjs': return
+            await asyncio.sleep(4)
+        if md == 'authloop':   # (asks for approval again and again, never signs)
+            for i in range(40):
+                await signer_send(client, {'id': rid, 'result': 'auth_url', 'error': f'https://signer.test/approve?n={i}'}); await asyncio.sleep(1)
+            return
+        if md == 'swap': return await signer_send(client, {'id': rid, 'result': json.dumps(signed(content='swapped by the signer')), 'error': ''})
+        if md == 'wrongpub': return await signer_send(client, {'id': rid, 'result': json.dumps(signed(sk=os.urandom(32).hex())), 'error': ''})
+        if md == 'wrongid': return await signer_send(client, {'id': 'x' + str(rid), 'result': json.dumps(signed()), 'error': ''})
+        if md == 'huge': return await signer_send(client, {'id': rid, 'result': json.dumps(signed()) + ' ' * 300000, 'error': ''})
+        return await signer_send(client, {'id': rid, 'result': json.dumps(signed()), 'error': ''})
+    await signer_send(client, {'id': rid, 'result': '', 'error': 'unknown method'})
 
 
 if __name__ == '__main__':
