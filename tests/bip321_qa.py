@@ -36,6 +36,10 @@ async def wallet(b, name, lang='en', width=390, fiat=False):
     if fiat: prefs.update({'fiat': True, 'currency': 'USD'})
     await ctx.add_init_script("window.__i18nMiss = new Set(); if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs'," + J(J(prefs)) + ")")
     pg = await ctx.new_page(); w = W(pg, name)
+    # the price service: a fixed $50,000 (CI has the network; a live price would override Nutcade.livePrice)
+    try: await ctx.route(re.compile(r'https://api(\.exchange)?\.coinbase\.com/.*'), lambda r: r.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': '*'}, body=json.dumps({'data': {'currency': 'BTC', 'rates': {'USD': '50000'}}})))
+    except Exception: pass
+    await ctx.route_web_socket(re.compile('coinbase'), lambda ws: None)
     pg.on('pageerror', lambda e: w.errs.append('PAGEERROR ' + str(e)))
     pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and not outside_net(m.text) and 'WebSocket' not in m.text else None)
     await pg.goto(URL); await pg.wait_for_timeout(700)
