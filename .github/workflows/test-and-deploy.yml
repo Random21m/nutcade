@@ -97,6 +97,8 @@ jobs:
             suites: review
           - name: signin
             suites: signin
+          - name: bip321
+            suites: bip321
           - name: lib
             suites: lib
     env:

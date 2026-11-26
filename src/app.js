@@ -2246,6 +2246,17 @@ function parseBtc(v) {
   const n = Number(w) * 1e8 + Number((m[2] || '').padEnd(8, '0'));
   return n > 0 && n <= MAX_SAT ? n : null;
 }
+/* The other way, for the bitcoin: links NUTCADE writes (the on-chain deposit QR, 1.38): whole SAT to BTC in string math,
+   never a float. 1 is 0.00000001, 2100 is 0.000021, 100000000 is 1: no trailing zeros, no exponent, no grouping, and
+   always '.', whatever the language. Anything but a whole SAT from 1 to MAX_SAT is null (no amount at all). parseBtc
+   reads every one back to the same SAT (tests/bip321_qa.py). */
+function satsToBtc(n) {
+  if (!Number.isSafeInteger(n) || n < 1 || n > MAX_SAT) return null;
+  const s = String(n).padStart(9, '0'), w = s.slice(0, -8), f = s.slice(-8).replace(/0+$/, '');
+  return f ? w + '.' + f : w;
+}
+// bitcoin:ADDRESS, with ?amount=BTC only for a valid amount (and only on a plain address, as a mint gives it)
+const btcUri = (addr, n) => { const a = satsToBtc(n); return 'bitcoin:' + addr + (a != null && !/[?#&]/.test(addr) ? '?amount=' + a : ''); };
 // your currency without grouping, with the language's decimal mark: 12,50 in German, 12.50 in English
 const fmtFiatPlain = (x, dp = 2) => Number(x).toLocaleString(numLocale(), { minimumFractionDigits: dp, maximumFractionDigits: dp, useGrouping: false });
 /* SAT, from an amount in your currency ("1234.56") at the live rate, in exact decimal arithmetic and rounded half
@@ -2817,7 +2828,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.37.0';
+const APP_VERSION = '1.38.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -3954,14 +3965,38 @@ function showInvoice(tx) {
     return () => { alive = false; document.removeEventListener('nutcade:paid', onPaid); };
   });
 }
+/* The address of an on-chain deposit (NUT-30). The optional amount (1.38) only goes into the QR code and the payment link
+   (bitcoin:ADDRESS?amount=BTC, BIP21/BIP321) as a hint for the payer's wallet: an on-chain deposit has no amount, the
+   mint credits whatever arrives. Nothing about it is kept; reopened from the history, the field is empty again. */
 function showAddress(tx) {
-  const q = S.quotes.find(x => x.quote === tx.quote);
+  const q = S.quotes.find(x => x.quote === tx.quote), plain = btcUri(tx.request);
+  const mi = methodInfo(S.mints.find(m => m.url === tx.mint), 'mint', 'onchain');
   setBody(`<div class="label" style="text-align:center">Send Bitcoin to</div>
-    ${qrBlock('bitcoin:' + tx.request, 'Bitcoin address QR')}
+    <div id="btcQR" data-uri="${esc(plain)}">${qrBlock(plain, 'Bitcoin address QR')}</div>
+    <div id="btcNote"></div>
     <div class="code">${esc(tx.request)}</div>
     <button class="btn block" data-act="copy" data-text="${esc(tx.request)}">Copy address</button>
+    <div id="btcLink"></div>
+    <div class="field">${amtField('btcAmt', 'Amount ({U}, optional)', '2100', 'sat')}</div>
+    <div id="btcErr"></div>
     <div class="notice">Ecash appears after the deposit confirms. You can close this; NUTCADE keeps checking while it's open.</div>
-    <div class="row" style="justify-content:center"><span class="spinner" id="payState">WATCHING THE CHAIN</span></div>`, () => {
+    <div class="row" style="justify-content:center"><span class="spinner" id="payState">WATCHING THE CHAIN</span></div>`, b => {
+    const el = b.querySelector('#btcAmt'); let shown = plain;
+    const redraw = () => {
+      if (!el.isConnected) return;
+      let n = 0, err = '';
+      try { n = satsOf(el); } catch (e) { err = e.message || String(e); }
+      if (!err && !n && String(el.value || '').trim()) err = 'Type at least 1 SAT, or leave the amount empty.';
+      else if (!err && n && mi && mi.min && n < mi.min) err = `This mint takes on-chain deposits of at least ${fmtU(mi.min, 'sat')} SAT.`;
+      else if (!err && n && mi && mi.max && n > mi.max) err = `This mint takes on-chain deposits of at most ${fmtU(mi.max, 'sat')} SAT.`;
+      const uri = err ? plain : btcUri(tx.request, n), box = b.querySelector('#btcQR');
+      if (box && uri !== shown) { shown = uri; box.dataset.uri = uri; box.innerHTML = qrBlock(uri, 'Bitcoin address QR'); }
+      const asked = uri !== plain;
+      b.querySelector('#btcNote').innerHTML = asked ? '<div class="tiny muted" style="text-align:center">The amount is only a request: the mint credits whatever actually arrives, and some wallets ignore it.</div>' : '';
+      b.querySelector('#btcLink').innerHTML = asked ? `<button class="btn block" data-act="copy" data-link data-text="${esc(uri)}">Copy payment link</button>` : '';
+      b.querySelector('#btcErr').innerHTML = err ? `<div class="notice red">${esc(err)}</div><div class="tiny muted">The QR code shows the address with no amount.</div>` : '';
+    };
+    if (el) { el.addEventListener('input', redraw); el.closest('.field').addEventListener('click', e => { if (e.target.closest('.unitbtn')) setTimeout(redraw, 0); }); }
     if (!q) return null; let alive = true;
     (async () => { while (alive) { try { const r = await checkQuote(q); if (r === 'paid') { if (alive) showDone('in', txById(tx.id).amount, 'On-chain'); return; } } catch (e) { } await sleep(15000); } })();
     return () => { alive = false; };
@@ -4924,7 +4959,7 @@ let pendingLink = null;
 function readHashLink() { try { const h = decodeURIComponent(location.hash || ''); const m = h.match(/(cashu[AB][A-Za-z0-9_\-+/=]{20,}|creqA[A-Za-z0-9_\-+/=]+|challenge=[A-Za-z0-9_-]{40,}(?:&r=r[01]\.[A-Za-z0-9_-]+)?|hunt=[0-9a-f]{64}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.[A-Za-z0-9_-]{40,46})/); if (m) { pendingLink = m[1]; history.replaceState(null, '', location.pathname + location.search); return true; } } catch (e) {} return false; }
 readHashLink();
 window.addEventListener('hashchange', () => { if (readHashLink()) refresh(); });   // a link opened while NUTCADE is already open
-window.Nutcade = { auth: authHooks, loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON }, storage: { health: () => ({ bad: saveBad(), keys: [...saveHealth.failed.keys()], told: saveHealth.told }), pct: () => usePct(), bytes: () => useBytes(), check: () => useCheck(), level: () => useLevel } };
+window.Nutcade = { btc: { fmt: satsToBtc, uri: btcUri }, auth: authHooks, loadCard, render, refresh, S, toast, parseSat, parseFiat, parseBtc, parseCount, btcAddr, fiatToSats, holdToasts, tr, fmtDate, fmtEn, locale: () => numLocale(), logoSVG, sfx, openSheet, closeSheet, esc, fmt, livePrice, celebrate, classify, handleScan, vault, live, startChallenge, challengeDone, sendResult, canChallenge: () => !!(S.seed && S.seed.backedUp), soundBytes, soundText, health, piggySaved, r7: { decodeBolt11, meltCost, meltCostNow: async (u, a, r) => { await getWallet(u); return meltCost(u, a, r); }, sharedX: (sk, pub) => hex(SECP.sharedX(sk, pub)), isBlocked, nwcLive, nwcListen, wdUsed, nwcSince: () => nwcSince }, r8: { spentDay: () => limitUsed(), limitLeft: () => limitLeft(), sendEcash: (a, n, l, u, o) => sendEcash(a, n, l, u || S.active, o), refundExpired: () => refundExpiredGifts(), importBackup: d => importBackup(d), newRequest: (a, m) => newRequest(a, m), backupData: () => backupData(), mintMax: u => mintMax(u), lateCheck: (u, f) => lateCheck(u, f), lateGap: a => lateGap(a), moveQuote: (f, t, a) => moveQuote(f, t, a), recv: (t, n, o) => receiveToken(t, n, o || {}), hold: (t, n, x) => { const h = holdIncoming(t, n); if (x) updTx(h.id, x); return h; } }, r9: { status: u => (ksMint(u) || {}).ks || null, check: (u, o) => ksCheck(u, o || { manual: true }), soon: KS_SOON }, storage: { health: () => ({ bad: saveBad(), keys: [...saveHealth.failed.keys()], told: saveHealth.told }), pct: () => usePct(), bytes: () => useBytes(), check: () => useCheck(), level: () => useLevel } };
 window.Nutcade.bk = { cap: () => phoneCapCheck(), rec: () => pbRec(), fetch: () => phoneFetch(), lock: (t, p) => lockBackup(t, p), unlock: (d, p) => unlockBackup(d, p), extras: d => importExtras(d) };
 window.Nutcade.dq = { check: t => offlineCheck(t), line: t => checkLine(t), ok: (p, A) => DQ.proofOk(p, A), h2c: m => DQ.unc(DQ.hashToCurve(new TextEncoder().encode(m))), ptText: t => ptText({ token: t }), slim: t => slimToken(t) };
 window.Nutcade.lk = { of: s => lockOf(s), req: pr => reqLock(pr), ys: (w, s, ids) => ysOf(w, s, ids), wallet: u => getWallet(u), heir: (p, from) => onExtraLife(p, from), takeBack: t => takeBackGift(t) };   // (NUTCADE's own lock reading, tests/lib_qa.py)
