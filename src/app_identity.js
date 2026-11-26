@@ -32,7 +32,7 @@
    The duress PIN's wallet has no identity: nothing shown or used, and signing in there answers like a signer that doesn't
    answer, keeps nothing and asks no signer. */
 const ID_MS = 45000, ID_AUTH_MS = 180000, ID_AUTH_MAX = 3, ID_REPLY_MAX = 100000, ID_OLD_MAX = 3, ID_LINK_MAX = 1000;
-const ID_PERMS = 'sign_event:1,sign_event:5,sign_event:9734,sign_event:10019,sign_event:38000';
+const ID_PERMS = 'sign_event:1,sign_event:5,sign_event:9734,sign_event:10019,sign_event:27235,sign_event:38000';   // (every kind idSign / idProve asks for: the daily note, deletions, zap requests, nutzap info, the sign-in check, reviews)
 const idMs = () => { const t = window.__nutcadeTest; return t && Number(t.idMs) > 0 ? Number(t.idMs) : ID_MS; };
 const idAuthMs = () => { const t = window.__nutcadeTest; return t && Number(t.idMs) > 0 ? 2 * Number(t.idMs) : ID_AUTH_MS; };   // (also the most one request may take in all, from when it was first sent)
 const idHex = v => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
@@ -75,11 +75,11 @@ function idKeys() {
 /* ---------- errors (each a sentence in your language; what the signer itself said is shown small, as text) ---------- */
 const idText = v => clipText(String(v == null ? '' : v), 200).trim();
 const idLate = () => Object.assign(keepErr(new Error("Your signer didn't answer in time. Nothing was sent. Check it and try again.")), { idLate: true });
-const idSaidNo = why => serviceErr('Your signer said no. Nothing was sent.', idText(why && typeof why === 'object' ? why.message : why) || null);
+const idSaidNo = why => Object.assign(serviceErr('Your signer said no. Nothing was sent.', idText(why && typeof why === 'object' ? why.message : why) || null), { said: true });
 const idSwap = () => keepErr(new Error('Your signer returned a different event from the one NUTCADE asked it to sign, so it was not used. Nothing was sent.'));
 const idBadReply = () => keepErr(new Error("Your signer's answer can't be read. Nothing was sent."));
 const idNoRelay = () => keepErr(new Error("Couldn't reach your signer's relays. Nothing was sent. Check your connection and try again."));
-const idOffline = () => keepErr(new Error("You're offline. Your Nostr identity needs a connection. Nothing was sent."));
+const idOffline = () => Object.assign(keepErr(new Error("You're offline. Your Nostr identity needs a connection. Nothing was sent.")), { offline: true });
 const idNoExt = () => keepErr(new Error("Your browser extension isn't available here, so nothing can be signed with your Nostr identity. Nothing was sent. Open NUTCADE where the extension is installed, or sign out in Settings."));
 const idGone = () => Object.assign(keepErr(new Error('Your Nostr identity changed while it was being signed. Nothing was sent.')), { gone: true });
 const idTwice = () => keepErr(new Error("You're already signed in with a Nostr identity. Sign out first, then connect another one."));
@@ -148,7 +148,7 @@ async function id07Sign(t) {
 const idNoProof = () => keepErr(new Error("Your signer couldn't prove it holds the key it named, so NUTCADE didn't sign in."));
 async function idProve(signFn, pub) {
   const t = { kind: 27235, created_at: Math.floor(Date.now() / 1000), tags: [], content: 'nutcade sign-in check ' + hex(rnd(16)) };   // (no "u" tag: useless as a NIP-98 login anywhere)
-  let ev; try { ev = await signFn(t); } catch (e) { if (e && (e.idLate || e.gone)) throw e; throw idNoProof(); }
+  let ev; try { ev = await signFn(t); } catch (e) { if (e && (e.idLate || e.gone || e.said || e.offline || e.paused)) throw e; throw idNoProof(); }   // (a refusal is shown as the signer's own words; a wrong key as idNoProof)
   try { idCheck(ev, t, pub); } catch (e) { throw idNoProof(); }
 }
 
@@ -371,7 +371,7 @@ const idTexts = () => ['Nostr identity', 'Your public Nostr posts (your nutzap i
   'Your Nostr identity changed while it was being signed. Nothing was sent.', "Your signer couldn't prove it holds the key it named, so NUTCADE didn't sign in.", "You're already signed in with a Nostr identity. Sign out first, then connect another one.",
   "Your nutzaps are on: signing in publishes your nutzap info under your identity with the same receiving key as now, so anyone can link your identity to this wallet's own Nostr key.",
   "Another wallet already published nutzap info for your Nostr identity. Replace it with NUTCADE's? Nutzaps sent to this npub would then come to NUTCADE instead of the other wallet.",
-  "Replace with NUTCADE's", 'NOT PUBLISHED', 'Try again', "The nutzap info under this identity now belongs to another wallet, so NUTCADE left it as it is. Nothing was sent.",
+  "Replace with NUTCADE's", 'That is the nutzap info in use now, so NUTCADE left it published.', 'NOT PUBLISHED', 'Try again', "The nutzap info under this identity now belongs to another wallet, so NUTCADE left it as it is. Nothing was sent.",
   'You also have an earlier review of this mint under your other key. Delete it? Deleting reviews under both keys at about the same time can publicly link the two keys.', 'Delete the earlier review', 'Earlier review deleted',
   'This deletes your reviews of this mint under both of your keys. Deleting under both at once can publicly link the two keys.', ID_E_LINK, ID_E_RELAY, ID_E_NSEC, ID_E_NC, "Your browser extension gave a key NUTCADE can't read.",
   "Your signer's answer didn't match the secret in the link, so NUTCADE didn't connect. Make a new bunker:// link in your signer app and try again.",

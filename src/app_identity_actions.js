@@ -1,6 +1,11 @@
 /* Your own Nostr identity: actions (src/app_identity.js) */
 Object.assign(A, {
-  idExt: b => run(b, 'WAITING FOR YOUR SIGNER', async () => { sfx('select'); await idSignInExt(); sfx('coin'); toast('Signed in', 'lime'); refresh(); }),
+  idExt: b => run(b, 'WAITING FOR YOUR SIGNER', async () => {
+    sfx('select');
+    try { await idSignInExt(); }
+    catch (e) { if (e && e.raw) { sfx('err'); openSheet('Nostr identity', errHTML(e) + '<button class="btn block" data-act="close">Close</button>'); return; } throw e; }   // (the signer's own words, as text, under our sentence)
+    sfx('coin'); toast('Signed in', 'lime'); refresh();
+  }),
   idBunker: () => { sfx('select'); openIdBunker(); },
   idScan: () => openScanner("Point at your signer's bunker:// QR code."),
   idConnect: b => run(b, 'WAITING FOR YOUR SIGNER', async () => {

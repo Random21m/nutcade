@@ -4928,8 +4928,8 @@ window.Nutcade = { auth: authHooks, loadCard, render, refresh, S, toast, parseSa
 window.Nutcade.bk = { cap: () => phoneCapCheck(), rec: () => pbRec(), fetch: () => phoneFetch(), lock: (t, p) => lockBackup(t, p), unlock: (d, p) => unlockBackup(d, p), extras: d => importExtras(d) };
 window.Nutcade.dq = { check: t => offlineCheck(t), line: t => checkLine(t), ok: (p, A) => DQ.proofOk(p, A), h2c: m => DQ.unc(DQ.hashToCurve(new TextEncoder().encode(m))), ptText: t => ptText({ token: t }), slim: t => slimToken(t) };
 window.Nutcade.lk = { of: s => lockOf(s), req: pr => reqLock(pr), ys: (w, s, ids) => ysOf(w, s, ids), wallet: u => getWallet(u), heir: (p, from) => onExtraLife(p, from), takeBack: t => takeBackGift(t) };   // (NUTCADE's own lock reading, tests/lib_qa.py)
-window.Nutcade.rv = window.NutReview;
-window.Nutcade.tick = () => backgroundTick();   // (the background round, for tests/signin_qa.py)   // (mint reviews: src/app_review.js)
+window.Nutcade.rv = window.NutReview;   // (mint reviews: src/app_review.js)
+window.Nutcade.tick = () => backgroundTick();   // (the background round, for tests/signin_qa.py)
 window.Nutcade.bt = { max: u => btMax(u), offClear: () => bt.off.clear(), skipped: id => bt.skip.has(id) };   // (batched deposits: src/app_batch.js)
 window.Nutcade.mr = { radar, parse: radarParse, ensure: radarEnsure, bkSent: () => Object.keys(bkSettings()), bkAllowed: () => Object.keys(BK_SET) };
 setLang();
