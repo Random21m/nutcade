@@ -579,6 +579,61 @@ async def main():
             await rx.pg.context.close()
         await section('rv2', rv2)
 
+        async def fix1():
+            # a review after the mint's pubkey changed: no automatic deletion by the other key of yours (it would link them)
+            rp = await wallet(b, 'si-fix1'); await rp.create(); await rp.add_mint(M); await rp.use(M)
+            skR, pkR = await keypair(rp); SP = await rp.ev("__seedPub()")
+            await ext_mode(rp, 'honest', skR, reload=True)
+            e = await review(rp, 3, 'seed, old mint key')
+            OLDD = 'ab' * 32
+            await rp.ev(f"(()=>{{ const l = Nutcade.S.mintlog[{J(M)}]; l.rev.d = {J(OLDD)}; if (l.revBy) for (const k in l.revBy) l.revBy[k].d = {J(OLDD)}; }})()")
+            await sign_in_ext(rp); e2 = await review(rp, 4, 'identity, new mint key'); await rp.wait(2500)
+            k5 = [x for x in evs(5, SP) if ['a', f'38000:{SP}:{OLDD}'] in x['tags']]
+            check('rvpk: a review under the identity after the mint changed its key sends no automatic deletion by the 12-word key (that would link the keys)', not e and not e2 and not k5, (e, e2, len(k5)))
+            check('rvpk: ...the earlier review is offered for deletion instead, with the linking warning', await rp.ev("!!document.querySelector('#layer #rvOldOffer [data-act=rvDelOld]')") and 'link' in (await rp.ev("(document.querySelector('#rvOldOffer')||{}).innerText||''")).lower())
+            await rp.click('#layer #rvOldOffer [data-act=rvDelOld]')
+            await rp.until("!document.querySelector('#layer #rvOldOffer [data-act=rvDelOld]')", 12000); await rp.wait(400)
+            k5 = [x for x in evs(5, SP) if ['a', f'38000:{SP}:{OLDD}'] in x['tags']]
+            dels = await rp.ev(f"(Nutcade.S.mintlog[{J(M)}].revDels || {{}})")
+            check('rvpk: accepting it deletes the old review by the 12-word key, and that deletion is kept (no offer again)', k5 and SP in dels and await rp.ev(f"NutReview.mine({J(M)}).pk") == pkR, (len(k5), dels))
+            # the same key: the old review (other d) is deleted automatically, dated before the new one, and the deletion kept
+            await sign_out(rp)
+            e = await review(rp, 2, 'seed again'); OLD2 = 'cd' * 32
+            await rp.ev(f"(()=>{{ const l = Nutcade.S.mintlog[{J(M)}]; l.rev.d = {J(OLD2)}; if (l.revBy) for (const k in l.revBy) if (k === {J(SP)}) l.revBy[k].d = {J(OLD2)}; }})()")
+            e2 = await review(rp, 5, 'seed, new mint key'); await rp.wait(2500)
+            nv = [x for x in evs(38000, SP) if x['content'] == '[5/5] seed, new mint key']
+            k5 = [x for x in evs(5, SP) if ['a', f'38000:{SP}:{OLD2}'] in x['tags']]
+            dels = await rp.ev(f"(Nutcade.S.mintlog[{J(M)}].revDels || {{}})"); mine = await rp.ev(f"NutReview.mine({J(M)})")
+            check('rvpk: same key, mint key changed: the old review is deleted by that key, dated before the new review, the deletion kept, the new review still yours', not e and not e2 and nv and k5 and k5[-1]['created_at'] < nv[-1]['created_at'] and dels.get(SP) == k5[-1]['created_at'] and mine and mine['stars'] == 5, (len(nv), len(k5), dels, mine))
+            await rp.pg.context.close()
+            # other 12 words while the extension sign-in is on its way: the sign-in ends, nothing kept
+            sx = await wallet(b, 'si-fix1b'); await sx.create(); await sx.add_mint(M)
+            skS, pkS = await keypair(sx); await ext_mode(sx, 'slow', skS, reload=True)
+            await settings(sx)
+            await sx.ev("(()=>{ window.__x = null; NutId.ext().then(()=>'in', e=>e.message).then(v=>{ window.__x = v; }); })()")
+            await sx.ev("(()=>{const b=document.createElement('button'); b.dataset.act='newSeedAsk'; document.querySelector('#app').appendChild(b); b.click(); b.remove()})()"); await sx.until("!!document.querySelector('#confirmWord')", 8000)
+            await sx.fill('#confirmWord', 'NEW'); await sx.click('[data-act=doNewSeed]')
+            await sx.until("typeof window.__x === 'string'", 15000); await sx.wait(300)
+            check('extseed: new 12 words while the extension sign-in waits: the sign-in ends, nothing kept', await sx.ev("window.__x") != 'in' and not await sx.ev("NutId.active()") and 'nutcade:nid' not in await sx.ev("JSON.stringify(localStorage)"), (await sx.ev("window.__x"), await sx.ev("NutId.active()")))
+            await sx.pg.context.close()
+            # the zap sheet: signed in or out after it opened: said again, nothing sent
+            zw = await wallet(b, 'si-fix1z'); await zw.create(); await zw.add_mint(M); await zw.use(M); await zw.receive_ln(200)
+            skZ, pkZ = await keypair(zw); ZS = await zw.ev("__seedPub()"); await ext_mode(zw, 'honest', skZ, reload=True); await sign_in_ext(zw)
+            post('/test/lnurlp', {'name': 'zee', 'zap': True}); pz = post('/test/profile', {'name': 'zee', 'lud16': 'zee@lnurl.test'})
+            await zw.home(); await zw.click('[data-act=send]'); await zw.wait(150); await zw.click('[data-act=sendMethod][data-m=ln]'); await zw.wait(100)
+            await zw.fill('#destIn', pz['npub']); await zw.click('[data-act=doMeltQuote]'); await zw.until("!!document.querySelector('[data-act=zapQuote]')", 12000)
+            t0 = await zw.ev("(document.querySelector('#zapWho')||{}).innerText||''")
+            await zw.ev("NutId.out()"); nz = len(state()['zaps'])
+            await zw.fill('#amtIn', '21'); await zw.click('[data-act=zapQuote]'); await zw.wait(800)
+            e = await zw.err(); t1 = await zw.ev("(document.querySelector('#zapWho')||{}).innerText||''")
+            check('zapwho: signed out after the zap sheet opened: Zap sends nothing and says so, the sheet now names the wallet\'s key', 'identity' in t0.lower() and 'changed' in e.lower() and len(state()['zaps']) == nz and "wallet's nostr key" in t1.lower(), (t0[:60], e, len(state()['zaps']) - nz, t1[:60]))
+            await zw.ev("(()=>{ const x = document.querySelector('#sheetErr'); if (x) x.innerHTML = ''; })()"); await zw.click('[data-act=zapQuote]')
+            await zw.until("!!document.querySelector('#payBtn') || !!(document.querySelector('#sheetErr')||{}).innerText", 15000)
+            z = state()['zaps'][nz:]
+            check('zapwho: tapping Zap again sends it, signed by the key the sheet names (the 12-word key)', z and z[-1]['valid'] and z[-1]['event']['pubkey'] == ZS, z[-1:] and z[-1]['event'].get('pubkey'))
+            await zw.pg.context.close()
+        await section('fix1', fix1)
+
         async def abort():
             ab = await wallet(b, 'si-abort'); await ab.create(); await ab.add_mint(M); await ab.use(M)
             await nz_on(ab); SP = await ab.ev("__seedPub()"); sk5, pk5 = await keypair(ab)
