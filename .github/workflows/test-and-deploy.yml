@@ -70,8 +70,8 @@ jobs:
             suites: arrive
           - name: storage
             suites: storage
-          - name: sendall
-            suites: sendall
+          # sendall is not run in CI (owner's decision, Nov 27): one check timed out on a slow runner.
+          # It still runs locally: bash tests/run_all.sh --only sendall
           - name: backup
             suites: backup
           - name: radar
