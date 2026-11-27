@@ -10,7 +10,7 @@
 # 1. gets main from GitHub and reads the version on the page
 # 2. downloads the live SHA256SUMS.txt and checks every file in it is the one in main (so the site is this release)
 # 3. shows you the checksums and, after you type yes (RELEASE_YES=1: already said), signs SHA256SUMS.txt with your key (gpg asks for its passphrase itself)
-# 4. makes the GitHub release vX: the notes (from the notebook, releases/nutcade/nutcade-vX-notes.md), SHA256SUMS.txt and its signature
+# 4. makes the GitHub release vX: the notes (the checksums, signed with the release key), SHA256SUMS.txt and its signature
 # 5. downloads the release again and checks the files, the signature and the tag
 #
 # Your private key never leaves this computer, and this script never sees its passphrase. Every step checks before it acts and
@@ -22,7 +22,6 @@ FPR=${NC_SIGNING_FPR:-$RELEASE_KEY}
 REPO=${NC_REPO:-Random21m/nutcade}
 REMOTE=${NC_REMOTE:-origin}
 SITE=${NC_SITE:-https://random21m.github.io/nutcade}
-NOTES_REPO=${NC_NOTES_REPO:-Random21m/second-brain}
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32mOK\033[0m  %s\n' "$*"; }
@@ -92,12 +91,8 @@ gpg --status-fd 1 --verify "$D/SHA256SUMS.txt.asc" "$D/SHA256SUMS.txt" 2>/dev/nu
 ok "SHA256SUMS.txt.asc is a good signature by $FPR"
 
 say "4/5  Making the GitHub release $TAG"
-if gh api -H "Accept: application/vnd.github.raw" "repos/$NOTES_REPO/contents/releases/nutcade/nutcade-$TAG-notes.md" > "$D/notes.md" 2>/dev/null && [ -s "$D/notes.md" ]; then
-  ok "notes: releases/nutcade/nutcade-$TAG-notes.md from the notebook"
-else
-  { printf 'NUTCADE %s\n\nChecksums (SHA256SUMS.txt, signed with the release key %s):\n```\n' "$TAG" "$FPR"; cat "$D/SHA256SUMS.txt"; printf '```\n'; } > "$D/notes.md"
-  ok "notes: no notes file in the notebook for $TAG, so the notes are the checksums only (edit them on GitHub later if you like)"
-fi
+{ printf 'NUTCADE %s\n\nChecksums (SHA256SUMS.txt, signed with the release key %s):\n```\n' "$TAG" "$FPR"; cat "$D/SHA256SUMS.txt"; printf '```\n'; } > "$D/notes.md"
+ok "notes: the checksums, signed with the release key (edit them on GitHub later if you like)"
 gh release create "$TAG" -R "$REPO" --target "$M" --title "NUTCADE $TAG" --notes-file "$D/notes.md" "$D/SHA256SUMS.txt" "$D/SHA256SUMS.txt.asc" >/dev/null
 ok "released: https://github.com/$REPO/releases/tag/$TAG"
 

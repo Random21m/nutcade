@@ -229,6 +229,20 @@ async def main():
             check('themes: no script errors', not w.errs, w.errs[:3]); await w.pg.context.close()
         await section('themes', themes)
 
+        # ---------- the amount arrow's x (1.41): 22 px with Readable text on and off, at three widths ----------
+        async def arrx():
+            for on_ in (False, True):
+                w = await wallet(b, 'arrx-' + ('on' if on_ else 'off'), on=on_)
+                await w.ev("""(() => { let st = document.getElementById('arrStack'); if (!st) { st = document.createElement('div'); st.id = 'arrStack'; st.className = 'arr-stack'; document.body.appendChild(st); }
+                  st.innerHTML = '<div class="arr-card" data-type="live"><div class="arr-row"><span class="arr-ico">\u2193</span><span class="arr-big">+1,000 SAT</span><span class="arr-sp"></span><button type="button" class="arr-x" data-act="arrClose" aria-label="Dismiss">\u00d7</button></div></div>'; })()""")
+                got = {}
+                for vw in (320, 375, 414):
+                    await w.pg.set_viewport_size({'width': vw, 'height': 667}); await frames(w)
+                    got[vw] = await w.ev("getComputedStyle(document.querySelector('.arr-x')).fontSize")
+                check(f'arr-x: the amount arrow\'s x is 22px at 320, 375 and 414 px with Readable text {"on" if on_ else "off"}', set(got.values()) == {'22px'} and await w.ev("document.documentElement.classList.contains('readable')") == on_, got)
+                await w.pg.context.close()
+        await section('arrx', arrx)
+
         # ---------- the label and hint in every language ----------
         async def labels():
             for lang in LANGS:

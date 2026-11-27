@@ -39,25 +39,23 @@ MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh
 MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh --only r7,r8
 ```
 
-## Cutting a release (one paste)
+## Cutting a release
 
-1. Claude pushes the change to `main` with your OK, and the workflow passes: the site then serves the new version and its
+1. Claude merges the change to `main` with your OK, and the workflow passes: the site then serves the new version and its
    `SHA256SUMS.txt`.
-2. On your own computer, in any terminal, paste this one line (the same line for every project):
+2. On your own computer, run:
 
    ```bash
-   bash <(gh api -H "Accept: application/vnd.github.raw" repos/Random21m/second-brain/contents/how-to/release-kit/release-all.sh)
+   cd ~/nutcade && git pull && bash tools/release.sh
    ```
 
-   It finds every project whose new version is live but not released, and for each runs `tools/release.sh` from main. Here it
-   checks main's page version and that every file in the live `SHA256SUMS.txt` is the one in main, signs them with the release
-   key (gpg asks for the key's passphrase, if it has one; the key never leaves your computer), makes the GitHub release with
-   the notes from the notebook (`releases/nutcade/nutcade-vX.Y.Z-notes.md`, or the checksums alone if there is none), and
-   checks the files, the signature and the tag. It stops at the first thing that does not match.
+   It checks main's page version and that every file in the live `SHA256SUMS.txt` is the one in main, signs them with the
+   release key (gpg asks for the key's passphrase, if it has one; the key never leaves your computer), makes the GitHub
+   release, and checks the files, the signature and the tag. It stops at the first thing that does not match.
 
-By hand, in this clone: `bash tools/release.sh` (it reads the version from main). Needs git, gpg, curl and the GitHub CLI
-(`gh auth login` once). The script is tested with a throwaway key and stand-ins for GitHub and the site:
-`bash tests/release_script_test.sh`.
+The release notes are the checksums themselves (`SHA256SUMS.txt`, signed with the release key). The script needs git, gpg, curl
+and the GitHub CLI (`gh auth login` once), and it reads the version from main. It is tested with a throwaway key and stand-ins
+for GitHub and the site: `bash tests/release_script_test.sh`.
 
 ## Signing by hand (if you cannot run the script)
 
