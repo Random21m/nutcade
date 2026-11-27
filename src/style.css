@@ -548,7 +548,7 @@ body{overflow-wrap:break-word;hyphens:manual}
 .boss > *{max-width:100%;min-width:0}
 .mid,.tx .meta > span{min-width:0}
 /* two-line pixel-font labels get room between their lines */
-.cab .nm,.sub,.cash-today,.hunt-big,.boss-name,.pb-h,.pin-title,.cont-q,.tape-win b,.hunt-card .hc-top b,.hunt-card .hc-prize,.chal-card span:last-child,.empty-state b,.health,.hp{line-height:1.5}
+.cab .nm,.sub,.cash-today,.hunt-big,.boss-name,.pb-h,.pin-title,.cont-q,.tape-win b,.chal-card span:last-child,.empty-state b,.health,.hp{line-height:1.5}
 .nowrap{white-space:nowrap}
 .tx .amt.wide{grid-column:2 / -1;justify-self:end;max-width:100%}
 .credit-num small{font-size:max(.38em,9px)}.cash-amt small{font-size:max(.32em,9px)}
@@ -689,26 +689,37 @@ html.readable .marquee,html.readable .h2,html.readable .sheet-head h3,html.reada
 html.readable :is(.marquee,.game-view,.cab,.continue-box,.pt-preview,.pt-card,.stick,.initials,.tape-win){font-family:var(--f-pixel-body)}
 /* text: a bigger size than the pixel fonts' tiny steps, a calmer line height, no letter spacing meant for pixel type */
 html.readable body{font-size:1.25rem;line-height:1.4}
-html.readable button,html.readable input,html.readable textarea,html.readable select{font-family:var(--f-sys)}
-html.readable .game-view button,html.readable .game-view input,html.readable .cab,html.readable .abtn,html.readable .dpad button,html.readable .initials input{font-family:var(--f-pixel)}
-html.readable :is(.label,.sub,.btn,.field label,.flabel,.seg button,.tab,.chip,.unitbtn,.tl,.empty-state b,.netbanner,.steps span,.pin-title,.linkbtn,.health,.cash-today,.cash-title,.ck){letter-spacing:0}
+html.readable button:not(.game-view *):not(.cab *):not(.game-view):not(.cab),html.readable input:not(.game-view *):not(.cab *):not(.game-view):not(.cab),html.readable textarea:not(.game-view *):not(.cab *):not(.game-view):not(.cab),html.readable select:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-family:var(--f-sys)}
+html.readable :is(.label,.sub,.btn,.field label,.flabel,.seg button,.tab,.chip,.unitbtn,.tl,.empty-state b,.netbanner,.steps span,.pin-title,.linkbtn,.health,.cash-today,.cash-title,.ck):not(.game-view *):not(.cab *):not(.game-view):not(.cab){letter-spacing:0}
 /* the smallest pixel-font steps (9 to 11 px) */
-html.readable :is(.label,.sub,.btn,.btn.sm,.field label,.flabel,.seg button,.seg.three button,.unitbtn,.netbanner,.steps span,.pc-live,.pc-seg button,.pc-msg,.pc-tip b,.scan-msg,.hp,.hits,.pip,.health,.chip.grade,.rg.word,.ks-line .ks-h,.pt-row .pt-st,.push .t,.empty-state b,.cash-method button,.cash-charge,.cash-today,.chal-card span:last-child,.hunt-card .hc-top b,.hunt-card .hc-prize,.tx .amt,.pt-presets button,.x,.arr-total){font-size:.9375rem}
-html.readable .tab{font-size:min(.8125rem,3.3vw);gap:4px;padding-inline:0}
-html.readable .tx .ico{font-size:1rem}
-html.readable .btn,html.readable .cash-charge{font-weight:600}
-html.readable :is(.label,.sub){text-transform:none;font-weight:600}
+html.readable :is(.label,.sub,.btn,.btn.sm,.field label,.flabel,.seg button,.seg.three button,.unitbtn,.netbanner,.steps span,.pc-live,.pc-seg button,.pc-msg,.pc-tip b,.scan-msg,.hp,.hits,.pip,.health,.chip.grade,.rg.word,.ks-line .ks-h,.pt-row .pt-st,.push .t,.empty-state b,.cash-method button,.cash-charge,.cash-today,.chal-card span:last-child,.tx .amt,.pt-presets button,.x,.arr-total):not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:.9375rem}
+html.readable .tab:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:min(.8125rem,3.3vw);gap:4px;padding-inline:0}
+html.readable .tx .ico:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:1rem}
+html.readable .btn:not(.game-view *):not(.cab *):not(.game-view):not(.cab),html.readable .cash-charge:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-weight:600}
+html.readable :is(.label,.sub):not(.game-view *):not(.cab *):not(.game-view):not(.cab){text-transform:none;font-weight:600}
 /* medium display sizes (12 to 16 px) and the body font's sizes (16 to 24 px) */
-html.readable :is(.tx .meta,.th,.tiny,.pad-keys,.legend,.hunt-card .hc-note,.hunt-card .hc-foot,.hunt-card .hc-top span,.pc-tip,.pc-src,.pc-chg,.cab-none,.notice .raw,.tag span,.pt-fiat,.arr-note,.arr-card,.arr-n,.sheet .pinpad .th,.lim-sheet .lim-msg,.lim-sheet .th,.toast,.mint-pill,.chip,.set-index .chip,.tag){font-size:1.0625rem}
-html.readable :is(.kv,.notice,.ack,.toggle,.pt-row,.help summary,.help-a,ol.steps,details.adv summary,.boss-memo,.split-share,.cash-label,.pin-err,.arr-x){font-size:1.125rem}
-html.readable :is(.inp,textarea.inp,select.inp,.inp.amount){font-size:1.25rem}
-html.readable .inp.amount::placeholder{font-size:1.125rem;font-family:var(--f-sys)}
-html.readable .pin-k{font-size:1.5rem}
-html.readable .pin-title{font-size:1.125rem}
-html.readable .push .cap{font-size:1.375rem}
-html.readable .credit-num{font-size:clamp(1.75rem,9vw,2.75rem);font-weight:700;font-variant-numeric:tabular-nums}
-html.readable .cash-amt{font-weight:700}
-html.readable .spinner{font-size:.9375rem!important}   /* (one has an inline 11px)  */
-html.readable .credit-num small{font-size:max(.45em,.875rem)}
-html.readable .seg button{white-space:normal;line-height:1.2;padding:6px 4px}
-html.readable :is(.btn,.seg button,.chip,.unitbtn,.linkbtn){overflow-wrap:anywhere;hyphens:auto;max-width:100%}
+html.readable :is(.tx .meta,.th,.tiny,.pad-keys,.legend,.pc-tip,.pc-src,.pc-chg,.cab-none,.notice .raw,.tag span,.pt-fiat,.arr-note,.arr-card,.arr-n,.sheet .pinpad .th,.lim-sheet .lim-msg,.lim-sheet .th,.toast,.mint-pill,.chip,.set-index .chip,.tag):not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:1.0625rem}
+html.readable :is(.kv,.notice,.ack,.toggle,.pt-row,.help summary,.help-a,ol.steps,details.adv summary,.boss-memo,.split-share,.cash-label,.pin-err,.arr-x):not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:1.125rem}
+html.readable :is(.inp,textarea.inp,select.inp,.inp.amount):not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:1.25rem}
+html.readable .inp.amount:not(.game-view *):not(.cab *)::placeholder{font-size:1.125rem;font-family:var(--f-sys)}
+html.readable .pin-k:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:1.5rem}
+html.readable .pin-title:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:1.125rem}
+html.readable .push .cap:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:1.375rem}
+html.readable .credit-num:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:clamp(1.75rem,9vw,2.75rem);font-weight:700;font-variant-numeric:tabular-nums}
+html.readable .cash-amt:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-weight:700}
+html.readable .spinner:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:.9375rem!important}   /* (one has an inline 11px)  */
+html.readable .credit-num small:not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:max(.45em,.875rem)}
+html.readable .seg button:not(.game-view *):not(.cab *):not(.game-view):not(.cab){white-space:normal;line-height:1.2;padding:6px 4px}
+/* the arcade (cabinet list and every game screen) is exactly as without this setting: what the body now sets is set back */
+html.readable :is(.game-view,.cab){font-size:22px;line-height:1.15;font-family:var(--f-pixel-body)}
+/* amounts and numbers are never cut inside themselves: words break only at spaces (a word longer than its line still breaks, never hyphenated) */
+html.readable :is(#app,#layer) *:not(.game-view *):not(.cab *){hyphens:manual}
+html.readable :is(.tag,.note,.meta,.kv dd,.boss-memo,.hc-note,.mid b,.tiny b,p b,.notice b,.th b,.tl b):not(.game-view *):not(.cab *){overflow-wrap:break-word}
+html.readable .kv{grid-template-columns:minmax(0,1fr);gap:0}
+html.readable .kv dt{margin-top:8px}
+html.readable .kv dd{text-align:left;overflow-wrap:break-word}
+html.readable :is(.amt,.credit-num,.chip,.tag .amt,.pc-price,.cash-amt,.pb-count b,.arr-big){white-space:nowrap}
+html.readable .btn:not(.game-view *){max-width:100%;min-width:0}
+html.readable .btn.solid.block:not(.game-view *):not(.cab *):not(.game-view):not(.cab):not(.game-view *):not(.cab *):not(.game-view):not(.cab){white-space:nowrap;overflow-wrap:normal;font-size:min(.9375rem,4.6vw)}   /* (the big action buttons carry amounts: Pay 12,345,678 SAT) */
+html.readable .btn.sm:not(.game-view *):not(.cab *):not(.game-view):not(.cab):not(.game-view *):not(.cab *):not(.game-view):not(.cab){font-size:.875rem}
+html.readable :is(.panel,.sheet-body,.screen)>*:not(.game-view *){min-width:0}   /* (a long word wraps inside its box instead of widening the row) */
