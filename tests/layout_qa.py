@@ -5,6 +5,7 @@ From the visual review of 1.45.0:
   in its button at 320 px in every language and at 375 px in es, pt and de. No button of such a group cuts its text now.
 - Toggle rows (Send's "Lock it to one person", and every other one): the row's layout squeezed the checkbox to 13 x 22 px.
   Every visible toggle checkbox keeps its full size now (the whole row was, and stays, the tap target).
+Each language is checked to be the page's language, and the QR code center group to be there, so nothing passes on an empty page.
 """
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -29,6 +30,8 @@ async def main():
                 await w.pg.set_viewport_size({'width': vw, 'height': 740}); await w.wait(250)
                 await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(300)
                 cut = await w.ev(CUT); sq = await w.ev(SQUASHED)
+                here = await w.ev("[document.documentElement.lang, document.querySelectorAll('[data-act=qrLogo]').length]")
+                check(f'{lang} {vw}px, Settings: the page is in {lang} and the QR code center buttons are there', here[0].startswith(lang) and here[1] == 2, here)
                 check(f'{lang} {vw}px, Settings: no button text cut off (QR code center and the rest)', not cut, cut)
                 check(f'{lang} {vw}px, Settings: every toggle checkbox at full size', not sq, sq)
                 await w.ev("Nutcade.closeSheet()"); await w.home(); await w.click('[data-act=send]'); await w.wait(300)
