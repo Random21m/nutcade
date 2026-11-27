@@ -1750,7 +1750,7 @@ function setLang() {
 }
 
 /* ---------- sound ---------- */
-const PREF_DEFAULTS = { sound: true, music: true, crt: true, theme: 'neon', btcSymbol: false, fiat: true, currency: 'USD',
+const PREF_DEFAULTS = { sound: true, music: true, crt: true, readable: false, theme: 'neon', btcSymbol: false, fiat: true, currency: 'USD',
   checkSent: true, nostrBackup: true, npc: false, nostrInbox: true, piggy: false, piggyStep: 100, ksAuto: true, mintRadar: false, remind: true, nutzap: false, p2bk: false, amOn: false, amMint: '', amMin: 1000 };
 for (const k in PREF_DEFAULTS) if (S.prefs[k] === undefined) S.prefs[k] = PREF_DEFAULTS[k];
 S.p2pk = store.get('p2pk', []);   // [{pub, priv, created, used}]
@@ -2408,6 +2408,7 @@ function render() {
   const app = $('#app');
   app.className = S.prefs.crt ? 'crt' : '';
   document.body.className = 'theme-' + (S.prefs.theme || 'neon');
+  document.documentElement.classList.toggle('readable', !!S.prefs.readable);   // (Readable text: the same class the page's first script sets before the first paint)
   if (S.prefs.fiat && S.seed) fetchPrice();
   let body = '';
   if (tabLocked) {
@@ -2831,7 +2832,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.39.0';
+const APP_VERSION = '1.40.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -2903,6 +2904,7 @@ function viewSettings() {
       ${arrSettingsHTML()}
       ${toggle('music', 'Arcade music', '')}
       ${toggle('crt', 'CRT scanlines', '')}
+      ${toggle('readable', 'Readable text', "Plain, larger text for the words in the wallet, following your phone's text size. Buttons, headings and the arcade keep the pixel font.")}
       ${toggle('btcSymbol', 'Show amounts as ₿', '₿1,000 instead of 1,000 SAT.')}
       <div class="field"><label>QR code center</label><div class="seg pt-seg" role="group" aria-label="QR code center">${[['none', 'NONE'], ['acorn', 'NUTCADE ACORN']].map(([k, l]) => `<button data-act="qrLogo" data-v="${k}" aria-pressed="${(S.prefs.qrLogo || 'acorn') === k}">${l}</button>`).join('')}</div><div class="th">The acorn in the middle of the QR codes NUTCADE shows and prints. A code that wouldn't scan with it shows plain, and animated codes stay plain.</div></div>
       <div class="field"><label>Recent notes on the home screen</label><div class="seg pt-seg" role="group" aria-label="Recent notes on the home screen">${[0, 1, 2, 3, 4, 5, 6].map(n => `<button data-act="recentN" data-v="${n}" aria-pressed="${recentCount() === n}">${n}</button>`).join('')}</div><div class="th">How many of your latest notes the home screen lists. All notes always shows the rest. Kept on this device.</div></div>

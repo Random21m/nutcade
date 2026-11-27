@@ -61,7 +61,8 @@ function backupFileRow() {
    to the release page and its signed checksums. A tab that stays open for days looks, now and then, at this site's own page
    (the same file the app was loaded from: no server, nothing sent) and, when it names a newer version, offers a reload that
    waits until no money step is open. */
-const WHATS_NEW = [   // (v1.39.0, with the v1.38.0 item, with the v1.37.0 item, with the v1.36.0 item, with the v1.35.0 item, which carries the v1.34.0 item, which carries the v1.33.0 items, which carry the v1.32.0 items, which carry the v1.31.2, v1.31.1 and v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+const WHATS_NEW = [   // (v1.40.0, with the v1.39.0 item, with the v1.38.0 item, with the v1.37.0 item, with the v1.36.0 item, with the v1.35.0 item, which carries the v1.34.0 item, which carries the v1.33.0 items, which carry the v1.32.0 items, which carry the v1.31.2, v1.31.1 and v1.31.0 items, which carry the v1.30.0 items, which carry the v1.29.0 P2BK item; rewrite this list at every release)
+  'New, optional: Readable text (Settings, Look & sound) shows the words in the wallet in your device\'s plain font at a larger size that follows your phone\'s text size. Buttons, headings and the arcade keep the pixel font.',
   'New: use a game controller in the arcade. The d-pad or left stick moves, A and B are the buttons, Start pauses and Back exits. Nothing is sent anywhere.',
   'New: an on-chain deposit\'s address screen takes an optional amount for the QR code and payment link (BIP321). It is only a request: the mint credits whatever actually arrives, and some wallets ignore it.',
   'New, optional: sign in with your own Nostr identity (Settings, Nostr identity), with a browser extension (NIP-07) or a remote signer\'s bunker:// link (NIP-46). Mint reviews, the daily share post and zap requests use it; nutzaps and your ecash stay on your 12 words.',
