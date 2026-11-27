@@ -38,6 +38,9 @@ EOF
 chmod +x "$T/bin/gh"; mkdir -p "$T/notes"; printf 'Notes for v%s from the notebook\n' "$V" > "$T/notes/nutcade-v$V-notes.md"
 export PATH="$T/bin:$PATH" NC_SIGNING_FPR=$FPR NC_SITE="http://127.0.0.1:$PORT" NC_REMOTE_OK=1
 run() { (cd "$T/work" && echo "${2:-yes}" | bash tools/release.sh "$1" > "$T/out" 2>&1); }
+# --pending: the version is live and not released yet
+P1=$(cd "$T/work" && bash tools/release.sh --pending 2>/dev/null)
+ok "--pending prints the version main has, and changes nothing" '[ "$P1" = "$V" ] && [ ! -d "$T/rel/v$V" ]'
 # a wrong version is refused before anything is signed
 run 9.9.8 && r=0 || r=$?
 ok "a version main's page does not have is refused" '[ $r -ne 0 ] && grep -q "not 9.9.8" "$T/out" && [ ! -d "$T/rel/v9.9.8" ]'
@@ -49,9 +52,13 @@ cp "$T/sums.keep" "$T/site/SHA256SUMS.txt"
 # no is no
 run $V no && r=0 || r=$?
 ok "not typing yes signs nothing" '[ $r -ne 0 ] && grep -q "you did not type yes" "$T/out" && [ ! -d "$T/rel/v$V" ]'
-# the real run
-run $V && r=0 || r=$?
+# the real run: no version given, RELEASE_YES=1 (as the one-line release-all runs it)
+(cd "$T/work" && RELEASE_YES=1 bash tools/release.sh < /dev/null > "$T/out" 2>&1) && r=0 || r=$?
 ok "the release is made: signed checksums, the notebook's notes, the tag on main" '[ $r -eq 0 ] && grep -q "Done. Tell Claude" "$T/out" && gpg --verify "$T/rel/v$V/SHA256SUMS.txt.asc" "$T/rel/v$V/SHA256SUMS.txt" 2>/dev/null && cmp -s "$T/rel/v$V/SHA256SUMS.txt" "$T/site/SHA256SUMS.txt" && grep -q "from the notebook" "$T/rel/v$V/notes.md" && [ "$(git -C "$T/gh/Random21m/nutcade.git" rev-parse v$V)" = "$(git -C "$T/gh/Random21m/nutcade.git" rev-parse main)" ]'
+# after: --pending prints nothing; with no version it says nothing to do
+P2=$(cd "$T/work" && bash tools/release.sh --pending 2>/dev/null)
+(cd "$T/work" && bash tools/release.sh < /dev/null > "$T/out" 2>&1) && r=0 || r=$?
+ok "once released: --pending prints nothing, and with no version it says nothing to do" '[ -z "$P2" ] && [ $r -eq 0 ] && grep -q "already released" "$T/out"'
 # and not twice
 run $V && r=0 || r=$?
 ok "a release that exists already is refused" '[ $r -ne 0 ] && grep -q "already exists" "$T/out"'

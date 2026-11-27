@@ -39,24 +39,25 @@ MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh
 MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh --only r7,r8
 ```
 
-## Cutting a release (one command)
+## Cutting a release (one paste)
 
-1. Push the change to `main` and wait for the workflow to pass (Actions tab): the site then serves the new version and its `SHA256SUMS.txt`.
-2. On your own computer, in your clone of nutcade:
+1. Claude pushes the change to `main` with your OK, and the workflow passes: the site then serves the new version and its
+   `SHA256SUMS.txt`.
+2. On your own computer, in any terminal, paste this one line (the same line for every project):
 
    ```bash
-   git pull
-   bash tools/release.sh 1.40.0
+   bash <(gh api -H "Accept: application/vnd.github.raw" repos/Random21m/second-brain/contents/how-to/release-kit/release-all.sh)
    ```
 
-   It checks that main's page is that version and that every file in the live `SHA256SUMS.txt` is the one in main, shows you the
-   checksums (compare them with the ones Claude gave you), and after you type `yes` signs them with the release key (gpg asks for
-   the key's passphrase itself; the key never leaves your computer). Then it makes the GitHub release `v1.40.0` with the notes
-   from the notebook (`releases/nutcade/nutcade-v1.40.0-notes.md`, or the checksums alone if there is none) and both files,
-   downloads it again and checks the files, the signature and the tag. It stops at the first thing that does not match.
-   It needs git, gpg, curl and the GitHub CLI (`gh auth login` once).
+   It finds every project whose new version is live but not released, and for each runs `tools/release.sh` from main. Here it
+   checks main's page version and that every file in the live `SHA256SUMS.txt` is the one in main, signs them with the release
+   key (gpg asks for the key's passphrase, if it has one; the key never leaves your computer), makes the GitHub release with
+   the notes from the notebook (`releases/nutcade/nutcade-vX.Y.Z-notes.md`, or the checksums alone if there is none), and
+   checks the files, the signature and the tag. It stops at the first thing that does not match.
 
-The script is tested with a throwaway key and stand-ins for GitHub and the site: `bash tests/release_script_test.sh`.
+By hand, in this clone: `bash tools/release.sh` (it reads the version from main). Needs git, gpg, curl and the GitHub CLI
+(`gh auth login` once). The script is tested with a throwaway key and stand-ins for GitHub and the site:
+`bash tests/release_script_test.sh`.
 
 ## Signing by hand (if you cannot run the script)
 

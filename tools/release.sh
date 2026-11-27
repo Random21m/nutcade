@@ -2,11 +2,14 @@
 # NUTCADE release in one command. On your own computer, in your clone of nutcade, after main is pushed and the site has
 # deployed (the Actions run is green):
 #
-#   bash tools/release.sh 1.40.0
+#   paste the one line in RELEASING.md (it runs this for every project that needs it), or by hand, in the clone:
+#   bash tools/release.sh            (finds the version on main itself)
+#   bash tools/release.sh 1.40.0     (or say which version it must be)
+#   bash tools/release.sh --pending  (only prints the version if it is live but not released yet; changes nothing)
 #
-# 1. gets main from GitHub and checks the page says it is this version
+# 1. gets main from GitHub and reads the version on the page
 # 2. downloads the live SHA256SUMS.txt and checks every file in it is the one in main (so the site is this release)
-# 3. shows you the checksums and, after you type yes, signs SHA256SUMS.txt with your key (gpg asks for its passphrase itself)
+# 3. shows you the checksums and, after you type yes (RELEASE_YES=1: already said), signs SHA256SUMS.txt with your key (gpg asks for its passphrase itself)
 # 4. makes the GitHub release vX: the notes (from the notebook, releases/nutcade/nutcade-vX-notes.md), SHA256SUMS.txt and its signature
 # 5. downloads the release again and checks the files, the signature and the tag
 #
@@ -27,26 +30,42 @@ die()  { printf '\n\033[31mSTOP:\033[0m %s\nNothing after this point was done.\n
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is not installed. $2"; }
 sha()  { if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi; }
 
-[ $# -eq 1 ] || { sed -n '2,15p' "$0"; exit 1; }
-V=${1#v}
-[[ $V =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "the version should look like 1.40.0"
-TAG=v$V
+MODE=release; V=
+case "${1:-}" in
+  -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+  --pending) MODE=pending ;;
+  "") ;;
+  *) V=${1#v} ;;
+esac
+[ -z "$V" ] || [[ $V =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "the version should look like 1.40.0"
 need git "Install git."; need gpg "Install GnuPG."; need gh "Install the GitHub CLI and run: gh auth login"; need curl "Install curl."
 git rev-parse --show-toplevel >/dev/null 2>&1 || die "run this inside your clone of nutcade."
 cd "$(git rev-parse --show-toplevel)"
-[ "$FPR" = "$RELEASE_KEY" ] || printf '\n\033[33mNOTE:\033[0m signing and checking with %s, NOT the release key (NC_SIGNING_FPR is set). Only for testing.\n' "$FPR"
+[ "$FPR" = "$RELEASE_KEY" ] || printf '\n\033[33mNOTE:\033[0m signing and checking with %s, NOT the release key (NC_SIGNING_FPR is set). Only for testing.\n' "$FPR" >&2
+shopt -s nocasematch   # GitHub names are not case-sensitive
 case "$(git remote get-url "$REMOTE" 2>/dev/null)" in
   *"$REPO"|*"$REPO.git"|*"$REPO/") ;;
   *) [ -n "${NC_REMOTE_OK:-}" ] || die "the remote \"$REMOTE\" is $(git remote get-url "$REMOTE" 2>/dev/null || echo missing), not github.com/$REPO." ;;
 esac
-gpg --list-secret-keys "$FPR" >/dev/null 2>&1 || die "the release key $FPR is not on this computer."
+shopt -u nocasematch
+[ "$MODE" = pending ] || gpg --list-secret-keys "$FPR" >/dev/null 2>&1 || die "the release key $FPR is not on this computer."
 
-say "1/5  Getting main from GitHub"
+[ "$MODE" = pending ] || say "1/5  Getting main from GitHub"
 git fetch -q "$REMOTE" main || die "could not fetch main."
 M=$(git rev-parse FETCH_HEAD)
-ok "main is $(git log --oneline -1 "$M")"
 PV=$(git show "$M:public/index.html" | grep -o "const APP_VERSION = '[0-9.]*'" | head -1 | grep -o "[0-9][0-9.]*" || true)
-[ "$PV" = "$V" ] || die "main's page says it is ${PV:-no version}, not $V. Push the release to main first."
+[ -n "$PV" ] || die "could not read the version on main's page."
+if [ "$MODE" = pending ]; then
+  gh release view "v$PV" -R "$REPO" >/dev/null 2>&1 || echo "$PV"
+  exit 0
+fi
+ok "main is $(git log --oneline -1 "$M")"
+if [ -z "$V" ]; then
+  V=$PV
+  if gh release view "v$V" -R "$REPO" >/dev/null 2>&1; then say "NUTCADE $V is already released. Nothing to do."; exit 0; fi
+fi
+TAG=v$V
+[ "$PV" = "$V" ] || die "main's page says it is $PV, not $V. Push the release to main first."
 ok "main's page is $V"
 ! gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 || die "a GitHub release $TAG already exists."
 
@@ -65,8 +84,9 @@ done < "$D/SHA256SUMS.txt"
 say "3/5  Signing"
 printf '  You are signing these checksums (the live site, the same as main %s):\n\n' "${M:0:7}"
 sed 's/^/    /' "$D/SHA256SUMS.txt"
-printf '\n  They must match the checksums Claude gave you for this release. If they differ, do not sign.\n'
-read -r -p "  Type yes to sign them with $FPR: " a; [ "$a" = yes ] || die "not signed (you did not type yes)."
+printf '\n  If Claude gave you checksums for this release, they must be these.\n'
+if [ "${RELEASE_YES:-}" = 1 ]; then ok "you said yes in release"; else
+  read -r -p "  Type yes to sign them with $FPR: " a; [ "$a" = yes ] || die "not signed (you did not type yes)."; fi
 gpg --local-user "$FPR" --armor --detach-sign --yes --output "$D/SHA256SUMS.txt.asc" "$D/SHA256SUMS.txt"
 gpg --status-fd 1 --verify "$D/SHA256SUMS.txt.asc" "$D/SHA256SUMS.txt" 2>/dev/null | grep -q "^\[GNUPG:\] VALIDSIG $FPR " || die "the new signature does not verify as made by $FPR."
 ok "SHA256SUMS.txt.asc is a good signature by $FPR"
