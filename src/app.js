@@ -374,6 +374,7 @@ const counterSource = {
 };
 function setSeed(mnemonic, backedUp) {
   const changed = !S.seed || S.seed.mnemonic !== mnemonic;
+  if (changed && S.seed && typeof keepSeedKeys === 'function') keepSeedKeys();   // (the old words' lock keys stay usable: app_r4.js, 1.45)
   S.seed = { mnemonic, backedUp: !!backedUp, created: Date.now() };
   seedBytes = null;
   if (changed && S.prefs) { S.prefs.npc = false; S.prefs.npcSince = 0; S.prefs.npcName = ''; S.prefs.mintBackupAt = 0; S.prefs.mintBackupList = ''; S.prefs.sync = false; delete S.prefs.syncSt; S.prefs.syncOther = []; S.prefs.amOn = false; S.prefs.amMint = ''; S.prefs.amMin = AM_MIN_DEF; if (typeof npcSocketStop === 'function') npcSocketStop(); }
@@ -2863,7 +2864,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.44.0';
+const APP_VERSION = '1.45.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];

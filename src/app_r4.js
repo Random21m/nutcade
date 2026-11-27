@@ -138,6 +138,20 @@ function evenPriv(privHex) {   // the private key whose public key starts with 0
 const myLockPub = () => '02' + L.nostrPub(nostrKey());
 const myLockPriv = () => evenPriv(hex(nostrKey()));
 const allPrivs = () => p2pkPrivs().concat(S.seed ? [myLockPriv(), nzPriv()] : []);   // (nzPriv: the nutzap receiving key, src/app_nutzap.js)
+/* (1.45) Other 12 words: the lock and nutzap keys of the words you had before are kept in the wallet's P2PK keys (which the
+   backup file carries), marked prevSeed. Ecash locked to them, gifts and treasure hunts that name them as refund key, your
+   Extra Life made under them and an Extra Life left to them keep working (setSeed calls this before the words change). */
+function keepSeedKeys() {
+  try {
+    for (const priv of [myLockPriv(), nzPriv()]) {
+      if (S.p2pk.some(k => k.priv === priv)) continue;
+      S.p2pk.push({ pub: hex(L.getPubKeyFromPrivKey(L.hexToBytes(priv))), priv, created: Date.now(), prevSeed: true });
+    }
+    store.set('p2pk', S.p2pk);
+  } catch (e) {}
+}
+const myLockPubs = () => [myLockPub()].concat(S.p2pk.filter(k => k.prevSeed).map(k => k.pub));   // your lock key and the kept ones
+const lockPrivFor = pub => [myLockPriv()].concat(S.p2pk.filter(k => k.prevSeed).map(k => k.priv)).find(k => hex(L.getPubKeyFromPrivKey(L.hexToBytes(k))) === pub) || myLockPriv();
 // (a key that is a point on the curve: cashu-ts 5 refuses to lock to any other, and a lock to one nobody can hold would
 // only come back after its date)
 function lockPubFrom(v) {
