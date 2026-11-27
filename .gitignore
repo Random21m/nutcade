@@ -1,3 +1,4 @@
 qa-out/
 __pycache__/
 *.pyc
+.release/
