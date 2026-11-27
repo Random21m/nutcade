@@ -281,9 +281,12 @@ async def main():
         # (the wallet's side stands in: a challenge from a contact who can be answered, and a send that is only counted)
         await w.ev("window.__sent=0; window.__cd=Nutcade.challengeDone; window.__sr=Nutcade.sendResult; Nutcade.challengeDone=()=>({canReply:true, name:'BOB'}); Nutcade.sendResult=()=>{ __sent++; return Promise.resolve(true) }")
         await w.ev("Arcade.open('swarm', {challenge:{id:'t145', seed:5, target:1, by:'BOB', name:'BOB'}}); __F.watch('swarm'); __F.n = 0; __F.add = 100; __F.cap = 20"); await pump(3)
-        await pad({'b': [0]}); await pump(3); await pad(); await pump(40); await w.wait(2200); await pump(2)
-        await w.ev("__F.add = 0; __F.cap = 0")
+        await pad({'b': [0]}); await pump(3); await pad(); await pump(40)
         on_result = "!!document.querySelector('#entry [data-g=reply]') && !!document.querySelector('#entry [data-g=rematch]')"
+        for _ in range(60):   # (the game-over pause runs on the page's own timers: pump frames until the result is up, on a slow machine too)
+            if await w.ev(on_result): break
+            await w.wait(100); await pump(2)
+        await w.ev("__F.add = 0; __F.cap = 0")
         check('1.45: the challenge result offers Send my score and Rematch', await w.ev(on_result))
         s0 = await w.ev("__sent")
         bb = await w.ev("(() => { const r = document.querySelector('#entry [data-g=reply]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()")
