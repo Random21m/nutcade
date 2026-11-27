@@ -104,7 +104,31 @@ async def main():
         await section('helper', helper)
         await section('address', lambda: late('address'))
         await section('card', lambda: late('card'))
+        async def enter_twice():   # (1.43) Enter pressed again in the address box while an add is on its way starts no second add
+            w = await wallet(b); await w.create(); await w.add_mint(B)
+            held, free = [], [False]   # (its requests are held and then refused in the order they came: without the fix the second add ends last)
+            async def bad(route):
+                if free[0]: await route.abort(); return
+                held.append(route)
+            await w.pg.route('https://notamint.invalid/**', bad)
+            await open_picker(w); await w.fill('#mintUrl', 'notamint.invalid'); await w.pg.focus('#mintUrl')
+            await w.pg.keyboard.press('Enter'); await w.wait(300); await w.pg.keyboard.press('Enter'); await w.wait(300)
+            free[0] = True
+            for r in list(held): await r.abort(); await w.wait(150)
+            done = await w.until("!document.querySelector('#layer [data-act=addMintUrl][disabled]')", 20000); await w.wait(1500)
+            btn = await w.ev("(b=>b?b.innerText.trim():null)(document.querySelector('#layer [data-act=addMintUrl]'))")
+            check('enter twice, an address that is not a mint: afterwards the button says Add again, not ADDING (one add ran, not two)', done and btn and btn.upper() == 'ADD', btn)
+            go = await hold(w, A + '/**')
+            await w.fill('#mintUrl', A); await w.pg.focus('#mintUrl')
+            await w.pg.keyboard.press('Enter'); await w.wait(200); await w.pg.keyboard.press('Enter'); await w.wait(200)
+            go.set()
+            ok = await w.until(f"{has(A)} && !document.querySelector('#layer .sheet')", 15000)
+            check('enter twice, a real mint: it is added once and the picker closes', ok and await w.ev(f"Nutcade.S.mints.filter(m=>m.url==={J(A)}).length") == 1, await w.ev("Nutcade.S.mints.map(m=>m.url)"))
+            check('enter twice: no script errors', not w.errs, w.errs[:4])
+            await w.pg.context.close()
+
         await section('normal', normal)
+        await section('enter_twice', enter_twice)
         await b.close()
         print('\nSUMMARY', sum(r[1] for r in results), '/', len(results))
     sys.exit(0 if results and all(r[1] for r in results) else 1)

@@ -2835,7 +2835,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.42.0';
+const APP_VERSION = '1.43.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -4885,7 +4885,7 @@ document.addEventListener('keydown', e => {
   if (document.querySelector('[data-pinpad]') && !e.target.matches('input,textarea,select')) {
     const k = /^[0-9]$/.test(e.key) ? e.key : e.key === 'Backspace' ? 'del' : e.key === 'Enter' ? 'ok' : null;
     if (k) { e.preventDefault(); const b = document.querySelector(`[data-pinpad] [data-k="${k}"]`); if (b) A.pinKey(b); return; }
-  } if (e.key === 'Enter' && e.target.dataset && e.target.dataset.cw !== undefined && $('[data-act=gateConfirm]')) { e.preventDefault(); A.gateConfirm($('[data-act=gateConfirm]')); } if (e.key === 'Escape' && $('#layer .sheet')) closeSheet(); if (e.key === 'Enter' && e.target.id === 'mintUrl') A.addMintUrl($('[data-act="addMintUrl"]')); });
+  } if (e.key === 'Enter' && e.target.dataset && e.target.dataset.cw !== undefined && $('[data-act=gateConfirm]')) { e.preventDefault(); A.gateConfirm($('[data-act=gateConfirm]')); } if (e.key === 'Escape' && $('#layer .sheet')) closeSheet(); if (e.key === 'Enter' && e.target.id === 'mintUrl') { const b = $('[data-act="addMintUrl"]'); if (!b || !b.disabled) A.addMintUrl(b); } });   // (Enter again while the add is on its way starts no second one, like a click on the busy button; 1.43)
 
 /* ---------- background checks ---------- */
 // one background check at a time: the timer, coming back online and opening the app can all ask for one, and two at

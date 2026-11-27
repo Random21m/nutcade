@@ -267,6 +267,16 @@ async def main():
         await pad(); await pump(3); await pad({'b': [0]}); await pump(3)
         check('1.41: ...and the next pad A (a frame later) starts the game as usual', await w.ev("__F.n") > 0, await w.ev("__F.n"))
         await leave(); await pad(); await pump(2)
+        # Enter in the initials field and pad A in the same frame: the score is saved once and the SCORE SAVED screen stays (1.43)
+        await w.ev("NutStore.set('scores:swarm', [])"); await finish_run()
+        check('1.43: the initials form is shown, its field focused', await w.ev("!!document.querySelector('#entry #ini') && document.activeElement.id === 'ini'"))
+        await pad({'b': [0]}); await w.pg.keyboard.down('Enter'); await pump(1); await w.pg.keyboard.up('Enter'); await pump(3)   # (a real Enter keydown in the field and pad A in the same frame)
+        saved = "!!document.querySelector('#entry [data-g=again]') && !document.querySelector('#entry #ini')"
+        check('1.43: Enter in the initials field + pad A in the same frame: ONE action (the score is saved and the SCORE SAVED screen stays)',
+              await w.ev(saved) and len(await w.ev("NutStore.get('scores:swarm', [])")) == 1, (await w.ev(saved), await w.ev("NutStore.get('scores:swarm', []).length"), await w.ev("Arcade.playing()")))
+        await pad(); await pump(3); await pad({'b': [0]}); await pump(3)
+        check('1.43: ...and the next pad A (a frame later) goes on as usual (Continue)', not await w.ev(saved), await w.ev(saved))
+        await leave(); await pad(); await pump(2)
 
         # --- replays: pad input is recorded exactly like the keyboard's
         async def run(kind):

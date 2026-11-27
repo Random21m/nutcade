@@ -650,7 +650,9 @@ LEGACY = """(async([U,amt])=>{ const S=Nutcade.S; const ws=new CashuLib.Wallet(U
   localStorage.setItem('nutcade:txs',JSON.stringify(S.txs)); localStorage.setItem('nutcade:quotes',JSON.stringify(S.quotes));   // (as the app would have written it)
   const c0=JSON.stringify(S.counters); await Nutcade.r9.check(U,{startup:true}).catch(()=>{}); const c1=JSON.stringify(S.counters);   // (the check-up, forced at this very moment)
   await new Promise(r=>setTimeout(r,1200));
-  try { await ws.mintProofsBolt11(amt,q.quote); } catch (e) { if (!/already (signed|issued)|issued|only 0 available to mint|11003|20002|20003/i.test(String(e&&e.message||e))) throw e; }
+  // (the app collects this quote in the background too: if its own request is still at work at the mint, the mint says "already pending";
+  //  that copy then credits it, which the next checks look for. A slow CI runner, Nov 27, 1.43.0)
+  try { await ws.mintProofsBolt11(amt,q.quote); } catch (e) { if (!/already (signed|issued|pending)|issued|quote is pending|only 0 available to mint|11003|20002|20003|20005/i.test(String(e&&e.message||e))) throw e; }
   return c0===c1 })"""
 
 

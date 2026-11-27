@@ -146,7 +146,9 @@ async def main():
             mine = await al.ev("document.querySelector('#rvMine') && document.querySelector('#rvMine').innerText")
             check('publish: your review is shown on the sheet as text, with Edit and Delete', mine and '<img' in mine and await al.ev("!!document.querySelector('#layer [data-act=rvEdit]') && !!document.querySelector('#layer [data-act=rvDelAsk]')"), mine)
             st = await al.ev(f"JSON.stringify(Nutcade.rv.mine({J(M)}))")
-            check('publish: remembered per mint, without secrets (stars, text, d, time)', st and '"stars":4' in st and words.split()[0] not in st and 'sig' not in st, st)
+            # (no two of the 12 words in a row anywhere: one word alone can be in the review's own text, like "second", or inside a hex key, like "add")
+            ww = words.split(); pairs = [' '.join(ww[i:i + 2]) for i in range(len(ww) - 1)]
+            check('publish: remembered per mint, without secrets (stars, text, d, time)', st and '"stars":4' in st and words not in st and not any(x in st for x in pairs) and '"sig"' not in st, st)
             await al.pg.reload(); await al.wait(900); await open_review(al)
             mine = await al.ev("(document.querySelector('#rvMine')||{}).innerText||''")
             check('publish: still there after a reload, still as text', '<img' in mine and not await al.ev("!!document.querySelector('#layer img')"), mine)
