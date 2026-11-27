@@ -2904,7 +2904,7 @@ function viewSettings() {
       ${arrSettingsHTML()}
       ${toggle('music', 'Arcade music', '')}
       ${toggle('crt', 'CRT scanlines', '')}
-      ${toggle('readable', 'Readable text', "Plain, larger text on the wallet screens that follows your phone's text size. Headings and the arcade keep the pixel font.")}
+      ${toggle('readable', 'Readable text', "Plain, larger text for the words in the wallet, following your phone's text size. Buttons, headings and the arcade keep the pixel font.")}
       ${toggle('btcSymbol', 'Show amounts as ₿', '₿1,000 instead of 1,000 SAT.')}
       <div class="field"><label>QR code center</label><div class="seg pt-seg" role="group" aria-label="QR code center">${[['none', 'NONE'], ['acorn', 'NUTCADE ACORN']].map(([k, l]) => `<button data-act="qrLogo" data-v="${k}" aria-pressed="${(S.prefs.qrLogo || 'acorn') === k}">${l}</button>`).join('')}</div><div class="th">The acorn in the middle of the QR codes NUTCADE shows and prints. A code that wouldn't scan with it shows plain, and animated codes stay plain.</div></div>
       <div class="field"><label>Recent notes on the home screen</label><div class="seg pt-seg" role="group" aria-label="Recent notes on the home screen">${[0, 1, 2, 3, 4, 5, 6].map(n => `<button data-act="recentN" data-v="${n}" aria-pressed="${recentCount() === n}">${n}</button>`).join('')}</div><div class="th">How many of your latest notes the home screen lists. All notes always shows the rest. Kept on this device.</div></div>

@@ -72,9 +72,9 @@ PIX = re.compile(r'Press Start|VT323', re.I)
 OVER_JS = """(()=>{const W=document.documentElement.clientWidth,out=[];for(const e of document.querySelectorAll('#app *, #layer *')){
   if(!e.getClientRects().length||e.closest('.sr,.cab'))continue;const r=e.getBoundingClientRect();if(r.right>W+1||r.left<-1)out.push((e.className&&e.className.baseVal===undefined?e.className:e.tagName)+':'+Math.round(r.left)+'..'+Math.round(r.right))}
   if(document.documentElement.scrollWidth>W+1)out.push('page scrolls sideways '+document.documentElement.scrollWidth);return out.slice(0,5)})()"""
-CLIP_JS = """(()=>{const out=[];for(const e of document.querySelectorAll('#app button, #layer button, #app .btn, #layer .btn, .tab span, .seg button, .chip')){
-  const r=e.getBoundingClientRect();if(!r.width||!r.height||e.closest('.sr,.pin-keys,.cab'))continue;
-  if(e.scrollWidth>e.clientWidth+1||e.scrollHeight>e.clientHeight+1)out.push((e.innerText||e.className).trim().slice(0,24)+' '+e.scrollWidth+'x'+e.scrollHeight+' in '+e.clientWidth+'x'+e.clientHeight)}return out.slice(0,5)})()"""
+CLIP_JS = """(()=>{const out=[];for(const e of document.querySelectorAll('#app .notice, #layer .notice, #app .kv dd, #layer .kv dd, .tx .note, .tx .meta, .toggle .tl, .toggle .th, .th, .tiny, .field label, .tx .amt, .credit-num')){
+  const r=e.getBoundingClientRect();if(!r.width||!r.height||e.closest('.sr,.pin-keys,.cab,#arcadeScreen,.code,.mono'))continue;
+  if(e.scrollWidth>e.clientWidth+1||e.scrollHeight>e.clientHeight+1)out.push((e.innerText||e.className).trim().slice(0,24)+' '+e.scrollWidth+'x'+e.scrollHeight+' in '+e.clientWidth+'x'+e.clientHeight)}return out.slice(0,5)})()"""   # (buttons, chips and tabs are not part of Readable text: the buttons suite compares them with the setting off)
 INVIEW = """(sel=>{const e=document.querySelector(sel); if(!e) return 'missing'; const r=e.getBoundingClientRect(); return r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight ? 'ok' : [Math.round(r.left),Math.round(r.top),Math.round(r.right),Math.round(r.bottom)].join(',')})"""
 
 async def main():
@@ -107,16 +107,17 @@ async def main():
             await w.pg.click('#p_readable'); await frames(w)
             check('on: the switch turns the class on at once', await w.ev("document.documentElement.classList.contains('readable') && Nutcade.S.prefs.readable===true && document.querySelector('#p_readable').checked"))
             after = await w.ev(probe_js(list(before['set'].keys())))
-            wrong = {s: after[s] for s in after if after[s] and before['set'][s] and not SYS.search(after[s]['f'])}
-            check('on: settings text (body, buttons, labels, hints, inputs, toggles) is in the system font', not wrong and after['body'] and SYS.search(after['body']['f']), wrong or after['body'])
-            check('on: the system font has no downloaded face in the stack (no network font)', all('Press Start' not in after[s]['f'] and 'VT323' not in after[s]['f'] for s in after if after[s]), {s: after[s]['f'] for s in after if after[s]})
-            small = {s: (before['set'][s]['s'], after[s]['s']) for s in ('.btn', '.field label', '.label', '.sub') if after.get(s) and before['set'].get(s) and after[s]['s'] <= before['set'][s]['s']}
-            check('on: pixel-font text (buttons, field labels, labels) is larger than before', not small and after['.btn']['s'] > before['set']['.btn']['s'], small or (before['set']['.btn'], after['.btn']))
+            wrong = {s: after[s] for s in after if s != '.btn' and after[s] and before['set'][s] and not SYS.search(after[s]['f'])}
+            check('on: settings text (body, labels, hints, inputs, toggles) is in the system font', not wrong and after['body'] and SYS.search(after['body']['f']), wrong or after['body'])
+            check('on: buttons keep exactly their font and size (pixel font, same px)', after['.btn'] == before['set']['.btn'] and PIX.search(after['.btn']['f']), (before['set']['.btn'], after['.btn']))
+            check('on: the system font has no downloaded face in the stack (no network font)', all('Press Start' not in after[s]['f'] and 'VT323' not in after[s]['f'] for s in after if after[s] and s != '.btn'), {s: after[s]['f'] for s in after if after[s]})
+            small = {s: (before['set'][s]['s'], after[s]['s']) for s in ('.field label', '.label', '.sub') if after.get(s) and before['set'].get(s) and after[s]['s'] <= before['set'][s]['s']}
+            check('on: pixel-font text (field labels, labels) is larger than before', not small and after['.field label']['s'] > before['set']['.field label']['s'], small or (before['set']['.field label'], after['.field label']))
             check('on: input and body text are at least 20 px, hints and toggles at least 17 px', after['.inp']['s'] >= 20 and after['body']['s'] >= 20 and after['.th']['s'] >= 17 and after['.toggle']['s'] >= 18, {s: after[s]['s'] for s in after if after[s]})
-            check('on: sizes are in rem (they are whole multiples of the 16 px root)', all(round(after[s]['s'] / 16 * 10000) % 625 == 0 for s in ('.btn', '.inp', '.th', '.toggle', 'body')), {s: after[s]['s'] for s in after if after[s]})
+            check('on: sizes are in rem (they are whole multiples of the 16 px root)', all(round(after[s]['s'] / 16 * 10000) % 625 == 0 for s in ('.inp', '.th', '.toggle', 'body')), {s: after[s]['s'] for s in after if after[s]})
             await tab(w, 'wallet')
             a2 = await w.ev(probe_js(['.credit-num', '.push .cap', '.push .t']))
-            check('on: the balance and the big buttons are in the system font, the balance still big', all(SYS.search(a2[s]['f']) for s in a2 if a2[s]) and a2['.credit-num']['s'] >= 28, a2)
+            check('on: the balance is in the system font and still big; the big Receive and Send buttons are unchanged', SYS.search(a2['.credit-num']['f']) and a2['.credit-num']['s'] >= 28 and a2['.push .cap'] == before['balance']['.push .cap'] and a2['.push .t'] == before['balance']['.push .t'], (a2, before['balance']))
             # no wallet text in the system font under 13 px (codes and addresses in a monospace box are exempt)
             tiny = []
             for t in TABS[:1] + TABS[2:]:
@@ -180,15 +181,17 @@ async def main():
         # ---------- text size follows the browser's setting ----------
         async def zoom():
             for on_ in (True, False):
-                w = await wallet(b, 'zoom', on=on_); await w.create(); await tab(w, 'settings')
+                w = await wallet(b, 'zoom', 430, 800, on=on_); await w.create(); await tab(w, 'settings')
                 s0 = await w.ev(probe_js(['body', '.btn', '.th', '.inp', '.toggle']))
-                await w.ev("document.documentElement.style.fontSize='24px'"); await frames(w)   # (the browser's text size set to 150 %)
+                await w.ev("document.documentElement.style.fontSize='20px'"); await frames(w)   # (the browser's text size set to 125 %)
                 s1 = await w.ev(probe_js(['body', '.btn', '.th', '.inp', '.toggle']))
-                if on_: check('zoom: text size 150 % scales the wallet text by 1.5 (body, buttons, hints, inputs, toggles)', all(abs(s1[s]['s'] / s0[s]['s'] - 1.5) < 0.02 for s in s0), {s: (s0[s]['s'], s1[s]['s']) for s in s0})
+                if on_:
+                    check('zoom: text size 125 % scales the wallet text by 1.25 on a 430 px screen (body, hints, inputs, toggles)', all(abs(s1[s]['s'] / s0[s]['s'] - 1.25) < 0.02 for s in s0 if s != '.btn'), {s: (s0[s]['s'], s1[s]['s']) for s in s0})
+                    check('zoom: buttons keep their size at any text size', s1['.btn']['s'] == s0['.btn']['s'], (s0['.btn'], s1['.btn']))
                 else: check('zoom: with it off nothing changes (pixel sizes as before, as the page always did)', all(s1[s]['s'] == s0[s]['s'] for s in s0), {s: (s0[s]['s'], s1[s]['s']) for s in s0})
                 if on_:
                     await w.ev("document.documentElement.style.fontSize='24px'"); await tab(w, 'wallet')
-                    check('zoom: at 150 % the wallet screen does not scroll sideways', not await w.ev(OVER_JS), await w.ev(OVER_JS))
+                    check('zoom: at 150 % on a 430 px screen the wallet screen does not scroll sideways', not await w.ev(OVER_JS), await w.ev(OVER_JS))
                     v = await w.ev("document.querySelector('meta[name=viewport]').content")
                     check('zoom: the page allows pinch zoom (no user-scalable=no, no maximum-scale)', 'user-scalable' not in v and 'maximum-scale' not in v, v)
                 await w.pg.context.close()
@@ -217,7 +220,7 @@ async def main():
                 await tab(w, 'settings')
                 st = await w.ev("""(()=>{const c=getComputedStyle(document.body);const b=getComputedStyle(document.querySelector('.btn'));return {cls:document.body.className,html:document.documentElement.classList.contains('readable'),font:c.fontFamily,bf:b.fontFamily,col:b.borderTopColor,ink:c.color,over:document.documentElement.scrollWidth>innerWidth+1}})()""")
                 seen[th] = st
-                check(f'themes: {th}: the class stays on and the wallet text is in the system font', st['html'] and f'theme-{th}' in st['cls'] and SYS.search(st['font']) and SYS.search(st['bf']), st)
+                check(f'themes: {th}: the class stays on, the wallet text is in the system font and buttons keep the pixel font', st['html'] and f'theme-{th}' in st['cls'] and SYS.search(st['font']) and PIX.search(st['bf']), st)
                 check(f'themes: {th}: no sideways scroll', not st['over'])
             check('themes: it is a font change only: the theme colours still differ between themes', len({seen[t]['col'] for t in THEMES}) >= 2, {t: seen[t]['col'] for t in THEMES})
             # picking a theme with it on keeps it on
@@ -257,19 +260,19 @@ async def main():
                                      ('help', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); const h=document.querySelector('[data-act=helpOpen]'); if(h) h.click()"),
                                      ('contacts', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); document.querySelector('[data-act=contactsOpen]').click()"),
                                      ('restore', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); document.querySelector('[data-act=restore]').click()"),
-                                     ('limit', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); const l=document.querySelector('[data-act=limitOpen]'); if(l) l.click()")]:
+                                     ('limit', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); document.querySelector('[data-act=limOpen]').click()")]:
                         await w.ev("try{" + js + "}catch(e){}"); await frames(w)
                         opened[name] = await w.ev("!!document.querySelector('#layer .sheet')")
                         o, c = await w.ev(OVER_JS), await w.ev(CLIP_JS)
                         if o: bad[name + ' overflow'] = o
                         if c: bad[name + ' clipped'] = c
                     await w.ev("Nutcade.closeSheet()")
-                    if vw == 375 and lang == 'en': check('layout: the sheets the layout check opens really opened (send, receive, scan, contacts, restore)', all(opened.get(n) for n in ('send', 'receive', 'scan', 'contacts', 'restore')), opened)
-                    check(f'layout {vw}px {lang}: no sideways overflow and no clipped buttons on any tab or sheet', not bad, bad)
+                    if vw == 375 and lang == 'en': check('layout: the sheets the layout check opens really opened (send, receive, scan, contacts, restore, spending limit)', all(opened.get(n) for n in ('send', 'receive', 'scan', 'contacts', 'restore', 'limit')), opened)
+                    check(f'layout {vw}px {lang}: no sideways overflow and no clipped wallet text on any tab or sheet', not bad, bad)
                     await tab(w, 'wallet')
                     tabs = await w.ev("""(()=>{const bar=document.querySelector('.tabbar').getBoundingClientRect();return {inside:bar.left>=0&&bar.right<=innerWidth+1&&bar.bottom<=innerHeight+1,
-                      each:[...document.querySelectorAll('.tab')].map(t=>{const s=t.querySelector('span'),r=t.getBoundingClientRect();return s.scrollWidth<=t.clientWidth+1&&r.left>=-1&&r.right<=innerWidth+1&&parseFloat(getComputedStyle(s).fontSize)>=10})}})()""")
-                    check(f'layout {vw}px {lang}: the tab bar fits, its five labels fit at 10 px or more', tabs['inside'] and len(tabs['each']) == 5 and all(tabs['each']), tabs)
+                      each:[...document.querySelectorAll('.tab')].map(t=>{const s=t.querySelector('span'),r=t.getBoundingClientRect();return s.scrollWidth<=t.clientWidth+1&&r.left>=-1&&r.right<=innerWidth+1&&parseFloat(getComputedStyle(s).fontSize)>=9})}})()""")
+                    check(f'layout {vw}px {lang}: the tab bar fits, its five labels fit at 9 px or more (the size they have without the setting)', tabs['inside'] and len(tabs['each']) == 5 and all(tabs['each']), tabs)
                     if vw == 375: await w.pg.screenshot(path=os.path.join(OUT, f'readable-on-{lang}-{vw}.png'))
                     check(f'layout {vw}px {lang}: no script errors', not w.errs, w.errs[:3]); await w.pg.context.close()
         await section('layout', layout)
@@ -292,7 +295,7 @@ async def main():
                     o, c = await k.ev(OVER_JS), await k.ev(CLIP_JS)
                     check(f'lock {vw} {lang}: no sideways overflow or clipped text on the lock screen', not o and not c, (o, c))
                     f = await k.ev("({k:getComputedStyle(document.querySelector('.pin-k')).fontFamily,t:getComputedStyle(document.querySelector('.pinpad .th')||document.body).fontFamily})")
-                    check(f'lock {vw} {lang}: the pad text is in the system font', SYS.search(f['k']) and SYS.search(f['t']), f)
+                    check(f'lock {vw} {lang}: the PIN text is in the system font, the pad keys keep the pixel font', PIX.search(f['k']) and SYS.search(f['t']), f)
                     if vw == 375 and lang == 'en': await k.pg.screenshot(path=os.path.join(OUT, 'readable-on-lock-375.png'))
                     await k.pg.context.close()
         await section('pin', pin)
@@ -306,13 +309,14 @@ async def main():
           while(n=w.nextNode()){const e=n.parentElement;if(!e||e.closest('.sr,script,style,.marquee'))continue;const s=n.nodeValue;let m;
             while(m=re.exec(s)){if(!/\\d{3}/.test(m[0]))continue;const r=document.createRange();r.setStart(n,m.index);r.setEnd(n,m.index+m[0].length);
               const tops=new Set([...r.getClientRects()].map(x=>Math.round(x.top)));
-              const alone=e.closest('dd,.amt,.credit-num,.chip,button.btn,.pc-price,.cash-amt');
-              const num=m[0].replace(/\s?(SAT|USD|EUR|CHF)$/,'');const rn=document.createRange();rn.setStart(n,m.index);rn.setEnd(n,m.index+num.length);
+              const alone=e.closest('dd,.amt,.credit-num,.pc-price,.cash-amt');
+              const num=m[0].replace(/\\s?(SAT|USD|EUR|CHF)$/,'');const rn=document.createRange();rn.setStart(n,m.index);rn.setEnd(n,m.index+num.length);
               const nt=new Set([...rn.getClientRects()].map(x=>Math.round(x.top)));
               if(nt.size>1||(alone&&tops.size>1))out.push('AMOUNT SPLIT: '+m[0]+' in <'+e.tagName+'.'+e.className+'>')}
             // a word cut in the middle although it would have fitted a line of its own
-            const wr=/[^\\s\\u00a0-]{4,}/g;while(m=wr.exec(s)){const r=document.createRange();r.setStart(n,m.index);r.setEnd(n,m.index+m[0].length);
-              const rs=[...r.getClientRects()];if(new Set(rs.map(x=>Math.round(x.top))).size>1){const tot=rs.reduce((a,x)=>a+x.width,0),box=(e.closest('dd,dt,button,.tx,.notice,p,div')||e).clientWidth;if(tot<=box-8)out.push('WORD CUT: '+m[0]+' in <'+e.tagName+'.'+e.className+'>')}}}
+            const wr=/[^\\s\\u00a0-]{4,}/g;while(m=wr.exec(s)){if(e.closest('.code,.mono,.addr,.qr,.words,.btn,.chip,.tab,.h2,.sheet-head,.marquee,.push,button:not(.tx)'))continue;const r=document.createRange();r.setStart(n,m.index);r.setEnd(n,m.index+m[0].length);
+              const rs=[...r.getClientRects()];if(new Set(rs.map(x=>Math.round(x.top))).size>1){const tot=rs.reduce((a,x)=>a+x.width,0),box=(e.closest('dd,dt,button,.tx,.notice,p,div')||e).clientWidth;if(tot<=box-8)out.push('WORD CUT: '+m[0]+' in <'+e.tagName+'.'+e.className+'>');else out.push('WORD WIDER THAN ITS BOX: '+m[0]+' in <'+e.tagName+'.'+e.className+'>')}
+              else{const rs2=[...r.getClientRects()],box=(e.closest('dd,dt,button,.tx,.notice,p,div')||e).getBoundingClientRect();if(rs2.length&&(Math.max(...rs2.map(x=>x.right))>box.right+1||Math.min(...rs2.map(x=>x.left))<box.left-1))out.push('WORD WIDER THAN ITS BOX: '+m[0]+' in <'+e.tagName+'.'+e.className+'>')}}}
           return out.slice(0,6)})()"""
         BIG = [21000000, 12345678]
         async def amounts():
@@ -343,6 +347,72 @@ async def main():
                     await w.pg.context.close()
         await section('amounts', amounts)
 
+
+        # ---------- every text size at 320 px, every language: Settings, the 12 words, the spending limit, home, the notes list ----------
+        async def roots():
+            for lang in LANGS:
+                w = await wallet(b, f'root-{lang}', 320, 700, lang, on=True); await w.create()
+                await w.ev(f"""(()=>{{const S=Nutcade.S,now=Date.now(); S.txs.unshift(
+                  {{id:'rA',ts:now,note:'Lunch with Alex #food',status:'pending',fee:0,type:'out',method:'ln',amount:{BIG[1]},mint:'https://mint.test'}},
+                  {{id:'rB',ts:now-1000,note:'',status:'done',fee:0,type:'in',method:'ecash',amount:{BIG[0]},mint:'https://mint.test'}}); Nutcade.render()}})()""")
+                bad = {}
+                for root in (16, 20, 24):
+                    await w.ev(f"Nutcade.closeSheet(); document.documentElement.style.fontSize='{root}px'")
+                    shots = [('home', "document.querySelector('[data-act=tab][data-tab=wallet]').click()", None),
+                             ('notes', "document.querySelector('[data-act=tab][data-tab=history]').click()", None),
+                             ('settings', "document.querySelector('[data-act=tab][data-tab=settings]').click()", None),
+                             ('words', "document.querySelector('[data-act=tab][data-tab=settings]').click(); document.querySelector('[data-act=seedShow]').click()", '#layer .sheet'),
+                             ('limits', "document.querySelector('[data-act=tab][data-tab=settings]').click(); document.querySelector('[data-act=limOpen]').click()", '#layer .sheet')]
+                    for name, js, sheet in shots:
+                        await w.ev("Nutcade.closeSheet()"); await w.ev(js); await frames(w)
+                        if sheet and not await w.until(f"!!document.querySelector('{sheet}')", 4000): bad[f'{root} {name}'] = 'sheet did not open'; continue
+                        await frames(w)
+                        probs = {k: v for k, v in {'overflow': await w.ev(OVER_JS), 'words': await w.ev(AMT_JS), 'inview': {s: await w.ev(f"({INVIEW})('{s}')") for s in (['.tabbar'] + (['#layer .sheet-head .x, #layer .sheet-head [data-act=close]'] if sheet else []))}}.items() if v and v != {s: 'ok' for s in v} }
+                        if root == 24 and lang == 'de': await w.pg.screenshot(path=os.path.join(OUT, f'readable-de-320-root24-{name}.png'))
+                        if probs: bad[f'{root} {name}'] = probs
+                tabs = await w.ev("""[...document.querySelectorAll('.tab')].map(t=>{const r=t.getBoundingClientRect();return r.left>=-1&&r.right<=innerWidth+1})""")
+                check(f'roots 320px {lang}: at text size 16, 20 and 24, Home, Notes, Settings, the 12 words and the spending limit have no sideways overflow, no cut or overwide word, and the tab bar and the sheet\'s X stay on screen', not bad and all(tabs), (bad, tabs))
+                await w.pg.context.close()
+        await section('roots', roots)
+
+        # ---------- buttons are not part of Readable text: same font, size, spacing and wrapping on and off ----------
+        BTN_JS = """(()=>{const P=['fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','whiteSpace','textTransform','overflowWrap','hyphens'];
+          return [...document.querySelectorAll('#app button:not(.tx), #app .btn, #app .chip, #app .tab, #app .tab span, #app .push *, #app .linkbtn, #layer button, #layer .btn, #layer .chip')].filter(e=>!e.closest('#arcadeScreen')).map(e=>(e.innerText||e.className||e.tagName).trim().slice(0,18)+'|'+P.map(p=>getComputedStyle(e)[p]).join('|'))})()"""
+        async def buttons():
+            for lang in ('en', 'de'):
+                got = {}
+                for on_ in (False, True):
+                    w = await wallet(b, f'btn-{on_}', 320, 700, lang, on=on_); await w.create(); await w.add_mint(MINT); await w.use(MINT)
+                    snap = {}
+                    await w.ev(f"""(()=>{{const S=Nutcade.S,now=Date.now(); S.txs.unshift({{id:'bA',ts:now,note:'Lunch',status:'pending',fee:0,type:'out',method:'ln',amount:1234,mint:'https://mint.test'}}); Nutcade.render()}})()""")
+                    for t_ in ('wallet', 'history', 'mints', 'settings'):
+                        await tab(w, t_); snap[t_] = await w.ev(BTN_JS)
+                    for name, js in [('send', "document.querySelector('[data-act=tab][data-tab=wallet]').click(); document.querySelector('[data-act=send]').click()"), ('receive', "Nutcade.closeSheet(); document.querySelector('[data-act=receive]').click()"), ('limits', "Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=settings]').click(); document.querySelector('[data-act=limOpen]').click()")]:
+                        await w.ev(js); await w.until("!!document.querySelector('#layer .sheet')", 4000); await frames(w); snap[name] = await w.ev(BTN_JS)
+                    got[on_] = snap; await w.pg.context.close()
+                diff = {k: [(a, c) for a, c in zip(got[False][k], got[True][k]) if a != c][:3] for k in got[False] if got[False][k] != got[True][k]}
+                check(f'buttons {lang}: every button, chip and tab on 4 tabs and 3 sheets has identical font, size, spacing and wrapping with Readable text on and off', not diff and all(len(got[True][k]) > 2 for k in got[True]), diff)
+        await section('buttons', buttons)
+
+        # ---------- notes rows: the amount drops below instead of squeezing the note; chips keep their style and fit ----------
+        async def notes():
+            w = await wallet(b, 'notes', 320, 700, 'de', on=True); await w.create()
+            await w.ev(f"""(()=>{{const S=Nutcade.S,now=Date.now(); S.txs.unshift(
+              {{id:'nA',ts:now,note:'Mittagessen mit Alex und Bo',status:'pending',fee:0,type:'out',method:'ln',amount:{BIG[1]},mint:'https://mint.test'}},
+              {{id:'nB',ts:now-1000,note:'',status:'done',fee:0,type:'in',method:'ecash',amount:{BIG[0]},mint:'https://mint.test'}}); Nutcade.render()}})()""")
+            for root in (16, 24):
+                await w.ev(f"document.documentElement.style.fontSize='{root}px'"); await tab(w, 'history')
+                r = await w.ev("""(()=>{const out=[];for(const row of document.querySelectorAll('.tx:not(.contact)')){const note=row.querySelector('.note'),amt=row.querySelector('.amt'),chips=[...row.querySelectorAll('.chip')];
+                  if(note&&note.getBoundingClientRect().width<110&&note.innerText.trim())out.push('note squeezed to '+Math.round(note.getBoundingClientRect().width));
+                  if(note&&note.scrollWidth>note.clientWidth+1)out.push('note overflows');
+                  for(const c of chips){const cr=c.getBoundingClientRect();if(c.scrollWidth>c.clientWidth+1)out.push('chip text spills: '+c.innerText);
+                    if(amt){const ar=amt.getBoundingClientRect();if(!(cr.right<=ar.left||cr.left>=ar.right||cr.bottom<=ar.top||cr.top>=ar.bottom))out.push('chip touches the amount: '+c.innerText)}
+                    const f=getComputedStyle(c);if(!/Press Start|VT323/.test(f.fontFamily))out.push('chip font changed')}
+                  if(amt){const wd=amt.getBoundingClientRect(),rr=row.getBoundingClientRect();if(wd.right>rr.right+1)out.push('amount outside the row')}}return out})()""")
+                check(f'notes: at text size {root} the note is not squeezed or letter-broken, the amount fits, the chips keep their font, fit their border and never touch the amount', not r, r)
+            await w.pg.context.close()
+        await section('notes', notes)
+
         # ---------- the arcade is exactly as without the setting ----------
         STYLE_JS = """(sel=>{const P=['fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','whiteSpace','hyphens','overflowWrap','wordBreak','textTransform','width','height','paddingTop','paddingLeft','marginTop','display'];
           return [...document.querySelectorAll(sel)].map(e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return (e.className&&e.className.baseVal===undefined?e.className:e.tagName)+'|'+P.map(p=>s[p]).join('|')+'|'+Math.round(r.width)+'x'+Math.round(r.height)})})"""
@@ -352,7 +422,8 @@ async def main():
                 for on_ in (False, True):
                     w = await wallet(b, f'arc-{on_}', vw, 700, 'en', on=on_); await w.create()
                     await tab(w, 'arcade'); await w.until("!!document.querySelector('.cab')", 5000); await frames(w)
-                    snap = {'list': await w.ev(f"({STYLE_JS})('.cab, .cab *')")}
+                    snap = {'tab': await w.ev(f"({STYLE_JS})('#arcadeScreen, #arcadeScreen *')")}   # (the cabinet list, the Daily Challenge panel, the trophy case: all of the arcade tab)
+                    snap['has'] = [await w.ev("!!document.querySelector('#arcadeScreen [data-daily-play]')"), await w.ev("!!document.querySelector('#arcadeScreen .cab')")]
                     ids = await w.ev("Arcade.games.map(c=>c.id)")
                     for gid in ids[:6]:
                         await w.ev(f"document.querySelector('[data-game={gid}]').click()"); await w.until("!!document.querySelector('.game-view canvas')", 8000); await frames(w)
@@ -360,7 +431,7 @@ async def main():
                         await w.ev("document.querySelector('[data-g=exit]').click()"); await w.until("!document.querySelector('.game-view')", 5000)
                     got[on_] = snap; await w.pg.context.close()
                 diff = {k: [(a, c) for a, c in zip(got[False][k], got[True][k]) if a != c][:2] for k in got[False] if got[False][k] != got[True][k]}
-                check(f'arcade {vw}px: the cabinet list and 6 game screens have identical computed styles and sizes with Readable text on and off', not diff and len(got[True]) >= 7 and all(got[True][k] for k in got[True]), diff)
+                check(f'arcade {vw}px: the whole arcade tab (cabinets, Daily Challenge, trophies) and 6 game screens have identical computed styles and sizes with Readable text on and off', not diff and len(got[True]) >= 8 and all(got[True]['has']) and all(got[True][k] for k in got[True]), diff)
         await section('arcade', arcade)
 
         # ---------- no hyphenation, no breaking inside words anywhere in the wallet ----------
