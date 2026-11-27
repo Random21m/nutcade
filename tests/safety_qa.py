@@ -1,14 +1,14 @@
 """Safety fixes (1.44.0). Uses the local mints 3338 (Mint A), 3339 (Mint B), 3345 (MULTI: sat, usd, eur) and mock_nostr.py.
 
 1. Removing a mint while money is on its way there is refused with a sentence: a Lightning deposit being collected, a
-   payment in flight (its coins sit in the payment record, so the balance reads 0), an open step. A deposit that never
-   expires (an on-chain address, say) does not block removal, but if it is paid later the mint comes back with the
-   sats instead of them being hidden. The confirm screen checks again when Remove is tapped.
+   payment in flight (its coins sit in the payment record, so the balance reads 0), an open step. A deposit nobody has
+   paid yet does not block removal, but if it is paid later the mint comes back with the sats instead of them being
+   hidden. The confirm screen checks again when Remove is tapped.
 3. Change PIN, Remove PIN and Face ID setup wait out the wrong-PIN pause like the lock screen does.
 4. Receive: the "trust this mint" step is for that token's mint only; a token from another unknown mint pasted in its
    place gets its own notice, not a silent claim.
-5. A USD deposit recovered after its answer was lost comes in (its toast's unit, arrMoneyU as on the line beside it, is checked
-   by reading: the recovery path these local mints take shows the arrival screen, not that toast).
+5. A USD deposit recovered after its answer was lost comes in on its USD line (its toast's unit, arrMoneyU as on the line
+   beside it, is checked by reading: the recovery path these local mints take shows the arrival screen, not that toast).
 """
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -39,15 +39,32 @@ async def held_route(w, pattern):
     return go
 
 
-async def invoice_at(w, url, amount, expiry_null=False):
-    """a Lightning deposit at `url` whose collection is held back: the fake Lightning pays it, the app's mint step waits"""
-    go = await held_route(w, url + '/v1/mint/bolt11')
+async def invoice_at(w, url, amount, unpaid=False):
+    """A Lightning deposit at `url`. Default: the fake Lightning pays it and the app's mint step is held (being collected).
+    unpaid: nobody has paid it as far as the app can tell (its status reads UNPAID, the mint's live updates are cut) until
+    the returned event is set, when the real status is let through (an invoice paid later)."""
+    if unpaid:
+        go = asyncio.Event()
+        async def status(route):
+            if go.is_set():
+                try: await route.continue_()
+                except Exception: pass
+                return
+            try:
+                r = await route.fetch(); d = await r.json(); d['state'] = 'UNPAID'
+                await route.fulfill(response=r, body=json.dumps(d))
+            except Exception:
+                try: await route.abort()
+                except Exception: pass
+        await w.pg.route(url + '/v1/mint/quote/bolt11/**', status)
+        await w.pg.route_web_socket(url.replace('http', 'ws') + '/**', lambda ws: None)   # (no live "paid" message from this mint)
+    else:
+        go = await held_route(w, url + '/v1/mint/bolt11')
     await w.ev(f"Nutcade.S.active={J(url)}; Nutcade.render()"); await w.home()
     await w.click('[data-act=receive]'); await w.wait(150)
     if await w.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await w.click('[data-act=recvMethod][data-m=ln]'); await w.wait(100)
     await w.fill('#amtIn', str(amount)); await w.click('[data-act=doLnInvoice]')
     ok = await w.until(f"Nutcade.S.quotes.some(q=>q.mint==={J(url)}&&q.amount=={amount})", 15000)
-    if expiry_null: await w.ev(f"Nutcade.S.quotes.filter(q=>q.mint==={J(url)}).forEach(q=>q.expiry=null)")   # (as an on-chain address or a Lightning address deposit: no expiry)
     await w.ev("Nutcade.closeSheet()"); await w.wait(200)
     return go, ok
 
@@ -96,28 +113,28 @@ async def main():
             check('remove, payment: no script errors', not w.errs, w.errs[:4])
             await w.pg.context.close()
 
-        async def remove_noexpiry():
+        async def remove_unpaid():
             w = await wallet(b); await w.create(); await w.add_mint(A); await w.add_mint(B)
-            go, ok = await invoice_at(w, A, 120, expiry_null=True)
+            go, ok = await invoice_at(w, A, 120, unpaid=True)
             t, conf = await remove(w, A)
-            check('remove, a deposit that never expires: the confirm screen says it stays watched', ok and conf is not None and 'watched' in conf, (t, conf))
+            check('remove, a deposit nobody has paid yet: the confirm screen is offered and says it stays watched', ok and conf is not None and 'watched' in conf, (t, conf))
             # the deposit lands while the confirm screen is open: Remove is then refused
             go.set(); landed = await w.until(f"(Nutcade.S.proofs[{J(A)}]||[]).reduce((t,p)=>t+p.amount,0) >= 120", 30000)
             await w.ev("document.querySelector('#toast') && (document.querySelector('#toast').hidden = true)")
             if await w.ev("!!document.querySelector('#layer [data-act=confirmRemove]')"): await w.click('#layer [data-act=confirmRemove]'); await w.wait(300)
             check('remove, the deposit landed while the confirm screen was open: Remove is refused, the mint and its 120 SAT stay', landed and await w.ev(has(A)) and await w.bal(A) >= 120 and 'Send or move' in await w.toast(), (landed, await w.bal(A), await w.toast()))
-            check('remove, no expiry: no script errors', not w.errs, w.errs[:4])
+            check('remove, unpaid: no script errors', not w.errs, w.errs[:4])
             await w.pg.context.close()
 
         async def remove_comeback():
             w = await wallet(b); await w.create(); await w.add_mint(A); await w.add_mint(B)
-            go, ok = await invoice_at(w, A, 130, expiry_null=True)
+            go, ok = await invoice_at(w, A, 130, unpaid=True)
             t, conf = await remove(w, A)
             if conf is not None: await w.click('#layer [data-act=confirmRemove]'); await w.wait(400)
             gone = not await w.ev(has(A))
             go.set()
             back = await w.until(f"{has(A)} && (Nutcade.S.proofs[{J(A)}]||[]).reduce((t,p)=>t+p.amount,0) >= 130", 40000)
-            check('remove, then the never-expiring deposit is paid: the mint comes back with the 130 SAT (never hidden)', ok and gone and back, (ok, gone, back, await w.ev("Nutcade.S.mints.map(m=>m.url)")))
+            check('remove, then the open deposit is paid: the mint comes back with the 130 SAT (never hidden)', ok and gone and back, (ok, gone, back, await w.ev("Nutcade.S.mints.map(m=>m.url)")))
             check('remove, comeback: the total balance counts them', await w.ev("Object.entries(Nutcade.S.proofs).filter(([u])=>Nutcade.S.mints.some(m=>m.url===u)).flatMap(([,ps])=>ps).reduce((t,p)=>t+p.amount,0)") >= 130)
             check('remove, comeback: no script errors', not w.errs, w.errs[:4])
             await w.pg.context.close()
@@ -130,8 +147,9 @@ async def main():
                 await w.ev(f"(()=>{{let x=document.querySelector('[data-act={act}]'); if(!x){{x=document.createElement('button'); x.dataset.act={J(act)}; x.hidden=true; document.body.appendChild(x)}} x.click()}})()")
                 return await w.until("!!document.querySelector('#layer [data-pinpad]')", 3000)
             await open_pad('pinChange')
-            for _ in range(5):
-                await pad(w, wrong, '#layer [data-pinpad]'); await w.wait(600)
+            fails = "(JSON.parse(localStorage.getItem('nutcade:pinfails')||'{}').n||0)"
+            for _ in range(5):   # (each wrong PIN is let count before the next: on a slow machine the key stretching takes a while)
+                n0 = await w.ev(fails); await pad(w, wrong, '#layer [data-pinpad]'); await w.until(f"{fails} > {n0}", 15000); await w.wait(150)
             waiting = await w.ev("(JSON.parse(localStorage.getItem('nutcade:pinfails')||'{}').until||0) > Date.now()")
             await pad(w, PIN, '#layer [data-pinpad]'); await w.wait(800)
             msg = await w.ev("(document.querySelector('#layer #pinErr')||{}).innerText||''")
@@ -177,10 +195,11 @@ async def main():
             await w.until(f"Nutcade.S.quotes.some(q=>q.mint==={J(USD)})", 15000); await w.wait(3000)
             await w.pg.unroute(MULTI + '/v1/mint/bolt11'); await w.ev("Nutcade.closeSheet()")
             got = await w.until(f"(Nutcade.S.proofs[{J(USD)}]||[]).reduce((t,p)=>t+p.amount,0) >= 1250", 60000); await w.wait(800)
+            check('unit deposit: a USD deposit recovered after a lost answer comes in (1,250 cents, on a USD line)', ok and got and await w.ev(f"Nutcade.S.txs.some(t=>t.mint==={J(USD)}&&t.status==='done'&&t.amount===1250)"), (ok, got))
             check('unit deposit: no script errors', not w.errs, w.errs[:4])
             await w.pg.context.close()
 
-        for name, fn in (('remove_deposit', remove_deposit), ('remove_payment', remove_payment), ('remove_noexpiry', remove_noexpiry),
+        for name, fn in (('remove_deposit', remove_deposit), ('remove_payment', remove_payment), ('remove_unpaid', remove_unpaid),
                          ('remove_comeback', remove_comeback), ('pin_wait', pin_wait), ('trust', trust), ('unit_toast', unit_toast)):
             await section(name, fn)
         await b.close()

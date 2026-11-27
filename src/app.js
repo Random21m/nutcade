@@ -676,23 +676,24 @@ function addProofs(url, ps) {
 
 /* ---------- removing a mint (1.44) ----------
    Never while money is on its way there: a Lightning deposit not yet expired (being paid or collected), a payment in flight
-   (its coins sit in the payment record, so the balance reads 0) or an open step. A deposit that never expires (an on-chain
-   address, a Lightning address payment) doesn't block removal, but stays watched: coins that land at a mint no longer in the
+   (its coins sit in the payment record, so the balance reads 0) or an open step. A deposit nobody has paid yet (an invoice,
+   an on-chain address, a Lightning address payment) doesn't block removal, but stays watched: coins that land at a mint no longer in the
    list bring it back (reclaimOrphans, after every save), so they are never hidden. */
-const openAt = u => S.pending.some(p => p.mint === u && !p.paid) || S.ops.some(o => o.mint === u) || S.quotes.some(q => q.mint === u && q.expiry && Date.now() / 1000 <= q.expiry);
-const watchedAt = u => S.quotes.filter(q => q.mint === u && !q.expiry).length;
+const collecting = q => q.state === 'PAID' || q.state === 'PENDING' || depCtrs(q).length > 0;   // (paid or being paid, or the wallet already asked for its coins)
+const openAt = u => S.pending.some(p => p.mint === u && !p.paid) || S.ops.some(o => o.mint === u) || S.quotes.some(q => q.mint === u && collecting(q));
+const watchedAt = u => S.quotes.filter(q => q.mint === u && !collecting(q)).length;   // (unpaid invoices and deposit addresses: watched after removal)
 function removeRefused(u) {
   const bal = balanceOf(u);
   if (bal > 0) { toast(`Send or move the ${moneyAt(u, bal)} out of this mint before removing it.`, 'red'); sfx('err'); return true; }
   if (openAt(u)) { toast('A deposit or payment at this mint is still on its way. Remove the mint once it has settled.', 'red'); sfx('err'); return true; }
   return false;
 }
-const orphansBack = new Set();
+const orphansBack = new Map();   // url -> when its last try started (one at a time, and a failed one waits a minute)
 function reclaimOrphans() {
   for (const [u, ps] of Object.entries(S.proofs)) {
-    if (!ps || !ps.length || S.mints.some(m => m.url === u) || orphansBack.has(u) || isBlocked(u)) continue;
-    orphansBack.add(u);
-    addMint(u, { dropped: true, sat: isSatAcct(u) }).then(m => { toast(`${acctName(m)} is back: ${moneyAt(u, balanceOf(u))} arrived there`, 'lime'); render(); }).catch(() => {}).finally(() => orphansBack.delete(u));
+    if (!ps || !ps.length || S.mints.some(m => m.url === u) || isBlocked(u) || Date.now() - (orphansBack.get(u) || 0) < 60e3) continue;
+    orphansBack.set(u, Date.now());
+    addMint(u, { dropped: true, sat: isSatAcct(u) }).then(m => { if (!S.mints.some(x => x.url === u)) return; orphansBack.delete(u); toast(`${acctName(m)} is back: ${moneyAt(u, balanceOf(u))} arrived there`, 'lime'); render(); }).catch(() => {});
   }
 }
 
@@ -4464,7 +4465,7 @@ const A = {
     const u = b.dataset.url;
     if (removeRefused(u)) return;
     const aside = asideOf(u);
-    openSheet('Remove mint', `<p style="margin:0">Remove ${esc(host(u))}${isSatAcct(u) ? '' : ' · ' + esc(unitCode(acctUnit(u)))} from NUTCADE? Its transaction notes stay.</p>${aside.length ? `<p class="tiny muted" style="margin:0">${aside.length === 1 ? `It also forgets 1 coin (${moneyAt(u, sum(aside))}) the mint no longer accepts.` : `It also forgets ${fmt(aside.length)} coins (${moneyAt(u, sum(aside))}) the mint no longer accepts.`}</p>` : ''}${watchedAt(u) ? `<p class="tiny muted" style="margin:0">${watchedAt(u) === 1 ? 'A deposit address' : `${fmt(watchedAt(u))} deposit addresses`} at this mint stay${watchedAt(u) === 1 ? 's' : ''} watched: if sats arrive there later, the mint comes back with them.</p>` : ''}<button class="btn solid red block" data-act="confirmRemove" data-url="${esc(u)}">Remove</button>`);
+    openSheet('Remove mint', `<p style="margin:0">Remove ${esc(host(u))}${isSatAcct(u) ? '' : ' · ' + esc(unitCode(acctUnit(u)))} from NUTCADE? Its transaction notes stay.</p>${aside.length ? `<p class="tiny muted" style="margin:0">${aside.length === 1 ? `It also forgets 1 coin (${moneyAt(u, sum(aside))}) the mint no longer accepts.` : `It also forgets ${fmt(aside.length)} coins (${moneyAt(u, sum(aside))}) the mint no longer accepts.`}</p>` : ''}${watchedAt(u) ? `<p class="tiny muted" style="margin:0">${watchedAt(u) === 1 ? 'An open deposit at this mint stays watched' : `${fmt(watchedAt(u))} open deposits at this mint stay watched`}: if sats arrive there later, the mint comes back with them.</p>` : ''}<button class="btn solid red block" data-act="confirmRemove" data-url="${esc(u)}">Remove</button>`);
   },
   confirmRemove: b => { const u = b.dataset.url; if (removeRefused(u)) { closeSheet(); return; } S.mints = S.mints.filter(m => m.url !== u); delete S.proofs[u]; if (S.active === u) S.active = S.mints[0] ? S.mints[0].url : null; save(); scheduleMintBackup(); closeSheet(); render(); },
   discover: b => {
