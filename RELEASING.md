@@ -39,13 +39,27 @@ MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh
 MINT_PY=/tmp/mint/bin/python QA_PY=/tmp/qa/bin/python bash tests/run_all.sh --only r7,r8
 ```
 
-## Cutting a release
+## Cutting a release (one paste)
 
-1. Push the change and wait for the workflow to pass (Actions tab).
-2. Note the checksums at https://random21m.github.io/nutcade/SHA256SUMS.txt.
-3. On GitHub, go to **Releases → Draft a new release**, create a tag like `v1.8.1`, and paste the checksums into the release notes.
+1. Claude pushes the change to `main` with your OK, and the workflow passes: the site then serves the new version and its
+   `SHA256SUMS.txt`.
+2. On your own computer, in any terminal, paste this one line (the same line for every project):
 
-## Signing a release (recommended)
+   ```bash
+   bash <(gh api -H "Accept: application/vnd.github.raw" repos/Random21m/second-brain/contents/how-to/release-kit/release-all.sh)
+   ```
+
+   It finds every project whose new version is live but not released, and for each runs `tools/release.sh` from main. Here it
+   checks main's page version and that every file in the live `SHA256SUMS.txt` is the one in main, signs them with the release
+   key (gpg asks for the key's passphrase, if it has one; the key never leaves your computer), makes the GitHub release with
+   the notes from the notebook (`releases/nutcade/nutcade-vX.Y.Z-notes.md`, or the checksums alone if there is none), and
+   checks the files, the signature and the tag. It stops at the first thing that does not match.
+
+By hand, in this clone: `bash tools/release.sh` (it reads the version from main). Needs git, gpg, curl and the GitHub CLI
+(`gh auth login` once). The script is tested with a throwaway key and stand-ins for GitHub and the site:
+`bash tests/release_script_test.sh`.
+
+## Signing by hand (if you cannot run the script)
 
 A signature proves the release came from the project. Releases are signed with the key in `nutcade-signing-key.asc`:
 
@@ -61,7 +75,8 @@ gpg --armor --detach-sign --local-user 4B729F056A529340 SHA256SUMS.txt   # creat
 gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt                           # should say "Good signature"
 ```
 
-Then edit the release on GitHub and attach `SHA256SUMS.txt` and `SHA256SUMS.txt.asc`. The key expires on 5 November 2028; extend it before then with `gpg --quick-set-expire 2509D11503B72CBFBCB5408F4B729F056A529340 2y` and commit the re-exported public key.
+Then on GitHub, **Releases → Draft a new release**, create the tag (like `v1.40.0`) on `main`, paste the notes and attach
+`SHA256SUMS.txt` and `SHA256SUMS.txt.asc`. The key expires on 5 November 2028; extend it before then with `gpg --quick-set-expire 2509D11503B72CBFBCB5408F4B729F056A529340 2y` and commit the re-exported public key.
 
 ## Timestamping a release (optional)
 
