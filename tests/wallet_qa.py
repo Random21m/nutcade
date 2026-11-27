@@ -114,7 +114,12 @@ class W:
         await s.ev("Nutcade.closeSheet()")
         await s.ev("document.querySelector('[data-act=pickMint]').click()"); await s.wait(200)
         await s.fill('#mintUrl', url); await s.click('[data-act=addMintUrl]')
-        await s.until("!document.querySelector('#mintUrl') || !!document.querySelector('#toast:not([hidden])')", 8000); await s.wait(200)
+        # done when the add itself has finished: the picker is gone (added), or its Add button is no longer busy (refused, with
+        # the reason on screen). Never "a toast is showing": one left from an earlier step made this move on while the mint was
+        # still being added, and that add's finish then closed the next picker (CI, Nov 27, 1.42.0).
+        if not await s.until("!document.querySelector('#mintUrl') || !!document.querySelector('#layer [data-act=addMintUrl]:not([disabled])')", 30000):
+            raise AssertionError(f'add_mint({url}): still adding after 30 s')
+        await s.wait(200)
     async def use(s, url): await s.ev(f"Nutcade.S.active={json.dumps(url)}; Nutcade.render()")
     async def home(s):
         await s.ev("Nutcade.closeSheet()")

@@ -70,8 +70,8 @@ jobs:
             suites: arrive
           - name: storage
             suites: storage
-          # sendall is not run in CI (owner's decision, Nov 27): one check timed out on a slow runner.
-          # It still runs locally: bash tests/run_all.sh --only sendall
+          - name: sendall
+            suites: sendall
           - name: backup
             suites: backup
           - name: radar
@@ -106,6 +106,8 @@ jobs:
             suites: readable
           - name: lib
             suites: lib
+          - name: addmint
+            suites: addmint
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out

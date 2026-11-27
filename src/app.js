@@ -2379,6 +2379,9 @@ function closeSheet() {
   if (back && !back.isConnected && back.dataset && back.dataset.act) back = [...document.querySelectorAll(`#app [data-act="${back.dataset.act}"]`)].find(x => !back.dataset.id || x.dataset.id === back.dataset.id) || null;
   if (had && back && back.isConnected && (inLayer || document.activeElement === document.body)) { try { back.focus({ preventScroll: true }); } catch (e) {} }
 }
+// a step started from a sheet (adding a mint, say) closes that sheet when it finishes, never one opened while it was on its way (1.42)
+const sheetOf = el => (el && el.closest && el.closest('#layer .sheet')) || null;
+function closeSheetOf(sh) { if (sh && sh.isConnected) closeSheet(); }
 const FOCUSABLE = 'button:not([disabled]),[href],input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 function setBody(html, onOpen) {
   const b = $('#layer .sheet-body'); if (!b) return; if (typeof sheetCleanup === 'function') sheetCleanup();
@@ -2832,7 +2835,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.41.0';
+const APP_VERSION = '1.42.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -4426,8 +4429,8 @@ const A = {
   amtUnit: b => { const el = b.parentElement.querySelector('input'); if (el) { toggleUnit(el); el.focus(); } },
   csv: () => exportCsv(S.txs, `nutcade-transactions-${new Date().toISOString().slice(0, 10)}.csv`),
   tx: b => openTx(b.dataset.id),
-  addMint: b => run(b, 'ADDING', async () => { if (isBlocked(b.dataset.url)) throw blockedErr(b.dataset.url, 'add'); const m = await addMint(b.dataset.url, { activate: true }); sfx('coin'); toast(`${acctName(m)} added`, 'lime'); closeSheet(); render(); }),
-  addMintUrl: b => run(b, 'ADDING', async () => { const u = val('mintUrl'); if (!u.trim()) throw new Error('Type a mint address first.'); if (isBlocked(normUrl(u))) throw blockedErr(normUrl(u), 'add'); const m = await addMint(u, { activate: true }); sfx('coin'); toast(`${acctName(m)} added`, 'lime'); closeSheet(); render(); }),
+  addMint: b => run(b, 'ADDING', async () => { const sh = sheetOf(b); if (isBlocked(b.dataset.url)) throw blockedErr(b.dataset.url, 'add'); const m = await addMint(b.dataset.url, { activate: true }); sfx('coin'); toast(`${acctName(m)} added`, 'lime'); closeSheetOf(sh); render(); }),
+  addMintUrl: b => run(b, 'ADDING', async () => { const sh = sheetOf(b), u = val('mintUrl'); if (!u.trim()) throw new Error('Type a mint address first.'); if (isBlocked(normUrl(u))) throw blockedErr(normUrl(u), 'add'); const m = await addMint(u, { activate: true }); sfx('coin'); toast(`${acctName(m)} added`, 'lime'); closeSheetOf(sh); render(); }),
   useMint: b => { S.active = b.dataset.url; save(); closeSheet(); render(); toast('Mint switched', 'cyan'); },
   refreshMint: b => run(b, '…', async () => { delete wallets[b.dataset.url]; await addMint(b.dataset.url); await ksCheck(b.dataset.url, { manual: true }).catch(() => {}); render(); toast('Mint info refreshed', 'cyan'); }),
   removeMint: b => {
