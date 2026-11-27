@@ -207,7 +207,7 @@ async function continueExtra(quiet) {
     const cfg = extraLockCfg(w, until, x.heir.pubkey);
     const pick = w._selectProofs; w._selectProofs = ps => ({ keep: [], send: ps });   // exactly the Extra Life's coins, all of them
     let res;
-    try { res = await journaled(url, 'send', { inputs: ins, amount: target, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow }, (cb, o) => rSend(o, w, target, ins, { includeFees: false, privkey: x.unlocked ? undefined : [myLockPriv()], onCountersReserved: cb }, cfg)); }
+    try { res = await journaled(url, 'send', { inputs: ins, amount: target, locked: true, note: 'Extra Life', tx: { locked: myLockPub() }, follow }, (cb, o) => rSend(o, w, target, ins, { includeFees: false, privkey: x.unlocked ? undefined : [lockPrivFor(lockOf(ins[0].secret).data)], onCountersReserved: cb }, cfg)); }
     finally { w._selectProofs = pick; }
     const { r: { keep, send }, op } = res;
     if (keep.length) { addProofs(url, keep); addTx({ type: 'in', method: 'ecash', amount: sum(plain(keep)), mint: url, note: `Extra Life cashed out (was for ${x.heir.name})`, self: true }); }   // (none: the amount is exact)
@@ -265,7 +265,7 @@ async function onExtraLife(p, from) {
     // only copies we could actually claim, the lock read as the library reads it (lockOf, app.js): P2PK, our key among its
     // refund keys with one signature enough, and a locktime that ends (digits; "0" has ended already: claimable now)
     const lk = lockOf(pr.secret);
-    if (!lk || lk.kind !== 'P2PK' || !lk.refund.includes(myLockPub()) || lk.nSigsRefund !== 1 || lk.locktime === null) return;
+    if (!lk || lk.kind !== 'P2PK' || !lk.refund.some(k => myLockPubs().includes(k)) || lk.nSigsRefund !== 1 || lk.locktime === null) return;
     until = Math.max(until, lk.locktime * 1000);
   }
   const who = nameFor(from);

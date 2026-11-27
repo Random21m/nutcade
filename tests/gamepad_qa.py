@@ -277,6 +277,26 @@ async def main():
         await pad(); await pump(3); await pad({'b': [0]}); await pump(3)
         check('1.43: ...and the next pad A (a frame later) goes on as usual (Continue)', not await w.ev(saved), await w.ev(saved))
         await leave(); await pad(); await pump(2)
+        # a challenge's result: a key on "Send my score" and pad A in the same frame: the score is sent, Rematch is not pressed (1.45)
+        # (the wallet's side stands in: a challenge from a contact who can be answered, and a send that is only counted)
+        await w.ev("window.__sent=0; window.__cd=Nutcade.challengeDone; window.__sr=Nutcade.sendResult; Nutcade.challengeDone=()=>({canReply:true, name:'BOB'}); Nutcade.sendResult=()=>{ __sent++; return Promise.resolve(true) }")
+        await w.ev("Arcade.open('swarm', {challenge:{id:'t145', seed:5, target:1, by:'BOB', name:'BOB'}}); __F.watch('swarm'); __F.n = 0; __F.add = 100; __F.cap = 20"); await pump(3)
+        await pad({'b': [0]}); await pump(3); await pad(); await pump(40)
+        on_result = "!!document.querySelector('#entry [data-g=reply]') && !!document.querySelector('#entry [data-g=rematch]')"
+        for _ in range(60):   # (the game-over pause runs on the page's own timers: pump frames until the result is up, on a slow machine too)
+            if await w.ev(on_result): break
+            await w.wait(100); await pump(2)
+        await w.ev("__F.add = 0; __F.cap = 0")
+        check('1.45: the challenge result offers Send my score and Rematch', await w.ev(on_result))
+        s0 = await w.ev("__sent")
+        bb = await w.ev("(() => { const r = document.querySelector('#entry [data-g=reply]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()")
+        await pad({'b': [0]}); await w.pg.mouse.click(bb[0], bb[1]); await pump(1); await pump(3)   # (a real tap on Send my score and pad A in the same frame)
+        check('1.45: a tap on Send my score + pad A in the same frame: ONE action (the score is sent once, the result screen stays, no Rematch)',
+              await w.ev("__sent") == s0 + 1 and await w.ev("!!document.querySelector('#entry [data-g=rematch]')"), (s0, await w.ev("__sent"), await w.ev("!!document.querySelector('#entry [data-g=rematch]')")))
+        await pad(); await pump(3); await pad({'b': [0]}); await pump(3)
+        check('1.45: ...and the next pad A (a frame later) presses Rematch as usual', not await w.ev("!!document.querySelector('#entry [data-g=rematch]')"))
+        await w.ev("Nutcade.challengeDone=__cd; Nutcade.sendResult=__sr")
+        await leave(); await pad(); await pump(2)
 
         # --- replays: pad input is recorded exactly like the keyboard's
         async def run(kind):
