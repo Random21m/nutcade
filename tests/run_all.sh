@@ -28,8 +28,8 @@ ports_for() { case "$1" in
   r7_qa|grid_backup_qa|polish_qa) echo "3338 3339 3340" ;;
   tokens_qa|radar_qa|dleq_qa) echo "3338 3339" ;;
   arrive_qa) echo "3338 3339" ;;
-  addmint_qa) echo "3338 3339" ;;
-  safety_qa) echo "3338 3339 3345" ;;   # (1.44 safety fixes: Mint A and Mint B, and the multi-unit mint for a USD deposit)   # (adding a mint while another add is still on its way: Mint A and Mint B)
+  addmint_qa) echo "3338 3339" ;;   # (adding a mint while another add is still on its way: Mint A and Mint B)
+  safety_qa) echo "3338 3339 3345" ;;   # (1.44 safety fixes: Mint A and Mint B, and the multi-unit mint for a USD deposit)
   sendall_qa) echo "3338 3339 3340 3342" ;;
   r8_qa) echo "3338 3339 3340 3342 3343 3344" ;;
   r9_qa) echo "3338" ;;   # (r9 starts and restarts mints of its own, R9_PORT 3438-3441, to rotate their keys)

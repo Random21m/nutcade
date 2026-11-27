@@ -199,8 +199,21 @@ async def main():
             check('unit deposit: no script errors', not w.errs, w.errs[:4])
             await w.pg.context.close()
 
+        async def langs():   # the new sentences in Spanish (and none of them missing from the translations)
+            w = await wallet(b, lang='es'); await w.create(); await w.add_mint(A); await w.add_mint(B)
+            go, ok = await invoice_at(w, A, 100)
+            t, conf = await remove(w, A)
+            check('es: the refusal is in Spanish', 'todavía está en camino' in t, t)
+            go.set(); await w.until(f"(Nutcade.S.proofs[{J(A)}]||[]).reduce((t,p)=>t+p.amount,0) >= 100", 30000)
+            go2, ok2 = await invoice_at(w, B, 100, unpaid=True)
+            t, conf = await remove(w, B)
+            check('es: the "stays watched" note is in Spanish', conf and 'sigue vigilado' in conf, conf)
+            miss = [x for x in await w.ev("[...(window.__i18nMiss||[])]") if 'on its way' in x or 'watched' in x or 'is back' in x]
+            check('es: none of the new sentences is missing a translation', not miss, miss)
+            await w.pg.context.close()
+
         for name, fn in (('remove_deposit', remove_deposit), ('remove_payment', remove_payment), ('remove_unpaid', remove_unpaid),
-                         ('remove_comeback', remove_comeback), ('pin_wait', pin_wait), ('trust', trust), ('unit_toast', unit_toast)):
+                         ('remove_comeback', remove_comeback), ('pin_wait', pin_wait), ('trust', trust), ('unit_toast', unit_toast), ('langs', langs)):
             await section(name, fn)
         await b.close()
         print('\nSUMMARY', sum(r[1] for r in results), '/', len(results))
