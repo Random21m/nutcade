@@ -108,6 +108,8 @@ jobs:
             suites: lib
           - name: addmint
             suites: addmint
+          - name: safety
+            suites: safety
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out

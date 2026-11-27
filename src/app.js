@@ -319,7 +319,9 @@ function save() {
   { const g = (raw.get('gen', 0) || 0) + 1; if (raw.set('gen', g)) myGen = g; }
   retrySaves();
   try { syDirty(); } catch (e) {}   // wallet sync (app_sync.js): the coins may have changed; published a moment later, never in this step
+  if (!orphanT) orphanT = setTimeout(() => { orphanT = 0; try { reclaimOrphans(); } catch (e) {} }, 0);   // (coins at a mint no longer listed bring it back; after the step that saved has finished)
 }
+let orphanT = 0;
 // the records that failed to save, written again (with what they hold now): by every save(), and by Try again
 function retrySaves() {
   if (writeGuard.paused || !saveBad()) return;
@@ -672,6 +674,29 @@ function addProofs(url, ps) {
   save();
 }
 
+/* ---------- removing a mint (1.44) ----------
+   Never while money is on its way there: a Lightning deposit not yet expired (being paid or collected), a payment in flight
+   (its coins sit in the payment record, so the balance reads 0) or an open step. A deposit nobody has paid yet (an invoice,
+   an on-chain address, a Lightning address payment) doesn't block removal, but stays watched: coins that land at a mint no longer in the
+   list bring it back (reclaimOrphans, after every save), so they are never hidden. */
+const collecting = q => q.state === 'PAID' || q.state === 'PENDING' || depCtrs(q).length > 0;   // (paid or being paid, or the wallet already asked for its coins)
+const openAt = u => S.pending.some(p => p.mint === u && !p.paid) || S.ops.some(o => o.mint === u) || S.quotes.some(q => q.mint === u && collecting(q));
+const watchedAt = u => S.quotes.filter(q => q.mint === u && !collecting(q)).length;   // (unpaid invoices and deposit addresses: watched after removal)
+function removeRefused(u) {
+  const bal = balanceOf(u);
+  if (bal > 0) { toast(`Send or move the ${moneyAt(u, bal)} out of this mint before removing it.`, 'red'); sfx('err'); return true; }
+  if (openAt(u)) { toast('A deposit or payment at this mint is still on its way. Remove the mint once it has settled.', 'red'); sfx('err'); return true; }
+  return false;
+}
+const orphansBack = new Map();   // url -> when its last try started (one at a time, and a failed one waits a minute)
+function reclaimOrphans() {
+  for (const [u, ps] of Object.entries(S.proofs)) {
+    if (!ps || !ps.length || S.mints.some(m => m.url === u) || isBlocked(u) || Date.now() - (orphansBack.get(u) || 0) < 60e3) continue;
+    orphansBack.set(u, Date.now());
+    addMint(u, { dropped: true, sat: isSatAcct(u) }).then(m => { if (!S.mints.some(x => x.url === u)) return; orphansBack.delete(u); toast(`${acctName(m)} is back: ${moneyAt(u, balanceOf(u))} arrived there`, 'lime'); render(); }).catch(() => {});
+  }
+}
+
 /* ---------- RECEIVE ---------- */
 // A new Lightning deposit quote (NUT-04). cashu-ts 5 locks every new bolt11 quote (NUT-20) and keeps no key itself: each is
 // locked to a fresh random key of its own, kept on the deposit's record (lockPriv, lockPub; wherever the record goes:
@@ -784,7 +809,7 @@ async function checkQuoteNow(id, txId) {
         } catch (e) { return 'waiting'; }
         if (S.quotes.some(x => x.quote === q.quote)) return 'waiting';
         refresh();
-        if (got) { sfx('coin'); arrToast(q.txId, `+${arrMoney(got)} received`, 'lime'); }
+        if (got) { sfx('coin'); arrToast(q.txId, `+${arrMoneyU(got, acctUnit(q.mint))} received`, 'lime'); }
         document.dispatchEvent(new CustomEvent('nutcade:paid', { detail: q.quote }));
         return 'paid';
       }
@@ -2771,6 +2796,9 @@ async function pinSubmit(pad) {
         <button class="btn solid gold block" data-act="close">Done</button></div>`);
       refresh(); return;
     }
+    if (m === 'changeOld' || m === 'remove' || m === 'bioVerify') {   // (the same pause after wrong PINs as the lock screen; 1.44)
+      const f = pinFails(); if (f.until > Date.now()) return pinError(`Wait ${Math.ceil((f.until - Date.now()) / 1000)}s before trying again.`);
+    }
     if (m === 'changeOld') { busy('CHECKING…'); if (!(await pinToDek(v))) { notePinFail(); return live() && pinError('That PIN is wrong.'); } if (!live()) return; pinUI.old = v; nextPad('changeNew');   // (the allowance is checked once the new PIN is typed twice: the same step as every refusal of a new PIN)
       setBody(padHTML('NEW PIN', `Choose a new PIN (${PIN_MIN} to ${PIN_MAX} digits).`) + '<div id="sheetErr"></div>'); return; }
     if (m === 'changeNew') { pinUI.first = v; nextPad('changeConfirm'); setBody(padHTML('CONFIRM NEW PIN', 'Enter it again.') + '<div id="sheetErr"></div>'); return; }
@@ -2835,7 +2863,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.43.0';
+const APP_VERSION = '1.44.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -4434,12 +4462,12 @@ const A = {
   useMint: b => { S.active = b.dataset.url; save(); closeSheet(); render(); toast('Mint switched', 'cyan'); },
   refreshMint: b => run(b, '…', async () => { delete wallets[b.dataset.url]; await addMint(b.dataset.url); await ksCheck(b.dataset.url, { manual: true }).catch(() => {}); render(); toast('Mint info refreshed', 'cyan'); }),
   removeMint: b => {
-    const u = b.dataset.url, bal = balanceOf(u);
-    if (bal > 0) { toast(`Send or move the ${moneyAt(u, bal)} out of this mint before removing it.`, 'red'); sfx('err'); return; }
+    const u = b.dataset.url;
+    if (removeRefused(u)) return;
     const aside = asideOf(u);
-    openSheet('Remove mint', `<p style="margin:0">Remove ${esc(host(u))}${isSatAcct(u) ? '' : ' · ' + esc(unitCode(acctUnit(u)))} from NUTCADE? Its transaction notes stay.</p>${aside.length ? `<p class="tiny muted" style="margin:0">${aside.length === 1 ? `It also forgets 1 coin (${moneyAt(u, sum(aside))}) the mint no longer accepts.` : `It also forgets ${fmt(aside.length)} coins (${moneyAt(u, sum(aside))}) the mint no longer accepts.`}</p>` : ''}<button class="btn solid red block" data-act="confirmRemove" data-url="${esc(u)}">Remove</button>`);
+    openSheet('Remove mint', `<p style="margin:0">Remove ${esc(host(u))}${isSatAcct(u) ? '' : ' · ' + esc(unitCode(acctUnit(u)))} from NUTCADE? Its transaction notes stay.</p>${aside.length ? `<p class="tiny muted" style="margin:0">${aside.length === 1 ? `It also forgets 1 coin (${moneyAt(u, sum(aside))}) the mint no longer accepts.` : `It also forgets ${fmt(aside.length)} coins (${moneyAt(u, sum(aside))}) the mint no longer accepts.`}</p>` : ''}${watchedAt(u) ? `<p class="tiny muted" style="margin:0">${watchedAt(u) === 1 ? 'An open deposit at this mint stays watched' : `${fmt(watchedAt(u))} open deposits at this mint stay watched`}: if sats arrive there later, the mint comes back with them.</p>` : ''}<button class="btn solid red block" data-act="confirmRemove" data-url="${esc(u)}">Remove</button>`);
   },
-  confirmRemove: b => { const u = b.dataset.url; S.mints = S.mints.filter(m => m.url !== u); delete S.proofs[u]; if (S.active === u) S.active = S.mints[0] ? S.mints[0].url : null; save(); scheduleMintBackup(); closeSheet(); render(); },
+  confirmRemove: b => { const u = b.dataset.url; if (removeRefused(u)) { closeSheet(); return; } S.mints = S.mints.filter(m => m.url !== u); delete S.proofs[u]; if (S.active === u) S.active = S.mints[0] ? S.mints[0].url : null; save(); scheduleMintBackup(); closeSheet(); render(); },
   discover: b => {
     const el = $('#nostrList'); el.innerHTML = busyHTML('LISTENING TO RELAYS');
     const stop = discoverMints(renderDiscovered);
@@ -4452,7 +4480,7 @@ const A = {
     let meta; try { meta = peekToken(tok); } catch (e) { throw new Error("That doesn't look like a Cashu token. It should start with cashuA or cashuB."); }
     if (!unitOk(meta.unit)) throw unitErr(meta.unit);
     if (isBlocked(meta.mint)) throw blockedErr(meta.mint);
-    if (!S.mints.find(m => m.url === meta.mint) && !b.dataset.trust) {
+    if (!S.mints.find(m => m.url === meta.mint) && b.dataset.trust !== meta.mint) {   // (a trust step shown for one token's mint is not one for another's; 1.44)
       setTrust(meta); return;
     }
     if (isOffline()) { const h = holdIncoming(tok, val('noteIn').trim(), { check: true }); sfx('blip'); refresh(); setBody(`${checkLine(h)}<div class="notice">You're offline, so this token is saved and will be claimed automatically when you're back online. Until then it isn't yours yet: the sender could still spend it.</div><button class="btn solid gold block" data-act="close">OK</button>`); return; }
@@ -4828,7 +4856,7 @@ function setTrust(meta) {
   const el = $('#tokPeek'); const dest = activeMint();
   const canSwap = dest && isSatAcct(dest.url) && meta.unit === 'sat' && supports(dest, 'mint', 'bolt11') && dest.url !== meta.mint;   // (a swap is Lightning between SAT accounts)
   el.innerHTML = `<div class="notice">This token is from ${esc(host(meta.mint))}${meta.unit === 'sat' ? '' : ' · ' + esc(unitCode(meta.unit))}, a mint you haven't added. Claiming adds it and trusts it with ${moneyU(meta.amount, meta.unit)}.${canSwap ? ` Or swap it into ${esc(dest.name)} over Lightning (small fee).` : ''}</div>`;
-  const btn = $('[data-act="doReceiveToken"]'); btn.dataset.trust = '1'; btn.textContent = 'Trust mint & claim';
+  const btn = $('[data-act="doReceiveToken"]'); btn.dataset.trust = meta.mint; btn.textContent = 'Trust mint & claim';
   if (canSwap && !$('[data-act="swapToken"]')) btn.insertAdjacentHTML('afterend', `<button class="btn block violet" data-act="swapToken">Swap into ${esc(dest.name)}</button>`);
 }
 
@@ -4860,7 +4888,9 @@ document.addEventListener('input', e => {
     if (el) el.innerHTML = validPhrase(e.target.value) ? '<span style="color:var(--lime)">Valid 12-word phrase</span>' : `${n} of 12 words${n >= 12 ? ' · checksum doesn\'t match, check spelling and order' : ''}`;
   }
   if (k === 'tokPeek') {
-    const el = $('#tokPeek'); const v = e.target.value.trim(); if (!v) { el.innerHTML = ''; return; }
+    const el = $('#tokPeek'); const v = e.target.value.trim();
+    const tb = $('[data-act="doReceiveToken"]'); if (tb && tb.dataset.trust) { delete tb.dataset.trust; tb.textContent = 'Claim ecash'; const sw = $('[data-act="swapToken"]'); if (sw) sw.remove(); }   // (another token: its own trust step, if it needs one)
+    if (!v) { el.innerHTML = ''; return; }
     try { const m = peekToken(v); if (!unitOk(m.unit)) { el.innerHTML = `<div class="notice red">${esc(unitErr(m.unit).message)}</div>`; return; } el.innerHTML = (isBlocked(m.mint) ? errHTML(blockedErr(m.mint)) : '') + `<dl class="kv"><dt>Amount</dt><dd style="color:var(--gold)">${moneyU(m.amount, m.unit)}</dd><dt>Mint</dt><dd data-noi18n>${esc(host(m.mint))}</dd>${m.memo ? `<dt>Memo</dt><dd data-noi18n>${esc(m.memo)}</dd>` : ''}</dl>`; }
     catch (x) { el.innerHTML = '<div class="tiny muted">Waiting for a valid cashu token…</div>'; }
   }
