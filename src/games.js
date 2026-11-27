@@ -786,14 +786,15 @@ function padPoll() {
   if (!padPrimed) { padPrimed = true; for (const k in n) padHeld[k] = !!n[k]; padBack = !!n.back; padAct = !!(n.a || n.start); return; }   // a button already down as the game opened (Back too) is not a press
   const back = !!n.back && padBack === false, act = !!(n.a || n.start) && !padAct;
   padBack = !!n.back; padAct = !!(n.a || n.start);
-  /* Enter (or a tap) on the initials form submits it between two polls; a pad A in that same frame must not then press the
-     SCORE SAVED screen's Continue too (1.43). The flag is set by the form's submit (not the pad's own) and dropped on every poll. */
+  /* A key or a tap on a screen after a game (the initials form's Enter, Space on Send my score...) acts between two polls; a pad A
+     in that same frame must not then press the next screen's or the same screen's other button too (1.43, 1.45). The flag is
+     set by that submit or click (never the pad's own) and dropped on every poll. */
   const keyed = entryKeyed; entryKeyed = false;
   if (mode === 'entry' || typing) {   // the DOM screens after a game (game over, results, the initials form), a focused text field: a pad key that is let go is released (keys, touch and other pad keys still holding it keep it), nothing new is pressed
     for (const k of RK) { const was = padHeld[k]; if (mode === 'entry' || !n[k]) padHeld[k] = !!n[k]; if (was && !n[k]) relK(k); }   // (a button newly down while typing is not recorded, so one still held when the field goes away is pressed on the next poll; on the entry screens it is, so a held A never starts a game from the title after Continue)
     if (mode !== 'entry') return;
     if (back) { closeGame(); return; }   // A or Start take the main button, Back closes like Escape; nothing else, even with the initials field focused
-    if (act && !keyed) { const box = view && view.querySelector('#entry'); const f = box && box.querySelector('form'); const bt = f ? null : box && (box.querySelector('[data-g=again],[data-g=rematch]') || box.querySelector('.btn.solid') || box.querySelector('.btn')); if (f) { padSubmitting = true; try { if (f.requestSubmit) f.requestSubmit(); else f.dispatchEvent(new Event('submit', { cancelable: true })); } finally { padSubmitting = false; } } else if (bt) bt.click(); }
+    if (act && !keyed) { const box = view && view.querySelector('#entry'); const f = box && box.querySelector('form'); const bt = f ? null : box && (box.querySelector('[data-g=again],[data-g=rematch]') || box.querySelector('.btn.solid') || box.querySelector('.btn')); padSubmitting = true; try { if (f) { if (f.requestSubmit) f.requestSubmit(); else f.dispatchEvent(new Event('submit', { cancelable: true })); } else if (bt) bt.click(); } finally { padSubmitting = false; } }
     /* One action per frame: if the pad just took the main button or closed (act/back above), a key pressed in this same frame
        (Space/Enter) must not also act. The click can have moved us to the title, whose check in tick() reads pressed and would
        start a game, so drop this frame's presses. (A key pressed first is no problem: the pad only clicks, it presses nothing.) */
@@ -803,7 +804,10 @@ function padPoll() {
   if (back) { closeGame(); return; }   // Back first: nothing else of this step is pressed, so no 'a' can outlive the game
   for (const k of RK) { const d = !!n[k], was = padHeld[k]; padHeld[k] = d; if (d && !was) press(k); else if (!d && was) relK(k); }
 }
-let entryKeyed = false, padSubmitting = false;   // the initials form was just submitted by a key or a tap / is being submitted by the pad (see padPoll)
+let entryKeyed = false, padSubmitting = false;   // a result screen was just acted on by a key or a tap / is being acted on by the pad (see padPoll)
+// (1.45) a key or a tap on any button of the screens after a game (Send my score, Continue...), not only the initials form:
+// the pad's A in that same frame must not also press the next button there
+document.addEventListener('click', e => { if (!padSubmitting && view && e.target && e.target.closest && e.target.closest('#entry')) entryKeyed = true; }, true);
 function padReset() { entryKeyed = false; padPrimed = false; padBack = false; padAct = false; for (const k in padHeld) padHeld[k] = false; }
 
 const ptr = { x: W / 2, y: H / 2, down: false, over: false, cancel: false, sx: 0, sy: 0, st: 0 };   // cancel: the system took the touch away (pointercancel); true for one step, so a cabinet drops a drag instead of treating it as a release
