@@ -112,6 +112,8 @@ jobs:
             suites: safety
           - name: keys
             suites: keys
+          - name: layout
+            suites: layout
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out
