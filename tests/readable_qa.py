@@ -413,6 +413,45 @@ async def main():
             await w.pg.context.close()
         await section('notes', notes)
 
+
+        # ---------- a long unbroken word in a note breaks inside its box instead of widening the page ----------
+        LONG = {'de-compound': 'Einwilligungserklärungsgebühr', 'de-ship': 'Donaudampfschifffahrtsgesellschaft', 'url': 'https://example.com/a/very/long/path/that/goes/on/and/on/x',
+                'hashtag': '#einwilligungserklaerungsgebuehrfuerdasganzejahr', 'bech32': 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq'}
+        SENT = 'Mittagessen mit Alex und Bo am Dienstag'
+        async def longnotes():
+            for vw in (320, 375, 414):
+                for lang in ('en', 'de'):
+                    w = await wallet(b, f'long-{vw}-{lang}', vw, 760, lang, on=True); await w.create()
+                    notes = list(LONG.items()) + [('sentence', SENT)]
+                    await w.ev(f"""(()=>{{const S=Nutcade.S,now=Date.now(),L={J(notes)};L.forEach((n,i)=>S.txs.unshift({{id:'ln'+i,ts:now-i*1000,note:n[1],status:'done',fee:0,type:i%2?'in':'out',method:'ln',amount:1000+i,mint:'https://mint.test'}}));Nutcade.render()}})()""")
+                    bad = {}
+                    for root in (16, 24):
+                        await w.ev(f"Nutcade.closeSheet(); document.documentElement.style.fontSize='{root}px'")
+                        for where, js in [('notes', "document.querySelector('[data-act=tab][data-tab=history]').click()"), ('home', "document.querySelector('[data-act=tab][data-tab=wallet]').click()")]:
+                            await w.ev(js); await frames(w)
+                            sw = await w.ev("document.documentElement.scrollWidth"); o = await w.ev(OVER_JS)
+                            if sw > vw or o: bad[f'{root} {where}'] = (sw, o)
+                            # a normal sentence wraps at spaces: no line of it ends inside a word (no word is split)
+                            cut = await w.ev("""(()=>{const out=[];for(const n of document.querySelectorAll('.tx .note')){if(!/Mittagessen/.test(n.innerText)&&!/ate|Dienstag/.test(n.innerText))continue;const tn=[...n.childNodes].find(x=>x.nodeType===3);if(!tn)continue;
+                              const re=/\\S+/g;let m;while(m=re.exec(tn.nodeValue)){const r=document.createRange();r.setStart(tn,m.index);r.setEnd(tn,m.index+m[0].length);if(new Set([...r.getClientRects()].map(x=>Math.round(x.top))).size>1)out.push(m[0])}}return out})()""")
+                            if cut: bad[f'{root} {where} sentence cut'] = cut
+                        # every long-word note: its detail sheet keeps X and Save note on screen
+                        for i, (name, _) in enumerate(notes):
+                            await w.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=history]').click()"); await frames(w)
+                            await w.ev(f"document.querySelector('[data-act=tx][data-id=ln{i}]').click()")
+                            if not await w.until("!!document.querySelector('#layer [data-act=saveNote]')", 4000): bad[f'{root} {name} sheet'] = 'did not open'; continue
+                            await frames(w)
+                            sw = await w.ev("document.documentElement.scrollWidth")
+                            where_ = {s: await w.ev(f"({INVIEW})('{s}')") for s in ['#layer .sheet-head .x', '#layer [data-act=saveNote]']}
+                            if sw > vw or any(v != 'ok' for k, v in where_.items() if k != '#layer [data-act=saveNote]') or await w.ev("(()=>{const r=document.querySelector('#layer [data-act=saveNote]').getBoundingClientRect();return r.left<0||r.right>innerWidth+1})()"):
+                                bad[f'{root} {name} sheet'] = (sw, where_)
+                            if vw == 320 and lang == 'en' and root == 16 and name == 'de-ship': await w.pg.screenshot(path=os.path.join(OUT, 'readable-longword-sheet-320.png'))
+                        await w.ev("Nutcade.closeSheet(); document.querySelector('[data-act=tab][data-tab=history]').click()"); await frames(w)
+                        if vw == 320 and lang == 'en' and root == 16: await w.pg.screenshot(path=os.path.join(OUT, 'readable-longword-notes-320.png'))
+                    check(f'longnotes {vw}px {lang}: at root 16 and 24 five long unbroken words never widen the Notes tab, Home or the note sheet (X and Save note stay on screen), and a normal sentence still wraps only at spaces', not bad, bad)
+                    await w.pg.context.close()
+        await section('longnotes', longnotes)
+
         # ---------- the arcade is exactly as without the setting ----------
         STYLE_JS = """(sel=>{const P=['fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','whiteSpace','hyphens','overflowWrap','wordBreak','textTransform','width','height','paddingTop','paddingLeft','marginTop','display'];
           return [...document.querySelectorAll(sel)].map(e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return (e.className&&e.className.baseVal===undefined?e.className:e.tagName)+'|'+P.map(p=>s[p]).join('|')+'|'+Math.round(r.width)+'x'+Math.round(r.height)})})"""
