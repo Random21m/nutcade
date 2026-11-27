@@ -51,8 +51,9 @@ async def main():
 
         async def helper():
             w = await wallet(b); await w.create()
-            check('helper: a toast from creating the wallet is still on screen (the case that fooled the helper)', bool(await w.toast()), await w.toast())
             go = await hold(w, A + '/**')
+            await w.ev("Nutcade.toast('A toast from an earlier step', 'gold')")   # (as creating the wallet leaves one; shown here, so a slow machine can't let it fade first)
+            check('helper: a toast from an earlier step is on screen (the case that fooled the helper)', bool(await w.toast()), await w.toast())
             asyncio.get_running_loop().call_later(1.5, go.set)   # (Mint A answers 1.5 s late, as on a slow machine)
             await w.add_mint(A)
             check('helper: add_mint(A) returns only once Mint A is added', await w.ev(has(A)), await w.ev("Nutcade.S.mints.map(m=>m.url)"))
@@ -88,9 +89,9 @@ async def main():
             await open_picker(w); await w.fill('#mintUrl', A); await w.click('[data-act=addMintUrl]')
             ok = await w.until(f"{has(A)} && !document.querySelector('#layer .sheet')", 15000)
             check('normal: adding a mint closes the picker, as before', ok, await w.ev(SHEET))
+            go = await hold(w, CARD + '/**', target=A); go.set()   # (before the picker opens: its probe of the card goes to the local mint too)
             await open_picker(w)
-            go = await hold(w, CARD + '/**', target=A)
-            go.set(); await w.click(f'[data-act=addMint][data-url="{CARD}"]')
+            await w.click(f'[data-act=addMint][data-url="{CARD}"]')
             ok = await w.until(f"{has(CARD)} && !document.querySelector('#layer .sheet')", 15000)
             check('normal: adding a Popular mints card closes the picker, as before', ok, await w.ev(SHEET))
             await open_picker(w); await w.fill('#mintUrl', 'notamint.invalid'); await w.click('[data-act=addMintUrl]')
