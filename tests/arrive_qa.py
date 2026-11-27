@@ -1228,7 +1228,7 @@ async def main():
                 await w.click('[data-act=doReceiveToken]'); await w.wait(700)
                 if trust:
                     t = await w.ev("(document.querySelector('[data-act=doReceiveToken]')||{dataset:{}}).dataset.trust||''")
-                    check('held: (an unknown mint: asked to trust it first)', t == '1', t)
+                    check('held: (an unknown mint: asked to trust it first)', t.startswith('http'), t)   # (since 1.44 the trust step holds the mint it was shown for)
                     await w.click('[data-act=doReceiveToken]'); await w.wait(700)
                 await w.until(f"Nutcade.S.txs.some(t=>t.incoming&&t.status==='pending'&&t.amount>0)", 15000); await w.wait(300); await w.ev("Nutcade.closeSheet()")
             async def h_claim_now(w, hid):
