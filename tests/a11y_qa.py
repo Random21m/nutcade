@@ -1,4 +1,5 @@
-"""Screen reader pass (1.47.0 step a: Home and Receive; 1.48.0 step b: Send, Pay confirm, the over-limit PIN screen).
+"""Screen reader pass (1.47.0 step a: Home and Receive; 1.48.0 step b: Send, Pay confirm, the over-limit PIN screen;
+1.49.0 step c: Settings, Notes, and the welcome, PIN lock and "open in another tab" screens).
 Uses the local mint 3339 (Mint B).
 
 - A sheet that opens, and a sheet whose content is replaced (Create invoice shows the invoice), takes the focus. On a touch
@@ -14,6 +15,10 @@ Step b (1.48):
 - The over-limit PIN screen and the piggy-bank screen (both sit above the sheet layer): each takes the focus when it opens,
   Tab stays inside it (not in the sheet under it), Escape cancels it (not the sheet under it, which stays open), and the
   focus goes back there (never to a text field on a touch screen).
+Step c (1.49):
+- Every section title (Security, Backup, Look & sound... on Settings; the ones on Notes) is a heading, so a screen reader
+  can jump from section to section instead of reading one long list.
+- The welcome screen, the PIN lock screen and the "open in another tab" screen each have one main area too.
 """
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -29,6 +34,9 @@ UNNAMED = r"""(() => {
     .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[aria-hidden=true]'))
     .filter(el => { const n = name(el); return !n || /^[^\p{L}\p{N}]{0,3}$/u.test(n); }).map(el => el.tagName + ' ' + (el.dataset.act || el.id || el.className));
 })()"""
+
+HEADS = "[...document.querySelectorAll('.h2')].filter(e=>e.getClientRects().length).map(e=>[e.innerText.trim().slice(0,20), /^H[1-6]$/.test(e.tagName) || e.getAttribute('role')==='heading'])"
+ONEMAIN = "(sel => { const m=[...document.querySelectorAll('main,[role=main]')]; return {n:m.length, holds: m[0] ? !!m[0].querySelector(sel) : false, header: m[0] ? !!m[0].querySelector('header') : null}; })"
 
 
 async def open_receive(w):
@@ -113,6 +121,30 @@ async def main():
         st = await w.ev("({limit: !!document.querySelector('#limitLayer'), sheet: !!document.querySelector('#layer .sheet'), focusInSheet: !!document.activeElement.closest('#layer .sheet')})")
         check('over-limit screen: Escape closes it, the Pay screen under it stays open, and the focus goes back there', not st['limit'] and st['sheet'] and st['focusInSheet'], st)
         check('step b: no script errors', not w.errs, w.errs[:4])
+        await w.pg.context.close()
+
+        # ---- step c: the welcome screen, Settings, Notes, the PIN lock screen, "open in another tab"
+        g = await wallet(b); await g.wait(300)
+        m = await g.ev(ONEMAIN + "('[data-act=gateCreate], #ack')")
+        check('welcome screen: one main area, holding the welcome, with the header outside it', m['n'] == 1 and m['holds'] and not m['header'], m)
+        await g.pg.context.close()
+        w = await wallet(b); await w.create(); await w.add_mint(B); await w.receive_ln(200); await w.send_ecash(20, 'Pizza #food'); await w.ev("Nutcade.closeSheet()")
+        for tab, name in (('settings', 'Settings'), ('history', 'Notes')):
+            await w.ev("Nutcade.closeSheet()"); await w.click(f'[data-act=tab][data-tab={tab}]'); await w.wait(400)
+            hs = await w.ev(HEADS)
+            check(f'{name}: every section title is a heading ({len(hs)} titles)', hs and all(h[1] for h in hs), [h[0] for h in hs if not h[1]])
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(300)
+        check('Settings: more than 8 sections to jump between', len([1 for h in await w.ev(HEADS)]) > 8, len(await w.ev(HEADS)))
+        # a second tab of the same wallet: "open in another tab"
+        p2 = await w.pg.context.new_page(); await p2.goto(await w.ev("location.href")); await p2.wait_for_timeout(1500)
+        m = await p2.evaluate(ONEMAIN + "('[data-act=takeover]')")
+        check('"open in another tab": one main area, holding the Use NUTCADE here button', m['n'] == 1 and m['holds'], m)
+        await p2.close(); await w.wait(300)
+        # the PIN lock screen
+        await set_pin(w); await w.pg.reload(); await w.wait(1500)
+        m = await w.ev(ONEMAIN + "('[data-pinpad]')")
+        check('PIN lock screen: one main area, holding the PIN pad', m['n'] == 1 and m['holds'], m)
+        check('step c: no script errors', not w.errs, w.errs[:4])
         await w.pg.context.close()
 
         # ---- a computer (mouse and keyboard): unchanged, the first field takes the focus
