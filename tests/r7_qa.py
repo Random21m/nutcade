@@ -39,6 +39,11 @@ async def forward(route):
     except Exception: pass
 
 
+NAV_LOG = """(()=>{const L=m=>console.log('NAVLOG '+new Date().toISOString().slice(11,19)+' '+m+' at '+location.href+' | '+(new Error().stack||'').split('\\n').slice(2,9).map(x=>x.trim()).join(' | '));
+  addEventListener('beforeunload',()=>L('leaving the page'));
+  addEventListener('submit',e=>L('form submit: '+((e.target&&e.target.className)||'?')),true)})()"""   # (leaving the page: its stack names what called reload() or set the location)
+
+
 async def wallet(b, vw=375, vh=667, lang='en', mobile=True, init=None):
     ctx = await b.new_context(viewport={'width': vw, 'height': vh}, device_scale_factor=1, is_mobile=mobile, has_touch=mobile, accept_downloads=True)
     prefs = {'sound': False, 'music': False, 'crt': True, 'lang': lang, 'relays': ['ws://127.0.0.1:3350/relay'], 'npcHost': 'http://127.0.0.1:3350'}
@@ -46,7 +51,18 @@ async def wallet(b, vw=375, vh=667, lang='en', mobile=True, init=None):
     await ctx.add_init_script("window.__i18nMiss=new Set(); if(!localStorage.getItem('nutcade:prefs'))localStorage.setItem('nutcade:prefs'," + json.dumps(json.dumps(prefs)) + ")")
     await ctx.route('https://lnurl.test/**', forward)
     await ctx.route('https://down.test/**', lambda r: r.abort())
+    # (r7's tour has twice crashed in CI only, at the voucher service error step, with "Execution context was destroyed,
+    # most likely because of a navigation", and never locally. Each time the page is left, a form is submitted, the page
+    # crashes or closes, or another page opens, a NAVLOG line says so. Leaving the page carries the JS stack: a reload or
+    # a new location set by the app names the code that did it; an empty stack means it came from outside the page (the
+    # test itself, or the browser). A normal run logs a few lines a wallet: its first load and the tour's reload.)
+    await ctx.add_init_script(NAV_LOG)
     pg = await ctx.new_page(); w = W(pg, 'r7')
+    pg.on('framenavigated', lambda f: print(f'NAVLOG {time.strftime("%H:%M:%S")} page loaded: {f.url}', flush=True) if f == pg.main_frame else None)
+    pg.on('console', lambda m: print(m.text[:900], flush=True) if m.text.startswith('NAVLOG') else None)
+    pg.on('crash', lambda *_: print(f'NAVLOG {time.strftime("%H:%M:%S")} the page crashed', flush=True))
+    pg.on('close', lambda *_: print(f'NAVLOG {time.strftime("%H:%M:%S")} the page was closed', flush=True))
+    ctx.on('page', lambda q: print(f'NAVLOG {time.strftime("%H:%M:%S")} another page opened: {q.url}', flush=True) if q != pg else None)
     pg.on('pageerror', lambda e: w.errs.append('PAGEERROR ' + str(e)))
     pg.on('console', lambda m: w.errs.append('CONSOLE ' + m.text) if m.type == 'error' and not outside_net(m.text) and 'lnurl.test' not in m.text and 'down.test' not in m.text else None)
     await pg.goto(URL); await pg.wait_for_timeout(700)
