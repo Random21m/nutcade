@@ -2,7 +2,7 @@
 
 Run from the repository root, with the test setup (Python Playwright, a Nutshell mint in MINT_PY's environment):
     MINT_PY=/path/to/mint/python python3 tools/readme_shots.py [scene ...]
-It starts its own test mint "Pixel" (port 3361, fake Lightning, no fees), seen by the app as https://mint.pixel.cash, and
+It starts its own test mint "Pixel" (port 3361, fake Lightning, no fees), seen by the app as https://mint.pixel.example, and
 serves public/ on port 8099. The BTC price chart gets fixed candles around $97,000 (no network). Each scene drives real
 wallets in headless phones (390 x 844), then lays the screenshots into the arcade frame at 1280 x 720 (docs/screens/*.jpg).
 Scene "video" records the tour as docs/nutcade-tour.mp4 and docs/nutcade-tour.gif (ffmpeg). No real people's names.
@@ -16,7 +16,7 @@ from wallet_qa import W, URL
 
 OUT = os.path.join(ROOT, 'docs', 'screens')
 PORT = 3361
-MINT = 'https://mint.pixel.cash'
+MINT = 'https://mint.pixel.example'   # (a reserved name: the QR codes in the pictures point nowhere real)
 LOCAL = f'http://127.0.0.1:{PORT}'
 J = json.dumps
 FONTS = ''.join(re.findall(r'@font-face\{[^}]*\}', open(os.path.join(ROOT, 'public', 'index.html')).read())[:2])
@@ -153,7 +153,7 @@ async def s_lightning(b):
     await w.click('[data-act=receive]'); await w.wait(200)
     if await w.ev("!!document.querySelector('[data-act=recvMethod][data-m=ln][aria-pressed=false]')"): await w.click('[data-act=recvMethod][data-m=ln]'); await w.wait(100)
     await w.fill('#amtIn', '21000'); await w.click('[data-act=doLnInvoice]')
-    await wait_1up(w, 0, 21000); await w.ev("document.querySelectorAll('[data-act=arrClose]').forEach(b=>b.click())"); await w.wait(500)
+    await wait_1up(w, 0, 21000); await clean(w); await w.wait(250)
     p = await snap(w, '01')
     await render(b, '01-lightning', frame('01', [('LOAD SATS', 'gold'), ('OVER LIGHTNING', 'cyan')], [p]))
     await w.pg.context.close()
@@ -167,7 +167,7 @@ async def s_send(b):
     await f.home(); await f.click('[data-act=receive]'); await f.wait(150); await f.click('[data-act=recvMethod][data-m=ecash]'); await f.wait(100)
     await f.fill('#tokIn', tok); await f.click('[data-act=doReceiveToken]'); await f.wait(900)
     if await f.ev("!!document.querySelector('[data-act=doReceiveToken][data-trust]')"): await f.click('[data-act=doReceiveToken]')
-    await wait_1up(f, 0, 2100); await clean(a); await f.ev("document.querySelectorAll('[data-act=arrClose]').forEach(b=>b.click())"); await f.wait(350)
+    await wait_1up(f, 0, 2100); await clean(a); await clean(f)
     pa, pf = await snap(a, '04a'), await snap(f, '04b')
     await render(b, '04-send', frame('04', [('SEND SATS', 'pink'), ('TO FRIENDS', 'gold')], [pa, pf], ['YOU', 'FRIEND']))
     await a.pg.context.close(); await f.pg.context.close()
@@ -216,7 +216,7 @@ async def s_sound(b):
     await f.home(); await f.click('[data-act=receive]'); await f.wait(150); await f.click('[data-act=recvMethod][data-m=ecash]'); await f.wait(100)
     await f.fill('#tokIn', tok); await f.click('[data-act=doReceiveToken]'); await f.wait(900)
     if await f.ev("!!document.querySelector('[data-act=doReceiveToken][data-trust]')"): await f.click('[data-act=doReceiveToken]')
-    await wait_1up(f, 0, 1024); await clean(a); await f.ev("document.querySelectorAll('[data-act=arrClose]').forEach(b=>b.click())"); await f.wait(350)
+    await wait_1up(f, 0, 1024); await clean(a); await clean(f)
     pa, pf = await snap(a, '05a'), await snap(f, '05b')
     await render(b, '05-sound', frame('05', [('SEND SATS', 'cyan'), ('BY SOUND', 'gold')], [pa, pf], ['YOU', 'FRIEND']))
     await a.pg.context.close(); await f.pg.context.close()
