@@ -149,7 +149,7 @@ async def main():
             await w.click('[data-act=ptOpen]'); await w.until("!!document.querySelector('.pt-intro')", 5000); await w.click('[data-act=ptIntroOk]')   # (the first time: the first-scan rule)
             await w.until("!!document.querySelector('#ptAmt')", 5000)
             t = await w.sheet_text()
-            check('screen: amount per token, how many (1-20) and the two styles', await w.ev("!!document.querySelector('#ptAmt') && !!document.querySelector('#ptCount') && document.querySelectorAll('[data-act=ptStyle]').length===2") and 'ARCADE' in t.upper() and 'INK SAVER' in t.upper(), t[:300])
+            check('screen: amount per token, how many (1-20) and the three styles', await w.ev("!!document.querySelector('#ptAmt') && !!document.querySelector('#ptCount') && document.querySelectorAll('[data-act=ptStyle]').length===3") and 'ARCADE' in t.upper() and 'INK SAVER' in t.upper() and 'PIZZA DAY' in t.upper(), t[:300])
             # not by color alone: the chosen style says so in words / a mark, not just a color
             await w.click('[data-act=ptStyle][data-s=ink]'); await w.wait(80)
             on = await w.ev("[...document.querySelectorAll('[data-act=ptStyle]')].map(b=>[b.dataset.s,b.getAttribute('aria-pressed'),getComputedStyle(b,'::before').content])")
@@ -174,6 +174,78 @@ async def main():
             check('screen: ... and Print again prints them once they read back', await w.ev("!!document.querySelector('.pt-ready') && NutTokens.lastCheck.length===2 && NutTokens.lastCheck.every(c=>c.ok)"))
             await w.pg.context.close()
         await section('screen', screen)
+
+        # ---------- Pizza Day (1.51.0): a card style printed in pairs, the day and the payment ----------
+        # The facts, checked on mempool.space: block 56,982 was mined on 22 May 2010 at 11:50:18 UTC; the
+        # 10,000 BTC payment for two pizzas (a1075db5...d48d) is in block 57,043, 18:16:31 UTC, 61 blocks later.
+        async def pizza():
+            CARDS = "[...document.querySelectorAll('#tokPrint .pt-card')].map(c=>({text:c.innerText, face:c.dataset.pz||'', cls:document.querySelector('#tokPrint').className}))"
+            CUT = "[...document.querySelectorAll('.pt-seg button')].filter(b=>b.getClientRects().length && b.scrollWidth > b.clientWidth + 1).map(b=>b.innerText.trim())"
+            WORD = {'en': 'BLOCK', 'es': 'BLOQUE', 'pt': 'BLOCO', 'de': 'BLOCK', 'fr': 'BLOC'}
+            FOR = {'en': 'FOR', 'es': 'POR', 'pt': 'POR', 'de': 'FÜR', 'fr': 'POUR'}
+            w = await funded(b, [NOFEE], 3000)
+            await w.ev("window.__i18nMiss=new Set()")
+            await open_print(w, NOFEE)
+            check('pizza: a third style, PIZZA DAY, on the Print tokens screen', await w.ev("!!document.querySelector('[data-act=ptStyle][data-s=pizza]')") and 'PIZZA DAY' in (await w.sheet_text()).upper())
+            await w.click('[data-act=ptStyle][data-s=pizza]'); await w.wait(80)
+            help_ = await w.ev("document.querySelector('#ptStyleHelp').innerText")
+            check('pizza: picked, it is marked (aria-pressed + a ✓) and its help says the cards come in pairs', await w.ev("document.querySelector('[data-act=ptStyle][data-s=pizza]').getAttribute('aria-pressed')") == 'true' and '✓' in await w.ev("getComputedStyle(document.querySelector('[data-act=ptStyle][data-s=pizza]'),'::before').content") and re.search(r'pair', help_, re.I), help_)
+            await w.ev("Nutcade.closeSheet()"); await open_print(w, NOFEE)
+            check('pizza: the style is remembered when the screen opens again', await w.ev("document.querySelector('[data-act=ptStyle][data-s=pizza]').getAttribute('aria-pressed')") == 'true')
+            summary, e, bid = await make(w, NOFEE, 21, 5, 'pizza')
+            check('pizza: 5 tokens made in the Pizza Day style', bool(bid) and 'Pizza Day' in summary, (e, summary[:200]))
+            if not bid: return
+            txs = await batch(w, bid)
+            check('pizza: each is a normal, separate token (its own pending line), the style kept with the batch', len(txs) == 5 and len({t['token'] for t in txs}) == 5 and all(t['status'] == 'pending' and t['print']['style'] == 'pizza' for t in txs), [(t['status'], t['print'].get('style')) for t in txs])
+            check('pizza: the preview is in the Pizza Day style', await w.ev("!!document.querySelector('.pt-ready .pt-preview.pizza')"))
+            chk = await w.ev("NutTokens.lastCheck")
+            check('pizza: every QR read back by the app before printing', bool(chk) and len(chk) == 5 and all(c['ok'] for c in chk), chk)
+            info = await show_print(w, bid, 'tok-pizza-en.png')
+            check('pizza: print pages: 5 fronts and backs in the Pizza Day style, 4 a page (a pair never split over two pages)', info and info['fronts'] == 5 and 'pizza' in info['style'] and info['perPage'] == [4, 1], info and (info['fronts'], info['style'], info['perPage']))
+            decoded = [await read_img(w, s_) for s_ in (info['imgs'] if info else [])]
+            check('pizza: every printed QR reads back (second reader) as its own token', len(decoded) == 5 and all(d and d.startswith('cashuB') for d in decoded) and len(set(decoded)) == 5, [d and d[:16] for d in decoded])
+            await w.ev(f"NutTokens.preparePrint({json.dumps(bid)})"); cards = await w.ev(CARDS); await w.ev("NutTokens.endPrint()")
+            day = [f"BLOCK {await w.ev('Nutcade.fmt(56982)')}", '11:50 UTC', await w.ev("new Date(Date.UTC(2010,4,22)).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}).toUpperCase()")]
+            pay = [f"BLOCK {await w.ev('Nutcade.fmt(57043)')}", '18:16 UTC', f"{await w.ev('Nutcade.fmt(10000)')} BTC FOR 2 PIZZAS"]   # (in words: the pixel font has no arrow)
+            faces = [c['face'] for c in cards]
+            check('pizza: the cards alternate, the day then the payment (an odd last one is a day card)', faces == ['day', 'pay', 'day', 'pay', 'day'], faces)
+            check('pizza: a day card says BLOCK 56,982, MAY 22, 2010 and 11:50 UTC (and not the payment\'s block)', all(all(x in c['text'] for x in day) and 'BLOCK 57,043' not in c['text'] for c in cards[0::2]), [c['text'][:160] for c in cards[0::2]][:1])
+            check('pizza: a payment card says BLOCK 57,043, 10,000 BTC FOR 2 PIZZAS and 18:16 UTC (and not the day\'s block)', all(all(x in c['text'] for x in pay) and 'BLOCK 56,982' not in c['text'] for c in cards[1::2]), [c['text'][:160] for c in cards[1::2]][:1])
+            check('pizza: the rest of the card as on the others (amount, mint, token number, how to claim)', all('NUTCADE' in c['text'] and 'HOW TO CLAIM' in c['text'] and NOFEE.split('//')[1] in c['text'] and t['print']['code'] in c['text'] for c, t in zip(cards, txs)), [c['text'][:120] for c in cards][:1])
+            # one taken back: the cards still left print as pairs again (by place on the page, not by token number)
+            await plist(w); await w.click(f"[data-act=ptTake][data-id={json.dumps(txs[0]['id'])}]")
+            await w.until(f"Nutcade.S.txs.find(x=>x.id==={json.dumps(txs[0]['id'])}).status==='reclaimed'", 60000); await w.wait(400)
+            await w.ev("Nutcade.closeSheet()"); await plist(w); await w.click(f"[data-act=ptReprint][data-b={json.dumps(bid)}]")
+            await w.until("!!document.querySelector('.pt-ready') || /\\S/.test((document.querySelector('#sheetErr')||{}).innerText||'')", 60000); await w.wait(300)
+            check('pizza: Print again keeps the Pizza Day style', await w.ev("!!document.querySelector('.pt-ready .pt-preview.pizza')"), await w.err())
+            await w.ev(f"NutTokens.preparePrint({json.dumps(bid)})"); cards = await w.ev(CARDS); await w.ev("NutTokens.endPrint()")
+            check('pizza: after one was taken back, the 4 left still print as 2 pairs', [c['face'] for c in cards] == ['day', 'pay', 'day', 'pay'], [c['face'] for c in cards])
+            # the other two styles are as before: no pizza line, their own look
+            for st in ('arcade', 'ink'):
+                await w.ev(f"NutTokens.preparePrint({json.dumps(bid)}, {json.dumps(st)})"); cards = await w.ev(CARDS); await w.ev("NutTokens.endPrint()")
+                check(f'pizza: a {st} print has no block line and no pizza look', cards and all(not c['face'] and 'BLOCK 5' not in c['text'] and 'PIZZA' not in c['text'] and st in c['cls'] and 'pizza' not in c['cls'] for c in cards), [(c['face'], c['cls']) for c in cards][:2])
+            # every language: the lines said the local way, nothing left in English; the three style buttons never cut off
+            for lang in LANGS:
+                await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(200)
+                await w.ev(f"const s=document.querySelector('#p_lang'); s.value='{lang}'; s.dispatchEvent(new Event('change',{{bubbles:true}}))"); await w.wait(500)
+                await w.ev("Nutcade.closeSheet()"); await w.wait(300); await w.ev("window.__i18nMiss=new Set()")   # (from here on, only what this language shows: the text of the one before it is not "missing")
+                await w.ev(f"NutTokens.preparePrint({json.dumps(bid)}, 'pizza')"); await w.wait(200); cards = await w.ev(CARDS); await w.ev("NutTokens.endPrint()")
+                n1, n2, nb = await w.ev("Nutcade.fmt(56982)"), await w.ev("Nutcade.fmt(57043)"), await w.ev("Nutcade.fmt(10000)")
+                dt = await w.ev("new Date(Date.UTC(2010,4,22)).toLocaleDateString(Nutcade.locale(),{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}).toUpperCase()")
+                ok = cards and f'{WORD[lang]} {n1}' in cards[0]['text'] and dt in cards[0]['text'] and f'{WORD[lang]} {n2}' in cards[1]['text'] and f'{nb} BTC {FOR[lang]} 2 PIZZAS' in cards[1]['text']
+                check(f'pizza {lang}: the block lines in the language ({WORD[lang]} {n1} · {dt} / {WORD[lang]} {n2} · {nb} BTC {FOR[lang]} 2 PIZZAS)', ok, cards and (cards[0]['text'][:140], cards[1]['text'][:140]))
+                for vw in (320, 375, 430):
+                    await w.pg.set_viewport_size({'width': vw, 'height': 800}); await open_print(w, NOFEE); await w.wait(250)
+                    cut = await w.ev(CUT); over = await w.ev(OVER_JS)
+                    tops = await w.ev("[...document.querySelectorAll('[data-act=ptStyle]')].map(b=>Math.round(b.getBoundingClientRect().top))")
+                    check(f'pizza {lang} {vw}px: the three style buttons side by side in one row, none cuts its text, nothing off the screen', len(tops) == 3 and len(set(tops)) == 1 and not cut and not over, (tops, cut, over))
+                await w.pg.set_viewport_size({'width': 390, 'height': 844})
+                miss = await w.ev("[...(window.__i18nMiss||[])]")
+                check(f'pizza {lang}: no untranslated text on the screen and the cards', not miss, miss[:8])
+            check('pizza: history = balance', not await books(w, (NOFEE,)), await books(w, (NOFEE,)))
+            check('pizza: no page errors', not w.errs, w.errs[:3])
+            await w.pg.context.close()
+        await section('pizza', pizza)
 
         # ---------- the grid: 1 and many x fee / no fee x both styles x 5 languages ----------
         async def grid():

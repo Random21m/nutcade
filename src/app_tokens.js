@@ -154,7 +154,25 @@ const ptBadPlan = (url, amount, count, plan) => {
   if (plan.tooMany) return manyErr(url, plan.tooMany);
   return null;
 };
-const ptStyleName = s => s === 'ink' ? 'Ink saver' : '<span data-noi18n>Arcade</span>';   // (Arcade: the style's name, the same in every language)
+const ptStyleName = s => s === 'ink' ? 'Ink saver' : s === 'pizza' ? '<span data-noi18n>Pizza Day</span>' : '<span data-noi18n>Arcade</span>';   // (Arcade, Pizza Day: the styles' names, the same in every language)
+const PT_STYLES = ['arcade', 'ink', 'pizza'];
+const ptCls = s => PT_STYLES.includes(s) ? s : 'arcade';
+const ptStyleHelp = s => s === 'ink' ? 'Black on white.' : s === 'pizza' ? `Bitcoin Pizza Day. The cards print in pairs: the day, then the block with the ${fmt(10000)} BTC pizza payment.` : 'Full color. The QR code is always dark on light.';
+/* Pizza Day (1.51.0): the cards of a batch alternate, by their place on the page (so the cards still left after one is
+   claimed print as pairs again): the day, then the payment. Checked on mempool.space: block 56,982 was mined on
+   22 May 2010 at 11:50:18 UTC; the 10,000 BTC payment for two pizzas (a1075db5...d48d) is in block 57,043,
+   mined at 18:16:31 UTC, 61 blocks later. An odd last card is a day card. Each card is still its own token. */
+const PT_PIZZA = { day: { block: 56982, time: '11:50 UTC' }, pay: { block: 57043, time: '18:16 UTC' } };
+const ptFace = (style, i) => style === 'pizza' ? (i % 2 ? 'pay' : 'day') : '';
+const PT_SLICE = (() => { const rows = ['cccccccc', 'yyypyyyy', '.yyyyyy.', '.ypyyyy.', '..yypy..', '..yyyy..', '...yy...', '...y....'], pal = { c: '#c8782a', y: '#ffc83d', p: '#c41e12' };
+  let r = ''; rows.forEach((row, y) => [...row].forEach((c, x) => { if (pal[c]) r += `<rect x="${x}" y="${y}" width="1" height="1" fill="${pal[c]}"/>`; }));
+  return `<svg viewBox="0 0 8 8" aria-hidden="true" shape-rendering="crispEdges">${r}</svg>`; })();
+function ptPizzaHTML(face) {
+  const f = PT_PIZZA[face]; if (!f) return '';
+  let day = ''; try { day = new Date(Date.UTC(2010, 4, 22)).toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).toUpperCase(); } catch (e) { day = '22 MAY 2010'; }
+  const l1 = face === 'day' ? `<span data-noi18n>${esc(day)}</span>` : `<span>${fmt(10000)} BTC FOR 2 PIZZAS</span>`;
+  return `<div class="pt-pz">${PT_SLICE}<div><div class="pt-pzb">BLOCK ${fmt(f.block)}</div><div class="pt-pzl">${l1}</div><div class="pt-pzl" data-noi18n>${f.time}</div></div></div>`;
+}
 function openPrint() {
   if (needMint()) return;
   if (!ptIntroSeen()) {
@@ -174,8 +192,8 @@ function openPrint() {
       <div class="tiny muted pt-pre-why"></div></div>
     <div class="row" style="gap:10px"><div class="field" style="flex:3"><label for="ptAmt">Amount per token (SAT)</label><input id="ptAmt" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off" value="${ptUI.amount || ''}"></div>
     <div class="field" style="flex:2"><label for="ptCount">How many (1 to 20)</label><input id="ptCount" class="inp" inputmode="numeric" autocomplete="off" value="${ptUI.count || 4}"></div></div>
-    <div class="field"><label>Style</label><div class="seg pt-seg" role="group" aria-label="Style">${[['arcade', 'ARCADE'], ['ink', 'INK SAVER']].map(([k, l]) => `<button type="button" data-act="ptStyle" data-s="${k}" aria-pressed="${ptUI.style === k}"${k === 'arcade' ? ' data-noi18n' : ''}>${l}</button>`).join('')}</div>
-      <div class="tiny muted" id="ptStyleHelp">${ptUI.style === 'ink' ? 'Black on white.' : 'Full color. The QR code is always dark on light.'}</div></div>
+    <div class="field"><label>Style</label><div class="seg three pt-seg" role="group" aria-label="Style">${[['arcade', 'ARCADE'], ['ink', 'INK SAVER'], ['pizza', 'PIZZA DAY']].map(([k, l]) => `<button type="button" data-act="ptStyle" data-s="${k}" aria-pressed="${ptUI.style === k}"${k !== 'ink' ? ' data-noi18n' : ''}>${l}</button>`).join('')}</div>
+      <div class="tiny muted" id="ptStyleHelp">${ptStyleHelp(ptUI.style)}</div></div>
     <button class="btn solid gold block" data-act="ptNext">Next</button>
     ${n ? `<button class="linkbtn tiny" data-act="ptList" style="justify-self:start">Printed tokens (${n})</button>` : ''}
     <div id="sheetErr"></div>`, body => {
@@ -306,16 +324,16 @@ async function ptReady(b, style) {
   setBody(`<div class="pt-ready" data-b="${esc(b)}"><div class="pb-h" style="text-align:center">${txs.length === 1 ? '1 TOKEN READY' : `${txs.length} TOKENS READY`}</div>
     <dl class="kv"><dt>Total</dt><dd>${money(total)}</dd><dt>Fees paid</dt><dd>${money(fees)}</dd><dt>Style</dt><dd>${ptStyleName(style)}</dd></dl>
     <div class="tiny muted">✓ Every code was read back and scans.</div>
-    <div class="pt-preview ${style === 'ink' ? 'ink' : 'arcade'}">${imgs.map(x => ptCardHTML(x.t, x.src)).join('')}</div>
+    <div class="pt-preview ${ptCls(style)}">${imgs.map((x, i) => ptCardHTML(x.t, x.src, ptFace(style, i))).join('')}</div>
     <div class="notice">Cut along the dashed lines. Fold each card on the dotted line, printed sides out: front and back of one token. Fold it the other way to keep the code hidden until you hand it over.</div>
     <button class="btn solid gold block" data-act="ptPrint" data-b="${esc(b)}">Print</button>
     <button class="btn block" data-act="ptList">Printed tokens</button><div id="sheetErr"></div></div>`);
 }
 function ptAmtStyle(a) { const s = fmt(a), mm = Math.min(6, 29 / (s.length + 1.6)); return `font-size:${mm.toFixed(2)}mm`; }
-function ptCardHTML(t, src) {
+function ptCardHTML(t, src, face) {
   const p = t.print, code = '#' + p.code;
-  return `<div class="pt-card"><div class="pt-front"><div class="pt-l">
-      <div class="pt-mq">NUTCADE</div><div class="pt-sub">TOKEN</div><div class="pt-dots" aria-hidden="true"></div>
+  return `<div class="pt-card"${face ? ` data-pz="${face}"` : ''}><div class="pt-front"><div class="pt-l">
+      <div class="pt-mq">NUTCADE</div><div class="pt-sub">TOKEN</div>${face ? ptPizzaHTML(face) : '<div class="pt-dots" aria-hidden="true"></div>'}
       <div class="pt-amt" style="${ptAmtStyle(t.amount)}"><span data-noi18n>${fmt(t.amount)}</span><span class="pt-unit">SAT</span></div>
       <div class="pt-meta"><div><span>Mint:</span> <span data-noi18n>${esc(host(t.mint))}</span></div><div><span>Made</span> <span data-noi18n>${esc(fmtDate(p.at || t.ts))}</span></div><div><span>Token</span> <span data-noi18n>${esc(code)}</span></div></div></div>
       <div class="pt-r"><img class="pt-qr" src="${src}" alt="QR code of token ${esc(code)}"><div class="pt-cap">SCAN TO CLAIM</div></div></div>
@@ -331,9 +349,9 @@ async function preparePrint(b, style) {
   let imgs = b === ptLast.b ? ptLast.imgs : null; if (!imgs) return false;
   if (style !== ptLast.style) imgs = await ptImages(imgs.map(x => x.t), style);   // (the other style's colors, read back again)
   let box = document.getElementById('tokPrint'); if (!box) { box = document.createElement('div'); box.id = 'tokPrint'; document.body.appendChild(box); }
-  box.className = 'tok-print ' + (style === 'ink' ? 'ink' : 'arcade');
-  const pages = []; for (let i = 0; i < imgs.length; i += 4) pages.push(imgs.slice(i, i + 4));
-  box.innerHTML = pages.map(pg => `<div class="pt-page">${pg.map(x => ptCardHTML(x.t, x.src)).join('')}</div>`).join('');
+  box.className = 'tok-print ' + ptCls(style);
+  const pages = []; for (let i = 0; i < imgs.length; i += 4) pages.push(imgs.slice(i, i + 4));   // (4 a page: a Pizza Day pair is never split over two pages)
+  box.innerHTML = pages.map((pg, pi) => `<div class="pt-page">${pg.map((x, i) => ptCardHTML(x.t, x.src, ptFace(style, pi * 4 + i))).join('')}</div>`).join('');
   document.documentElement.classList.add('print-tokens');
   return true;
 }

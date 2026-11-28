@@ -9,9 +9,9 @@ Object.assign(A, {
     sfx('blip');
   },
   ptStyle: b => {
-    ptUI.style = b.dataset.s === 'ink' ? 'ink' : 'arcade';
+    ptUI.style = ptCls(b.dataset.s);
     document.querySelectorAll('[data-act=ptStyle]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.s === ptUI.style)));
-    const h = $('#ptStyleHelp'); if (h) h.textContent = tr(ptUI.style === 'ink' ? 'Black on white.' : 'Full color. The QR code is always dark on light.');
+    const h = $('#ptStyleHelp'); if (h) h.textContent = tr(ptStyleHelp(ptUI.style));
     sfx('blip');
   },
   ptNext: b => run(b, 'CHECKING', ptSummary),
