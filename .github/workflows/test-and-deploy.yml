@@ -114,6 +114,8 @@ jobs:
             suites: keys
           - name: layout
             suites: layout
+          - name: a11y
+            suites: a11y
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       QA_OUT: ${{ github.workspace }}/qa-out
