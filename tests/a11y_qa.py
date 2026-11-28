@@ -1,4 +1,5 @@
-"""Screen reader pass (1.47.0, step a: Home and Receive). Uses the local mint 3339 (Mint B).
+"""Screen reader pass (1.47.0 step a: Home and Receive; 1.48.0 step b: Send, Pay confirm, the over-limit PIN screen).
+Uses the local mint 3339 (Mint B).
 
 - A sheet that opens, and a sheet whose content is replaced (Create invoice shows the invoice), takes the focus. On a touch
   screen that is the sheet itself, never a text field (no keyboard pops up), so VoiceOver and TalkBack land in it instead
@@ -6,12 +7,20 @@
 - The page has one main area (role=main) holding the wallet's content, so "jump to main" works; the header and the tab
   bar stay outside it.
 - Every visible control on Home and on Receive (the form and the invoice) has a name a screen reader can read.
+Step b (1.48):
+- A sheet's error box (#sheetErr, used by most sheets) is announced: it is an alert region, so "That isn't a complete
+  Lightning invoice" is read out instead of appearing silently.
+- Send (ecash and Lightning) and the Pay confirm screen: every visible control has a name; the confirm screen has the focus.
+- The over-limit PIN screen and the piggy-bank screen (both sit above the sheet layer): each takes the focus when it opens,
+  Tab stays inside it (not in the sheet under it), Escape cancels it (not the sheet under it, which stays open), and the
+  focus goes back there (never to a text field on a touch screen).
 """
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from playwright.async_api import async_playwright
 from wallet_qa import check, results, B
-from r8_qa import wallet
+import urllib.request
+from r8_qa import wallet, set_pin, set_limits
 
 FOCUS = "(a => ({tag: a.tagName, inSheet: !!a.closest('#layer .sheet'), isSheet: a.matches('#layer .sheet'), field: /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName), id: a.id}))(document.activeElement)"
 UNNAMED = r"""(() => {
@@ -52,6 +61,58 @@ async def main():
         check('phone, Create invoice: when the invoice replaces the form, the focus is in the sheet (not lost to the page)', f['inSheet'] and not f['field'], f)
         check('Receive, the invoice: every visible control has a name', not await w.ev(UNNAMED), await w.ev(UNNAMED))
         check('phone: no script errors', not w.errs, w.errs[:4])
+        await w.pg.context.close()
+
+        # ---- step b: Send, an error, Pay confirm, the over-limit screen (on a phone, as most screen reader users)
+        def inv(n):
+            q = urllib.request.Request(B + '/v1/mint/quote/bolt11', data=json.dumps({'amount': n, 'unit': 'sat'}).encode(), headers={'Content-Type': 'application/json'})
+            return json.loads(urllib.request.urlopen(q).read())['request']
+        w = await wallet(b); await w.create(); await w.add_mint(B); await w.receive_ln(500)
+        await w.ev("Nutcade.closeSheet()"); await w.home(); await w.pg.locator('[data-act=send]').click(); await w.wait(300)
+        check('Send (ecash): every visible control has a name', not await w.ev(UNNAMED), await w.ev(UNNAMED))
+        await w.pg.locator('[data-act=sendMethod][data-m=ln]').click(); await w.wait(200)
+        check('Send (Lightning): every visible control has a name', not await w.ev(UNNAMED), await w.ev(UNNAMED))
+        await w.fill('#destIn', 'lnbc1notaninvoice'); await w.pg.locator('[data-act=doMeltQuote]').click()
+        await w.until("!!((document.querySelector('#sheetErr')||{}).innerText||'').trim()", 10000)
+        er = await w.ev("(e=>({text:e.innerText.trim().slice(0,60), alert: e.getAttribute('role')==='alert' || !!e.closest('[role=alert],[aria-live=assertive]')}))(document.querySelector('#sheetErr'))")
+        check('Send: an error is announced (the error box is an alert region), not shown silently', er['text'] and er['alert'], er)
+        await w.fill('#destIn', inv(100)); await w.pg.locator('[data-act=doMeltQuote]').click()
+        await w.until("!!document.querySelector('#payBtn')", 15000); await w.wait(300)
+        f = await w.ev(FOCUS)
+        check('Pay confirm: the screen has the focus, and every visible control has a name', f['inSheet'] and not await w.ev(UNNAMED), (f, await w.ev(UNNAMED)))
+        # the piggy-bank screen (a payment that dips into what the piggy bank set aside): built like the over-limit screen
+        await w.ev("Nutcade.closeSheet(); Nutcade.S.prefs.piggy = true; Nutcade.S.piggy.saved = 500")
+        await w.home(); await w.pg.locator('[data-act=send]').click(); await w.wait(300)
+        await w.fill('#amtIn', '100'); await w.pg.locator('[data-act=doSendEcash]').click()
+        pig = await w.until("!!document.querySelector('#piggyLayer .sheet')", 15000); await w.wait(300)
+        inpig = "!!document.activeElement.closest('#piggyLayer')"
+        check('piggy-bank screen: it opens and takes the focus', pig and await w.ev(inpig), await w.ev(FOCUS))
+        stays = []
+        for _ in range(4):
+            await w.pg.keyboard.press('Tab'); stays.append(await w.ev(inpig))
+        check('piggy-bank screen: Tab stays inside it', all(stays), stays)
+        await w.pg.keyboard.press('Escape'); await w.wait(300)
+        st = await w.ev("({pig: !!document.querySelector('#piggyLayer'), sheet: !!document.querySelector('#layer .sheet'), focusInSheet: !!document.activeElement.closest('#layer .sheet'), field: /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)})")
+        check('piggy-bank screen: Escape keeps saving (nothing paid), the Send screen stays open with the focus, not on a field', not st['pig'] and st['sheet'] and st['focusInSheet'] and not st['field'] and await w.bal(B) == 500, (st, await w.bal(B)))
+        await w.ev("Nutcade.S.prefs.piggy = false; Nutcade.S.piggy.saved = 0")
+        # the over-limit screen
+        await w.ev("Nutcade.closeSheet()"); await set_pin(w); await set_limits(w, '50', '1000')
+        await w.home(); await w.pg.locator('[data-act=send]').click(); await w.wait(300)
+        await w.pg.locator('[data-act=sendMethod][data-m=ln]').click(); await w.wait(200)
+        await w.fill('#destIn', inv(200)); await w.pg.locator('[data-act=doMeltQuote]').click()
+        await w.until("!!document.querySelector('#payBtn')", 15000); await w.wait(300)
+        await w.pg.locator('#payBtn').click()
+        up = await w.until("!!document.querySelector('#limitLayer .sheet')", 15000); await w.wait(400)
+        inlim = "!!document.activeElement.closest('#limitLayer')"
+        check('over-limit screen: it opens (a payment over the 50 SAT limit) and takes the focus', up and await w.ev(inlim), await w.ev(FOCUS))
+        stays = []
+        for _ in range(8):
+            await w.pg.keyboard.press('Tab'); stays.append(await w.ev(inlim))
+        check('over-limit screen: Tab stays inside it (never in the sheet under it)', all(stays), stays)
+        await w.pg.keyboard.press('Escape'); await w.wait(300)
+        st = await w.ev("({limit: !!document.querySelector('#limitLayer'), sheet: !!document.querySelector('#layer .sheet'), focusInSheet: !!document.activeElement.closest('#layer .sheet')})")
+        check('over-limit screen: Escape closes it, the Pay screen under it stays open, and the focus goes back there', not st['limit'] and st['sheet'] and st['focusInSheet'], st)
+        check('step b: no script errors', not w.errs, w.errs[:4])
         await w.pg.context.close()
 
         # ---- a computer (mouse and keyboard): unchanged, the first field takes the focus

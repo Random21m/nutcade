@@ -738,9 +738,11 @@ function piggyBreak(info, retry) {
     <button class="btn block" id="pbNo">Keep saving</button></div></div>`;
   document.body.appendChild(box);
   if (LANG !== 'en') trNode(box);
+  const opener = document.activeElement !== document.body ? document.activeElement : null;   // (1.48: it takes the focus, and gives it back)
+  const sh = box.querySelector('.sheet'); sh.tabIndex = -1; sh.focus({ preventScroll: true });
   sfx('err');
   let n = 10; const yes = box.querySelector('#pbYes'), lab = box.querySelector('#pbN');
-  const end = () => { clearInterval(t); box.remove(); };
+  const end = () => { clearInterval(t); box.remove(); focusBack(opener); };
   const t = setInterval(() => {
     n--; lab.textContent = n; sfx('tick');
     if (n === 5) { yes.disabled = false; yes.textContent = tr('Break it and pay'); }
