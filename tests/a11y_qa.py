@@ -1,5 +1,5 @@
 """Screen reader pass (1.47.0 step a: Home and Receive; 1.48.0 step b: Send, Pay confirm, the over-limit PIN screen;
-1.49.0 step c: Settings, Notes, and the welcome, PIN lock and "open in another tab" screens).
+1.49.0 step c: Settings, Notes, and the welcome, PIN lock and "open in another tab" screens; 1.50.0 step d: the 12 words).
 Uses the local mint 3339 (Mint B).
 
 - A sheet that opens, and a sheet whose content is replaced (Create invoice shows the invoice), takes the focus. On a touch
@@ -19,6 +19,10 @@ Step c (1.49):
 - Every section title (Security, Backup, Look & sound... on Settings; the ones on Notes) is a heading, so a screen reader
   can jump from section to section instead of reading one long list.
 - The welcome screen, the PIN lock screen and the "open in another tab" screen each have one main area too.
+Step d (1.50), the 12 words (setup, and Settings' Show my words), as the owner chose: a screen reader would read them
+aloud, so a spoken warning comes first ("...will read your 12 words aloud. Use headphones..."), and the words stay hidden
+from it until "Read my words" is pressed; then the focus goes to them and each is read as "Word 1: abandon". Sighted users
+see no change (the warning and the button are visually hidden; the button shows itself when it has the keyboard focus).
 """
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +41,19 @@ UNNAMED = r"""(() => {
 
 HEADS = "[...document.querySelectorAll('.h2')].filter(e=>e.getClientRects().length).map(e=>[e.innerText.trim().slice(0,20), /^H[1-6]$/.test(e.tagName) || e.getAttribute('role')==='heading'])"
 ONEMAIN = "(sel => { const m=[...document.querySelectorAll('main,[role=main]')]; return {n:m.length, holds: m[0] ? !!m[0].querySelector(sel) : false, header: m[0] ? !!m[0].querySelector('header') : null}; })"
+
+WORDS = r"""(() => {
+  const ol = document.querySelector('ol.words'); if (!ol) return null;
+  const hidden = el => !!el.closest('[aria-hidden=true]');
+  const warn = document.querySelector('[data-srwarn]'), btn = document.querySelector('[data-act=srWords]');
+  const spoken = [...ol.querySelectorAll('li')].map(li => [...li.childNodes].filter(n => !(n.nodeType === 1 && n.getAttribute('aria-hidden') === 'true')).map(n => n.textContent).join('').trim());
+  const r = e => e ? e.getBoundingClientRect() : null;
+  return { listHidden: hidden(ol), n: ol.querySelectorAll('li').length, spoken,
+    warn: warn ? warn.textContent.trim() : null, warnHidden: warn ? hidden(warn) : null, warnBefore: warn ? !!(warn.compareDocumentPosition(ol) & 4) : null,
+    warnVisible: warn ? r(warn).width > 2 && r(warn).height > 2 : null, btn: !!btn, btnName: btn ? btn.innerText.trim() : null,
+    btnBefore: btn ? !!(btn.compareDocumentPosition(ol) & 4) : null, btnVisible: btn ? r(btn).width > 2 && r(btn).height > 2 : null,
+    focusInList: !!document.activeElement.closest('ol.words') || document.activeElement === ol };
+})()"""
 
 
 async def open_receive(w):
@@ -152,6 +169,31 @@ async def main():
         m = await w.ev(ONEMAIN + "('[data-pinpad]')")
         check('PIN lock screen: one main area, holding the PIN pad', m['n'] == 1 and m['holds'], m)
         check('step c: no script errors', not w.errs, w.errs[:4])
+        await w.pg.context.close()
+
+        # ---- step d: the 12 words (setup, and Settings' Show my words)
+        async def words_checks(w, where):
+            a = await w.ev(WORDS)
+            check(f'{where}: the spoken warning comes before the words, readable by a screen reader, about hearing them aloud', a and a['warn'] and 'aloud' in a['warn'] and not a['warnHidden'] and a['warnBefore'], a and {k: a[k] for k in ('warn', 'warnHidden', 'warnBefore')})
+            check(f'{where}: the words are hidden from a screen reader until asked for (12 on screen)', a and a['n'] == 12 and a['listHidden'], a and (a['n'], a['listHidden']))
+            check(f'{where}: a "Read my words" button comes before them', a and a['btn'] and 'read my words' in a['btnName'].lower() and a['btnBefore'], a and (a['btn'], a['btnName'], a['btnBefore']))
+            check(f'{where}: sighted users see no change (the warning and the button are visually hidden)', a and not a['warnVisible'] and not a['btnVisible'], a and (a['warnVisible'], a['btnVisible']))
+            if not (a and a['btn']): return
+            await w.pg.focus('[data-act=srWords]'); await w.wait(100)
+            check(f'{where}: the button shows itself when it has the keyboard focus', await w.ev("(r=>r.width>20&&r.height>10)(document.querySelector('[data-act=srWords]').getBoundingClientRect())"))
+            await w.pg.keyboard.press('Enter'); await w.wait(300)
+            a = await w.ev(WORDS)
+            words = await w.ev("Nutcade.S.seed ? Nutcade.S.seed.mnemonic.split(' ') : []")
+            check(f'{where}: after Read my words, the words are readable, the focus is on them, each read as "Word 1: ..."', a and not a['listHidden'] and a['focusInList'] and a['spoken'][:2] == [f'Word 1: {words[0]}', f'Word 2: {words[1]}'] and len(a['spoken']) == 12, a and (a['listHidden'], a['focusInList'], a['spoken'][:2]))
+        g = await wallet(b); await g.gate_new(); await g.wait(300)
+        await words_checks(g, 'setup')
+        await g.pg.context.close()
+        w = await wallet(b); await w.create(); await w.add_mint(B)
+        await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(300)
+        await w.ev("(()=>{let x=document.querySelector('[data-act=seedShow]'); if(!x){x=document.createElement('button'); x.dataset.act='seedShow'; x.hidden=true; document.body.appendChild(x)} x.click()})()")
+        await w.until("!!document.querySelector('#layer ol.words')", 5000)
+        await words_checks(w, 'Settings, Show my words')
+        check('step d: no script errors', not w.errs, w.errs[:4])
         await w.pg.context.close()
 
         # ---- a computer (mouse and keyboard): unchanged, the first field takes the focus

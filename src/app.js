@@ -2619,8 +2619,13 @@ function viewGate() {
       ${gate.busy ? `<span class="spinner">${esc(gate.busy)}</span>` : `${vault.on ? '' : `<div class="notice cyan" style="text-align:left">Recommended: set a PIN so nobody who picks up this device can open your wallet. It also encrypts your phrase and ecash here.</div><button class="btn block violet" data-act="pinSet">Set a PIN</button>`}<button class="btn solid gold block" data-act="gateStart">Press start</button>`}
     </div></section>`;
 }
+// (1.50) A screen reader would read the 12 words aloud. A spoken warning comes first, and the words stay hidden from it until
+// "Read my words" is pressed (then the focus goes to them, each read as "Word 1: abandon"). Sighted users see no change: the
+// warning and the button are visually hidden, and the button shows itself when it has the keyboard focus.
 function phraseGrid(words) {
-  return `<ol class="words" aria-label="${tr('Recovery phrase')}">${words.map((w, i) => `<li><span>${i + 1}</span>${esc(w)}</li>`).join('')}</ol>`;
+  return `<p class="sr" data-srwarn>${tr('Your screen reader will read your 12 words aloud. Use headphones or make sure no one can hear.')}</p>
+    <button class="btn sm sr sr-focus" data-act="srWords">${tr('Read my words')}</button>
+    <ol class="words" aria-label="${tr('Recovery phrase')}" aria-hidden="true" tabindex="-1">${words.map((w, i) => `<li><span aria-hidden="true">${i + 1}</span><span class="sr">${tr(`Word ${i + 1}:`)} </span>${esc(w)}</li>`).join('')}</ol>`;
 }
 function openShowPhrase(fresh) {
   const words = S.seed.mnemonic.split(' ');
@@ -2882,7 +2887,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.49.0';
+const APP_VERSION = '1.50.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -4563,6 +4568,7 @@ const A = {
   takeover: () => { try { chan && chan.postMessage({ t: 'takeover', id: TAB_ID }); } catch (e) {} location.reload(); },
   seedCreate: b => pinGuard('newseed', () => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (!anyBalance()) { S.seed.secured = true; store.set('seed', S.seed); } sfx('start'); render(); openShowPhrase(true); })),   // (a new wallet has no PIN: nothing is asked)
   seedShow: () => { if (!S.seed) return; pinGuard('seed', () => openShowPhrase(!S.seed.backedUp)); },
+  srWords: b => { const ol = b.parentElement && b.parentElement.querySelector('ol.words'); if (!ol) return; ol.removeAttribute('aria-hidden'); b.remove(); ol.focus({ preventScroll: true }); },   // (the 12 words, read on request: 1.50)
   gateCreate: b => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (!anyBalance()) { S.seed.secured = true; store.set('seed', S.seed); } gate = { step: 'show' }; sfx('start'); render(); window.scrollTo(0, 0); }),
   gateRestore: () => pinGuard('restore', openRestore),   // (on the start screen nothing is asked: no wallet yet)
   gateToConfirm: () => { gate = { step: 'confirm', picks: pickWords() }; sfx('select'); render(); window.scrollTo(0, 0); const f = document.querySelector('[data-cw]'); if (f && !matchMedia('(pointer:coarse)').matches) f.focus(); },

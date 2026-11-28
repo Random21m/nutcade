@@ -43,6 +43,8 @@ button{cursor:pointer}
 .marquee.mini .logo svg{width:auto;height:38px;max-width:100%}
 .marquee .logo svg{display:block;width:100%;height:auto;max-width:400px;margin:0 auto;filter:drop-shadow(0 0 10px var(--pink));filter:drop-shadow(0 0 10px color-mix(in srgb,var(--pink) 35%,transparent))}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.sr.sr-focus:not(:focus){position:absolute!important;width:1px!important;height:1px!important;min-height:0!important;padding:0!important;margin:0!important;border:0!important;overflow:hidden;clip:rect(0 0 0 0)}   /* (a visually hidden control, even a .btn, until it has the keyboard focus: the 12 words' Read my words, 1.50) */
+.sr.sr-focus:focus{position:static;width:auto;height:auto;overflow:visible;clip:auto;margin:0 0 8px}
 .pad-keys{display:none;font-size:18px;color:var(--dim);text-align:center}
 @media (pointer:fine){.pad.touch-only{display:none}.pad-keys{display:block}}
 @media (orientation:landscape) and (max-height:520px){.pad.nostick{display:none}}   /* a card cabinet taps its own buttons, so a phone on its side gives the table the whole height */
