@@ -4231,7 +4231,7 @@ function openLnAddr() {
 }
 
 /* ---------- support / donations ---------- */
-const DONATE = { address: 'npub1vj8zjhnmkhekv93e2xmrz7kfwuxq25vrzw53u4dqhwd2lp5smvks3mwu2n@npub.cash', lnurl: 'LNURL1DP68GURN8GHJ7MNSW43ZUCMPWD5Z7TNHV4KXCTTTDEHHWM30D3H82UNVWQHKUUR4VGCHV63C0F4XSMNDDD5X26MK8YEK2VNCD4E85DMTVEMH27R3XG6HVUN6WU6NXAF5V3CKSAMYXFK8QDTND4MXKUEND4MH2VNWPVSW3Q' };
+const DONATE = { address: 'npub1t5nvfnlmegsqkqegcpnyek4qf4fc2f2gx2t4lm88h2kq22plpmxqdhgpa9@npub.cash', lnurl: 'LNURL1DP68GURN8GHJ7MNSW43ZUCMPWD5Z7TNHV4KXCTTTDEHHWM30D3H82UNVWQHKUUR4VGCHGDTWWENXUMRDV4NHXUTTW9JKWCMSDEUK26E5W9NRGENRXFNRYEMCXF6RGMRD8QUXSVNTWYERYURVWPKHSUTYDPNHQCFE9W6HHX' };
 function openSupport() {
   const m = activeMint();
   const canTip = m && isSatAcct(m.url) && supports(m, 'melt', 'bolt11');   // (a tip is in SAT, from a SAT account)
