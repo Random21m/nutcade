@@ -2381,6 +2381,7 @@ function openSheet(title, html, onOpen) {
   const layer = $('#layer');
   layer.innerHTML = `<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="sheet-head"><h3>${esc(title)}</h3><button class="x" data-act="close" aria-label="Close">X</button></div><div class="sheet-body" style="display:grid;gap:14px">${html}</div></div></div>`;
   const body = layer.querySelector('.sheet-body');
+  alertBoxes(body);
   enhanceAmounts(body);
   sheetCleanup = onOpen ? onOpen(body) : null; fitNums(body);
   // the focus moves into the new sheet: the first field with a mouse or keyboard; on a touch screen the sheet itself (no keyboard
@@ -2412,10 +2413,12 @@ function closeSheet() {
 const sheetOf = el => (el && el.closest && el.closest('#layer .sheet')) || null;
 function closeSheetOf(sh) { if (sh && sh.isConnected) closeSheet(); }
 const FOCUSABLE = 'button:not([disabled]),[href],input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+// a sheet's error box (#sheetErr) is an alert region: an error that appears in it is read out by a screen reader (1.48)
+const alertBoxes = root => root.querySelectorAll('#sheetErr').forEach(e => e.setAttribute('role', 'alert'));
 function setBody(html, onOpen) {
   const b = $('#layer .sheet-body'); if (!b) return; if (typeof sheetCleanup === 'function') sheetCleanup();
   const sheet = b.closest('.sheet'), a = document.activeElement, lost = !a || a === document.body || a === sheet || !sheet.contains(a) || b.contains(a);
-  b.innerHTML = html; enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; fitNums(b);
+  b.innerHTML = html; alertBoxes(b); enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; fitNums(b);
   // the body was replaced (a lookup finished): the first field gets the focus, as when a sheet opens
   if (lost) { const f = !matchMedia('(pointer:coarse)').matches && b.querySelector('input:not([type=file]):not([type=checkbox]):not([type=radio]),textarea'); if (f) f.focus({ preventScroll: true }); else { sheet.tabIndex = -1; sheet.focus({ preventScroll: true }); } }   // (on a touch screen the sheet itself: 1.47)
 }
@@ -2867,7 +2870,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.47.0';
+const APP_VERSION = '1.48.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
@@ -4900,7 +4903,7 @@ document.addEventListener('input', e => {
   }
 });
 document.addEventListener('keydown', e => {
-  const sheet = $('#layer .sheet'), trap = sheet || cash.el;
+  const sheet = $('#layer .sheet'), trap = $('#limitLayer .sheet') || sheet || cash.el;   // (the over-limit screen sits above the sheets: Tab stays in it while it is up; 1.48)
   if (trap && e.key === 'Tab') {   // keep keyboard focus inside the open sheet, or the till
     const f = [...trap.querySelectorAll(FOCUSABLE)].filter(x => x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden');
     if (f.length) {
@@ -4919,7 +4922,7 @@ document.addEventListener('keydown', e => {
   if (document.querySelector('[data-pinpad]') && !e.target.matches('input,textarea,select')) {
     const k = /^[0-9]$/.test(e.key) ? e.key : e.key === 'Backspace' ? 'del' : e.key === 'Enter' ? 'ok' : null;
     if (k) { e.preventDefault(); const b = document.querySelector(`[data-pinpad] [data-k="${k}"]`); if (b) A.pinKey(b); return; }
-  } if (e.key === 'Enter' && e.target.dataset && e.target.dataset.cw !== undefined && $('[data-act=gateConfirm]')) { e.preventDefault(); A.gateConfirm($('[data-act=gateConfirm]')); } if (e.key === 'Escape' && $('#layer .sheet')) closeSheet(); if (e.key === 'Enter' && e.target.id === 'mintUrl') { const b = $('[data-act="addMintUrl"]'); if (!b || !b.disabled) A.addMintUrl(b); } });   // (Enter again while the add is on its way starts no second one, like a click on the busy button; 1.43)
+  } if (e.key === 'Enter' && e.target.dataset && e.target.dataset.cw !== undefined && $('[data-act=gateConfirm]')) { e.preventDefault(); A.gateConfirm($('[data-act=gateConfirm]')); } if (e.key === 'Escape') { if ($('#limitLayer')) A.limitNo(); else if ($('#layer .sheet')) closeSheet(); } /* (Escape closes the over-limit screen first, never the sheet under it; 1.48) */ if (e.key === 'Enter' && e.target.id === 'mintUrl') { const b = $('[data-act="addMintUrl"]'); if (!b || !b.disabled) A.addMintUrl(b); } });   // (Enter again while the add is on its way starts no second one, like a click on the busy button; 1.43)
 
 /* ---------- background checks ---------- */
 // one background check at a time: the timer, coming back online and opening the app can all ask for one, and two at

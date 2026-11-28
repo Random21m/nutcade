@@ -154,9 +154,17 @@ function limitAsk(e, retry) {
     <button class="btn block" data-act="limitNo">Cancel</button></div></div>`;
   document.body.appendChild(box);
   if (LANG !== 'en') trNode(box);
+  // (1.48) the screen takes the focus (it sits above the sheets, outside #layer), and gives it back when it closes
+  const a = document.activeElement; if (a && a !== document.body && !box.contains(a)) limitOpener = a;
+  const sh = box.querySelector('.sheet'); sh.tabIndex = -1; sh.focus({ preventScroll: true });
   sfx('err');
 }
-function limitClose() { document.getElementById('limitLayer')?.remove(); limitRetry = null; if (pinUI.mode === 'limitOK') pinUI.mode = null; }
+let limitOpener = null;
+function limitClose() {
+  document.getElementById('limitLayer')?.remove(); limitRetry = null; if (pinUI.mode === 'limitOK') pinUI.mode = null;
+  const back = limitOpener && limitOpener.isConnected ? limitOpener : document.querySelector('#layer .sheet'); limitOpener = null;
+  if (back) { if (back.matches('.sheet')) back.tabIndex = -1; try { back.focus({ preventScroll: true }); } catch (e) {} }
+}
 
 /* ---------- PIN guard ----------
    The spending limit protects an unlocked phone only if nothing hands over the whole wallet around it. So with a PIN,
