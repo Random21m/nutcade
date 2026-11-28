@@ -212,8 +212,17 @@ async def main():
             check('es: none of the new sentences is missing a translation', not miss, miss)
             await w.pg.context.close()
 
+        async def unit_code():   # (1.50) a unit NUTCADE doesn't know is shown as letters and digits only, never as markup
+            w = await wallet(b); await w.create()
+            got = await w.ev("['<img src=x onerror=alert(1)>', 'us\"d', 'x<b>y', 'usd', 'sat'].map(u => NutUnits.code(u))")
+            import re as _re
+            check('unit code: an unknown unit is shown as letters and digits only (at most 8), never as markup', all(_re.fullmatch(r'[A-Z0-9]{0,8}', g or '') for g in got[:3]), got)
+            check('unit code: the known units keep their codes (USD, SAT)', got[3] == 'USD' and got[4] in ('SAT', 'sat', 'SATS'), got[3:])
+            check('unit code: no script errors', not w.errs, w.errs[:4])
+            await w.pg.context.close()
+
         for name, fn in (('remove_deposit', remove_deposit), ('remove_payment', remove_payment), ('remove_unpaid', remove_unpaid),
-                         ('remove_comeback', remove_comeback), ('pin_wait', pin_wait), ('trust', trust), ('unit_toast', unit_toast), ('langs', langs)):
+                         ('remove_comeback', remove_comeback), ('pin_wait', pin_wait), ('trust', trust), ('unit_toast', unit_toast), ('langs', langs), ('unit_code', unit_code)):
             await section(name, fn)
         await b.close()
         print('\nSUMMARY', sum(r[1] for r in results), '/', len(results))

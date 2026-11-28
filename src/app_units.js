@@ -20,7 +20,7 @@ const acctUrl = k => String(k || '').replace(UNIT_RE, '');
 const acctKey = (url, unit) => !unit || unit === 'sat' ? url : url + '|' + unit;
 const isSatAcct = k => acctUnit(k) === 'sat';
 const unitDp = u => (UNITS[u] || UNITS.sat).dp;
-const unitCode = u => unitOk(u) ? UNITS[u].code : String(u || '').toUpperCase().slice(0, 8);
+const unitCode = u => unitOk(u) ? UNITS[u].code : String(u || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);   // (a unit from outside, e.g. a scanned request's, is letters and digits only: never markup, whoever shows it; 1.50)
 const txUnit = t => (t && unitOk(t.unit) && t.unit) || acctUnit(t && t.mint);
 // one spelling per account: the address as normUrl1 spells it, then the unit (lowercase) for a non-SAT account
 const normUrl = u => { const s = String(u ?? '').trim(); const m = /\|(usd|eur|chf)$/i.exec(s); return m ? normUrl1(s.slice(0, m.index)) + '|' + m[1].toLowerCase() : normUrl1(s); };
