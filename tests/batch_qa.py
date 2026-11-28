@@ -360,7 +360,15 @@ async def main():
                       (mode, ok, st, pq, await lines(w, B), await bal(w, B)))
                 await reopen(w); await w.wait(2500)
                 check(f'lost ({mode}): reopened again: nothing counted twice', await bal(w, B) == sum(amts) and len(await lines(w, B)) == 3 and (await ledger(w, B)) == [sum(amts)] * 2)
-                errs.extend(w.errs); await w.pg.context.close()
+                # (CI, Nov 28: the job hung here for 35 minutes, after this run's checks, and hit its 40-minute limit. The
+                #  "same round" run kept its catch of the mint's answers to the end, and a close can wait on a handler still
+                #  running. Every catch is dropped first, ignoring handlers in flight; the batch requests the catch saw are
+                #  printed, so a repeat shows whether the app sent one more; and a close that doesn't finish in 30 s fails
+                #  the run at once instead of the job)
+                print(f'lost ({mode}): batch answers lost by the test: {st["lost"]}', flush=True)
+                try: await w.pg.unroute_all(behavior='ignoreErrors')
+                except Exception: pass
+                errs.extend(w.errs); await asyncio.wait_for(w.pg.context.close(), 30)
         await section('lost', lost)
 
         # ======================= two devices, one seed =======================
