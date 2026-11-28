@@ -254,7 +254,7 @@ async def main():
             # (the check above is only worth something if it sees the words when they ARE shown: here, the app's own word list)
             await w.ev("(()=>{const b=document.createElement('button'); b.dataset.act='seedShow'; document.body.appendChild(b); b.click(); b.remove()})()")
             await w.until("!!document.querySelector('#layer ol.words')", 5000)
-            check('phone: (self-test) the words-not-shown check does see the 12 words in the app\'s own word list', shown(words, await w.ev("document.querySelector('#layer .sheet').innerText")), await w.ev("(document.querySelector('#layer .sheet')||{}).innerText||''")[:80])
+            check('phone: (self-test) the words-not-shown check does see the 12 words in the app\'s own word list', shown(words, await w.ev("document.querySelector('#layer .sheet').innerText")), (await w.ev("(document.querySelector('#layer .sheet')||{}).innerText||''"))[:80])
             await w.ev("Nutcade.closeSheet()")
             check('phone: no toast or log carries the 12 words (restore)', not leaks(words, await w.ev("window.__toasts.concat(window.__logs)")))
             check('phone: no script errors', not w.errs, w.errs[:4])
