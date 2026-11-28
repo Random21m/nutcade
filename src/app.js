@@ -2419,6 +2419,9 @@ function focusBack(o) {
   const t = o && o.isConnected && !(matchMedia('(pointer:coarse)').matches && /^(INPUT|TEXTAREA|SELECT)$/.test(o.tagName)) ? o : $('#layer .sheet');
   if (t) { if (t.matches('.sheet')) t.tabIndex = -1; try { t.focus({ preventScroll: true }); } catch (e) {} }
 }
+// (1.49) the section titles (.h2: Security, Backup, Look & sound...) look like headings: they are headings to a screen reader
+// too (level 3, under NUTCADE and the tab's own title), so it can jump from section to section
+const headingRoles = root => root.querySelectorAll('.h2').forEach(e => { if (!/^H[1-6]$/.test(e.tagName) && !e.hasAttribute('role') && !e.closest('button,a,label,summary')) { e.setAttribute('role', 'heading'); e.setAttribute('aria-level', '3'); } });   // (never a title inside a control, like Home's Bill boss and Extra Life panels, which are buttons; the price chart marks its own)
 // a sheet's error box (#sheetErr) is an alert region: an error that appears in it is read out by a screen reader (1.48)
 const alertBoxes = root => root.querySelectorAll('#sheetErr').forEach(e => e.setAttribute('role', 'alert'));
 function setBody(html, onOpen) {
@@ -2455,15 +2458,16 @@ function render() {
   if (tabLocked) {
     npcSocketStop(); liveSync(); dmStop(); nwcStop(); nzStop();
     app.innerHTML = `<div class="wrap">${marqueeHTML(false)}
-      <section class="screen"><div class="panel hot"><span class="h2" style="color:var(--pink)">Open in another tab</span>
+      <main id="main"><section class="screen"><div class="panel hot"><span class="h2" style="color:var(--pink)">Open in another tab</span>
       <p style="margin:0">NUTCADE is already open in another tab or window. Running two copies at once can make them overwrite each other's ecash, so this one is paused.</p>
-      <button class="btn solid gold block" data-act="takeover">Use NUTCADE here instead</button></div></section></div>`;
-    return;
+      <button class="btn solid gold block" data-act="takeover">Use NUTCADE here instead</button></div></section></main></div>`;
+    headingRoles(app); return;
   }
   if (vault.on && !vault.open) {
     app.innerHTML = `<div class="wrap lockwrap${raw.get('vault', {}).bio ? ' bio' : ''}" style="padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))">
       ${marqueeHTML(false)}
-      ${viewLock()}</div>`;
+      <main id="main">${viewLock()}</main></div>`;
+    headingRoles(app);
     if (window.NutAudio) window.NutAudio.stopMusic();
     if (window.PriceChart) window.PriceChart.disconnect();
     return;
@@ -2473,8 +2477,9 @@ function render() {
     const gv = viewGate();
     app.innerHTML = `<div class="wrap" style="padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))">
       ${marqueeHTML(gate.step === 'welcome')}
-      ${storageOk ? '' : '<div class="notice red" style="margin-top:14px">This browser is blocking storage, so your wallet would vanish on reload. Open NUTCADE in a normal browser tab.</div>'}
-      ${gv}</div>`;
+      <main id="main">${storageOk ? '' : '<div class="notice red" style="margin-top:14px">This browser is blocking storage, so your wallet would vanish on reload. Open NUTCADE in a normal browser tab.</div>'}
+      ${gv}</main></div>`;
+    headingRoles(app);
     if (window.NutAudio) window.NutAudio.stopMusic();
     return;
   }
@@ -2497,6 +2502,7 @@ function render() {
   </div>
   <nav class="tabbar" aria-label="Sections"><div class="in">${TABS.map(([k, l]) => `<button class="tab" data-act="tab" data-tab="${k}" ${tab === k ? 'aria-current="page"' : ''}>${ICONS[k]}<span>${l}</span></button>`).join('')}</div></nav>`;
   if (tab === 'arcade' && window.Arcade) { window.Arcade.mountList($('#arcadeScreen')); const cp = challengePanel(); if (cp) $('#arcadeScreen').insertAdjacentHTML('beforeend', cp); if (window.Trophies) window.Trophies.mount($('#arcadeScreen')); }
+  headingRoles(app);   // (after the arcade's list and panels are in: 1.49)
   if (tab === 'mints' && S.mints.some(m => !health[m.url] || Date.now() - health[m.url].at > 5 * 60e3)) setTimeout(checkHealth, 0);
   if (window.Trophies) setTimeout(() => window.Trophies.checkWallet(), 0);
   if (radarOn() && (tab === 'wallet' || tab === 'mints')) setTimeout(radarEnsure, 0);
@@ -2876,7 +2882,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.48.0';
+const APP_VERSION = '1.49.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
