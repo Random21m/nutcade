@@ -125,10 +125,12 @@ async def leave_gate(w):
 
 
 def shown(words, text):
-    """the words readable in text: any two of them in a row (with a number or space between), never one word alone (one of 2048 common
-    English words is often on the page by chance: "coin", "key", "phrase"; that failed this suite now and then until 1.50)"""
-    ws = words.split()
-    return any(re.search(r'\b' + a + r'\W+(?:\d+\W+)?' + b + r'\b', text) for a, b in zip(ws, ws[1:]))
+    """the words readable in text: two of them in a row, never one word alone (one of 2048 common English words is often on the page or
+    in random base64 by chance: "coin", "key", "phrase"; that failed this suite now and then until 1.50). The text is read as runs of
+    letters, so the numbers of the word list and its screen-reader label ("Word 2:", in every language) between two words are skipped."""
+    ws = words.split(); toks = [t for t in re.findall(r'[^\W\d_]+', text.lower()) if t not in ('word', 'palabra', 'palavra', 'wort', 'mot')]
+    pairs = set(zip(ws, ws[1:]))
+    return any(p in pairs for p in zip(toks, toks[1:]))
 
 
 def leaks(words, texts): return [t for t in texts if any(x in t for x in (words, ' '.join(words.split()[:4])))]
@@ -249,6 +251,11 @@ async def main():
             check('phone: the mints from the backup are ticked', await w.ev(f"[...document.querySelectorAll('[data-rmint]')].some(i=>i.checked && i.dataset.rmint==={J(B)})"))
             await restore_now(w)
             check('phone: restored (the same words, the sats found at the mint)', await w.ev("Nutcade.S.seed && Nutcade.S.seed.mnemonic") == words and await w.bal() == 1000, await w.bal())
+            # (the check above is only worth something if it sees the words when they ARE shown: here, the app's own word list)
+            await w.ev("(()=>{const b=document.createElement('button'); b.dataset.act='seedShow'; document.body.appendChild(b); b.click(); b.remove()})()")
+            await w.until("!!document.querySelector('#layer ol.words')", 5000)
+            check('phone: (self-test) the words-not-shown check does see the 12 words in the app\'s own word list', shown(words, await w.ev("document.querySelector('#layer .sheet').innerText")), await w.ev("(document.querySelector('#layer .sheet')||{}).innerText||''")[:80])
+            await w.ev("Nutcade.closeSheet()")
             check('phone: no toast or log carries the 12 words (restore)', not leaks(words, await w.ev("window.__toasts.concat(window.__logs)")))
             check('phone: no script errors', not w.errs, w.errs[:4])
             await w.pg.context.close()
