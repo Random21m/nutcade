@@ -14,6 +14,8 @@ A Cashu ecash wallet with a 1980s arcade built in.
 
 NUTCADE holds Bitcoin as Cashu ecash: fast, private payments you can send like a text message. It works in any modern browser on phone or desktop, with nothing to install, and keeps your wallet protected by a standard 12-word recovery phrase.
 
+<p align="center"><img src="docs/nutcade-tour.gif" alt="A 30-second tour: load sats over Lightning, send ecash, play Star Swarm and print Pizza Day tokens" width="300"><br><a href="docs/nutcade-tour.mp4">Watch the tour in full quality (MP4, 30 seconds)</a></p>
+
 ## Get NUTCADE: add it to your home screen
 
 **The only real address is https://random21m.github.io/nutcade/** · There's no app-store app; anything else calling itself NUTCADE isn't us.
@@ -34,10 +36,11 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 - Updates arrive by themselves: the next time you open NUTCADE, it loads the new version, and a note tells you what's new. If you keep NUTCADE open for days, a message says when a new version is ready, and you reload when you're done (never in the middle of a payment).
 
 <table>
-<tr><td><img src="docs/screens/01-lightning.jpg" alt="Loading sats over Lightning: a 1UP and a coin shower"></td><td><img src="docs/screens/02-arcade.jpg" alt="Star Swarm, one of the 10 arcade cabinets"></td></tr>
-<tr><td><img src="docs/screens/03-trophies.jpg" alt="The trophy room"></td><td><img src="docs/screens/04-send.jpg" alt="Sending sats to a friend: SENT! on one phone, 1UP! on the other"></td></tr>
+<tr><td><img src="docs/screens/01-lightning.jpg" alt="Loading sats over Lightning: a 1UP and a coin shower"></td><td><img src="docs/screens/02-arcade.jpg" alt="Star Swarm, one of the 12 arcade cabinets"></td></tr>
+<tr><td><img src="docs/screens/03-trophies.jpg" alt="The trophy room"></td><td><img src="docs/screens/04-send.jpg" alt="Sending sats to a friend: the ecash token on one phone, 1UP! on the other"></td></tr>
 <tr><td><img src="docs/screens/05-sound.jpg" alt="Send by sound: one phone plays the coins, the other listens and receives them"></td><td><img src="docs/screens/06-cashier.jpg" alt="Cashier mode: a paid sale of 5,000 sats"></td></tr>
 <tr><td><img src="docs/screens/07-languages.jpg" alt="The wallet in English, Spanish, Portuguese, German and French"></td><td><img src="docs/screens/08-pin.jpg" alt="The PIN lock"></td></tr>
+<tr><td><img src="docs/screens/09-printed.jpg" alt="Printed tokens in the Pizza Day style: a day card and a payment card"></td><td><img src="docs/screens/10-readable.jpg" alt="Readable text: the wallet in the arcade font and in the plain system font"></td></tr>
 </table>
 
 ## Features
@@ -101,7 +104,9 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 - **Cashier mode**: a full-screen till for a market stall or a café. Type the price, the customer scans, and coins drop with a chime when it's paid. Takes Lightning or ecash, keeps today's total and exports the day's sales as CSV
 - **High-score bounties**: put sats on a challenge. The mint locks them to your friend and to a secret only your NUTCADE holds (NUT-14). Beat your score within a week and their NUTCADE gets the secret and claims the sats; otherwise they come back to you
 - **Replays that prove scores**: every game records its inputs, so any phone can replay it and get exactly the same score. Challenges carry the challenger's replay, checked on arrival, and you race their ghost; a bounty only pays out when the winner's replay checks out
-- **NUTCADE tokens**: print sats on paper, like arcade tokens. Pick an amount per token and how many (1 to 20): each is its own Cashu token with its own QR code, read back before printing, that anyone can claim with any Cashu wallet. Unclaimed ones can be taken back, and the Printed tokens list shows which were claimed
+- **NUTCADE tokens**: print sats on paper, like arcade tokens. Pick an amount per token and how many (1 to 20): each is its own Cashu token with its own QR code, read back before printing, that anyone can claim with any Cashu wallet. Unclaimed ones can be taken back, and the Printed tokens list shows which were claimed. Three card styles: **Arcade**, **Ink saver** and **Pizza Day** (1.51), whose cards come in pairs: the day, block 56,982 on May 22, 2010, and the block with the 10,000 BTC pizza payment, 57,043
+- **Screen readers** (1.47 to 1.50): VoiceOver and TalkBack move into each screen that opens and stay with it, errors are read out, section titles are headings you can jump between, every tab has a main area, and your 12 words are read only when you press **Read my words**, after a warning to use headphones
+- **Other 12 words keep your old keys** (1.45, 1.52): after you restore other words, ecash, gifts, an Extra Life, bounties and nutzaps sent to the keys of your earlier words are still found and claimed
 - **Recent notes on the home screen**: choose 0 to 6 of your latest notes to list under Recent (it starts at 2; **All notes** always shows the rest). Kept on this device.
 - **QR code center**: the NUTCADE acorn in the middle of the QR codes NUTCADE shows and prints (or none), only where the code still scans
 - **Treasure hunts**: hide sats behind printable clue cards. The prize is locked to a key split across the cards (Shamir's secret sharing), so any 3 of 5 (or whatever you choose) open the chest, and no single card can
@@ -113,7 +118,7 @@ Adding it to your home screen makes NUTCADE open full-screen like an app and wor
 - Take back a sent token if nobody claimed it, and see when one was claimed
 - Coin-drop and 1UP effects when sats arrive, and a launch effect when you send
 
-**Arcade**: ten original cabinets with high-score tables, chiptune sound and music
+**Arcade**: twelve original cabinets with high-score tables, chiptune sound and music
 
 | Cabinet | Style |
 |---|---|
@@ -147,6 +152,7 @@ Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons
 - **Keyboard:** left/right arrows or A/D steer, up or W is gas (the car cruises by itself without it), down or S brakes.
 - **Phone:** touch the left or right half of the screen to steer (the car accelerates while you touch), touch the top of the screen to brake, or use the joystick: left/right steers, up boosts, down brakes.
 - Score is distance, plus 50 for every car you pass (100 for a close pass), plus a bonus at each checkpoint.
+
 **Daily Challenge**: at the top of the arcade, one cabinet a day (picked from the UTC date) with the same seeded level for everyone. The first run of the day is your official score, you keep a streak of days played in a row, and you can share the score as a Nostr note only when you tap **Post**. See [Daily Challenge](#daily-challenge).
 
 **Challenges and bounties**: after a game, tap **Challenge a friend** to send your score to a contact over Nostr or share it as a link. Your friend's game starts from the same seed, so it's laid out the same way, and their score comes back to you. Challenges are signed with your NUTCADE key, so nobody can send one in your name. Sending to a contact, you can also **put sats on it**: they're locked so only that friend can win them, and only by beating your score within a week.
@@ -155,14 +161,14 @@ Plays with keyboard, mouse, or on a phone with an on-screen joystick and buttons
 
 **Your initials**: the three letters on your high scores, challenges you play and score cards can be changed any time, in **Arcade → Your initials** or **Settings → Look & sound**. Capitals and numbers only, exactly 3; **Also rename my past scores on this phone** (on by default) rewrites this phone's own high-score tables, and never touches scores already sent in challenges or posted to Nostr. The new-high-score box starts with your current initials, and leaving it empty keeps them (it no longer resets to AAA). It has nothing to do with sats or free credits.
 
-**Trophies and score cards**: 28 trophies for wallet milestones and arcade feats (reach wave 3 in Star Swarm, grow Nibble to 30, play every cabinet…). Every high score and trophy can be turned into a share card for X or anywhere else. Cards show the game and score only, never anything about your wallet, and trophies stay on your device.
+**Trophies and score cards**: 27 trophies for wallet milestones and arcade feats (reach wave 3 in Star Swarm, grow Nibble to 30, play every cabinet…). Every high score and trophy can be turned into a share card for X or anywhere else. Cards show the game and score only, never anything about your wallet, and trophies stay on your device.
 
 **Settings**
 - **Security:** set, change or remove your PIN, turn on Face ID / fingerprint, lock now, and choose when the wallet locks itself
 - **Backup:** when you last checked your 12 words and last made a backup file, check your 12 words, show your phrase, find lost ecash, back up your mint list to Nostr, download or import a backup file (optionally protected with a password), back up with your phone, restore a wallet from 12 words (or with your phone), reset the wallet
 - **Lightning address:** turn on your own address, choose which mint receives the payments, check for payments, turn it off
 - **Contacts:** add, edit and pay contacts, and show your ecash address
-- **Look & sound:** language, three cabinet themes (Neon, Amber CRT, Green phosphor), sound effects, music, CRT scanlines, amounts shown as ₿, hide amounts
+- **Look & sound:** language, three cabinet themes (Neon, Amber CRT, Green phosphor), sound effects, music, CRT scanlines, readable text, amounts shown as ₿, hide amounts, the QR code center, your initials, how many recent notes the home screen lists
 - **Privacy:** turn the live price and price chart on or off (prices come from Coinbase, in your currency), choose whether to check if sent tokens were claimed, and whether to receive ecash sent over Nostr; **Show mint reliability** (off by default) adds a small **Reliable / Shaky / Mint down** label to your mints and suggests mints when you add one, from MintRadar's public list. It is an operational health signal, not a statement that a mint holds your sats or is safe to deposit into, and it never moves your sats or picks a mint for you
 - **Piggy bank:** turn round-ups on or off, choose what to round to, and empty the piggy bank
 - **Wallet tools:** cashier mode and today's till, move sats between mints, the keyset check-up (on its own when free, or always ask), remove spent ecash and check stuck payments
@@ -496,6 +502,7 @@ Posting the link on X and most social sites shows a large preview card automatic
 
 The app is one file, `public/index.html`, plus the QR decoder `public/zxing_reader.wasm`, the offline helper `public/sw.js` and the bundled libraries' licence texts `public/THIRD_PARTY_LICENSES.txt`. `public/index.html` is built from the files in [`src/`](src/README.md): edit those, run `python3 build.py`, and commit both. On every push to `main`, `.github/workflows/test-and-deploy.yml` checks that the page matches `src/`, runs the test suites, and then publishes `public/` to GitHub Pages with fresh checksums. [RELEASING.md](RELEASING.md) covers running the tests yourself, cutting a release and signing it. Wallets people already have keep their sats, and visitors get the new version within a few minutes.
 
+The README's pictures and tour video come from the app itself: `tools/readme_shots.py` starts a test mint of its own ("Pixel", fake Lightning, no fees), drives real wallets in headless phones and lays the screenshots into the arcade frame (`docs/screens/*.jpg`), and records the tour (`docs/nutcade-tour.mp4` and `.gif`, with ffmpeg). Run it with the test setup's Python after a release that changes what they show: `MINT_PY=/path/to/mint/python python3 tools/readme_shots.py` (or name some scenes: `lightning send video`...).
 
 ### Accessibility
 
