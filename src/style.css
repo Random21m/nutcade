@@ -325,7 +325,7 @@ body.theme-amber,body.theme-phosphor{background-image:linear-gradient(rgba(255,2
 .lockbtn svg{width:16px;height:16px}
 @media (prefers-reduced-motion:reduce){.pin-dots.shake{animation:none}}
 .toggle{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:21px}
-.toggle input{width:22px;height:22px;accent-color:var(--pink)}
+.toggle input{width:22px;height:22px;accent-color:var(--pink);flex:none}   /* (never squeezed by a long label beside it; 1.46) */
 
 @media (prefers-reduced-motion:reduce){.bulbs i,.spinner{animation:none}}
 
@@ -592,6 +592,7 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 /* ---------- tokens: printable NUTCADE tokens (app_tokens.js) ---------- */
 /* the chosen option says so with a mark, not only a color */
 .pt-seg button[aria-pressed="true"]::before{content:"✓ "}
+.pt-seg button{white-space:normal;line-height:1.3;padding:4px}   /* (a long label like NUTCADE ACORN wraps instead of being cut off at 320-375 px; 1.46) */
 .pt-presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:6px}
 .pt-pre{display:grid;gap:2px;justify-items:center;min-width:0}
 .pt-presets button{width:100%;min-height:44px;border:2px solid var(--grid);border-radius:var(--r);background:transparent;color:var(--ink);font-family:var(--f-display);font-size:10px;padding:0 4px}
