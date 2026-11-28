@@ -7,7 +7,7 @@ scores come back, money is never overwritten. Duress: a backup of the real walle
 Phone: create / restore / wrong passkey / no PRF support (hidden, and a passkey without PRF) / relay down / two devices /
 PIN + duress / reset deletes the backup; the 12 words never appear in a toast, a log or on screen.
 S_ONLY=a,b runs some sections (their names start with those letters)."""
-import asyncio, json, os, socket, sys, time, urllib.parse, urllib.request
+import asyncio, json, os, re, socket, sys, time, urllib.parse, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from playwright.async_api import async_playwright
 from wallet_qa import check, results, B
@@ -124,6 +124,13 @@ async def leave_gate(w):
     await w.wait(300); await w.ev("Nutcade.closeSheet()")
 
 
+def shown(words, text):
+    """the words readable in text: any two of them in a row (with a number or space between), never one word alone (one of 2048 common
+    English words is often on the page by chance: "coin", "key", "phrase"; that failed this suite now and then until 1.50)"""
+    ws = words.split()
+    return any(re.search(r'\b' + a + r'\W+(?:\d+\W+)?' + b + r'\b', text) for a, b in zip(ws, ws[1:]))
+
+
 def leaks(words, texts): return [t for t in texts if any(x in t for x in (words, ' '.join(words.split()[:4])))]
 
 
@@ -155,7 +162,7 @@ async def main():
             async with w.pg.expect_download() as dl: await w.click('[data-act=bkLockGo]')
             txt = open(await (await dl.value).path()).read(); env = json.loads(txt)
             check('file: the locked file is a self-describing envelope (PBKDF2-SHA256 600000, AES-256-GCM, v 1)', env.get('app') == 'nutcade' and env.get('kind') == 'locked-backup' and env.get('v') == 1 and env['kdf'] == {'alg': 'PBKDF2-SHA256', 'iter': 600000, 'salt': env['kdf']['salt']} and env['cipher']['alg'] == 'AES-256-GCM', {k: env.get(k) for k in ('kind', 'v', 'kdf', 'cipher')})
-            check('file: nothing readable inside (no words, no seed, no contact)', words.split()[0] not in txt.split('"ct"')[0] and '"seed"' not in txt and 'Alice' not in txt and words not in txt)
+            check('file: nothing readable inside (no words, no seed, no contact)', not shown(words, txt) and '"seed"' not in txt and 'Alice' not in txt and words not in txt)
             await w.wait(300); await w.click('[data-act=backupDownload]'); await w.until("!!document.querySelector('#bkPw')", 5000); await w.fill('#bkPw', 'correct horse'); await w.fill('#bkPw2', 'correct horse')
             async with w.pg.expect_download() as dl: await w.click('[data-act=bkLockGo]')
             env2 = json.loads(open(await (await dl.value).path()).read())
@@ -226,7 +233,7 @@ async def main():
             check('phone: backed up (one passkey made, one locked copy on the relay)', 'BACKED UP' in txt and await creds(cdp, aid) == 1 and len(evs) == n0 + 1, (txt[:120], await w.err()))
             rec = await w.ev("Nutcade.bk.rec()")
             ev = [e for e in evs if e['pubkey'] == rec['pk']]
-            check("phone: the copy is signed by the passkey's own key (not the wallet's Nostr key) and holds no readable words", len(ev) == 1 and all(x not in ev[0]['content'] for x in words.split()[:3]) and json.loads(ev[0]['content'])['alg'] == 'A256GCM')
+            check("phone: the copy is signed by the passkey's own key (not the wallet's Nostr key) and holds no readable words", len(ev) == 1 and not shown(words, ev[0]['content']) and json.loads(ev[0]['content'])['alg'] == 'A256GCM')
             await settings(w)
             check('phone: Settings shows when it was saved', 'NOT SET UP' not in await w.ev("document.querySelector('#set-backup').innerText"))
             check('phone: no toast or log carries the 12 words', not leaks(words, await w.ev("window.__toasts.concat(window.__logs)")))
@@ -238,7 +245,7 @@ async def main():
             await fresh(w)
             check('phone: Restore with my phone is on the start screen', await w.ev("!document.querySelector('[data-act=gatePhone]').hidden"))
             txt = await gate_phone(w)
-            check('phone: the passkey opens the copy; the Restore sheet is filled, the words are not shown', 'came from your phone backup' in txt and words.split()[2] not in await w.ev("document.body.innerText") and await w.ev("document.querySelector('#phraseIn').type") == 'hidden', txt[:200])
+            check('phone: the passkey opens the copy; the Restore sheet is filled, the words are not shown', 'came from your phone backup' in txt and not shown(words, await w.ev("document.body.innerText")) and await w.ev("document.querySelector('#phraseIn').type") == 'hidden', txt[:200])
             check('phone: the mints from the backup are ticked', await w.ev(f"[...document.querySelectorAll('[data-rmint]')].some(i=>i.checked && i.dataset.rmint==={J(B)})"))
             await restore_now(w)
             check('phone: restored (the same words, the sats found at the mint)', await w.ev("Nutcade.S.seed && Nutcade.S.seed.mnemonic") == words and await w.bal() == 1000, await w.bal())
