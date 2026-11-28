@@ -643,6 +643,17 @@ body:has(.cashier) .toast{top:calc(62px + env(safe-area-inset-top,0px));bottom:a
 .arcade .pt-qr{box-shadow:0 0 0 .7mm #ffb347}
 .arcade .pt-h{color:#ffb347} .arcade .pt-warn{border-color:#ff3d9a} .arcade .pt-foot{color:#b58bc0}
 /* Ink saver: black on white */
+.pizza .pt-front,.pizza .pt-back{background:radial-gradient(circle at 20% 0%,#a3261a 0,#5a0d08 65%),#5a0d08;color:#fff3d6;border:.9mm solid #ffc83d;box-shadow:inset 0 0 0 .5mm #5a0d08,inset 0 0 0 .9mm #ff7a3d}
+.pizza .pt-mq{color:#ffc83d;text-shadow:.35mm .35mm 0 #c41e12}
+.pizza .pt-sub,.pizza .pt-cap{color:#ffe08a}
+.pizza .pt-amt{color:#ffc83d} .pizza .pt-unit{color:#ff7a3d}
+.pizza .pt-meta{color:#ffd9b8}
+.pizza .pt-qr{box-shadow:0 0 0 .7mm #ffc83d}
+.pizza .pt-h{color:#ffc83d} .pizza .pt-warn{border-color:#ffc83d} .pizza .pt-foot{color:#ffb38a}
+.pt-pz{display:flex;align-items:center;gap:1.6mm;margin:2.2mm 0 1.4mm}
+.pt-pz svg{width:6.4mm;height:6.4mm;flex:none}
+.pt-pzb{font-family:var(--f-display);font-size:2.4mm;letter-spacing:.2mm;line-height:1.1;color:#ffc83d}
+.pt-pzl{font-family:var(--f-display);font-size:1.6mm;letter-spacing:.15mm;line-height:1.35;margin-top:.4mm;color:#ffe08a}
 .ink .pt-front,.ink .pt-back{background:#fff;color:#000;border:.5mm solid #000}
 .ink .pt-qr{box-shadow:0 0 0 .4mm #000}
 #tokPrint{display:none}

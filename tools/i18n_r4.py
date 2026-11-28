@@ -29,6 +29,10 @@ ROWS = [
 ("LISTENING", "ESCUCHANDO", "OUVINDO", "HÖRE ZU", "À L'ÉCOUTE"),
 ("WAITING FOR SOUND", "ESPERANDO SONIDO", "AGUARDANDO SOM", "WARTE AUF TON", "EN ATTENTE DU SON"),
 ("BLOCK {#} OF {#}", "BLOQUE {#} DE {#}", "BLOCO {#} DE {#}", "BLOCK {#} VON {#}", "BLOC {#} SUR {#}"),
+# --- printed tokens: Pizza Day (1.51.0) ---
+("BLOCK {#}", "BLOQUE {#}", "BLOCO {#}", "BLOCK {#}", "BLOC {#}"),
+("{#} BTC FOR {#} PIZZAS", "{#} BTC POR {#} PIZZAS", "{#} BTC POR {#} PIZZAS", "{#} BTC FÜR {#} PIZZAS", "{#} BTC POUR {#} PIZZAS"),
+("Bitcoin Pizza Day. The cards print in pairs: the day, then the block with the {#} BTC pizza payment.", "Bitcoin Pizza Day. Las tarjetas se imprimen en pares: el día y luego el bloque con el pago de {#} BTC por las pizzas.", "Bitcoin Pizza Day. Os cartões são impressos em pares: o dia e depois o bloco com o pagamento de {#} BTC pelas pizzas.", "Bitcoin Pizza Day. Die Karten werden paarweise gedruckt: der Tag, dann der Block mit der Zahlung von {#} BTC für die Pizzas.", "Bitcoin Pizza Day. Les cartes s'impriment par paires : le jour, puis le bloc avec le paiement de {#} BTC pour les pizzas."),
 ("LOADED", "CARGADO", "CARREGADO", "GELADEN", "CHARGÉ"),
 ("NO MICROPHONE", "SIN MICRÓFONO", "SEM MICROFONE", "KEIN MIKROFON", "PAS DE MICRO"),
 ("Hold this phone near the other phone. On that phone, open NUTCADE and tap Listen. Turn your volume up.", "Acerca este teléfono al otro. En ese teléfono, abre NUTCADE y toca Escuchar. Sube el volumen.", "Aproxime este celular do outro. No outro, abra o NUTCADE e toque em Ouvir. Aumente o volume.", "Halte dieses Handy nah an das andere. Öffne dort NUTCADE und tippe auf Zuhören. Dreh die Lautstärke auf.", "Approchez ce téléphone de l'autre. Sur l'autre, ouvrez NUTCADE et touchez Écouter. Montez le volume."),
