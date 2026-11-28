@@ -381,6 +381,7 @@ function setSeed(mnemonic, backedUp) {
   for (const k in wallets) delete wallets[k];
   if (changed && S.auth && Object.keys(S.auth).length) { S.auth = Object.create(null); store.set('auth', S.auth); }   // (other words: no mint login is kept, log in again)
   if (changed && typeof rvSeedChanged === 'function') rvSeedChanged();   // (other words: no mint review is yours any more: app_review.js)
+  if (changed && typeof nzSeedChanged === 'function') nzSeedChanged();   // (nutzaps: the relays asked afresh, the new nutzap info published now; app_nutzap.js, 1.52)
   if (changed && typeof idSeedChanged === 'function') { try { idSeedChanged(); } catch (e) { S.nid = null; raw.del('nid'); } }   // (other words: signed out of your Nostr identity: app_identity.js)
   if (!store.set('seed', S.seed)) throw new Error("This browser won't save data. Open NUTCADE in a normal browser tab.");
   requestPersist();

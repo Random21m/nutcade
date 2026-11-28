@@ -96,7 +96,10 @@ async def main():
         async def bounty():
             w = await wallet(b); await w.create(); await w.add_mint(B)
             old = await w.ev(LOCKPUB); kid = keyset_id(B)
-            oldpriv = await w.ev("CashuLib.bytesToHex(CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32))")
+            # (the lock key as the wallet uses it: the one whose public key starts 02, so the raw key or N minus it)
+            oldpriv = await w.ev("""(()=>{const k=CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32), h=CashuLib.bytesToHex(k);
+              if (CashuLib.bytesToHex(CashuLib.getPubKeyFromPrivKey(k)).startsWith('02')) return h;
+              const N=0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n; return (N-BigInt('0x'+h)).toString(16).padStart(64,'0')})()""")
             E = await w.ev("CashuLib.bytesToHex(CashuLib.getPubKeyFromPrivKey(crypto.getRandomValues(new Uint8Array(32))))")
             blinded = await w.ev(f"NutP2BK.blind({J(oldpriv)}, {J(E)}, 1)")   # (the old key blinded with E, for the lock's first "pubkeys" slot)
             stranger = await w.ev("'02'+CashuLib.nostrPub(crypto.getRandomValues(new Uint8Array(32)))")

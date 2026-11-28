@@ -101,8 +101,9 @@ async function readBounty(bo, rec) {
       if (lk.data !== lk.hash || (H && lk.hash !== H)) return null; H = lk.hash;
       locks.push(keys);
     }
-    // our lock key, or one of the older words' kept lock keys (1.52.0: a bounty locked to you before you restored other 12 words)
-    const mine = myLockPubs().map(pub => ({ pub, priv: lockPrivFor(pub) }));
+    // our lock key, or the lock key of one of the last 4 earlier sets of 12 words (1.52.0: a bounty locked to you before you
+    // restored other words); capped, as each blinded coin costs a point multiplication per key and anyone can send a challenge
+    const mine = [{ pub: myLockPub(), priv: myLockPriv() }].concat(keptKeys('lock', 4));
     for (let i = 0; i < d.proofs.length; i++) {
       // our key, or (Pay to Blinded Key, app_p2bk.js) our key blinded with the coin's E: the "pubkeys" keys are slots 1, 2...
       // x(k·E) once per coin and key, r per slot from it
