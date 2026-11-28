@@ -2383,7 +2383,10 @@ function openSheet(title, html, onOpen) {
   const body = layer.querySelector('.sheet-body');
   enhanceAmounts(body);
   sheetCleanup = onOpen ? onOpen(body) : null; fitNums(body);
-  const f = layer.querySelector('input:not([type=file]),textarea'); if (!matchMedia('(pointer:coarse)').matches) { if (f) f.focus(); else { const sh = layer.querySelector('.sheet'); sh.tabIndex = -1; sh.focus({ preventScroll: true }); } }
+  // the focus moves into the new sheet: the first field with a mouse or keyboard; on a touch screen the sheet itself (no keyboard
+  // pops up, and VoiceOver or TalkBack land in the sheet instead of staying on the page behind it; 1.47)
+  const f = layer.querySelector('input:not([type=file]),textarea'), sh = layer.querySelector('.sheet');
+  if (!matchMedia('(pointer:coarse)').matches && f) f.focus(); else { sh.tabIndex = -1; sh.focus({ preventScroll: true }); }
   return body;
 }
 function fitNums(root) {
@@ -2414,7 +2417,7 @@ function setBody(html, onOpen) {
   const sheet = b.closest('.sheet'), a = document.activeElement, lost = !a || a === document.body || a === sheet || !sheet.contains(a) || b.contains(a);
   b.innerHTML = html; enhanceAmounts(b); sheetCleanup = onOpen ? onOpen(b) : null; fitNums(b);
   // the body was replaced (a lookup finished): the first field gets the focus, as when a sheet opens
-  if (lost && !matchMedia('(pointer:coarse)').matches) { const f = b.querySelector('input:not([type=file]):not([type=checkbox]):not([type=radio]),textarea'); if (f) f.focus({ preventScroll: true }); else { sheet.tabIndex = -1; sheet.focus({ preventScroll: true }); } }
+  if (lost) { const f = !matchMedia('(pointer:coarse)').matches && b.querySelector('input:not([type=file]):not([type=checkbox]):not([type=radio]),textarea'); if (f) f.focus({ preventScroll: true }); else { sheet.tabIndex = -1; sheet.focus({ preventScroll: true }); } }   // (on a touch screen the sheet itself: 1.47)
 }
 const busyHTML = msg => `<div class="row" style="justify-content:center;padding:24px 0"><span class="spinner">${esc(msg)}</span></div>`;
 const errHTML = e => `<div class="notice red"${e && e.amount ? ' data-amount' : ''}>${esc(e && e.message || e)}${e && e.also ? `<div>${esc(e.also)}</div>` : ''}${e && e.raw ? `<div class="tiny muted raw" data-noi18n>${esc(e.raw)}</div>` : ''}${e && e.fix ? `<button class="btn sm gold" style="margin-top:8px" data-act="${esc(e.fix.act)}"${e.fix.a != null ? ` data-a="${esc(e.fix.a)}"` : ''}${e.fix.id ? ` data-id="${esc(e.fix.id)}"` : ''}>${esc(e.fix.label)}</button>` : ''}</div>`;
@@ -2480,8 +2483,8 @@ function render() {
     ? ['act', 'id', 'tab', 'm', 'url', 'game'].filter(k => fa.dataset[k] != null).map(k => `[data-${k}="${CSS.escape(fa.dataset[k])}"]`).join('') : null;
   app.innerHTML = `<div class="wrap">
     ${marqueeHTML(false)}
-    ${storageOk ? '' : '<div class="notice red" style="margin-top:14px">This browser is blocking storage, so ecash you receive here would vanish on reload. Open NUTCADE in a normal browser tab before adding funds.</div>'}
-    ${body}
+    <main id="main">${storageOk ? '' : '<div class="notice red" style="margin-top:14px">This browser is blocking storage, so ecash you receive here would vanish on reload. Open NUTCADE in a normal browser tab before adding funds.</div>'}
+    ${body}</main>
   </div>
   <nav class="tabbar" aria-label="Sections"><div class="in">${TABS.map(([k, l]) => `<button class="tab" data-act="tab" data-tab="${k}" ${tab === k ? 'aria-current="page"' : ''}>${ICONS[k]}<span>${l}</span></button>`).join('')}</div></nav>`;
   if (tab === 'arcade' && window.Arcade) { window.Arcade.mountList($('#arcadeScreen')); const cp = challengePanel(); if (cp) $('#arcadeScreen').insertAdjacentHTML('beforeend', cp); if (window.Trophies) window.Trophies.mount($('#arcadeScreen')); }
@@ -2864,7 +2867,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.46.0';
+const APP_VERSION = '1.47.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];
