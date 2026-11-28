@@ -128,8 +128,14 @@ async def open_q(w, url): return await w.ev(f"Nutcade.S.quotes.filter(q=>q.mint=
 
 
 async def reopen(w, ms=2500):
-    """the app closed and opened again (its start-up check runs)"""
-    await w.pg.reload(); await w.wait(ms)
+    """the app closed and opened again (its start-up check runs). (CI, Nov 28: twice a reload here never came back and the job
+    ran into its 40 minutes; now one that takes over 60 s fails its section, saying whether the page still answers)"""
+    try: await asyncio.wait_for(w.pg.reload(), 60)
+    except asyncio.TimeoutError:
+        try: alive = await asyncio.wait_for(w.pg.evaluate("[document.readyState, location.href, !!window.Nutcade]"), 5)
+        except Exception as e: alive = 'the page does not answer: ' + repr(e)[:120]
+        raise RuntimeError(f'reload did not finish in 60 s; the page: {alive}')
+    await w.wait(ms)
 
 
 async def settled(w, url, ids, ms=30000):
