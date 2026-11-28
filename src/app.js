@@ -2421,7 +2421,7 @@ function focusBack(o) {
 }
 // (1.49) the section titles (.h2: Security, Backup, Look & sound...) look like headings: they are headings to a screen reader
 // too (level 3, under NUTCADE and the tab's own title), so it can jump from section to section
-const headingRoles = root => root.querySelectorAll('.h2').forEach(e => { if (!/^H[1-6]$/.test(e.tagName) && !e.hasAttribute('role')) { e.setAttribute('role', 'heading'); e.setAttribute('aria-level', '3'); } });
+const headingRoles = root => root.querySelectorAll('.h2').forEach(e => { if (!/^H[1-6]$/.test(e.tagName) && !e.hasAttribute('role') && !e.closest('button,a,label,summary')) { e.setAttribute('role', 'heading'); e.setAttribute('aria-level', '3'); } });   // (never a title inside a control, like Home's Bill boss and Extra Life panels, which are buttons; the price chart marks its own)
 // a sheet's error box (#sheetErr) is an alert region: an error that appears in it is read out by a screen reader (1.48)
 const alertBoxes = root => root.querySelectorAll('#sheetErr').forEach(e => e.setAttribute('role', 'alert'));
 function setBody(html, onOpen) {

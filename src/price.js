@@ -84,7 +84,7 @@
   function shell(el) {
     el.innerHTML = `<div class="panel pc">
       <div class="row between" style="align-items:flex-start;gap:8px">
-        <div style="min-width:0"><div class="row" style="gap:8px"><span class="h2" data-noi18n>BTC / <span data-pc="cur">USD</span></span><span class="pc-live" data-pc="live"></span></div>
+        <div style="min-width:0"><div class="row" style="gap:8px"><span class="h2" role="heading" aria-level="3" data-noi18n>BTC / <span data-pc="cur">USD</span></span><span class="pc-live" data-pc="live"></span></div>
           <div class="pc-price" data-pc="price" aria-live="polite">—</div>
           <div class="pc-chg" data-pc="chg"></div></div>
       </div>
@@ -111,7 +111,7 @@
     new ResizeObserver(() => queue()).observe(cv);
   }
   function offShell(el) {
-    el.innerHTML = `<div class="panel pc"><div class="row between"><span class="h2">BTC price</span><button class="btn sm" data-act="priceOn">Show price</button></div>
+    el.innerHTML = `<div class="panel pc"><div class="row between"><span class="h2" role="heading" aria-level="3">BTC price</span><button class="btn sm" data-act="priceOn">Show price</button></div>
       <div class="th">The live Bitcoin price chart is off. Turning it on fetches prices from coinbase.com.</div></div>`;
     const b = el.querySelector('[data-act=priceOn]'); b.onclick = e => { e.stopPropagation(); const p = prefs(); p.fiat = true; store.set('prefs', p); window.Nutcade && window.Nutcade.refresh(); };
   }
