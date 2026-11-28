@@ -2666,7 +2666,7 @@ function viewWallet() {
   const m = activeMint();
   const nag = S.seed && !S.seed.backedUp ? `<div class="notice red row between" style="flex-wrap:wrap"><span>Your recovery phrase isn't backed up yet.</span><button class="btn sm red" data-act="seedShow">Back up now</button></div>` : '';
   const legacy = S.seed && !S.seed.secured && anyBalance() && S.seed.backedUp ? `<div class="notice row between" style="flex-wrap:wrap"><span>${heldMoney()} here isn't covered by your phrase yet.</span><button class="btn sm gold" data-act="secureAll">Protect it</button></div>` : '';
-  if (!m) return `<section class="screen">${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}${radarWarn()}
+  if (!m) return `<section class="screen"><h2 class="sr">Wallet</h2>${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}${radarWarn()}
     <div class="credits" style="text-align:center;justify-items:center"><div class="label">Credits</div><div class="credit-num">0<small>${unitTag()}</small></div>
     <div class="spinner" style="font-size:11px">INSERT MINT TO START</div></div>
     <div class="panel"><p style="margin:0">NUTCADE holds Bitcoin as Cashu ecash. A mint issues the ecash, so pick one first. Try a test mint if you want to play with fake sats.</p>
@@ -2680,7 +2680,7 @@ function viewWallet() {
   // the total of every mint: one line per unit, never one number across units
   const tots = unitTotals(), allLine = tots.length > 1 || (tots.length === 1 && tots[0][1] !== bal) ? `<span class="tiny muted" data-totals>All mints <span data-noi18n>${tots.map(([u, n]) => moneyU(n, u)).join(' · ')}</span></span>` : '';
   const recent = visTxs().slice(0, recentCount());
-  return `<section class="screen">${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}${radarWarn()}
+  return `<section class="screen"><h2 class="sr">Wallet</h2>${storageNotice()}${nag}${legacy}${homeBanner()}${trustNotices()}${radarWarn()}
     <div class="credits">
       <div class="row between"><span class="label">Credits</span><span class="row" style="gap:10px">${allLine}${hideBtn()}${vault.on ? '<button class="lockbtn" data-act="lockNow" aria-label="Lock wallet" title="Lock wallet"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2h1v8H4V7zm1 0h4V5a2 2 0 0 0-4 0zm1 3v3h2v-3z"/></svg></button>' : ''}</span></div>
       <div class="credit-num tap" data-act="hideToggle" title="${S.prefs.hideAmounts ? 'Tap to show amounts' : 'Tap to hide amounts'}" aria-live="polite">${mu === 'sat' ? `${S.prefs.btcSymbol ? '₿' : ''}${fmt(bal)}<small>${unitTag()}</small>` : `${fmtU(bal, mu)}<small>${unitCode(mu)}</small>`}</div>
@@ -2891,7 +2891,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- settings ---------- */
-const APP_VERSION = '1.51.0';
+const APP_VERSION = '1.52.0';
 // how many of your latest notes the home screen lists: 0 to 6, kept on this device (2 until you choose)
 const recentCount = () => { const n = S.prefs.recentN; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2; };
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY', 'BRL', 'MXN', 'INR', 'ZAR', 'NGN', 'ARS', 'SEK'];

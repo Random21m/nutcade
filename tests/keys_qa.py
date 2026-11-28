@@ -6,7 +6,9 @@ Restoring other 12 words used to forget it: none of those could be claimed, take
 words' keys are kept (in the wallet's P2PK keys, which the backup file carries too):
 - ecash locked to your old key, sent before you restored other words, is still claimed;
 - an Extra Life copy left to your old key is still recognised as yours;
-- your own Extra Life, made under the old words, is still renewed (CONTINUE), now locked to the new words' key.
+- your own Extra Life, made under the old words, is still renewed (CONTINUE), now locked to the new words' key;
+- (1.52.0) a bounty locked to your old key, plain or blinded (P2BK), is still recognised as yours; one locked to someone
+  else's key still isn't.
 """
 import asyncio, json, os, sys, time, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -91,6 +93,25 @@ async def main():
             check('heir: no script errors', not w.errs, w.errs[:4])
             await w.pg.context.close()
 
+        async def bounty():
+            w = await wallet(b); await w.create(); await w.add_mint(B)
+            old = await w.ev(LOCKPUB); kid = keyset_id(B)
+            oldpriv = await w.ev("CashuLib.bytesToHex(CashuLib.mnemonicToSeedSync(Nutcade.S.seed.mnemonic).slice(0,32))")
+            E = await w.ev("CashuLib.bytesToHex(CashuLib.getPubKeyFromPrivKey(crypto.getRandomValues(new Uint8Array(32))))")
+            blinded = await w.ev(f"NutP2BK.blind({J(oldpriv)}, {J(E)}, 1)")   # (the old key blinded with E, for the lock's first "pubkeys" slot)
+            stranger = await w.ev("'02'+CashuLib.nostrPub(crypto.getRandomValues(new Uint8Array(32)))")
+            def htlc(key): return J(['HTLC', {'nonce': '44' * 16, 'data': 'ab' * 32, 'tags': [['pubkeys', key]]}])
+            def tok(key, e=None): return f"CashuLib.getEncodedToken({{mint:{J(B)}, unit:'sat', proofs:[Object.assign({{id:{J(kid)}, amount:8, secret:{J(htlc(key))}, C:'02'+'1'.repeat(64)}}, {J({'p2pk_e': e} if e else {})})]}})"
+            before = [await w.ev(f"NutP2BK.bounty({{token:{tok(old)}, amount:8}})"), await w.ev(f"NutP2BK.bounty({{token:{tok(blinded, E)}, amount:8}})")]
+            await restore_other_words(w)
+            after = [await w.ev(f"NutP2BK.bounty({{token:{tok(old)}, amount:8}})"), await w.ev(f"NutP2BK.bounty({{token:{tok(blinded, E)}, amount:8}})")]
+            check('bounty: (the test reads it as the wallet does) both are bounties for you under the words they were made for', all(x and x['amount'] == 8 for x in before), before)
+            check('bounty: a bounty locked to your OLD key is still yours after other words (8 SAT)', after[0] and after[0]['amount'] == 8, after[0])
+            check('bounty: ...and one locked to your old key blinded (P2BK) too', after[1] and after[1]['amount'] == 8, after[1])
+            check("bounty: one locked to someone else's key is still not yours", await w.ev(f"NutP2BK.bounty({{token:{tok(stranger)}, amount:8}})") is None)
+            check('bounty: no script errors', not w.errs, w.errs[:4])
+            await w.pg.context.close()
+
         async def extra():
             w = await wallet(b); await w.create(); await w.add_mint(B); await w.receive_ln(3000)
             fr = await wallet(b); await fr.create(); await fr.add_mint(B)
@@ -112,7 +133,7 @@ async def main():
             check('extra: no script errors', not w.errs, w.errs[:4])
             await w.pg.context.close(); await fr.pg.context.close()
 
-        for name, fn in (('locked_token', locked_token), ('heir', heir), ('extra', extra)):
+        for name, fn in (('locked_token', locked_token), ('heir', heir), ('bounty', bounty), ('extra', extra)):
             await section(name, fn)
         await b.close()
         print('\nSUMMARY', sum(r[1] for r in results), '/', len(results))

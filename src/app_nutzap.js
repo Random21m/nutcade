@@ -103,7 +103,12 @@ function nzLock(secret) {
 }
 // a coin locked to our receiving key: the key itself with no E on the coin, or (Pay to Blinded Key, app_p2bk.js) our key
 // blinded for slot 0 with the coin's E; never both, and the lock's other rules (nzLock) stay as they are
-const nzMine = p => p2bkMine(nzLock(p.secret), nzPub(), nzPriv(), p.p2pk_e || null, 0);
+// (1.52.0) or one of the older words' kept keys (app_r4.js keepSeedKeys): a nutzap sent to the address you had before you
+// restored other 12 words is still yours
+const nzKept = () => S.p2pk.filter(k => k.prevSeed && k.pub && k.priv).slice(-8);   // (the latest 8: four earlier sets of words, each a lock key and a nutzap key)
+const nzMine = p => { const lock = nzLock(p.secret), E = p.p2pk_e || null; return p2bkMine(lock, nzPub(), nzPriv(), E, 0) || nzKept().some(k => p2bkMine(lock, k.pub, k.priv, E, 0)); };
+// the Nostr keys nutzaps to you are tagged with: this words' key, and the older words' ones (a Nostr key is the x of a lock key)
+const nzMyPs = () => [...new Set([L.nostrPub(nostrKey())].concat(nzKept().map(k => String(k.pub).slice(2))))];
 const nzWho = pk => { const c = S.contacts.find(x => x.pubkey === pk); return c ? c.name : shortNpub(pk); };
 // a sender's comment as it is shown: one line, no hashtags (they would become your history tags) and no quotes (it can't pass for the app's text)
 const nzComment = c => String(c || '').replace(/[\s\u200b-\u200f\u2028-\u202e\u2066-\u2069]+/g, ' ').replace(/[#"\u201c\u201d\u00ab\u00bb]/g, '').trim().slice(0, 120);
@@ -173,7 +178,7 @@ function nzListen() {
   if (!nzLive()) { nzStop(); return; }
   const want = nzMyRelays();
   for (const [r, ws] of nzSocks) if (!want.includes(r)) { nzSocks.delete(r); try { ws.close(); } catch (e) {} }
-  const f = { kinds: [9321], '#p': [L.nostrPub(nostrKey())] };
+  const f = { kinds: [9321], '#p': nzMyPs() };
   if (S.prefs.nzSince) f.since = Math.max(0, num(S.prefs.nzSince) - NZ_BACK);   // (a restored wallet has none: everything sent to it is looked at)
   for (const r of want) {
     const old = nzSocks.get(r); if (old && old.readyState <= 1) continue;
@@ -207,7 +212,7 @@ async function nzEvent(ev) {
   if (S.txs.some(t => t.nz && t.nz.id === ev.id)) { nzMark(ev.id); return 'seen'; }
   if (!L.verifyEvent(ev)) return 'bad';   // (not kept as seen: a forged copy must not hide the real one)
   const tg = k => ev.tags.filter(t => Array.isArray(t) && t[0] === k && typeof t[1] === 'string');
-  if (!tg('p').some(t => t[1] === L.nostrPub(nostrKey()))) return 'bad';
+  const ps = nzMyPs(); if (!tg('p').some(t => ps.includes(t[1]))) return 'bad';
   const skip = why => { nzMark(ev.id); nzWaitSet(ev, false); return why; };
   const u = (tg('u')[0] || [])[1]; if (!u || !/^https?:\/\//i.test(u.trim())) return skip('bad');
   const mint = nzOwnMint(u);   // (our own stored address of that mint, or none: untrusted)

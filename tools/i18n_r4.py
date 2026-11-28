@@ -29,6 +29,8 @@ ROWS = [
 ("LISTENING", "ESCUCHANDO", "OUVINDO", "HÖRE ZU", "À L'ÉCOUTE"),
 ("WAITING FOR SOUND", "ESPERANDO SONIDO", "AGUARDANDO SOM", "WARTE AUF TON", "EN ATTENTE DU SON"),
 ("BLOCK {#} OF {#}", "BLOQUE {#} DE {#}", "BLOCO {#} DE {#}", "BLOCK {#} VON {#}", "BLOC {#} SUR {#}"),
+# --- Home's own heading, for screen readers (1.52.0): the tab's name ---
+("Wallet", "Cartera", "Carteira", "Wallet", "Accueil"),
 # --- printed tokens: Pizza Day (1.51.0) ---
 ("BLOCK {#}", "BLOQUE {#}", "BLOCO {#}", "BLOCK {#}", "BLOC {#}"),
 ("{#} BTC FOR {#} PIZZAS", "{#} BTC POR {#} PIZZAS", "{#} BTC POR {#} PIZZAS", "{#} BTC FÜR {#} PIZZAS", "{#} BTC POUR {#} PIZZAS"),

@@ -159,6 +159,10 @@ async def main():
         check('Home: every section title outside a control is a heading (the BTC price title included)', any('BTC' in h[0] for h in hs) and all(h[1] for h in hs if not h[0].startswith(('Bill boss', 'Extra Life'))), hs)
         inctl = await w.ev("[...document.querySelectorAll('button [role=heading], a [role=heading], label [role=heading]')].map(e=>e.innerText.trim().slice(0,20))")
         check('Home: no heading inside a button, link or label (Bill boss, Extra Life stay plain button text)', not inctl, inctl)
+        # (1.52.0) like Notes, Mints and Settings, Home has its own level-2 heading, first in the main area, so its section
+        # titles (level 3) sit under it and not straight under NUTCADE (level 1); seen only by a screen reader
+        lv = await w.ev("[...document.querySelectorAll('#main h1,#main h2,#main h3,#main [role=heading]')].map(e=>[e.tagName==='H2'||e.getAttribute('aria-level')==='2'?2:e.tagName==='H1'?1:+(e.getAttribute('aria-level')||e.tagName.slice(1)), e.textContent.trim().slice(0,16), getComputedStyle(e).position])")
+        check('Home: a level-2 heading ("Wallet") comes first, before the section titles at level 3, and is not shown on screen', lv and lv[0][0] == 2 and lv[0][1] == 'Wallet' and lv[0][2] == 'absolute' and all(x[0] == 3 for x in lv[1:]) and len(lv) > 2, lv[:5])
         # a second tab of the same wallet: "open in another tab"
         p2 = await w.pg.context.new_page(); await p2.goto(await w.ev("location.href")); await p2.wait_for_timeout(1500)
         m = await p2.evaluate(ONEMAIN + "('[data-act=takeover]')")

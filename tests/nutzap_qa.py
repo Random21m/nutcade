@@ -472,6 +472,40 @@ async def main():
             await g.pg.context.close()
         await section('relays2', relays2)
 
+        # ---------- (1.52.0) other 12 words: nutzaps sent to your OLD address still arrive ----------
+        # A friend's contact, or the nutzap info they found before, still names the old words' Nostr key and receiving key.
+        # 1.45 keeps the old words' keys; now the wallet also listens for nutzaps to the old Nostr key and claims them with
+        # the kept receiving key. Only the new words' nutzap info is published.
+        async def oldwords():
+            c = await wallet(b, 'nz-carol'); await c.create(); await c.add_mint(M); await c.use(M)
+            await nz_on(c); old_pk, old_nz = await me(c), await c.ev("NutZap.pub()")
+            words = await c.ev("CashuLib.generateMnemonic(CashuLib.wordlist, 128)")
+            await settings(c)
+            await c.ev("(()=>{let x=document.querySelector('[data-act=seedRestore]'); if(!x){x=document.createElement('button'); x.dataset.act='seedRestore'; x.hidden=true; document.body.appendChild(x)} x.click()})()")
+            await c.until("!!document.querySelector('#phraseIn')", 5000); await c.fill('#phraseIn', words)
+            await c.ev(f"(()=>{{const t=document.querySelector('#rmExtra'); t.value={J(M)}; t.dispatchEvent(new Event('input',{{bubbles:true}}))}})()")
+            await c.click('[data-act=doRestorePhrase]')
+            await c.until(f"Nutcade.S.seed.mnemonic==={J(words)} && /CONTINUE|SCAN COMPLETE|DONE/i.test((document.querySelector('.sheet-body')||{{}}).innerText||'')", 90000)
+            await c.wait(500); await c.ev("Nutcade.closeSheet()")
+            await nz_on(c); new_pk = await me(c)
+            check('oldwords: other 12 words: a new Nostr key and receiving key, nutzaps on again', new_pk != old_pk and await c.ev("NutZap.pub()") != old_nz and await c.ev("NutZap.live()") > 0, (old_pk[:12], new_pk[:12]))
+            npub_ = await c.ev("NutZap.pub()"); info = []
+            for _ in range(40):   # (published when the wallet gets to it: up to 20 s)
+                info = [e for e in evs(10019, new_pk)]
+                if info and tags(info[-1], 'pubkey') == [['pubkey', npub_]]: break
+                await c.wait(500)
+            check("oldwords: the new words' nutzap info is published (with the new receiving key)", info and tags(info[-1], 'pubkey') == [['pubkey', npub_]], info[-1:] and tags(info[-1], 'pubkey'))
+            b0 = await c.bal()
+            r = await al.ev(f"NutZap.send({{pubkey:{J(old_pk)}, name:'Carol'}}, 55, 'old address').then(x=>x.ok, e=>e.message)")
+            check("oldwords: a friend sends a nutzap to Carol's OLD address (her old nutzap info is still on the relay)", r is True, r)
+            got = await c.until(f"Object.values(Nutcade.S.proofs).flat().reduce((t,p)=>t+p.amount,0) >= {b0 + 55}", 30000); await c.wait(1500)
+            i = await nz_in(c)
+            check('oldwords: it arrives and is claimed with the kept key: 55 SAT, once', got and await c.bal() == b0 + 55 and [x['amount'] for x in i] == [55] and i[0]['status'] == 'done', (await c.bal() - b0, i))
+            check('oldwords: nothing left waiting or failed', not await c.ev("Nutcade.S.txs.some(t=>t.nz&&t.status!=='done')"))
+            check('oldwords: no page errors', not c.errs, c.errs[:3])
+            await c.pg.context.close()
+        await section('oldwords', oldwords)
+
         async def langs():
             for lang in ('es', 'pt', 'de', 'fr'):
                 x = await wallet(b, 'nz-' + lang, lang); await x.create(); await x.add_mint(M); await x.use(M)
