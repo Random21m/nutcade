@@ -142,12 +142,18 @@ async def main():
 
         async def stored():
             await limits(al); tid = await address_screen(al)
+            # (the setup above changed the wallet in memory only; a save the app makes on its own while the amount is typed
+            #  would write it and look like a change. So it is written first, a save of the same kind is made in the middle,
+            #  and the save counter, which every save moves on, is left out: CI, Nov 28, 1.46.0)
+            SAVE = "for (const k of ['txs','quotes','ops','proofs','mints','pending']) localStorage.setItem('nutcade:'+k, JSON.stringify(Nutcade.S[k])); localStorage.setItem('nutcade:gen', String(+(localStorage.getItem('nutcade:gen')||0)+1));"
+            SNAP = "JSON.stringify(Object.keys(localStorage).filter(k=>k!=='nutcade:gen').sort().map(k=>[k,localStorage.getItem(k)]))"
+            await al.ev(SAVE)
             before = await al.ev("JSON.stringify([Nutcade.S.txs, Nutcade.S.quotes])")
-            ls0 = await al.ev("JSON.stringify(Object.keys(localStorage).sort().map(k=>[k,localStorage.getItem(k)]))")
-            await amount(al, '123,457'); await al.wait(1500)
+            ls0 = await al.ev(SNAP)
+            await amount(al, '123,457'); await al.wait(700); await al.ev(SAVE); await al.wait(800)
             s = await screen(al)
             after = await al.ev("JSON.stringify([Nutcade.S.txs, Nutcade.S.quotes])")
-            ls1 = await al.ev("JSON.stringify(Object.keys(localStorage).sort().map(k=>[k,localStorage.getItem(k)]))")
+            ls1 = await al.ev(SNAP)
             check('stored: an amount in the QR changes nothing in the history, the deposits or storage', s['uri'].endswith('amount=0.00123457') and before == after and ls0 == ls1 and '123457' not in ls1 and '0.00123457' not in ls1)
             await al.ev("Nutcade.closeSheet()"); await al.wait(200)
             await al.ev(f"(()=>{{const b=document.createElement('button'); b.dataset.act='tx'; b.dataset.id={J(tid)}; document.body.appendChild(b); b.click(); b.remove();}})()")
