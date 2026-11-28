@@ -154,7 +154,12 @@ async def main():
             s = await screen(al)
             after = await al.ev("JSON.stringify([Nutcade.S.txs, Nutcade.S.quotes])")
             ls1 = await al.ev(SNAP)
-            check('stored: an amount in the QR changes nothing in the history, the deposits or storage', s['uri'].endswith('amount=0.00123457') and before == after and ls0 == ls1 and '123457' not in ls1 and '0.00123457' not in ls1)
+            # (the money records must be exactly as before, and the amount must be nowhere in storage; other keys the app's own
+            #  background work writes meanwhile (the price, mint health...) are not this screen's doing: CI, Nov 28, after 1.52.0)
+            d0, d1 = dict(json.loads(ls0)), dict(json.loads(ls1))
+            money = [k for k in ('txs', 'quotes', 'ops', 'proofs', 'mints', 'pending') if d0.get('nutcade:' + k) != d1.get('nutcade:' + k)]
+            other = sorted(k for k in set(d0) | set(d1) if d0.get(k) != d1.get(k) and k.split(':', 1)[-1] not in ('txs', 'quotes', 'ops', 'proofs', 'mints', 'pending'))
+            check('stored: an amount in the QR changes nothing in the history, the deposits or storage', s['uri'].endswith('amount=0.00123457') and before == after and not money and '123457' not in ls1 and '0.00123457' not in ls1, {'money': money, 'other keys written meanwhile': other})
             await al.ev("Nutcade.closeSheet()"); await al.wait(200)
             await al.ev(f"(()=>{{const b=document.createElement('button'); b.dataset.act='tx'; b.dataset.id={J(tid)}; document.body.appendChild(b); b.click(); b.remove();}})()")
             await al.until("!!document.querySelector('#layer [data-act=resumeAddr]')", 5000); await al.click('#layer [data-act=resumeAddr]'); await al.wait(300)
