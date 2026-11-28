@@ -192,7 +192,7 @@ function openPrint() {
       <div class="tiny muted pt-pre-why"></div></div>
     <div class="row" style="gap:10px"><div class="field" style="flex:3"><label for="ptAmt">Amount per token (SAT)</label><input id="ptAmt" class="inp amount" inputmode="numeric" placeholder="1000" autocomplete="off" value="${ptUI.amount || ''}"></div>
     <div class="field" style="flex:2"><label for="ptCount">How many (1 to 20)</label><input id="ptCount" class="inp" inputmode="numeric" autocomplete="off" value="${ptUI.count || 4}"></div></div>
-    <div class="field"><label>Style</label><div class="seg pt-seg" role="group" aria-label="Style">${[['arcade', 'ARCADE'], ['ink', 'INK SAVER'], ['pizza', 'PIZZA DAY']].map(([k, l]) => `<button type="button" data-act="ptStyle" data-s="${k}" aria-pressed="${ptUI.style === k}"${k !== 'ink' ? ' data-noi18n' : ''}>${l}</button>`).join('')}</div>
+    <div class="field"><label>Style</label><div class="seg three pt-seg" role="group" aria-label="Style">${[['arcade', 'ARCADE'], ['ink', 'INK SAVER'], ['pizza', 'PIZZA DAY']].map(([k, l]) => `<button type="button" data-act="ptStyle" data-s="${k}" aria-pressed="${ptUI.style === k}"${k !== 'ink' ? ' data-noi18n' : ''}>${l}</button>`).join('')}</div>
       <div class="tiny muted" id="ptStyleHelp">${ptStyleHelp(ptUI.style)}</div></div>
     <button class="btn solid gold block" data-act="ptNext">Next</button>
     ${n ? `<button class="linkbtn tiny" data-act="ptList" style="justify-self:start">Printed tokens (${n})</button>` : ''}

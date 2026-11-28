@@ -237,7 +237,8 @@ async def main():
                 for vw in (320, 375, 430):
                     await w.pg.set_viewport_size({'width': vw, 'height': 800}); await open_print(w, NOFEE); await w.wait(250)
                     cut = await w.ev(CUT); over = await w.ev(OVER_JS)
-                    check(f'pizza {lang} {vw}px: the three style buttons there and none cuts its text, nothing off the screen', await w.ev("document.querySelectorAll('[data-act=ptStyle]').length") == 3 and not cut and not over, (cut, over))
+                    tops = await w.ev("[...document.querySelectorAll('[data-act=ptStyle]')].map(b=>Math.round(b.getBoundingClientRect().top))")
+                    check(f'pizza {lang} {vw}px: the three style buttons side by side in one row, none cuts its text, nothing off the screen', len(tops) == 3 and len(set(tops)) == 1 and not cut and not over, (tops, cut, over))
                 await w.pg.set_viewport_size({'width': 390, 'height': 844})
                 miss = await w.ev("[...(window.__i18nMiss||[])]")
                 check(f'pizza {lang}: no untranslated text on the screen and the cards', not miss, miss[:8])
