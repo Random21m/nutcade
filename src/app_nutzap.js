@@ -110,8 +110,9 @@ const nzMine = p => { const lock = nzLock(p.secret), E = p.p2pk_e || null; retur
 // the Nostr keys nutzaps to you are tagged with: this words' key, and the older words' ones (a Nostr key is the x of a lock key)
 const nzMyPs = () => [...new Set([L.nostrPub(nostrKey())].concat(keptKeys('lock', 4).map(k => String(k.pub).slice(2))))];
 // other 12 words (setSeed): the open relay connections asked for the old words' Nostr key only and would keep doing so,
-// and the new words' nutzap info would wait for the next 10-minute republish: closed and asked afresh, published now
-function nzSeedChanged() { try { nzStop(); nzTry = 0; setTimeout(() => nzTick().catch(() => {}), 0); } catch (e) {} }
+// and the new words' nutzap info would wait for the next 10-minute republish: closed and asked afresh now, and published
+// by the next tick (which waits until the restore's screen is closed, so the mints it adds are in the info)
+function nzSeedChanged() { try { nzStop(); nzTry = 0; setTimeout(() => { try { nzListen(); } catch (e) {} }, 0); } catch (e) {} }
 const nzWho = pk => { const c = S.contacts.find(x => x.pubkey === pk); return c ? c.name : shortNpub(pk); };
 // a sender's comment as it is shown: one line, no hashtags (they would become your history tags) and no quotes (it can't pass for the app's text)
 const nzComment = c => String(c || '').replace(/[\s\u200b-\u200f\u2028-\u202e\u2066-\u2069]+/g, ' ').replace(/[#"\u201c\u201d\u00ab\u00bb]/g, '').trim().slice(0, 120);

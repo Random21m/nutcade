@@ -490,7 +490,7 @@ async def main():
             await nz_on(c); new_pk = await me(c)
             check('oldwords: other 12 words: a new Nostr key and receiving key, nutzaps on again', new_pk != old_pk and await c.ev("NutZap.pub()") != old_nz and await c.ev("NutZap.live()") > 0, (old_pk[:12], new_pk[:12]))
             npub_ = await c.ev("NutZap.pub()"); info = []
-            for _ in range(40):   # (published when the wallet gets to it: up to 20 s)
+            for _ in range(130):   # (published by the wallet's next tick, every 30 s: up to 65 s)
                 info = [e for e in evs(10019, new_pk)]
                 if info and tags(info[-1], 'pubkey') == [['pubkey', npub_]]: break
                 await c.wait(500)
