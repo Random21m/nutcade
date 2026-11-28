@@ -101,12 +101,14 @@ async function readBounty(bo, rec) {
       if (lk.data !== lk.hash || (H && lk.hash !== H)) return null; H = lk.hash;
       locks.push(keys);
     }
-    const pub = myLockPub(), priv = myLockPriv();
+    // our lock key, or the lock key of one of the last 4 earlier sets of 12 words (1.52.0: a bounty locked to you before you
+    // restored other words); capped, as each blinded coin costs a point multiplication per key and anyone can send a challenge
+    const mine = [{ pub: myLockPub(), priv: myLockPriv() }].concat(keptKeys('lock', 4));
     for (let i = 0; i < d.proofs.length; i++) {
       // our key, or (Pay to Blinded Key, app_p2bk.js) our key blinded with the coin's E: the "pubkeys" keys are slots 1, 2...
-      // x(k·E) once per coin, r per slot from it
-      const E = d.proofs[i].p2pk_e, zx = E === undefined ? null : p2bkX(priv, E); if (E !== undefined && !zx) return null;
-      if (!locks[i].some((k, j) => p2bkIs(k, pub, priv, zx, j + 1))) return null;
+      // x(k·E) once per coin and key, r per slot from it
+      const E = d.proofs[i].p2pk_e; if (E !== undefined && !p2bkE(E)) return null;
+      if (!mine.some(({ pub, priv }) => { const zx = E === undefined ? null : p2bkX(priv, E); return (E === undefined || !!zx) && locks[i].some((k, j) => p2bkIs(k, pub, priv, zx, j + 1)); })) return null;
     }
     // the proofs carry a little extra for the mint's fee; show the amount the challenger put up when it's covered
     const amount = num(bo.amount) > 0 && num(bo.amount) <= sum(d.proofs) ? Math.floor(num(bo.amount)) : sum(d.proofs);

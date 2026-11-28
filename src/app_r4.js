@@ -143,15 +143,19 @@ const allPrivs = () => p2pkPrivs().concat(S.seed ? [myLockPriv(), nzPriv()] : []
    Extra Life made under them and an Extra Life left to them keep working (setSeed calls this before the words change). */
 function keepSeedKeys() {
   try {
-    for (const priv of [myLockPriv(), nzPriv()]) {
-      if (S.p2pk.some(k => k.priv === priv)) continue;
-      S.p2pk.push({ pub: hex(L.getPubKeyFromPrivKey(L.hexToBytes(priv))), priv, created: Date.now(), prevSeed: true });
+    for (const [priv, kind] of [[myLockPriv(), 'lock'], [nzPriv(), 'nz']]) {   // (kind: since 1.52; earlier kept keys have none and count as either)
+      const had = S.p2pk.find(k => k.priv === priv);
+      if (had) { if (had.prevSeed) { had.created = Date.now(); had.kind = kind; } continue; }   // (words left again: kept as the latest)
+      S.p2pk.push({ pub: hex(L.getPubKeyFromPrivKey(L.hexToBytes(priv))), priv, created: Date.now(), prevSeed: true, kind });
     }
     store.set('p2pk', S.p2pk);
   } catch (e) {}
 }
 const myLockPubs = () => [myLockPub()].concat(S.p2pk.filter(k => k.prevSeed).map(k => k.pub));   // your lock key and the kept ones
-const lockPrivFor = pub => [myLockPriv()].concat(S.p2pk.filter(k => k.prevSeed).map(k => k.priv)).find(k => hex(L.getPubKeyFromPrivKey(L.hexToBytes(k))) === pub) || myLockPriv();
+const lockPrivFor = pub => (S.p2pk.find(k => k.prevSeed && k.pub === pub && k.priv) || {}).priv || myLockPriv();   // (each kept key carries its own public key: none worked out again)
+// the kept keys of one kind ('lock' or 'nz'), oldest first by when they were kept (a backup file may list them in any order), the latest n
+const keptKeys = (kind, n) => { const now = [myLockPriv(), nzPriv()];   // (back on earlier words: their own keys are the current ones, not kept ones)
+  return S.p2pk.filter(k => k.prevSeed && k.pub && k.priv && !now.includes(k.priv) && k.kind !== (kind === 'lock' ? 'nz' : 'lock')).sort((a, b) => num(a.created) - num(b.created)).slice(-n); };
 // (a key that is a point on the curve: cashu-ts 5 refuses to lock to any other, and a lock to one nobody can hold would
 // only come back after its date)
 function lockPubFrom(v) {
