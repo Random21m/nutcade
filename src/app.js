@@ -2474,12 +2474,15 @@ function render() {
   }
   trustBoot();
   if (needsGate()) {
+    if (gate.step !== 'show') wordsShown = false;
+    const inWords = !!(document.activeElement && document.activeElement.closest && document.activeElement.closest('ol.words'));
     const gv = viewGate();
     app.innerHTML = `<div class="wrap" style="padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))">
       ${marqueeHTML(gate.step === 'welcome')}
       <main id="main">${storageOk ? '' : '<div class="notice red" style="margin-top:14px">This browser is blocking storage, so your wallet would vanish on reload. Open NUTCADE in a normal browser tab.</div>'}
       ${gv}</main></div>`;
     headingRoles(app);
+    if (inWords) { const ol = app.querySelector('ol.words'); if (ol) ol.focus({ preventScroll: true }); }   // (a redraw keeps a screen reader on the words it was reading: 1.50)
     if (window.NutAudio) window.NutAudio.stopMusic();
     return;
   }
@@ -2622,13 +2625,14 @@ function viewGate() {
 // (1.50) A screen reader would read the 12 words aloud. A spoken warning comes first, and the words stay hidden from it until
 // "Read my words" is pressed (then the focus goes to them, each read as "Word 1: abandon"). Sighted users see no change: the
 // warning and the button are visually hidden, and the button shows itself when it has the keyboard focus.
+let wordsShown = false;   // Read my words was pressed: a redraw keeps them readable (reset when the setup step changes or the words open afresh)
 function phraseGrid(words) {
   return `<p class="sr" data-srwarn>${tr('Your screen reader will read your 12 words aloud. Use headphones or make sure no one can hear.')}</p>
-    <button class="btn sm sr sr-focus" data-act="srWords">${tr('Read my words')}</button>
-    <ol class="words" aria-label="${tr('Recovery phrase')}" aria-hidden="true" tabindex="-1">${words.map((w, i) => `<li><span aria-hidden="true">${i + 1}</span><span class="sr">${tr(`Word ${i + 1}:`)} </span>${esc(w)}</li>`).join('')}</ol>`;
+    ${wordsShown ? '' : `<button class="btn sm sr sr-focus" data-act="srWords">${tr('Read my words')}</button>`}
+    <ol class="words" aria-label="${tr('Recovery phrase')}"${wordsShown ? '' : ' aria-hidden="true"'} tabindex="-1">${words.map((w, i) => `<li><span aria-hidden="true">${i + 1}</span><span class="sr">${tr(`Word ${i + 1}:`)} </span>${esc(w)}</li>`).join('')}</ol>`;
 }
 function openShowPhrase(fresh) {
-  const words = S.seed.mnemonic.split(' ');
+  const words = S.seed.mnemonic.split(' '); wordsShown = false;
   openSheet(fresh ? 'Your recovery phrase' : 'Recovery phrase', `
     <div class="notice red">Anyone with these 12 words can take your sats. Write them on paper in this order and keep them offline. Never type them into a website or send them to anyone, including NUTCADE support.</div>
     ${phraseGrid(words)}
@@ -4568,7 +4572,7 @@ const A = {
   takeover: () => { try { chan && chan.postMessage({ t: 'takeover', id: TAB_ID }); } catch (e) {} location.reload(); },
   seedCreate: b => pinGuard('newseed', () => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (!anyBalance()) { S.seed.secured = true; store.set('seed', S.seed); } sfx('start'); render(); openShowPhrase(true); })),   // (a new wallet has no PIN: nothing is asked)
   seedShow: () => { if (!S.seed) return; pinGuard('seed', () => openShowPhrase(!S.seed.backedUp)); },
-  srWords: b => { const ol = b.parentElement && b.parentElement.querySelector('ol.words'); if (!ol) return; ol.removeAttribute('aria-hidden'); b.remove(); ol.focus({ preventScroll: true }); },   // (the 12 words, read on request: 1.50)
+  srWords: b => { const ol = b.parentElement && b.parentElement.querySelector('ol.words'); if (!ol) return; wordsShown = true; ol.removeAttribute('aria-hidden'); b.remove(); ol.focus({ preventScroll: true }); },   // (the 12 words, read on request: 1.50)
   gateCreate: b => run(b, 'ROLLING', async () => { setSeed(newMnemonic(), false); if (!anyBalance()) { S.seed.secured = true; store.set('seed', S.seed); } gate = { step: 'show' }; sfx('start'); render(); window.scrollTo(0, 0); }),
   gateRestore: () => pinGuard('restore', openRestore),   // (on the start screen nothing is asked: no wallet yet)
   gateToConfirm: () => { gate = { step: 'confirm', picks: pickWords() }; sfx('select'); render(); window.scrollTo(0, 0); const f = document.querySelector('[data-cw]'); if (f && !matchMedia('(pointer:coarse)').matches) f.focus(); },
@@ -5002,7 +5006,7 @@ async function tickBody(startup) {
   if (S.prefs.nostrBackup && S.mints.length && S.prefs.mintBackupList !== mintAddrs().join(' ') && Date.now() - mintBackupTry > 10 * 60e3) scheduleMintBackup(startup ? 4000 : 0);
 }
 let tickCount = 0;
-setInterval(() => { if (document.hidden || tabLocked || $('#layer .sheet')) return; tickCount++; backgroundTick().then(() => { if (!$('#layer .sheet') && tab !== 'arcade') refresh(); }); }, 30000);
+setInterval(() => { if (document.hidden || tabLocked || $('#layer .sheet')) return; tickCount++; backgroundTick().then(() => { if (!$('#layer .sheet') && tab !== 'arcade' && !needsGate()) refresh(); }); }, 30000);   // (the setup screens show no wallet: no redraw there, which unticked "I wrote down all 12 words" and hid the words again; 1.50)
 // A Lightning invoice made in the last half hour is checked every 8 s while NUTCADE is open, in case the mint's
 // live update was missed (for example while the connection dropped), so a paid invoice never waits for the 30 s tick.
 setInterval(() => {

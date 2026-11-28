@@ -187,6 +187,10 @@ async def main():
             check(f'{where}: after Read my words, the words are readable, the focus is on them, each read as "Word 1: ..."', a and not a['listHidden'] and a['focusInList'] and a['spoken'][:2] == [f'Word 1: {words[0]}', f'Word 2: {words[1]}'] and len(a['spoken']) == 12, a and (a['listHidden'], a['focusInList'], a['spoken'][:2]))
         g = await wallet(b); await g.gate_new(); await g.wait(300)
         await words_checks(g, 'setup')
+        # a redraw of the setup screen (any refresh) keeps them revealed, with the focus on them
+        await g.ev("Nutcade.render()"); await g.wait(300)
+        a = await g.ev(WORDS)
+        check('setup: a redraw after Read my words keeps the words revealed and the focus on them (no button back)', a and not a['listHidden'] and not a['btn'] and a['focusInList'], a and (a['listHidden'], a['btn'], a['focusInList']))
         await g.pg.context.close()
         w = await wallet(b); await w.create(); await w.add_mint(B)
         await w.ev("Nutcade.closeSheet()"); await w.click('[data-act=tab][data-tab=settings]'); await w.wait(300)
