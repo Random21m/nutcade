@@ -552,9 +552,9 @@ Follow NUTCADE on Nostr: **npub1mzmequd6893lj36mh5jcs9qayz0vf732m8qyycv79lfylyqv
 
 NUTCADE is free and open source, and it stays that way. Supporting it is optional and changes nothing about how it works. If you enjoy it, you can send a few sats over Lightning:
 
-<p><img src="docs/support-qr.png" alt="QR code for the Lightning address npub1vj8zjhnmkhekv93e2xmrz7kfwuxq25vrzw53u4dqhwd2lp5smvks3mwu2n@npub.cash" width="200"></p>
+<p><img src="docs/support-qr.png" alt="QR code for the Lightning address npub1t5nvfnlmegsqkqegcpnyek4qf4fc2f2gx2t4lm88h2kq22plpmxqdhgpa9@npub.cash" width="200"></p>
 
-**npub1vj8zjhnmkhekv93e2xmrz7kfwuxq25vrzw53u4dqhwd2lp5smvks3mwu2n@npub.cash**
+**npub1t5nvfnlmegsqkqegcpnyek4qf4fc2f2gx2t4lm88h2kq22plpmxqdhgpa9@npub.cash**
 
 You can also tip from inside NUTCADE: **Settings → About → Support**. The same address and code are on that screen. Be wary of any other "NUTCADE support" address.
 
