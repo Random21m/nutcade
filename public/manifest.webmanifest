@@ -35,56 +35,56 @@
   "screenshots": [
     {
       "src": "screenshots/01-lightning.jpg",
-      "sizes": "1280x720",
+      "sizes": "1920x1080",
       "type": "image/jpeg",
       "form_factor": "wide",
       "label": "Loading sats over Lightning: a 1UP and a coin shower"
     },
     {
       "src": "screenshots/02-arcade.jpg",
-      "sizes": "1280x720",
+      "sizes": "1920x1080",
       "type": "image/jpeg",
       "form_factor": "wide",
       "label": "Star Swarm, one of the arcade cabinets"
     },
     {
       "src": "screenshots/03-trophies.jpg",
-      "sizes": "1280x720",
+      "sizes": "1920x1080",
       "type": "image/jpeg",
       "form_factor": "wide",
       "label": "The trophy room"
     },
     {
       "src": "screenshots/04-send.jpg",
-      "sizes": "1280x720",
+      "sizes": "1920x1080",
       "type": "image/jpeg",
       "form_factor": "wide",
       "label": "Sending sats to a friend"
     },
     {
       "src": "screenshots/05-sound.jpg",
-      "sizes": "1280x720",
+      "sizes": "1920x1080",
       "type": "image/jpeg",
       "form_factor": "wide",
       "label": "Send by sound: one phone plays the coins, the other listens"
     },
     {
       "src": "screenshots/06-cashier.jpg",
-      "sizes": "1280x720",
+      "sizes": "1920x1080",
       "type": "image/jpeg",
       "form_factor": "wide",
       "label": "Cashier mode: a paid sale"
     },
     {
       "src": "screenshots/07-languages.jpg",
-      "sizes": "1280x720",
+      "sizes": "1920x1080",
       "type": "image/jpeg",
       "form_factor": "wide",
       "label": "The wallet in English, Spanish, Portuguese, German and French"
     },
     {
       "src": "screenshots/08-pin.jpg",
-      "sizes": "1280x720",
+      "sizes": "1920x1080",
       "type": "image/jpeg",
       "form_factor": "wide",
       "label": "The PIN lock"
