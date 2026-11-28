@@ -11,8 +11,9 @@ Step b (1.48):
 - A sheet's error box (#sheetErr, used by most sheets) is announced: it is an alert region, so "That isn't a complete
   Lightning invoice" is read out instead of appearing silently.
 - Send (ecash and Lightning) and the Pay confirm screen: every visible control has a name; the confirm screen has the focus.
-- The over-limit PIN screen (it sits outside the sheet layer): it takes the focus when it opens, Tab stays inside it (not
-  in the sheet under it), Escape closes it (not the sheet under it, which stays open), and the focus goes back there.
+- The over-limit PIN screen and the piggy-bank screen (both sit above the sheet layer): each takes the focus when it opens,
+  Tab stays inside it (not in the sheet under it), Escape cancels it (not the sheet under it, which stays open), and the
+  focus goes back there (never to a text field on a touch screen).
 """
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -79,6 +80,21 @@ async def main():
         await w.until("!!document.querySelector('#payBtn')", 15000); await w.wait(300)
         f = await w.ev(FOCUS)
         check('Pay confirm: the screen has the focus, and every visible control has a name', f['inSheet'] and not await w.ev(UNNAMED), (f, await w.ev(UNNAMED)))
+        # the piggy-bank screen (a payment that dips into what the piggy bank set aside): built like the over-limit screen
+        await w.ev("Nutcade.closeSheet(); Nutcade.S.prefs.piggy = true; Nutcade.S.piggy.saved = 500")
+        await w.home(); await w.pg.locator('[data-act=send]').click(); await w.wait(300)
+        await w.fill('#amtIn', '100'); await w.pg.locator('[data-act=doSendEcash]').click()
+        pig = await w.until("!!document.querySelector('#piggyLayer .sheet')", 15000); await w.wait(300)
+        inpig = "!!document.activeElement.closest('#piggyLayer')"
+        check('piggy-bank screen: it opens and takes the focus', pig and await w.ev(inpig), await w.ev(FOCUS))
+        stays = []
+        for _ in range(4):
+            await w.pg.keyboard.press('Tab'); stays.append(await w.ev(inpig))
+        check('piggy-bank screen: Tab stays inside it', all(stays), stays)
+        await w.pg.keyboard.press('Escape'); await w.wait(300)
+        st = await w.ev("({pig: !!document.querySelector('#piggyLayer'), sheet: !!document.querySelector('#layer .sheet'), focusInSheet: !!document.activeElement.closest('#layer .sheet'), field: /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)})")
+        check('piggy-bank screen: Escape keeps saving (nothing paid), the Send screen stays open with the focus, not on a field', not st['pig'] and st['sheet'] and st['focusInSheet'] and not st['field'] and await w.bal(B) == 500, (st, await w.bal(B)))
+        await w.ev("Nutcade.S.prefs.piggy = false; Nutcade.S.piggy.saved = 0")
         # the over-limit screen
         await w.ev("Nutcade.closeSheet()"); await set_pin(w); await set_limits(w, '50', '1000')
         await w.home(); await w.pg.locator('[data-act=send]').click(); await w.wait(300)

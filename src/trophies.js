@@ -276,7 +276,7 @@ async function openCard(o) {
   box.innerHTML = `<img src="${r.url}" alt="${n.esc(shareText(o))}" class="share-card">
     ${o.loaded ? `<div class="notice cyan">Loaded with ${n.esc(n.fmt(o.loaded.amount))} SAT. Whoever scans it first wins them. If nobody does by ${n.esc(n.fmtDate(o.loaded.until))}, they come back to you.</div>`
       : noSats ? `<div class="notice cyan" id="noSatsCard">Free credits only: this card can't hold sats.</div>`
-      : `<div class="load-card"><label class="label" for="loadAmt">Put sats in it (optional)</label><div class="row" style="gap:8px"><input id="loadAmt" class="inp" inputmode="numeric" placeholder="210" style="flex:1"><button class="btn sm gold" id="cardLoad">Load card</button></div><div class="tiny muted">Adds a QR code to the card. The first person to scan it wins the sats; unclaimed after a week, they come back to you.</div><div id="sheetErr"></div></div>`}
+      : `<div class="load-card"><label class="label" for="loadAmt">Put sats in it (optional)</label><div class="row" style="gap:8px"><input id="loadAmt" class="inp" inputmode="numeric" placeholder="210" style="flex:1"><button class="btn sm gold" id="cardLoad">Load card</button></div><div class="tiny muted">Adds a QR code to the card. The first person to scan it wins the sats; unclaimed after a week, they come back to you.</div><div id="sheetErr" role="alert"></div></div>`}
     <div class="tiny muted">The card shows the game and score only, nothing about your wallet.</div>
     ${canShare ? '<button class="btn solid gold block" id="cardShare">Share</button>' : ''}
     <button class="btn block ${canShare ? '' : 'solid gold'}" id="cardSave">Save image</button>

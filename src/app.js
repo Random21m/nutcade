@@ -2413,6 +2413,12 @@ function closeSheet() {
 const sheetOf = el => (el && el.closest && el.closest('#layer .sheet')) || null;
 function closeSheetOf(sh) { if (sh && sh.isConnected) closeSheet(); }
 const FOCUSABLE = 'button:not([disabled]),[href],input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+// (1.48) a screen above the sheets (over-limit, piggy bank) gives the focus back when it closes: to what had it, unless that is
+// a text field on a touch screen (no keyboard popping back up), else to the sheet under it
+function focusBack(o) {
+  const t = o && o.isConnected && !(matchMedia('(pointer:coarse)').matches && /^(INPUT|TEXTAREA|SELECT)$/.test(o.tagName)) ? o : $('#layer .sheet');
+  if (t) { if (t.matches('.sheet')) t.tabIndex = -1; try { t.focus({ preventScroll: true }); } catch (e) {} }
+}
 // a sheet's error box (#sheetErr) is an alert region: an error that appears in it is read out by a screen reader (1.48)
 const alertBoxes = root => root.querySelectorAll('#sheetErr').forEach(e => e.setAttribute('role', 'alert'));
 function setBody(html, onOpen) {
@@ -4903,7 +4909,7 @@ document.addEventListener('input', e => {
   }
 });
 document.addEventListener('keydown', e => {
-  const sheet = $('#layer .sheet'), trap = $('#limitLayer .sheet') || sheet || cash.el;   // (the over-limit screen sits above the sheets: Tab stays in it while it is up; 1.48)
+  const sheet = $('#layer .sheet'), trap = $('#limitLayer .sheet') || $('#piggyLayer .sheet') || sheet || cash.el;   // (the over-limit and piggy-bank screens sit above the sheets: Tab stays in them while one is up; 1.48)
   if (trap && e.key === 'Tab') {   // keep keyboard focus inside the open sheet, or the till
     const f = [...trap.querySelectorAll(FOCUSABLE)].filter(x => x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden');
     if (f.length) {
@@ -4922,7 +4928,7 @@ document.addEventListener('keydown', e => {
   if (document.querySelector('[data-pinpad]') && !e.target.matches('input,textarea,select')) {
     const k = /^[0-9]$/.test(e.key) ? e.key : e.key === 'Backspace' ? 'del' : e.key === 'Enter' ? 'ok' : null;
     if (k) { e.preventDefault(); const b = document.querySelector(`[data-pinpad] [data-k="${k}"]`); if (b) A.pinKey(b); return; }
-  } if (e.key === 'Enter' && e.target.dataset && e.target.dataset.cw !== undefined && $('[data-act=gateConfirm]')) { e.preventDefault(); A.gateConfirm($('[data-act=gateConfirm]')); } if (e.key === 'Escape') { if ($('#limitLayer')) A.limitNo(); else if ($('#layer .sheet')) closeSheet(); } /* (Escape closes the over-limit screen first, never the sheet under it; 1.48) */ if (e.key === 'Enter' && e.target.id === 'mintUrl') { const b = $('[data-act="addMintUrl"]'); if (!b || !b.disabled) A.addMintUrl(b); } });   // (Enter again while the add is on its way starts no second one, like a click on the busy button; 1.43)
+  } if (e.key === 'Enter' && e.target.dataset && e.target.dataset.cw !== undefined && $('[data-act=gateConfirm]')) { e.preventDefault(); A.gateConfirm($('[data-act=gateConfirm]')); } if (e.key === 'Escape') { if ($('#limitLayer')) A.limitNo(); else if ($('#piggyLayer #pbNo')) $('#piggyLayer #pbNo').click(); else if ($('#layer .sheet')) closeSheet(); } /* (Escape cancels the over-limit or piggy-bank screen first, never the sheet under it; 1.48) */ if (e.key === 'Enter' && e.target.id === 'mintUrl') { const b = $('[data-act="addMintUrl"]'); if (!b || !b.disabled) A.addMintUrl(b); } });   // (Enter again while the add is on its way starts no second one, like a click on the busy button; 1.43)
 
 /* ---------- background checks ---------- */
 // one background check at a time: the timer, coming back online and opening the app can all ask for one, and two at

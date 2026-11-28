@@ -162,8 +162,7 @@ function limitAsk(e, retry) {
 let limitOpener = null;
 function limitClose() {
   document.getElementById('limitLayer')?.remove(); limitRetry = null; if (pinUI.mode === 'limitOK') pinUI.mode = null;
-  const back = limitOpener && limitOpener.isConnected ? limitOpener : document.querySelector('#layer .sheet'); limitOpener = null;
-  if (back) { if (back.matches('.sheet')) back.tabIndex = -1; try { back.focus({ preventScroll: true }); } catch (e) {} }
+  const back = limitOpener; limitOpener = null; focusBack(back);
 }
 
 /* ---------- PIN guard ----------
